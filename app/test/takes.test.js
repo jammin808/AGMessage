@@ -653,6 +653,14 @@ test('a web page: a right of its own (stage.web); its address told only to the p
   assert.deepEqual(await act(ria, 'page:push', { code: hall, to: 'board', content: web }), { ok: false, error: GUESTS_OFF });
   assert.equal((await act(ria, 'page:push', { code: hall, to: 'board', content: { kind: 'clock' } })).ok, true, 'every other kind goes');
   assert.equal((await joined(ria, { roomCode: hall, name: 'Ria', role: 'research', uid: joins.ria.identity })).canWeb, false);
+  // A quote from a web page goes, as every quote does, but its address with it only while she may show a web page: off, Gil's
+  // page is told the site's host alone (no Open the source), and no address of it is kept.
+  const gilQuoteKey = 'u:' + joins.gil.uid;
+  const webQuote = { kind: 'snippet', unit: 'text', text: 'Turnout was 64%', from: { web: VOTE } };
+  const quoteOff = await act(ria, 'page:push', { code: hall, to: { uid: gilQuoteKey }, content: webQuote });
+  assert.equal(quoteOff.ok, true, JSON.stringify(quoteOff));
+  await until(() => events(gil, 'page:take').some((x) => x.seq === quoteOff.seq), 4000, 'Gil told Ria\'s quote');
+  assert.deepEqual(events(gil, 'page:take').find((x) => x.seq === quoteOff.seq).content.from, { host: 'vote.example.com' });
 
   // The switch is the admin's alone: a Tech and a guest are not the admin page's, and a manager who manages settings is
   // admitted by its gate and is not "the admin". A side room has none, and an open hall none to turn.
@@ -680,6 +688,11 @@ test('a web page: a right of its own (stage.web); its address told only to the p
   const riaOver = await act(ria, 'page:push', { code: hall, to: 'board', content: { kind: 'chat', layer: 'info' } });
   assert.deepEqual(riaOver.previous, { seq: adminBoard.seq, content: null });
   assert.ok(!JSON.stringify(riaOver).includes('s3cr3t') && !JSON.stringify(heard.get(ria)).includes('s3cr3t'), 'Ria reads nothing of it');
+  // On, her quote from a web page carries its address to Gil's page, for Open the source.
+  const quoteOn = await act(ria, 'page:push', { code: hall, to: { uid: gilQuoteKey }, content: webQuote });
+  assert.equal(quoteOn.ok, true, JSON.stringify(quoteOn));
+  await until(() => events(gil, 'page:take').some((x) => x.seq === quoteOn.seq), 4000, 'Gil told Ria\'s quote');
+  assert.deepEqual(events(gil, 'page:take').find((x) => x.seq === quoteOn.seq).content.from, { host: 'vote.example.com', url: VOTE });
   // Ria's web page goes now; On stage, observing, a side room's Member and an open hall's guest still show nothing.
   const riaWeb = await act(ria, 'page:push', { code: hall, to: 'board', content: web });
   assert.deepEqual(riaWeb.previous, { seq: riaOver.seq, content: { kind: 'chat', layer: 'info' } });
@@ -710,6 +723,11 @@ test('a web page: a right of its own (stage.web); its address told only to the p
   assert.deepEqual(await act(ria2, 'page:push', { code: hall, to: 'board', content: web }), { ok: false, error: GUESTS_OFF });
   const still = (await act(ctl2, 'page:status', { code: hall })).board.info;
   assert.deepEqual([still.seq, still.kind], [riaWeb.seq, 'web'], 'the web page up stays');
+  // As her web page stays, so does the quote she showed Gil while it was on, with its address: whether a quote carries its
+  // link is decided as it is pushed, and a page joining again is told it so.
+  const gilAgain = await joined(gil2, { roomCode: hall, name: 'Gil', role: 'board', uid: joins.gil.identity });
+  const keptQuote = [gilAgain.over, gilAgain.beside, ...gilAgain.earlier].find((x) => x && x.seq === quoteOn.seq);
+  assert.deepEqual(keptQuote && keptQuote.content.from, { host: 'vote.example.com', url: VOTE }, JSON.stringify(gilAgain.earlier.map((x) => x.seq)));
   // Take it down: the information handed back over that take alone (the admin page's Take it down); then nothing a guest
   // showed is up.
   assert.equal((await act(ctl2, 'page:push', { code: hall, to: 'board', content: { kind: 'chat', layer: 'info' }, ifSeq: riaWeb.seq })).ok, true);
@@ -1272,7 +1290,7 @@ test('a document and a picture on the stage: by where the file may come from, it
   for (const [, words] of rows()) assert.ok(!/Board pack|Minutes|Stage plan|p2\.png|legal\.png|\/uploads\//.test(words), words);
 });
 
-test('a quote on the stage: words or cells picked from a file of the hall, carried as data, named by the file and its place and never its address; typed, or from a web page by its host; refused over its bounds; the console\'s words and the row\'s; nothing of it in the context or the Show Bus; the AI told what the Board\'s pages show, a quote\'s words only to who pushed it', { timeout: 120_000 }, async (t) => {
+test('a quote on the stage: words or cells picked from a file of the hall, carried as data, named by the file and its place and never its address; typed, or from a web page by its host, its address told the Board\'s pages only from a pusher who may show a web page; refused over its bounds; the console\'s words and the row\'s; nothing of it in the context or the Show Bus; the AI told what the Board\'s pages show, a quote\'s words only to who pushed it', { timeout: 120_000 }, async (t) => {
   const http = require('http');
   // A stand-in for the AI's endpoint (the SDK's ANTHROPIC_BASE_URL): every request's body kept, a draft answered.
   const bodies = [];
@@ -1362,14 +1380,19 @@ test('a quote on the stage: words or cells picked from a file of the hall, carri
   await until(() => posted().length >= before + 2, 15000, 'the context posted to the hall\'s Stagewatch twice more');
   const contexts = [...posted(), JSON.stringify((await api(srv.base, 'GET', '/api/context', undefined, { cookie: admin })).body)];
   for (const body of contexts) for (const words of ['Revenue', '£4.2m', 'Q3 costs', 'costs.csv']) assert.ok(!body.includes(words), 'the context carries no quote: ' + words + ' in ' + body);
+  // A quote from a web page, by a pusher who may show a web page (Tom: stage.web by his preset): the Board's page is told
+  // the address, its fragment kept, for Open the source; at rest it is sealed; the console, the row and the context name
+  // its host alone.
   const web = await act(tom, 'page:push', { code: hall, to: 'board', content: { kind: 'snippet', unit: 'text', text: 'Turnout was 64%', from: { web: 'https://vote.example.com/results?token=s3cr3t#q2' } } });
   assert.equal(web.ok, true, JSON.stringify(web));
+  assert.equal(web.results[0].status.showing, '❝ a quote from vote.example.com');
   await until(() => info(gil).some((x) => x.seq === web.seq), 4000, 'told');
-  assert.deepEqual(info(gil).find((x) => x.seq === web.seq).content.from, { host: 'vote.example.com' });
+  assert.deepEqual(info(gil).find((x) => x.seq === web.seq).content.from, { host: 'vote.example.com', url: 'https://vote.example.com/results?token=s3cr3t#q2' });
   await until(() => JSON.parse(onDisk()).halls[hall].board.info.seq === web.seq, 4000, 'saved');
-  assert.ok(!onDisk().includes('s3cr3t') && JSON.parse(onDisk()).halls[hall].board.info.content.from.host === 'vote.example.com', 'the web page\'s address is kept sealed');
+  const keptWeb = JSON.parse(onDisk()).halls[hall].board.info.content.from;
+  assert.ok(!onDisk().includes('s3cr3t') && keptWeb.host === 'vote.example.com' && /^enc1:/.test(keptWeb.urlSealed), 'the web page\'s address is kept sealed: ' + JSON.stringify(keptWeb));
   assert.deepEqual(rows().at(-1), [hall, 'the Board (1 page) → a quote from a web page on vote.example.com', 'tom']);
-
+  assert.ok(!JSON.stringify((await act(tom, 'page:status', { code: hall })).board).includes('s3cr3t'), 'the console names its host alone');
   // Over a bound it is refused in words, never cut; nothing is numbered.
   const seqNow = (await act(tom, 'page:status', { code: hall })).board.info.seq;
   assert.deepEqual(await act(tom, 'page:push', { code: hall, to: 'board', content: { kind: 'snippet', unit: 'paragraph', text: 'x'.repeat(1201) } }), { ok: false, error: 'Too long for the stage: 1,200 characters at most (this is 1,201)' });
@@ -1377,6 +1400,21 @@ test('a quote on the stage: words or cells picked from a file of the hall, carri
   assert.equal((await act(tom, 'page:status', { code: hall })).board.info.seq, seqNow);
   // The operator's quote is theirs to take down; a researcher's goes over the show again after it.
   assert.equal((await act(tom, 'page:push', { code: hall, to: 'board', content: { kind: 'chat', layer: 'info' }, ifSeq: web.seq })).ok, true);
+  // The same from Sue, who may show quotes but not web pages (Staff: stage.show, no stage.web): the Board's page is told the
+  // host alone, and no address of it is kept, sealed or in clear.
+  const named = await act(sue, 'page:push', { code: hall, to: 'board', content: { kind: 'snippet', unit: 'text', text: 'Turnout was 64%', from: { web: 'https://vote.example.com/results?token=n0r1ght' } } });
+  assert.equal(named.ok, true, JSON.stringify(named));
+  await until(() => info(gil).some((x) => x.seq === named.seq), 4000, 'told');
+  const toldNamed = info(gil).find((x) => x.seq === named.seq);
+  assert.deepEqual(toldNamed.content.from, { host: 'vote.example.com' });
+  assert.ok(!JSON.stringify(heard.get(gil)).includes('n0r1ght'), 'no frame to the Board\'s page carries its address');
+  await until(() => JSON.parse(onDisk()).halls[hall].board.info.seq === named.seq, 4000, 'saved');
+  assert.deepEqual(JSON.parse(onDisk()).halls[hall].board.info.content.from, { host: 'vote.example.com' }, 'no address kept, sealed or in clear');
+  assert.ok(!onDisk().includes('n0r1ght'));
+  assert.deepEqual(rows().at(-1), [hall, 'the Board (1 page) → a quote from a web page on vote.example.com', 'sue']);
+  // Tom's, taken down and now under the Board's Earlier, keeps its address for the pages it was shown on.
+  assert.deepEqual(toldNamed.earlier.find((e) => e.seq === web.seq).content.from, { host: 'vote.example.com', url: 'https://vote.example.com/results?token=s3cr3t#q2' });
+  assert.equal((await act(sue, 'page:push', { code: hall, to: 'board', content: { kind: 'chat', layer: 'info' }, ifSeq: named.seq })).ok, true);
 
   // The AI is told what the Board's pages show, in the console's words, by who may show there and drafts in Main; the
   // quote's own words only to who pushed it; a side room's draft is told none of it.

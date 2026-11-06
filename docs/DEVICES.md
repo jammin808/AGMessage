@@ -297,7 +297,9 @@ pdf.js versions would double what is vendored and tested. A picture of the place
   is offered as on any device: a form POST needs no parser. pdf.js is never fetched.
 - **Everything else works below the floor**: quotes and tables (drawn with `textContent` and CSS), pictures
   (`HTMLImageElement.decode()`, Safari 11.1), zoom (Pointer Events, Safari 13), web pages (the one frame), Earlier,
-  Download and the no-save measures.
+  Download and the no-save measures. A quote's Open the source is a link and a web page's "Look for: ❝ …" is words: a
+  browser without text directives opens the page at its top, and the words over the frame still say what to look for
+  (not walked).
 - **Older devices' other gaps, each with its fallback:** `<link rel="modulepreload">` arrived in Safari 17 and Safari has
   no `requestIdleCallback`: the Board page imports the take layer and the document reader with a timed `import()` 2 s
   after its join. Fetch Metadata arrived in Safari 16.4 (`http.headers.Sec-Fetch-Mode`): a device without it is served,
@@ -318,12 +320,16 @@ pdf.js versions would double what is vendored and tested. A picture of the place
   25 × 10 table scrolling sideways inside its card at 390 px, the page never sideways on any leg; a picture drawn, never
   draggable, its menu the page's; a PDF at its page, zoomed in by a tap on + and paged on by a tap, shown with Download
   ticked and saved whole by ⬇ Download on the phone, the page staying; a Word document without its hidden run or its
-  tracked deletion, and found in; a workbook without its hidden column, row and sheets, a deck without its hidden shape
-  and slide, a CSV, and Markdown without its comment; a JPEG 2000 page drawn; a web page's frame; each ✓ on all three
-  (the web page ◇); a picture under Earlier drawn again in a Look; 20 takes in a row, then Back to chat, each page still
-  drawing and never reloaded. Not on the legs: a pinch and a double-tap (touch gestures the legs do not make; the walk's),
-  the first page of a 25 MB pack timed (the bench's, §7), Word's page numbers (the panel's steps, the same reader), and a
-  device asleep and back (the walk's). The Board-side checks of the stage units still to land join the legs with them.
+  tracked deletion, its header row drawn as headers, and found in; a workbook without its hidden column, row and sheets,
+  a deck without its hidden shape and slide, a CSV, and Markdown without its comment; a JPEG 2000 page drawn; a web
+  page's frame at a place, its "Look for: ❝ …" words over it; each ✓ on all three (the web page ◇); a picture under
+  Earlier drawn again in a Look; a quote from a web page by the operator offering Open the source at its words, in a tab
+  of the person's own with no opener or referrer, ✓ on all three, and one from a Staff account (no Web pages right)
+  naming the site alone with no link; 20 takes in a row, then Back to chat, each page still drawing and never reloaded.
+  Not on the legs: a pinch and a double-tap (touch gestures the legs do not make; the walk's), the first page of a 25 MB
+  pack timed (the bench's, §7), Word's page numbers (the panel's steps, the same reader), Open in a new tab (the take's ⋯
+  in the full view only: the legs are On stage in the simple view; the quote hall's smoke opens it in the full view), and
+  a device asleep and back (the walk's). The Board-side checks of the stage units still to land join the legs with them.
 - **The floor leg**: a Board page with `DecompressionStream`, `requestIdleCallback` and `Promise.withResolvers` taken away
   before its scripts run joins without `docs`; a document shown before it joined says it cannot open documents and fails,
   and the pusher's console offers Show them a picture of p. 1, which reaches that page alone; the pusher's bar then says
@@ -331,8 +337,9 @@ pdf.js versions would double what is vendored and tested. A picture of the place
   with its words, never dragged out, its menu the page's, ✓ on the console "(1 as a picture)", and ⬇ Download on it,
   ticked, saves the file whole; a Word document's stand-in is what is at its place, as a quote naming the document,
   without its hidden run or tracked deletion, ✓ "(1 as a quote)"; under Earlier a Look at a document with no stand-in
-  reads the device's words and one with a stand-in draws it; quotes, pictures (never dragged out, the page's menu), web
-  pages and Earlier draw; pdf.js is never fetched (the tab's network log, from its first request); no script error. It
+  reads the device's words and one with a stand-in draws it; quotes, pictures (never dragged out, the page's menu), a web
+  page at a place with its "Look for" words, a web quote's Open the source (and none from a pusher without the right) and
+  Earlier draw; pdf.js is never fetched (the tab's network log, from its first request); no script error. It
   cannot take away syntax the browser parses: that is the ES2020 fence's and the walk's.
 - **A Board page that passes the probe but cannot import pdf.js** (its module refused on the way): it draws the document
   as a page below the floor does (here its stand-in, with its words), opens no document for the rest of its tab's

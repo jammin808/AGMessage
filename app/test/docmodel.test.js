@@ -181,6 +181,109 @@ test('inertBlocks: a parsed tree walked into plain data — blocks, never nodes 
   for (const gone of ['NOSCRIPT', 'TEMPLATE', 'alert', 'color', 'HIDDENATTR', 'DISPLAYNONE', 'VISHIDDEN', 'HIDDENROW', 'refresh', 'example.invalid', 'blob:']) assert.ok(!all.includes(gone), gone + ' is left out');
   assert.deepEqual(blocks.find((b) => b.kind === 'img'), { kind: 'img', text: '', src: 'agm-img:1', alt: 'chart', at: { block: 10 } });
   assert.deepEqual(blocks.find((b) => b.kind === 'table').rows.map((r) => r.map((c) => [c.text, c.c, c.colspan])), [[['wide', 0, 2], ['C', 2, 1]]]);
+  // A table's first row is its labels (`head` 1, drawn as headers, and a quote of it carries them so) only where every cell
+  // of it is a header (<th>: a Word table's repeated header row, as mammoth writes it); a row of cells, or a mixed one, is not.
+  const heads = (...rows) => M.inertBlocks(fragment(el('table', null, el('thead', null, rows[0]), el('tbody', null, ...rows.slice(1))))).blocks[0].head;
+  assert.deepEqual([heads(el('tr', null, el('th', null, 'Motion'), el('th', null, 'Vote')), el('tr', null, el('td', null, 'Budget'), el('td', null, 'Carried'))),
+    heads(el('tr', null, el('td', null, 'Motion'), el('td', null, 'Vote')), el('tr', null, el('td', null, 'Budget'), el('td', null, 'Carried'))),
+    heads(el('tr', null, el('th', null, 'Motion'), el('td', null, 'Vote')), el('tr', null, el('td', null, 'Budget'), el('td', null, 'Carried')))], [1, 0, 0]);
+  assert.equal(M.viewQuote([{ kind: 'table', table: { rows: [['Motion', 'Vote'], ['Budget', 'Carried']], head: 1, side: 0 } }]).blocks[0].table.head, 1, 'What I see keeps it');
+});
+
+// ---------------------------------------------------------------- a paste (the ❝ Quote tab)
+test('pastedQuote: HTML is read for its structure alone (one table\'s rows and cells, a list\'s items), and only where its words are the plain flavour\'s; hidden parts never read; tab-separated words a table; any other words text', () => {
+  const pasted = (plain, ...kids) => M.pastedQuote({ plain, blocks: kids.length ? M.inertBlocks(fragment(...kids)).blocks : null });
+  // A table: its rows and cells, the first row its labels where every cell of it is a header, a merged cell's words in its
+  // first place; a picture in it fetches nothing (the walk reads no source) and adds no word.
+  const table = pasted('Item\tQ3\nRevenue\t4.2\nCosts\t3.9\n',
+    el('meta', { charset: 'utf-8' }), el('style', null, 'td { color: red }'),
+    el('table', null, el('tbody', null,
+      el('tr', null, el('th', null, 'Item'), el('th', null, 'Q3')),
+      el('tr', null, el('td', null, 'Revenue', el('img', { src: 'https://agm-img.invalid/x.png' })), el('td', null, '4.2')),
+      el('tr', null, el('td', null, 'Costs'), el('td', null, '3.9')))));
+  assert.deepEqual(table.quote, { unit: 'range', table: { rows: [['Item', 'Q3'], ['Revenue', '4.2'], ['Costs', '3.9']], head: 1, side: 0 } });
+  assert.equal(table.words, 'Item\tQ3\nRevenue\t4.2\nCosts\t3.9\n', 'the box shows the plain flavour');
+  const merged = pasted('2025\nQ1\tQ2', el('table', null, el('tr', null, el('td', { colspan: '2' }, '2025')), el('tr', null, el('td', null, 'Q1'), el('td', null, 'Q2'))));
+  assert.deepEqual(merged.quote.table, { rows: [['2025', ''], ['Q1', 'Q2']], head: 0, side: 0 });
+  // A hidden cell's words, or a hidden row's, are never read: the HTML's words are then the plain flavour's, and the
+  // structure is kept without them.
+  const hidden = pasted('Revenue 4.2', el('table', null, el('tr', null, el('td', null, 'Revenue', el('span', { style: 'display:none' }, 'SECRET')), el('td', null, '4.2')), el('tr', { hidden: '' }, el('td', null, 'HIDDENROW'))));
+  assert.deepEqual(hidden.quote, { unit: 'range', table: { rows: [['Revenue', '4.2']], head: 0, side: 0 } });
+  assert.ok(!JSON.stringify(hidden).includes('SECRET') && !JSON.stringify(hidden).includes('HIDDENROW'));
+  // HTML whose words are not the plain flavour's (a part hidden by a style sheet the walk cannot see): the plain flavour
+  // alone, so no word the person did not see arrives.
+  const disagrees = pasted('Revenue\t4.2', el('table', null, el('tr', null, el('td', null, 'Revenue'), el('td', null, '4.2'), el('td', { class: 'off' }, 'UNSEEN'))));
+  assert.deepEqual(disagrees.quote, { unit: 'range', table: { rows: [['Revenue', '4.2']], head: 0, side: 0 } }, 'the tab-separated plain flavour');
+  assert.deepEqual(pasted('Net revenue rose', el('p', null, 'Net revenue rose ', el('span', { class: 'off' }, 'UNSEEN'))).quote, { unit: 'text', text: 'Net revenue rose' });
+  // A list's items: numbered where every one was; nested items read as items.
+  assert.deepEqual(pasted('Plant\nPeople', el('ul', null, el('li', null, 'Plant'), el('li', null, 'People'))).quote, { unit: 'item', items: ['Plant', 'People'] });
+  assert.deepEqual(pasted('One\nTwo', el('ol', null, el('li', null, 'One'), el('li', null, 'Two'))).quote, { unit: 'item', items: ['One', 'Two'], ordered: true });
+  // Any other structure (a heading and a paragraph, a table beside a paragraph, two tables) is the plain flavour's words.
+  assert.deepEqual(pasted('Capex\nRose 8% on plan', el('h2', null, 'Capex'), el('p', null, 'Rose 8% on plan')).quote, { unit: 'text', text: 'Capex\nRose 8% on plan' });
+  assert.deepEqual(pasted('Note\nA B', el('p', null, 'Note'), el('table', null, el('tr', null, el('td', null, 'A'), el('td', null, 'B')))).quote, { unit: 'text', text: 'Note\nA B' });
+  // Plain words alone: a tab makes a table (tab-separated values: a quoted cell may hold a tab or a line break, a blank line
+  // is no row, a short row padded); any other words are text, their line breaks kept; nothing to quote is null.
+  assert.deepEqual(M.pastedQuote({ plain: 'Item\tNote\r\nPlant\t"line one\nline two"\r\n\r\nPeople\r\n' }).quote, { unit: 'range', table: { rows: [['Item', 'Note'], ['Plant', 'line one\nline two'], ['People', '']], head: 0, side: 0 } });
+  assert.deepEqual(M.pastedQuote({ plain: '  The board approves\nthe budget.  ' }).quote, { unit: 'text', text: 'The board approves\nthe budget.' });
+  assert.deepEqual(M.pastedQuote({ plain: ' \n\t ' }).quote, null);
+  assert.deepEqual(M.pastedQuote({ plain: '', blocks: M.inertBlocks(fragment(el('p', null, 'only in HTML'))).blocks }).quote, null, 'no plain flavour: nothing the page said was seen');
+});
+
+test('a paste\'s bounds, said before it goes in the server\'s words, and the cut the researcher may choose: text to its first 1,200 characters, a table to its first 25 rows × 10 columns with what was left out counted', () => {
+  assert.equal(M.pasteOver({ unit: 'text', text: 'x'.repeat(1200) }), null);
+  assert.deepEqual(M.pasteOver({ unit: 'text', text: '😀'.repeat(1860) }), { error: 'Too long for the stage: 1,200 characters at most (this is 1,860)', cut: 'chars' });
+  const wide = { unit: 'range', table: { rows: Array.from({ length: 30 }, (_, r) => Array.from({ length: 12 }, (_, c) => r + ':' + c)), head: 0, side: 0 } };
+  assert.deepEqual(M.pasteOver(wide), { error: 'Too big for the stage: narrow it to 25 rows × 10 columns', cut: 'table' });
+  assert.deepEqual(M.pasteOver({ unit: 'item', items: Array.from({ length: 21 }, () => 'x') }), { error: 'Too long for the stage: 20 items at most (this is 21)', cut: '' });
+  assert.deepEqual(M.pasteOver({ unit: 'item', items: ['x'.repeat(301)] }), { error: 'Too long for the stage: an item is 300 characters at most (this is 301)', cut: '' });
+  assert.deepEqual(M.pasteOver({ unit: 'range', table: { rows: [['x'.repeat(201)]], head: 0, side: 0 } }), { error: 'Too long for the stage: a cell is 200 characters at most (this is 201)', cut: '' });
+  // Each bound said word for word as the server refuses it (lib/pages.js cleanPage): what the tab says first is what a push
+  // over it would be told.
+  const { cleanPage } = require('../lib/pages');
+  const view = (blocks) => ({ unit: 'view', blocks });
+  for (const q of [{ unit: 'text', text: '😀'.repeat(1860) }, wide, { unit: 'item', items: Array.from({ length: 21 }, () => 'x') }, { unit: 'item', items: ['x'.repeat(301)] },
+    { unit: 'range', table: { rows: [['x'.repeat(201)]], head: 0, side: 0 } }, { unit: 'range', table: { rows: Array.from({ length: 25 }, () => Array.from({ length: 10 }, () => 'x'.repeat(17))), head: 0, side: 0 } }]) {
+    assert.equal(M.pasteOver(q).error, cleanPage({ kind: 'snippet', ...q }).error, JSON.stringify(q).slice(0, 80));
+  }
+  for (const q of [view(Array.from({ length: 13 }, () => ({ kind: 'p', text: 'x' }))), view([{ kind: 'p', text: 'x'.repeat(1201) }]), view([{ kind: 'table', table: { rows: [['x'.repeat(201)]], head: 0, side: 0 } }]),
+    view(Array.from({ length: 4 }, () => ({ kind: 'p', text: 'x'.repeat(1001) })))]) {
+    assert.equal(M.quoteOver(q), cleanPage({ kind: 'snippet', ...q }).error, JSON.stringify(q).slice(0, 80));
+  }
+  const cutText = M.pasteCut({ unit: 'text', text: '😀'.repeat(1860) });
+  assert.deepEqual([Array.from(cutText.text).length, cutText.cut, M.pasteOver(cutText)], [1200, true, null]);
+  const cutTable = M.pasteCut(wide);
+  assert.deepEqual([cutTable.table.rows.length, cutTable.table.rows[0].length, cutTable.table.rows[24][9], cutTable.cut, cutTable.more, M.pasteOver(cutTable)], [25, 10, '24:9', true, { rows: 5, cols: 2 }, null]);
+  const within = { unit: 'text', text: 'short' };
+  assert.equal(M.pasteCut(within), within, 'within its bound: as it is');
+});
+
+test('the take layer\'s words for a web page at a place and a web quote\'s source (pagelayer.mjs lookFor, sourceHref): a text directive\'s words said in one clean line; a quote\'s source opened at its first and last words, its own fragment kept, none without its address', async () => {
+  const L = await import('../public/pagelayer.mjs');
+  // The words a text directive asks to be found, its prefix and suffix left out, decoded, at most 300 characters.
+  assert.equal(L.lookFor('https://vote.example.com/report#:~:text=net%20revenue%20rose,in%20Q3'), 'net revenue rose … in Q3');
+  assert.equal(L.lookFor('https://vote.example.com/report#results:~:text=before-,net%20revenue,-after'), 'net revenue', 'an #id beside it; the prefix and suffix left out');
+  assert.equal(L.lookFor('https://vote.example.com/report#:~:other=1&text=Q3%0Atotal'), 'Q3 total', 'among other directives; a line break one space');
+  assert.equal(Array.from(L.lookFor('https://vote.example.com/#:~:text=' + 'x'.repeat(400))).length, 301, '300 characters and "…"');
+  for (const url of ['https://vote.example.com/report', 'https://vote.example.com/report#results', 'https://vote.example.com/#:~:text=%E0%A4', 'https://vote.example.com/#:~:text=a,b,c,d', 'https://vote.example.com/#:~:text=', '', null]) {
+    assert.equal(L.lookFor(url), '', String(url));
+  }
+  // Open the source: the told address checked as a frame's is, with a text directive of the quote's first and last words
+  // where it has no fragment of its own (`-`, `,` and `&` encoded in its terms); a short quote found whole.
+  const was = Object.getOwnPropertyDescriptor(globalThis, 'location');
+  Object.defineProperty(globalThis, 'location', { value: { origin: 'https://agm-laptop:3000' }, configurable: true });
+  try {
+    const from = { host: 'vote.example.com', url: 'https://vote.example.com/results?t=1' };
+    assert.equal(L.sourceHref({ kind: 'snippet', unit: 'text', text: 'Net revenue rose 8 percent\nin the third quarter, as planned', from }),
+      'https://vote.example.com/results?t=1#:~:text=Net%20revenue%20rose%208,third%20quarter%2C%20as%20planned');
+    assert.equal(L.sourceHref({ kind: 'snippet', unit: 'text', text: 'A one-off & final', from }), 'https://vote.example.com/results?t=1#:~:text=A%20one%2Doff%20%26%20final');
+    assert.equal(L.sourceHref({ kind: 'snippet', unit: 'range', table: { rows: [['Item', 'Q3'], ['Revenue', '4.2']] }, from }), 'https://vote.example.com/results?t=1#:~:text=Item,4.2', 'a table from its first cell to its last');
+    assert.equal(L.sourceHref({ kind: 'snippet', unit: 'item', items: ['Plant', 'People'], from: { ...from, url: 'https://vote.example.com/results#q2' } }), 'https://vote.example.com/results#q2', 'its own fragment kept');
+    for (const c of [{ from: { host: 'vote.example.com' } }, { from: { host: 'vote.example.com', url: 'http://vote.example.com/' } }, { from: { host: 'agm-laptop', url: 'https://agm-laptop:3000/app.html' } }, { from: { name: 'Q3.xlsx' } }, {}]) {
+      assert.equal(L.sourceHref({ kind: 'snippet', unit: 'text', text: 'Net revenue', ...c }), '', JSON.stringify(c));
+    }
+  } finally {
+    if (was) Object.defineProperty(globalThis, 'location', was); else delete globalThis.location;
+  }
 });
 
 // ---------------------------------------------------------------- XML and the deck's outline

@@ -150,6 +150,15 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   researcher's own choice. Under Earlier, a quote's Look draws it again. The bar says whose information the Board is
   reading where another's is under 15 s old. The
   AI's draft, in the Main room, is told what the Board's pages show now (a quote's words only to whoever pushed it).
+  **❝ Quote**, a tab of the backstage composer, shows words pasted or typed: words copied from Excel or Sheets arrive as
+  a table, a web page's table or list as its rows or items (read for its structure alone, never loading what it holds,
+  its hidden parts never read, and only where it agrees with the words the page showed), anything else as text; **From**
+  says where it is from (nothing, "Typed by Ana"; a file of this room; a web page). A quote from a web page names the site,
+  and, where its sender may show web pages, offers **Open the source**, opening the page in the person's own tab at the
+  quote's words. A web page shown at a place (an address ending `#:~:text=…`) says over its frame what to look for
+  ("Look for: ❝ net revenue rose … in Q3"); a page in the full view opens it in a tab of its own (Open in a new tab, in the
+  layer's ⋯), where the browser highlights it. Over the bar a long quote is said "Long for the stage — the Board will
+  scroll", another sender's fresh information offers Replace, and a file dropped or pasted on the box is never a quote.
 - **Messages that land.** Action prompts with tap-to-answer buttons; documents (PDF, Word, Excel, PowerPoint, CSV,
   Markdown, text, images) shared for download, opened in a person's own panel (👁 Look, 👁 Preview), shown to the Board or
   on screens, PDFs on iPads from iPadOS 16.4 (pdf.js's

@@ -557,10 +557,12 @@
       { id: 'take.held', label: (f, o) => o.held + ' from backstage', icon: '📬', group: '1_respond', inline: () => 4, verb: 'local', mode: 'local',
         may: () => true, fits: (f, o) => o.kind === 'blank' && o.held > 0 },
       // A web page, opened by the person in a tab of its own, outside AGMessage (its address, `url`): where a site refuses
-      // to be framed, or a password is asked for, the person's browser is the place for it. In the layer's ⋯ and its
-      // right-click, in the full view only: the simple view keeps the layer's buttons alone.
-      { id: 'take.tab', label: 'Open in a new tab', icon: '🗗', group: '3_keep', verb: 'local', mode: 'local',
-        may: () => true, fits: (f, o) => full(f) && o.kind === 'web' && typeof o.url === 'string' && o.url.length > 0 },
+      // to be framed, or a password is asked for, the person's browser is the place for it. A quote from a web page whose
+      // address was told (its pusher may show a web page) opens its source there the same way, at the quote's words: Open
+      // the source, as its source line has it. In the layer's ⋯ and its right-click, in the full view only: the simple view
+      // keeps the layer's buttons alone, and a quote's source line its link.
+      { id: 'take.tab', label: (f, o) => (o.kind === 'snippet' ? 'Open the source' : 'Open in a new tab'), icon: '🗗', group: '3_keep', verb: 'local', mode: 'local',
+        may: () => true, fits: (f, o) => full(f) && (o.kind === 'web' || o.kind === 'snippet') && typeof o.url === 'string' && o.url.length > 0 },
       // ⬇ Download: a document shown with Let them download it ticked, and only that take, on the layer's bar in either
       // view (and its ⋯ in the full view); never for an observer or a Viewer account (no ticket is given them). The
       // server's act, by the take's number.

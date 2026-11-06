@@ -622,8 +622,11 @@ function snippetPlace(at, ext) {
 /**
  * Where a quote comes from, made safe (pure): `from` as the pusher sent it, one of {url, at} (a file of the hall, read
  * through `f.source`, sourceOk's verdict, and kept by its name and room, never its address), {local: true, name, at} (the
- * researcher's own copy, said as theirs) or {web} (a web page's address, webUrl's rules: kept by its host, its address
- * sealed at rest); {from}, {} for none (typed), or {error}. A picture has no words to quote.
+ * researcher's own copy, said as theirs) or {web} (a web page's address, webUrl's rules); {from}, {} for none (typed), or
+ * {error}. A picture has no words to quote. A web page's address is kept ({web, host}: sealed at rest, and told the pages
+ * the quote is shown on, whose Open the source opens it) only when this pusher may show a web page itself (`f.web` true:
+ * stage.web, or a code guest by the hall's setting): the address is a web page offered on the Board's devices. Without
+ * that right the quote keeps its host alone ({host}): the pages name the site, and no address is kept or told.
  */
 function snippetFrom(from, f) {
   if (from === undefined) return {};
@@ -633,7 +636,8 @@ function snippetFrom(from, f) {
   if (ways[0] === 'web') {
     if (typeof from.web !== 'string') return { error: FROM_WORDS };
     const w = webUrl(from.web, f.selfHosts);
-    return w.error ? { error: w.error } : { from: { web: w.url, host: w.host } };
+    if (w.error) return { error: w.error };
+    return { from: f.web === true ? { web: w.url, host: w.host } : { host: w.host } };
   }
   if (ways[0] === 'local') {
     if (own(from, 'local') !== true || typeof own(from, 'name') !== 'string') return { error: FROM_WORDS };
@@ -1362,13 +1366,18 @@ class Pages {
   told(content, { observer = false } = {}) {
     if (!isRecord(content)) return content;
     if (content.kind === 'web') return { kind: 'web', url: guard.str(this.open(content.urlSealed)), host: content.host };
-    // A quote names where it comes from by a file's name and its room's name, or a web page's host: never an address, a
-    // file's or a web page's, nor a side room's key.
+    // A quote names where it comes from by a file's name and its room's name, or a web page's host: never a file's address
+    // nor a side room's key. A web page's address is told only where it was kept (its pusher could show a web page:
+    // snippetFrom), opened here for the pages it is shown on (their Open the source); one this machine cannot open, or that
+    // is no web page's address once opened, is told by its host alone.
     if (content.kind === 'snippet') {
       if (!isRecord(content.from)) return content;
       const { from, ...rest } = content;
-      const told = typeof from.host === 'string' ? { host: from.host } : Object.fromEntries(Object.entries(from).filter(([k]) => k !== 'room'));
-      return { ...rest, from: told };
+      if (typeof from.host === 'string') {
+        const opened = typeof from.urlSealed === 'string' ? webUrl(guard.str(this.open(from.urlSealed))) : { error: 'none kept' };
+        return { ...rest, from: { host: from.host, ...(opened.error || opened.host !== from.host ? {} : { url: opened.url }) } };
+      }
+      return { ...rest, from: Object.fromEntries(Object.entries(from).filter(([k]) => k !== 'room')) };
     }
     if (!FILE_KINDS.includes(content.kind)) return content;
     const { room, roomName, from, ...rest } = content;

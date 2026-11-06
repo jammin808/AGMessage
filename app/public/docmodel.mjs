@@ -412,7 +412,7 @@ export function inertBlocks(root) {
             if (td.nodeType !== 1 || !shown(td)) continue;
             const t = String(td.tagName).toUpperCase();
             if (t !== 'TD' && t !== 'TH') continue;
-            cells.push({ text: textOf(td), colspan: Number(attr(td, 'colspan')) || 1, rowspan: Number(attr(td, 'rowspan')) || 1 });
+            cells.push({ text: textOf(td), colspan: Number(attr(td, 'colspan')) || 1, rowspan: Number(attr(td, 'rowspan')) || 1, th: t === 'TH' });
           }
           rows.push(cells);
         } else if (tag === 'THEAD' || tag === 'TBODY' || tag === 'TFOOT') walkRows(c);
@@ -421,7 +421,9 @@ export function inertBlocks(root) {
     walkRows(el);
     if (!rows.length) return;
     const grid = occupancy(rows);
-    blocks.push({ kind: 'table', text: grid.rows.map((r) => r.map((c) => c.text).join('\t')).join('\n'), rows: grid.rows, width: grid.width, cut: grid.cut, at: { block: blocks.length + 1 } });
+    // `head` 1 where its first row is all headers (<th>): the row of labels a quote of it is drawn with.
+    const head = rows[0].length > 0 && rows[0].every((x) => x.th) ? 1 : 0;
+    blocks.push({ kind: 'table', text: grid.rows.map((r) => r.map((c) => c.text).join('\t')).join('\n'), rows: grid.rows, width: grid.width, cut: grid.cut, head, at: { block: blocks.length + 1 } });
   }
   /** An element's visible text, its hidden parts left out. */
   function textOf(n) {
@@ -950,19 +952,22 @@ function quoteStrings(q) {
   for (const b of q.blocks || []) { if (b.table) cells(b.table); else out.push(b.text); }
   return out.filter((s) => typeof s === 'string');
 }
+/** The longest text of a quote's blocks (its tables left out), in characters. */
+const longestBlock = (blocks) => Math.max(0, ...(blocks || []).filter((b) => !b.table).map((b) => charsOf(b.text)));
 /**
- * The bound a quote passes, in the server's words, or '' within every bound (pure): a cell of more than 200 characters, more
- * than 12 blocks, a block's text of more than 1,200, more than 4,000 characters in all. The bar says it before anything goes.
+ * The bound a quote passes, word for word as the server refuses it (lib/pages.js cleanSnippet), or '' within every bound
+ * (pure): a cell of more than 200 characters, more than 12 blocks, a block's text of more than 1,200, more than 4,000
+ * characters in all. The bar says it before anything goes.
  */
 export function quoteOver(q) {
   if (!q) return '';
   const B = QUOTE_BOUNDS;
   const tables = [q.table, ...((q.blocks || []).map((b) => b.table))].filter(Boolean);
   const cell = Math.max(0, ...tables.flatMap((t) => (t.rows || []).flat().map(charsOf)));
-  if (cell > B.cell) return 'Too long for the stage: a cell ' + counted(B.cell) + ' characters at most (this is ' + counted(cell) + ')';
-  if (Array.isArray(q.blocks) && q.blocks.length > B.blocks) return 'Too much for the stage: ' + B.blocks + ' blocks at most (this is ' + counted(q.blocks.length) + ')';
-  const block = Math.max(0, ...(q.blocks || []).filter((b) => !b.table).map((b) => charsOf(b.text)));
-  if (block > B.text) return 'Too long for the stage: ' + counted(B.text) + ' characters a block at most (this is ' + counted(block) + ')';
+  if (cell > B.cell) return 'Too long for the stage: a cell is ' + counted(B.cell) + ' characters at most (this is ' + counted(cell) + ')';
+  if (Array.isArray(q.blocks) && q.blocks.length > B.blocks) return 'Too long for the stage: ' + B.blocks + ' blocks at most (this is ' + counted(q.blocks.length) + ')';
+  const block = longestBlock(q.blocks);
+  if (block > B.text) return 'Too long for the stage: ' + counted(B.text) + ' characters at most (this is ' + counted(block) + ')';
   const all = quoteStrings(q).reduce((n, s) => n + charsOf(s), 0);
   if (all > B.whole) return 'Too long for the stage: ' + counted(B.whole) + ' characters at most (this is ' + counted(all) + ')';
   return '';
@@ -978,9 +983,11 @@ export function viewQuote(blocks, { note = '' } = {}) {
   const B = QUOTE_BOUNDS;
   const tableOver = blocks.find((b) => b.table && ((b.table.rows || []).length > B.rows || Math.max(0, ...(b.table.rows || []).map((r) => r.length)) > B.cols));
   const whole = { unit: 'view', blocks, ...(note ? { note } : {}) };
+  const block = longestBlock(blocks);
   const over = blocks.length > B.blocks ? 'Too much in view for the stage: ' + counted(blocks.length) + ' blocks (' + B.blocks + ' at most)'
     : tableOver ? 'Too much in view for the stage: a table of ' + counted(tableOver.table.rows.length) + ' rows × ' + counted(Math.max(0, ...tableOver.table.rows.map((r) => r.length))) + ' columns (25 rows × 10 columns at most)'
-      : quoteOver(whole).replace(/^Too (long|much) for the stage/, 'Too much in view for the stage');
+      : block > B.text ? 'Too much in view for the stage: ' + counted(B.text) + ' characters a block at most (this is ' + counted(block) + ')'
+        : quoteOver(whole).replace(/^Too long for the stage/, 'Too much in view for the stage');
   if (!over) return { blocks };
   const fit = [];
   let left = B.whole - charsOf(note);
@@ -999,4 +1006,83 @@ export function viewQuote(blocks, { note = '' } = {}) {
     fit.push({ ...b, text });
   }
   return { blocks: fit, over };
+}
+
+// ---------------------------------------------------------------- a paste, or words typed (plan 4-§5.9.9, the ❝ Quote tab)
+
+/** Words with every run of white space (a line break, a tab, a no-break space) one space, trimmed: how two flavours are compared. */
+const flat = (s) => String(s || '').replace(/\s+/g, ' ').trim();
+
+/**
+ * What a paste becomes as a quote (pure): `plain`, its text/plain flavour, and `blocks`, its text/html flavour as parseInert
+ * read it (null where it carried none; what a renderer would not show is already left out there). The HTML is read for its
+ * structure alone, a table's rows and cells or a list's items, and only where its words, joined, are the plain flavour's
+ * (white space made one): a page's text/plain flavour is the words the person saw selected, so where the two disagree (a
+ * part hidden by a style sheet, a word the HTML carries and the page did not show) the plain flavour alone is used, and no
+ * word the person did not see arrives. One table alone is a range (its first row its labels where every cell of it was a
+ * header; a merged cell's words in its first place); list items alone are items (numbered where every one was); anything
+ * else is the plain flavour's words. Plain words holding a tab (what Excel and Sheets put on the clipboard) are a table,
+ * read as tab-separated values (a quoted cell may hold a tab or a line break); any other words are text. {quote, words}:
+ * `quote` {unit, text | items (ordered?) | table}, or null for nothing to quote; `words` what the box shows of the paste
+ * (its plain flavour).
+ */
+export function pastedQuote({ plain = '', blocks = null } = {}) {
+  const words = String(plain || '').replace(/\r\n?/g, '\n');
+  const said = flat(words);
+  if (Array.isArray(blocks) && blocks.length && said) {
+    const tables = blocks.filter((b) => b && b.kind === 'table');
+    if (tables.length === 1 && blocks.length === 1) {
+      const t = tables[0];
+      const width = Math.max(0, Number(t.width) || 0);
+      const rows = (t.rows || []).map((r) => { const out = Array.from({ length: width }, () => ''); for (const cell of r) if (cell.c < width) out[cell.c] = String(cell.text || ''); return out; });
+      const cells = (t.rows || []).flatMap((r) => r.map((cell) => cell.text));
+      if (width && rows.length && flat(cells.join(' ')) === said) return { quote: { unit: 'range', table: { rows, head: t.head === 1 && rows.length > 1 ? 1 : 0, side: 0 } }, words };
+    }
+    if (blocks.every((b) => b && b.kind === 'li')) {
+      const items = blocks.map((b) => String(b.text || ''));
+      if (flat(items.join(' ')) === said) return { quote: { unit: 'item', items, ...(blocks.every((b) => b.list === 'ol') ? { ordered: true } : {}) }, words };
+    }
+  }
+  if (!said) return { quote: null, words };
+  if (words.includes('\t')) {
+    const read = parseCsv(words, { delimiter: '\t' });
+    const width = Math.max(0, ...read.rows.map((r) => r.length));
+    const rows = read.rows.filter((r) => r.some((c) => c.trim())).map((r) => { const out = r.slice(); while (out.length < width) out.push(''); return out; });
+    if (rows.length && width) return { quote: { unit: 'range', table: { rows, head: 0, side: 0 } }, words };
+  }
+  return { quote: { unit: 'text', text: words.trim() }, words };
+}
+
+/**
+ * The bound a paste's quote passes, in the server's words, and the cut the researcher may choose for it (pure): {error, cut}
+ * — `cut` 'chars' for text over 1,200 characters, 'table' for a table over 25 rows × 10 columns, '' where none is offered
+ * (a list's items, a cell, the whole) — or null within every bound. The server refuses the same; the tab says it first.
+ */
+export function pasteOver(q) {
+  if (!q) return null;
+  const B = QUOTE_BOUNDS;
+  if (typeof q.text === 'string' && charsOf(q.text) > B.text) return { error: 'Too long for the stage: ' + counted(B.text) + ' characters at most (this is ' + counted(charsOf(q.text)) + ')', cut: 'chars' };
+  if (q.table && (q.table.rows.length > B.rows || Math.max(0, ...q.table.rows.map((r) => r.length)) > B.cols)) return { error: 'Too big for the stage: narrow it to 25 rows × 10 columns', cut: 'table' };
+  if (Array.isArray(q.items) && q.items.length > B.items) return { error: 'Too long for the stage: ' + B.items + ' items at most (this is ' + counted(q.items.length) + ')', cut: '' };
+  const item = Math.max(0, ...(q.items || []).map(charsOf));
+  if (item > B.item) return { error: 'Too long for the stage: an item is ' + counted(B.item) + ' characters at most (this is ' + counted(item) + ')', cut: '' };
+  const over = quoteOver(q);
+  return over ? { error: over, cut: '' } : null;
+}
+
+/**
+ * A paste's quote cut as the researcher chose (pure): text to its first 1,200 characters, a table to its first 25 rows × 10
+ * columns with what was left out counted (`more`), `cut` true either way; any other quote, or one within its bound, as it is.
+ */
+export function pasteCut(q) {
+  const B = QUOTE_BOUNDS;
+  if (!q) return q;
+  if (typeof q.text === 'string' && charsOf(q.text) > B.text) return { ...q, text: cutText(q.text).text, cut: true };
+  if (q.table) {
+    const width = Math.max(0, ...q.table.rows.map((r) => r.length));
+    if (q.table.rows.length <= B.rows && width <= B.cols) return q;
+    const more = { rows: Math.max(0, q.table.rows.length - B.rows), cols: Math.max(0, width - B.cols) };
+    return { ...q, table: { ...q.table, rows: q.table.rows.slice(0, B.rows).map((r) => r.slice(0, B.cols)) }, cut: true, more };
+  }
+  return q;
 }

@@ -607,6 +607,16 @@ body[data-role="research"] .file.clickable:hover { outline: 2px solid var(--acce
 .pick-row input[type="text"] { flex: 1 1 10rem; min-width: 0; font-size: var(--fs-sm); padding: var(--sp-1) var(--sp-2); border: 1px solid var(--c-border); border-radius: var(--radius-sm); background: var(--c-surface-raised); color: var(--c-ink); }
 .pick-more { min-width: var(--target-touch); min-height: var(--target-touch); }
 .pick-glance { position: fixed; top: 0; left: -10000px; visibility: hidden; pointer-events: none; }
+/* ❝ Quote: the box words are pasted or typed in, where they are from, what will go drawn as the Board will see it (the
+   pick bar's preview), whom it goes to and where it arrives, a line above it, and Show. */
+.quote-pane .field { margin-bottom: 0; }
+.quote-pane textarea { width: 100%; min-height: 4.5rem; resize: vertical; }
+.quote-pane .quote-row { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
+.quote-pane .quote-from { display: inline-flex; align-items: center; gap: var(--sp-1); font-size: var(--fs-sm); font-weight: 600; }
+.quote-pane select, .quote-pane input[type="url"], .quote-pane input[type="text"] { min-height: var(--target-min); font-size: var(--fs-sm); padding: var(--sp-1) var(--sp-2); border: 1px solid var(--c-border); border-radius: var(--radius-sm); background: var(--c-surface-raised); color: var(--c-ink); }
+.quote-pane input[type="url"], .quote-pane input[type="text"] { flex: 1 1 12rem; min-width: 0; }
+.quote-pane input[hidden] { display: none; }
+.quote-pane .pick-preview { max-height: 12rem; }
 
 /* DIRECTOR-MODE: bigger text on stage */
 /* Director overrides use `em` so the message zoom variable on .feed
@@ -2022,6 +2032,8 @@ h1[tabindex="-1"]:focus, h3[tabindex="-1"]:focus { outline: none; }
 .take-web { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
 .take-web-note { margin: 0; padding: var(--sp-2) var(--sp-3); font-size: var(--fs-md); border-bottom: 1px solid var(--stage-dim); overflow-wrap: anywhere; }
 .take-web-frame { flex: 1 1 auto; width: 100%; min-height: 0; border: 0; background: var(--c-web-page); }
+/* A web page at a place: the words its address asks to be found, said over the frame (a frame never highlights them). */
+.take-web-look { margin: 0; padding: var(--sp-2) var(--sp-3); font-size: var(--fs-md); font-weight: 600; border-bottom: 1px solid var(--stage-dim); overflow-wrap: anywhere; }
 /* A document or a picture in a take: drawn by docview.mjs on the page's own surface, its bar (the page box, zoom, find)
    at its top, the pusher's note above it and its line (its name and place, or whose picture of what) under it. Nothing
    in it is dragged out or saved by a long press; its words stay selectable. In the simple view its controls are the
@@ -2064,6 +2076,8 @@ body[data-view="simple"] .take-file .dv-bar .btn, body[data-view="simple"] .take
 .take-quote-focus { outline: .12em solid var(--stage-ink); outline-offset: -.12em; font-weight: 700; }
 .take-quote-more { margin: .2em 0 0; font-size: .6em; color: var(--stage-dim); }
 .take-quote-line { margin: .6em 0 0; font-size: .5em; color: var(--stage-dim); overflow-wrap: anywhere; }
+/* Open the source (a quote from a web page, told its address): a link in the stage's ink, underlined, never colour alone. */
+.take-quote-open { color: var(--stage-ink); text-decoration: underline; }
 .take-card-box .layer-box, .take-card-box .take-quote { font-size: var(--fs-md); }
 /* A quote longer than its box (pagelayer.mjs fitQuote marks it long): each table scrolls inside its own card, down as well
    as across, so its label row and column stay in view as it scrolls. */

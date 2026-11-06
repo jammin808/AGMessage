@@ -4027,6 +4027,176 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       for (const t of [desk, cy]) { await t.send('Page.navigate', { url: 'about:blank' }); t.close(); }
     }
 
+    // ---------------- A pasted or typed quote, and a web page at a place (unit 28) ----------------
+    // In a hall of its own: the admin account's page backstage (the operator, who may show web pages), Cy On stage on a
+    // device of her own, and later Qia, a Staff account who may show quotes but not web pages. The ❝ Quote tab reads a paste
+    // from the paste event's clipboard: tab-separated words become a table; HTML is read for its structure alone through
+    // parseInert (nothing in it loads, a hidden part's words never arrive), and only where it agrees with the plain words;
+    // typed words read "Typed by Ana Admin". A quote from a web page carries Open the source, at the quote's words, only
+    // from a pusher who may show a web page; a web page with a text directive says its words beside the frame and keeps
+    // them in Open in a new tab.
+    {
+      const qtHall = (await (await fetch(base + '/api/rooms', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ name: 'Quote hall' }) })).json()).code;
+      const signIn = async (t, username, password) => {
+        await t.until(`document.readyState === 'complete'`);
+        return t.eval(`(async () => { for (let i = 0; i < 5; i++) { const r = await fetch('/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: ${codeLiteral(username)}, password: ${codeLiteral(password)} }) }); if (r.status !== 429) return r.status; await new Promise((ok) => setTimeout(ok, 2100)); } return 429; })()`);
+      };
+      const desk = await edge.tab(`${base}/`, { alone: true });
+      if (await signIn(desk, 'ana', 'the green room kettle') !== 200) throw new Error('the quote hall\'s operator could not sign in');
+      // Every address the operator's page asks for, from here on: a pasted picture is never one of them.
+      const asked = [];
+      desk.on('Network.requestWillBeSent', (p) => asked.push(p.request.url));
+      await desk.send('Network.enable');
+      await desk.eval(`location.href = ${codeLiteral(`/app.html?code=${qtHall}&as=account&role=research`)}`);
+      await desk.until(`typeof joined !== 'undefined' && joined && F.canPush && F.canWeb`, 10000);
+      const cy = await edge.tab(`${base}/app.html?code=${qtHall}&name=Cy&role=board&invite=${inviteOf(dataDir, qtHall)}`, { alone: true });
+      await cy.until(`typeof joined !== 'undefined' && joined`, 10000);
+      // What Cy's page is told of each take, kept as it comes.
+      await cy.eval(`(() => { window.__told = []; socket.on('page:take', (t) => window.__told.push(t)); return true; })()`);
+      // The venue's web page answered by the browser itself (agm-web.invalid: a page of a few words).
+      cy.on('Fetch.requestPaused', (p) => { cy.send('Fetch.fulfillRequest', { requestId: p.requestId, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'text/html; charset=utf-8' }], body: Buffer.from('<!doctype html><title>Report</title><p>Net revenue rose in Q3</p>').toString('base64') }); });
+      await cy.send('Fetch.enable', { patterns: [{ urlPattern: 'https://agm-web.invalid/*', requestStage: 'Request' }] });
+
+      // The tab, for a seat that may show the Board; a paste as the browser hands it to the box (its two flavours).
+      const tabShown = await desk.until(`!document.getElementById('quoteTab').hidden && 'shown'`, 8000);
+      await desk.eval(`document.getElementById('quoteTab').click()`);
+      const paste = (t, plain, html) => t.eval(`(() => { const box = document.getElementById('quoteInput'); box.focus(); box.select(); const dt = new DataTransfer(); ${html ? `dt.setData('text/html', ${codeLiteral(html)});` : ''} dt.setData('text/plain', ${codeLiteral(plain)});
+        box.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })); return true; })()`);
+      const typed = (t, words) => t.eval(`(() => { const box = document.getElementById('quoteInput'); box.value = ${codeLiteral(words)}; box.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+      const said = (t, start) => t.until(`(() => { const s = document.getElementById('quoteSay').textContent; return s.startsWith(${codeLiteral(start)}) && !document.getElementById('quoteShow').disabled && !!document.querySelector('#quotePreview .take-quote') && s; })()`, 8000);
+      const QUOTE_ON_CY = `(() => { const q = document.querySelector('#layerBox .take-quote:not([data-old])'); if (document.getElementById('pageLayer').hidden || !q) return ''; const a = q.querySelector('.take-quote-open');
+        return JSON.stringify({ unit: q.dataset.unit, text: q.querySelector('.take-quote-body').innerText.replace(/\\n+/g, '\\n').trim(), line: q.querySelector('.take-quote-line').textContent,
+          table: [...q.querySelectorAll('tr')].map((tr) => [...tr.children].map((td) => td.textContent)), heads: q.querySelectorAll('.take-quote-head').length, href: a ? a.href : '', target: a ? a.target : '', rel: a ? a.rel : '' }); })()`;
+      /** Show from `t`'s tab, and what Cy's page draws of it. */
+      const shows = async (t = desk) => {
+        await cy.eval(`(() => { for (const q of document.querySelectorAll('#layerBox .take-quote')) q.dataset.old = '1'; return true; })()`);
+        await t.eval(`document.getElementById('quoteShow').click()`);
+        return JSON.parse((await cy.until(QUOTE_ON_CY, 10000)) || 'null');
+      };
+
+      // Tab-separated words (what Excel and Sheets put on the clipboard) become a table.
+      await paste(desk, 'Item\tQ3\nRevenue\t4.2\nCosts\t3.9\n');
+      const tsvSaid = await said(desk, 'A table');
+      const tsv = await shows();
+      const boxAfter = await desk.until(`document.getElementById('quoteInput').value === '' && 'emptied'`, 5000);
+      report(tabShown === 'shown' && tsvSaid === 'A table, 3 rows × 2 columns. ' && !!tsv && tsv.unit === 'range' && JSON.stringify(tsv.table) === JSON.stringify([['Item', 'Q3'], ['Revenue', '4.2'], ['Costs', '3.9']]) && tsv.line === 'Typed by Ana Admin' && boxAfter === 'emptied',
+        `the ❝ Quote tab: pasted tab-separated words become a table snippet on the Board's page, and the box is emptied once it went (${JSON.stringify({ tabShown, tsvSaid, tsv, boxAfter })})`);
+
+      // HTML with a table: its rows and cells, its header row as labels; its picture fetches nothing, and a display:none
+      // span's words never arrive.
+      const IMG = 'https://agm-img.invalid/pasted.png';
+      await paste(desk, 'Item\tQ3\nRevenue\t4.2', `<meta charset="utf-8"><table><tr><th>Item</th><th>Q3</th></tr><tr><td>Revenue<span style="display:none">SECRET-SALARY</span><img src="${IMG}"></td><td>4.2</td></tr></table>`);
+      await said(desk, 'A table, 2 rows');
+      const html = await shows();
+      await sleep(500);
+      const fetchedImg = asked.filter((u) => u.startsWith('https://agm-img.invalid/'));
+      const toldHtml = await cy.eval(`JSON.stringify(window.__told)`);
+      report(!!html && JSON.stringify(html.table) === JSON.stringify([['Item', 'Q3'], ['Revenue', '4.2']]) && html.heads === 2 && fetchedImg.length === 0 && !toldHtml.includes('SECRET-SALARY') && !JSON.stringify(html).includes('SECRET'),
+        `pasted HTML with a table becomes its rows (its header row the labels); its <img> fetches nothing (the network log), and a display:none span's words are absent (${JSON.stringify({ html, fetchedImg })})`);
+
+      // HTML whose words disagree with its plain flavour (a part hidden by a style sheet): the plain words alone.
+      await paste(desk, 'One\nTwo', '<ul><li>One</li><li>Two</li><li class="gone">UNSEEN-ITEM</li></ul>');
+      const disagreeSaid = await said(desk, 'Text');
+      const disagree = await shows();
+      report(disagreeSaid === 'Text, 7 characters. ' && !!disagree && disagree.unit === 'text' && disagree.text === 'One\nTwo' && !JSON.stringify(disagree).includes('UNSEEN'),
+        `pasted HTML whose words disagree with its text/plain flavour falls back to the plain words (${JSON.stringify({ disagreeSaid, disagree })})`);
+
+      // A table of 25 rows × 10 columns, within the stage's bounds yet longer than a glance on a tablet: said so, never refused.
+      await paste(desk, Array.from({ length: 25 }, (_, r) => Array.from({ length: 10 }, (__, c) => (r === 0 ? 'Q' + (c + 1) : String((r + 1) * (c + 3)))).join('\t')).join('\n'));
+      const longSaid = await desk.until(`(() => { const s = document.getElementById('quoteSay').textContent; return s.includes('Long for the stage') && !document.getElementById('quoteShow').disabled && s; })()`, 8000);
+      // A file dragged over the box finds no place to land (neither here nor the composer's attach), and one dropped is said
+      // and attaches nothing to a message.
+      const dropped = await desk.eval(`(() => { const box = document.getElementById('quoteInput'); const dt = new DataTransfer(); dt.items.add(new File(['x'], 'stage plan.png', { type: 'image/png' }));
+        const t = document.getElementById('agmToast'); if (t) t.textContent = '';
+        const over = new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true }); box.dispatchEvent(over);
+        const drop = new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }); box.dispatchEvent(drop);
+        return JSON.stringify({ over: over.defaultPrevented, effect: dt.dropEffect, hover: document.getElementById('researchCompose').classList.contains('drop-hover'), drop: drop.defaultPrevented, attached: pendingFile !== null, chip: !document.getElementById('fileChip').hidden }); })()`);
+      const dropSaid = await desk.until(`(document.getElementById('agmToast') || {}).textContent`, 3000);
+      report(/^A table, 25 rows × 10 columns\. Long for the stage — the Board will scroll\.$/.test(longSaid || '') && dropped === JSON.stringify({ over: true, effect: 'none', hover: false, drop: true, attached: false, chip: false })
+        && /^A file is not a quote/.test(dropSaid || ''),
+        `the ❝ Quote tab says a quote longer than a glance on a tablet is "Long for the stage — the Board will scroll", and Show stays offered; a file dragged over its box has no place to land, and one dropped is said and attaches nothing (${JSON.stringify({ longSaid, dropped, dropSaid })})`);
+
+      // Typed words, from nothing: "Typed by Ana Admin".
+      await typed(desk, 'Revenue Q3: £4.2m');
+      await said(desk, 'Text, 17');
+      const typedQ = await shows();
+      report(!!typedQ && typedQ.unit === 'text' && typedQ.text === 'Revenue Q3: £4.2m' && typedQ.line === 'Typed by Ana Admin' && typedQ.href === '',
+        `typed words read "Typed by Ana Admin" on the Board's page (${JSON.stringify(typedQ)})`);
+
+      // From a web page, by the operator (who may show web pages): Open the source, in a tab of the person's own, at the
+      // quote's first and last words (the address has no fragment of its own).
+      await typed(desk, 'Net revenue rose 8 percent in the third quarter');
+      await desk.eval(`(() => { const s = document.getElementById('quoteFrom'); s.value = 'web'; s.dispatchEvent(new Event('change', { bubbles: true })); const w = document.getElementById('quoteWeb'); w.value = 'https://agm-web.invalid/results?token=0p3n'; w.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+      await said(desk, 'Text');
+      const previewLink = await desk.eval(`(() => { const a = document.querySelector('#quotePreview .take-quote-open'); return a ? a.href : ''; })()`);
+      const fromWeb = await shows();
+      const SOURCE = 'https://agm-web.invalid/results?token=0p3n#:~:text=Net%20revenue%20rose%208,in%20the%20third%20quarter';
+      const toldWeb = await cy.eval(`JSON.stringify((window.__told.filter((t) => t.content && t.content.kind === 'snippet').pop() || {}).content.from)`);
+      report(!!fromWeb && fromWeb.line === 'Quoted by Ana Admin · agm-web.invalid · Open the source' && fromWeb.href === SOURCE && fromWeb.target === '_blank' && fromWeb.rel === 'noopener noreferrer' && previewLink === SOURCE
+        && toldWeb === JSON.stringify({ host: 'agm-web.invalid', url: 'https://agm-web.invalid/results?token=0p3n' }),
+        `a web quote from a pusher who holds stage.web: its card names the host and offers Open the source, a text directive from its first and last words, in a tab of the person's own (${JSON.stringify({ fromWeb, toldWeb, previewLink })})`);
+
+      // Qia, Staff (stage.show, no stage.web): the same quote names the site alone, with no link, and her page says so;
+      // nothing Cy's page is told carries its address.
+      const qiaMade = await desk.eval(`fetch('/api/users', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'qia', name: 'Qia Staff', role: 'staff', halls: [${codeLiteral(qtHall)}], password: 'quotes from the web only' }) }).then((r) => r.status)`);
+      const qia = await edge.tab(`${base}/build.js`, { alone: true });
+      if (qiaMade !== 200 || await signIn(qia, 'qia', 'quotes from the web only') !== 200) throw new Error('Qia could not sign in: ' + qiaMade);
+      await qia.send('Page.navigate', { url: `${base}/app.html?code=${qtHall}&as=account&role=research` });
+      await qia.until(`typeof joined !== 'undefined' && joined && F.canShow && !F.canPush && !F.canWeb && !document.getElementById('quoteTab').hidden`, 10000);
+      // The operator's quote taken down first: a seat that may only show sends to the side bar over the operator's.
+      await desk.eval(`new Promise((r) => socket.emit('page:push', { code: HALL_KEY, to: 'board', content: { kind: 'chat', layer: 'info' } }, r))`);
+      await cy.until(`document.getElementById('pageLayer').hidden && 'chat'`, 8000);
+      await qia.eval(`document.getElementById('quoteTab').click()`);
+      await typed(qia, 'Turnout was 64% this year');
+      await qia.eval(`(() => { const s = document.getElementById('quoteFrom'); s.value = 'web'; s.dispatchEvent(new Event('change', { bubbles: true })); const w = document.getElementById('quoteWeb'); w.value = 'https://agm-web.invalid/turnout?token=n0r1ght'; w.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+      await qia.until(`(() => { Console.read(); const b = Console.board(); return !!b && !(b.info && b.info.op) && !b.opOn && 'free'; })()`, 8000);
+      const qiaSaid = await said(qia, 'Text');
+      const fromQia = await shows(qia);
+      const toldAll = await cy.eval(`JSON.stringify(window.__told)`);
+      report(!!fromQia && fromQia.line === 'Quoted by Qia Staff · agm-web.invalid' && fromQia.href === '' && !toldAll.includes('n0r1ght') && qiaSaid.includes('The Board is told the site\'s name, without a link: web pages on the stage need their own right.'),
+        `a web quote from a pusher without stage.web: the card names the host with no link, and no take carries its address (${JSON.stringify({ fromQia, qiaSaid })})`);
+
+      // Qia's quote is fresh: the operator's tab says the Board is reading it, with Replace, which shows the operator's.
+      await desk.eval(`(() => { const s = document.getElementById('quoteFrom'); s.value = ''; s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+      await typed(desk, 'The vote opens at noon');
+      const freshSaid = await desk.until(`(() => { Console.read(); const s = document.getElementById('quoteSay'); return s.textContent.includes("reading Qia Staff's quote") && [...s.querySelectorAll('button')].some((b) => b.textContent === 'Replace') && s.textContent; })()`, 8000);
+      await cy.eval(`(() => { for (const q of document.querySelectorAll('#layerBox .take-quote')) q.dataset.old = '1'; return true; })()`);
+      await desk.eval(`[...document.querySelectorAll('#quoteSay button')].find((b) => b.textContent === 'Replace').click()`);
+      const replaced = JSON.parse((await cy.until(QUOTE_ON_CY, 10000)) || 'null');
+      report(/^Text, 22 characters\. The Board is reading Qia Staff's quote \(\d+ s\) — Replace · Show a person instead/.test(freshSaid || '') && !!replaced && replaced.text === 'The vote opens at noon' && replaced.line === 'Typed by Ana Admin',
+        `over another pusher's fresh quote the ❝ Quote tab says who the Board is reading, with Replace (which shows it) and Show a person instead (${JSON.stringify({ freshSaid, replaced })})`);
+
+      // Qia given web pages and not quotes (stage.web, without stage.show): she may show the Board a web page, so her page
+      // shows on it, but no quote of hers would be taken: the ❝ Quote tab is not drawn for her, nor the Preview's bar.
+      const qiaId = await desk.eval(`fetch('/api/users').then((r) => r.json()).then((j) => ((j.users || []).find((u) => u.username === 'qia') || {}).id || '')`);
+      const qiaRights = await desk.eval(`fetch('/api/users/' + ${codeLiteral(qiaId)}, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ revoke: ['stage.show'], grant: ['stage.web'] }) }).then((r) => r.status)`);
+      await qia.send('Page.navigate', { url: `${base}/app.html?code=${qtHall}&as=account&role=research` });
+      const webOnly = await qia.until(`typeof joined !== 'undefined' && joined && F.canShow && F.canWeb && !!Console.board() && Console.board().show === false && JSON.stringify({ tab: !document.getElementById('quoteTab').hidden, bar: !document.getElementById('previewBar').hidden })`, 10000);
+      report(qiaRights === 200 && webOnly === JSON.stringify({ tab: false, bar: false }),
+        `a seat that may show the Board web pages and not quotes is drawn no ❝ Quote tab and no Preview bar (${JSON.stringify({ qiaId: !!qiaId, qiaRights, webOnly })})`);
+
+      // A web page at a place: its text directive's words over the frame ("Look for: ❝ …"), the frame and Open in a new tab
+      // keeping the fragment (Cy's page given the full view, where Open in a new tab is in the layer's ⋯).
+      const AT_PLACE = 'https://agm-web.invalid/report#:~:text=net%20revenue%20rose,in%20Q3';
+      await desk.until(`people.some((u) => u.name === 'Cy' && u.socketId)`, 5000);
+      const cyFull = await desk.eval(`new Promise((r) => socket.emit('admin:setView', { roomCode: ROOM, socketId: (people.find((u) => u.name === 'Cy') || {}).socketId, view: 'full' }, (a) => r(JSON.stringify(a))))`);
+      const cyView = await cy.until(`document.body.dataset.view === 'full' && F.view === 'full' && 'full'`, 5000);
+      await desk.eval(`new Promise((r) => socket.emit('page:push', { code: HALL_KEY, to: 'board', content: { kind: 'web', url: ${codeLiteral(AT_PLACE)} } }, r))`);
+      const placed = await cy.until(`(() => { const l = document.querySelector('#layerBox .take-web-look'); const f = document.querySelector('#layerBox iframe'); return l && f && JSON.stringify({ look: l.textContent, src: f.src }); })()`, 10000);
+      // Its menu once the page has drawn it (the frame loaded: the layer's object is the take drawn).
+      await cy.until(`!!Takes.object() && 'drawn'`, 20000);
+      const more = await cy.until(`(() => { const m = document.querySelector('#layerActs .obj-more'); if (!m) return ''; window.__opened = []; window.open = (u, n, o) => { window.__opened.push([u, n, o]); return null; }; m.click(); return 'opened'; })()`, 5000);
+      const menuIds = await cy.until(`!!document.querySelector('.agm-menu [data-action="take.tab"]') && JSON.stringify([...document.querySelectorAll('.agm-menu [data-action]')].map((b) => b.dataset.action))`, 5000);
+      if (menuIds) await cy.eval(`document.querySelector('.agm-menu [data-action="take.tab"]').click()`);
+      const opened = await cy.until(`Array.isArray(window.__opened) && window.__opened.length > 0 && JSON.stringify(window.__opened[0])`, 5000);
+      report(placed === JSON.stringify({ look: 'Look for: ❝ net revenue rose … in Q3', src: AT_PLACE }) && opened === JSON.stringify([AT_PLACE, '_blank', 'noopener,noreferrer']),
+        `a web take with #:~:text= shows "Look for: ❝ …" over its frame and keeps the fragment in the frame and in Open in a new tab (${JSON.stringify({ placed, opened, cyFull, cyView, more, menuIds, toast: await cy.eval(`(document.getElementById('agmToast') || {}).textContent || ''`) })})`);
+
+      const quoteProblems = [['desk', desk], ['cy', cy], ['qia', qia]].flatMap(([n, t]) => t.problems.map((p) => n + ': ' + p));
+      report(quoteProblems.length === 0, `the quote hall's pages: no console error and no CSP violation${quoteProblems.length ? ' — ' + quoteProblems.slice(0, 4).join(' | ') : ''}`);
+      for (const t of [desk, cy, qia]) { await t.send('Page.navigate', { url: 'about:blank' }); t.close(); }
+    }
+
     // ---------------- The Board's devices (unit T): every stage feature on the device legs, and the floor leg ----------------
     // A hall of its own: the operator from a socket (its files uploaded fresh), the admin account's page backstage as the
     // pusher whose page makes a document's stand-in, and the Board on three device legs (a mobile viewport with touch, at
@@ -4052,7 +4222,9 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       const pdfUrl = await fresh('board pack.pdf', 'application/pdf', fixture('board-pack-tagged.pdf'));
       // A Word file with a hidden run and a tracked deletion, neither of which a Board page draws.
       const docxUrl = await fresh('minutes.docx', DOCX_TYPE, officeZip(wordParts({ body: '<w:p><w:r><w:t>Item 4: approved</w:t></w:r><w:del w:id="1" w:author="Ana" w:date="2026-11-01T09:00:00Z"><w:r><w:delText> DELETEDRUN</w:delText></w:r></w:del></w:p>'
-        + '<w:p><w:r><w:t>Item 5: deferred</w:t></w:r><w:r><w:rPr><w:vanish/></w:rPr><w:t> HIDDENRUN</w:t></w:r></w:p>' })));
+        + '<w:p><w:r><w:t>Item 5: deferred</w:t></w:r><w:r><w:rPr><w:vanish/></w:rPr><w:t> HIDDENRUN</w:t></w:r></w:p>'
+        + '<w:tbl><w:tr><w:trPr><w:tblHeader/></w:trPr><w:tc><w:p><w:r><w:t>Motion</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Vote</w:t></w:r></w:p></w:tc></w:tr>'
+        + '<w:tr><w:tc><w:p><w:r><w:t>Budget</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Carried</w:t></w:r></w:p></w:tc></w:tr></w:tbl><w:p/>' })));
       const picUrl = await fresh('stage plan.png', 'image/png', pngOf(64, 48));
       // A workbook with a hidden column, row and sheets; a deck with a hidden shape and slide; a CSV; Markdown with a comment;
       // a PDF whose page is a JPEG 2000 picture.
@@ -4072,6 +4244,12 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       };
       // The venue's web page, answered by the browser itself (agm-web.invalid: a page of a few words).
       const WEB = 'https://agm-web.invalid/vote';
+      // At a place: its text directive's words said over the frame ("Look for: ❝ …"), which never highlights them.
+      const WEB_AT = WEB + '#:~:text=Vote%20now,today';
+      const LOOK = 'Look for: ❝ Vote now … today';
+      // A quote from it: Open the source at its words (one short line, found whole) where its pusher may show a web page.
+      const WEB_QUOTE = 'Turnout was 64% this year';
+      const SOURCE_AT = WEB + '?r=1#:~:text=Turnout%20was%2064%25%20this%20year';
       const answerWeb = async (t) => {
         t.on('Fetch.requestPaused', (p) => { t.send('Fetch.fulfillRequest', { requestId: p.requestId, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'text/html; charset=utf-8' }], body: Buffer.from('<!doctype html><title>Vote</title><p>Vote now</p>').toString('base64') }); });
         await t.send('Fetch.enable', { patterns: [{ urlPattern: 'https://agm-web.invalid/*', requestStage: 'Request' }] });
@@ -4104,6 +4282,8 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
           img: !!img && img.complete && img.naturalWidth > 0, drag: img ? img.getAttribute('draggable') : null, menu, doc: v ? v.dataset.kind : '', page: (b.querySelector('.dv-n') || {}).value || '',
           canvas: !!b.querySelector('canvas.pdf-page:not(.pdf-page-pending)'), words: (b.querySelector('.dv-body') || {}).textContent || '', frame: f ? f.getAttribute('src') : '',
           pageW: Math.round((b.querySelector('.dv-page') || { getBoundingClientRect: () => ({ width: 0 }) }).getBoundingClientRect().width), found: (b.querySelector('.dv-found') || {}).textContent || '',
+          look: (b.querySelector('.take-web-look') || {}).textContent || '', source: q ? (q.querySelector('.take-quote-line') || {}).textContent || '' : '',
+          open: (() => { const a = q && q.querySelector('.take-quote-open'); return a ? [a.href, a.target, a.rel] : null; })(), th: [...b.querySelectorAll('.dv th')].map((x) => x.textContent).join('|'),
           jpx: (() => { const c = b.querySelector('.dv-page[data-page="1"] canvas'); if (!c || !c.width || c.classList.contains('pdf-page-pending')) return null; const p = c.getContext('2d').getImageData(Math.floor(c.width * ${JPX_YELLOW.x}), Math.floor(c.height * ${JPX_YELLOW.y}), 1, 1).data; return [p[0], p[1], p[2]]; })(),
           wide: document.documentElement.scrollWidth <= document.documentElement.clientWidth }); })()`;
       const onLegs = async (ok, ms = 20000) => Promise.all(legs.map(async (l) => JSON.parse(await l.tab.until(`(() => { const r = ${LEG_READ}; return r && (${ok})(JSON.parse(r)) && r; })()`, ms) || await l.tab.eval(LEG_READ) || 'null')));
@@ -4160,8 +4340,8 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       const jpx = await push({ kind: 'doc', url: jpxUrl, at: { page: 1 } });
       legRows.jpx = await onLegs('(r) => r.kind === "doc" && r.doc === "pdf" && !!r.jpx && r.jpx[0] > 200 && r.jpx[1] > 150 && r.jpx[2] < 110');
       const jpxInfo = await boardInfo(jpx.seq);
-      // A web page: its frame, opened (◇: AGMessage cannot see inside it).
-      const web = await push({ kind: 'web', url: WEB });
+      // A web page at a place: its frame, opened (◇: AGMessage cannot see inside it), its text directive's words over it.
+      const web = await push({ kind: 'web', url: WEB_AT });
       legRows.web = await onLegs('(r) => r.kind === "web" && !!r.frame');
       const webInfo = await boardInfo(web.seq, '◇');
       for (const l of legs) await l.tab.shot(path.join(OUT, `board-devices-${l.w}x${l.h}.png`));
@@ -4171,13 +4351,13 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
         && legRows.picture.every((r) => !!r && r.drag === 'false' && r.menu === true && r.wide)
         && legRows.pdf.every((r) => !!r && r.wide) && legRows.zoomed.every((r) => !!r && r.wide) && legRows.paged.every((r) => !!r && r.page === '2')
         && !!phoneSaved && phoneSaved[1].name === 'board pack.pdf' && fs.readFileSync(path.join(dlDir, phoneSaved[0])).equals(fixture('board-pack-tagged.pdf')) && phoneStays === true
-        && legRows.docx.every((r) => !!r && r.words.includes('Item 5: deferred') && !r.words.includes('HIDDENRUN') && !r.words.includes('DELETEDRUN') && r.wide) && legRows.found.every((r) => !!r && r.found === '1 of 1')
+        && legRows.docx.every((r) => !!r && r.words.includes('Item 5: deferred') && !r.words.includes('HIDDENRUN') && !r.words.includes('DELETEDRUN') && r.th === 'Motion|Vote' && r.wide) && legRows.found.every((r) => !!r && r.found === '1 of 1')
         && legRows.xlsx.every((r) => !!r && r.words.includes('Cost') && !/SECRETCOL|SECRETROW|VERYHIDDEN|JUSTHIDDEN/.test(r.words) && r.wide)
         && legRows.pptx.every((r) => !!r && r.words.includes('Q3 results') && !/HIDDENSHAPE|HIDDENSLIDE/.test(r.words) && r.wide)
         && legRows.csv.every((r) => !!r && r.words.includes('Staff') && r.wide) && legRows.md.every((r) => !!r && r.words.includes('words') && !r.words.includes('SECRETCOMMENT') && r.wide)
-        && legRows.jpx.every((r) => !!r && r.wide) && legRows.web.every((r) => !!r && r.frame.startsWith(WEB) && r.wide)
+        && legRows.jpx.every((r) => !!r && r.wide) && legRows.web.every((r) => !!r && r.frame === WEB_AT && r.look === LOOK && r.wide)
         && [paraInfo, tableInfo, picInfo, pdfInfo, docxInfo, xlsxInfo, pptxInfo, csvInfo, mdInfo, jpxInfo].every((i) => !!i && i.mark === '✓' && i.on === 3 && i.pages === 3) && !!webInfo && webInfo.mark === '◇';
-      report(legsOk, `the stage on the device legs: a quote in 28 px or more on a tablet and 20 px or more on a phone; a 25 × 10 table scrolling inside its card at 390 px, the page never sideways; a picture never dragged out, its menu the page's; a PDF at its page, zoomed in by a tap and paged on by one, saved whole on the phone by ⬇ Download with the page staying; a Word document without its hidden run or tracked deletion, found in; a workbook, a deck, a CSV and Markdown without what is hidden in them; a JPEG 2000 page drawn; a web page's frame; each ✓ on all 3 (the web page ◇) (${JSON.stringify({ legRows: Object.fromEntries(Object.entries(legRows).map(([k, v]) => [k, v.map((r) => r && { ...r, words: (r.words || '').slice(0, 60) })])), saved: phoneSaved ? phoneSaved[1].name : '', phoneStays, marks: [paraInfo, tableInfo, picInfo, pdfInfo, docxInfo, xlsxInfo, pptxInfo, csvInfo, mdInfo, jpxInfo, webInfo].map((i) => i && [i.mark, i.on, i.pages]) })})`);
+      report(legsOk, `the stage on the device legs: a quote in 28 px or more on a tablet and 20 px or more on a phone; a 25 × 10 table scrolling inside its card at 390 px, the page never sideways; a picture never dragged out, its menu the page's; a PDF at its page, zoomed in by a tap and paged on by one, saved whole on the phone by ⬇ Download with the page staying; a Word document without its hidden run or tracked deletion, its header row drawn as headers, found in; a workbook, a deck, a CSV and Markdown without what is hidden in them; a JPEG 2000 page drawn; a web page's frame at its place, with "${LOOK}" over it; each ✓ on all 3 (the web page ◇) (${JSON.stringify({ legRows: Object.fromEntries(Object.entries(legRows).map(([k, v]) => [k, v.map((r) => r && { ...r, words: (r.words || '').slice(0, 60) })])), saved: phoneSaved ? phoneSaved[1].name : '', phoneStays, marks: [paraInfo, tableInfo, picInfo, pdfInfo, docxInfo, xlsxInfo, pptxInfo, csvInfo, mdInfo, jpxInfo, webInfo].map((i) => i && [i.mark, i.on, i.pages]) })})`);
 
       // Earlier and Look on every leg: the picture, under Earlier now, drawn again in a Look on that page alone.
       const looks = await Promise.all(legs.map(async (l) => {
@@ -4186,6 +4366,32 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
         await l.tab.eval(`document.getElementById('webPreview').close()`);
         return JSON.parse(r || 'null');
       }));
+      // A quote from a web page on every leg: from the operator, who may show a web page, its source line names the site and
+      // offers Open the source at its words, in a tab of the person's own; from Dee, a Staff account of this hall who may show
+      // quotes but not web pages, the site alone, with no link.
+      const deeWords = 'a quote with no link to it';
+      const deeMade = await desk.eval(`fetch('/api/users', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'dee', name: 'Dee Staff', role: 'staff', halls: [${codeLiteral(dvHall)}], password: ${codeLiteral(deeWords)} }) }).then((r) => r.status)`);
+      let deeCookie = '';
+      for (let i = 0; i < 8 && !deeCookie; i++) {
+        const r = await fetch(base + '/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'dee', password: deeWords }) });
+        if (r.status === 200) deeCookie = r.headers.get('set-cookie').split(';')[0]; else await sleep(2100);
+      }
+      if (deeMade !== 200 || !deeCookie) throw new Error('Dee could not sign in: ' + deeMade);
+      const dee = await connect(base, deeCookie);
+      const deeAsked = async (ev, args) => { let r = null; for (let i = 0; i < 60; i++) { r = await emit(dee, ev, args); if (!(r && r.busy)) return r; await sleep(Math.min(2000, (r && r.retryMs) || 500)); } return r; };
+      const deeJoin = await deeAsked('join', { roomCode: dvHall, as: 'account' });
+      const deeQuote = { kind: 'snippet', unit: 'text', text: WEB_QUOTE, from: { web: WEB + '?token=n0r1ght' } };
+      const wq = await push({ kind: 'snippet', unit: 'text', text: WEB_QUOTE, from: { web: WEB + '?r=1' } });
+      legRows.webQuote = await onLegs('(r) => r.kind === "snippet" && !!r.open');
+      const wqInfo = await boardInfo(wq.seq);
+      // The operator's taken down first: a seat that may only show never sends over the operator's information.
+      await push({ kind: 'chat', layer: 'info' });
+      const dq = await deeAsked('page:push', { code: dvHall, to: 'board', content: deeQuote });
+      legRows.named = await onLegs('(r) => r.kind === "snippet" && r.source.startsWith("Quoted by Dee")');
+      report(!!deeJoin && deeJoin.canShow === true && deeJoin.canWeb === false && legRows.webQuote.every((r) => !!r && JSON.stringify(r.open) === JSON.stringify([SOURCE_AT, '_blank', 'noopener noreferrer']) && r.source === 'Quoted by Desk · agm-web.invalid · Open the source' && r.wide)
+        && !!wqInfo && wqInfo.mark === '✓' && !!dq && dq.ok === true && legRows.named.every((r) => !!r && r.open === null && r.source === 'Quoted by Dee Staff · agm-web.invalid' && r.wide),
+        `on every leg a quote from a web page by a pusher who may show one names the site and offers Open the source at its words, in a tab of the person's own with no opener or referrer, ✓ on all 3; from a pusher who may not, the site alone with no link (${JSON.stringify({ webQuote: legRows.webQuote, named: legRows.named, mark: wqInfo && [wqInfo.mark, wqInfo.on], dq, deeJoin: deeJoin && { canShow: deeJoin.canShow, canWeb: deeJoin.canWeb } })})`);
+
       // Many takes in a row, then Back to chat: the page still draws, and nothing reloaded it.
       for (const l of legs) await l.tab.eval(`(() => { window.__still = true; return true; })()`);
       for (let i = 1; i <= 20; i++) await push({ kind: 'snippet', unit: 'text', text: 'Take ' + i + ' of 20' });
@@ -4219,7 +4425,8 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
         let menu = null; if (img) { const e = new MouseEvent('contextmenu', { bubbles: true, cancelable: true }); img.dispatchEvent(e); menu = e.defaultPrevented; }
         return JSON.stringify({ kind: l.dataset.kind, standin: (b.querySelector('.take-standin-words') || {}).textContent || '', device: (b.querySelector('.take-device') || {}).textContent || '',
           img: !!img && img.complete && img.naturalWidth > 0, drag: img ? img.getAttribute('draggable') : null, menu, quote: q ? (q.querySelector('.take-quote-body') || q).textContent : '', source: (b.querySelector('.take-quote-line') || {}).textContent || '',
-          line: (b.querySelector('.take-file-line') || {}).textContent || '', pdf: !!b.querySelector('.dv[data-kind="pdf"]'), frame: !!b.querySelector('iframe') }); })()`;
+          line: (b.querySelector('.take-file-line') || {}).textContent || '', pdf: !!b.querySelector('.dv[data-kind="pdf"]'), frame: !!b.querySelector('iframe'),
+          look: (b.querySelector('.take-web-look') || {}).textContent || '', open: (() => { const a = q && q.querySelector('.take-quote-open'); return a ? [a.href, a.target, a.rel] : null; })() }); })()`;
       const floorShows = async (ok, ms = 15000) => JSON.parse(await floor.until(`(() => { const r = ${FLOOR_READ}; return r && (${ok})(JSON.parse(r)) && r; })()`, ms) || await floor.eval(FLOOR_READ) || 'null');
       // Joined after the push, with no stand-in: it says this device cannot open documents and fails; the console offers
       // Show them a picture of p. 1, which sends a picture to that page's person alone, drawn over the Board's document.
@@ -4257,6 +4464,9 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       await floor.eval(`act('past', 'past.look', Takes.pastObject(${early ? early.seq : 0}), {})`);
       const look = await floor.until(`document.getElementById('webPreview').open && (() => { const p = document.querySelector('#webPreviewBox .take-device'); return p && p.textContent; })()`, 8000);
       await floor.eval(`document.getElementById('webPreview').close()`);
+      // The dialog's close event comes as a task of its own after close(), and lets its box go: the next Look is opened once
+      // it has had its turn, so it never empties that Look.
+      await floor.until(`!document.getElementById('webPreview').open && document.getElementById('webPreviewBox').childElementCount === 0 && 'closed'`, 3000);
       // A Look at the document shown with its stand-in draws the stand-in.
       await floor.eval(`act('past', 'past.look', Takes.pastObject(${pictured.seq || 0}), {})`);
       const lookStandin = await floor.until(`document.getElementById('webPreview').open && (() => { const w = document.querySelector('#webPreviewBox .take-standin-words'); const img = document.querySelector('#webPreviewBox img'); return w && img && img.complete && img.naturalWidth > 0 && w.textContent; })()`, 8000);
@@ -4265,15 +4475,26 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       const floorQuote = await floorShows('(r) => r.kind === "snippet"');
       const p2 = await push({ kind: 'image', url: picUrl });
       const floorPic = await floorShows('(r) => r.kind === "image" && r.img');
-      const w2 = await push({ kind: 'web', url: WEB });
-      const floorWeb = await floorShows('(r) => r.kind === "web" && r.frame');
+      const w2 = await push({ kind: 'web', url: WEB_AT });
+      const floorWeb = await floorShows('(r) => r.kind === "web" && r.frame && !!r.look');
+      // A quote from a web page: Open the source from the operator; the site alone from Dee, once nothing of the operator's is
+      // up on any page of the Board's (the floor's person was shown a picture of their own).
+      const wq2 = await push({ kind: 'snippet', unit: 'text', text: WEB_QUOTE, from: { web: WEB + '?r=1' } });
+      const floorWebQuote = await floorShows('(r) => r.kind === "snippet" && !!r.open');
+      await push({ kind: 'chat', layer: 'info' });
+      const floorKey = ((await asked('page:status', { code: dvHall })).people.find((x) => x.name === 'Floor') || {}).uid;
+      if (floorKey) await push({ kind: 'chat', layer: 'info' }, { uid: floorKey });
+      const dq2 = await deeAsked('page:push', { code: dvHall, to: 'board', content: deeQuote });
+      const floorNamed = await floorShows('(r) => r.kind === "snippet" && r.source.startsWith("Quoted by Dee")');
       const floorEarlier = await floor.eval(`Takes.earlier()`);
       const pdfFetched = fetched.filter((u) => /\/vendor\/pdf\.(worker\.)?min\.mjs/.test(u));
       await floor.shot(path.join(OUT, 'board-devices-floor.png'));
       report(!!wordStandin && wordStandin.standin === 'As a quote: this device cannot page through the document' && wordStandin.source === 'Quoted by Ana Admin · minutes.docx' && !/HIDDENRUN|DELETEDRUN/.test(wordStandin.quote) && wordMark.mark === '✓' && wordMark.chip.includes('(1 as a quote)')
         && look === 'This device cannot open documents — ask the backstage team to show you a picture.' && lookStandin === 'As a picture of p. 1: this device cannot page through the document'
-        && q.ok && !!floorQuote && p2.ok && !!floorPic && floorPic.img && floorPic.drag === 'false' && floorPic.menu === true && w2.ok && !!floorWeb && floorWeb.frame && floorEarlier >= 3 && pdfFetched.length === 0 && floor.problems.length === 0,
-        `the floor leg: a Word document's stand-in is what is at its place as a quote, without its hidden run or tracked deletion, with its words and the document named, ✓ "(1 as a quote)"; under Earlier a Look at a document with no stand-in reads the device's words, and one with a stand-in draws it; quotes, pictures (never dragged out, the page's menu), web pages and Earlier draw; pdf.js is never fetched; no script error (${JSON.stringify({ wordStandin, wordMark: wordMark.mark, look, lookStandin, floorQuote: !!floorQuote, floorPic: !!floorPic, floorWeb: !!floorWeb, floorEarlier, pdfFetched, problems: floor.problems.slice(0, 3) })})`);
+        && q.ok && !!floorQuote && p2.ok && !!floorPic && floorPic.img && floorPic.drag === 'false' && floorPic.menu === true && w2.ok && !!floorWeb && floorWeb.frame && floorWeb.look === LOOK
+        && wq2.ok && !!floorWebQuote && JSON.stringify(floorWebQuote.open) === JSON.stringify([SOURCE_AT, '_blank', 'noopener noreferrer']) && floorWebQuote.source === 'Quoted by Desk · agm-web.invalid · Open the source'
+        && !!dq2 && dq2.ok === true && !!floorNamed && floorNamed.open === null && floorNamed.source === 'Quoted by Dee Staff · agm-web.invalid' && floorEarlier >= 3 && pdfFetched.length === 0 && floor.problems.length === 0,
+        `the floor leg: a Word document's stand-in is what is at its place as a quote, without its hidden run or tracked deletion, with its words and the document named, ✓ "(1 as a quote)"; under Earlier a Look at a document with no stand-in reads the device's words, and one with a stand-in draws it; quotes, pictures (never dragged out, the page's menu), web pages at a place ("Look for"), a web quote's Open the source (and none from a pusher without the right) and Earlier draw; pdf.js is never fetched; no script error (${JSON.stringify({ wordStandin, wordMark: wordMark.mark, look, lookStandin, floorQuote: !!floorQuote, floorPic: !!floorPic, floorWeb, floorWebQuote, floorNamed, dq2, floorEarlier, pdfFetched, problems: floor.problems.slice(0, 3) })})`);
 
       // ---- A Board page that opens documents by its probe, yet cannot import pdf.js (its module refused on the way): it draws
       // the document as a page that cannot open documents does (here the stand-in made for the floor leg's page), opens none
@@ -4300,6 +4521,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       const devProblems = [['desk', desk], ['probe', probe], ...legs.map((l) => ['leg ' + l.w, l.tab])].flatMap(([n, t]) => t.problems.map((p) => n + ': ' + p));
       report(devProblems.length === 0, `the devices hall's pages: no console error and no CSP violation${devProblems.length ? ' — ' + devProblems.slice(0, 4).join(' | ') : ''}`);
       dvOp.close();
+      dee.close();
       for (const t of [desk, floor, probe, ...legs.map((l) => l.tab)]) { await t.send('Page.navigate', { url: 'about:blank' }); t.close(); }
     }
 

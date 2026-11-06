@@ -182,6 +182,7 @@ const TAKE_HOT = { ...TAKE, strip: true };
 const TAKE_FULL = { ...TAKE, full: true };
 // A web page shown to this page, with its address: Open in a new tab.
 const TAKE_WEB = { ...TAKE, kind: 'web', url: 'https://vote.example.com/poll/7' };
+const TAKE_QUOTE_WEB = { ...TAKE, kind: 'snippet', url: 'https://vote.example.com/results#:~:text=Turnout%20was%2064%25' };
 const CARD = { id: 'card', seq: 4, kind: 'stage', layer: 'show', side: false };
 // A document shown with Let them download it ticked: ⬇ Download on its layer's bar (the full view's menu) and its card.
 const TAKE_DOC = { ...TAKE, kind: 'doc', file: '/uploads/1-capex.pdf', name: 'capex.pdf', download: true };
@@ -1401,6 +1402,13 @@ test('a take on this page: Back to chat and Minimise on its bar, Full screen onl
     [['take.chat', 'take.minimise', 'take.tab'], ['take.chat', 'take.minimise'], ['take.chat', 'take.minimise']]);
   assert.deepEqual([plain(C.shown('take', SEATS.boardSimpleFull, TAKE_WEB)).map((e) => e.id), plain(C.inline('take', SEATS.boardSimpleFull, TAKE_WEB, Infinity)).map((i) => i.id)],
     [['take.chat', 'take.minimise', 'take.fullscreen'], ['take.chat', 'take.minimise', 'take.fullscreen']], 'the simple view: the buttons alone');
+  // A quote from a web page whose address was told (its pusher may show a web page): Open the source, the same act, in the
+  // layer's ⋯ and its right-click in the full view; never for a quote told no address, never in the simple view (its
+  // source line's link is there).
+  assert.deepEqual(plain(C.items('take', SEATS.boardFull, TAKE_QUOTE_WEB)).filter((i) => !i.sep).map((i) => [i.id, i.label, i.icon]),
+    [['take.chat', 'Back to chat', '💬'], ['take.minimise', 'Minimise', '🔽'], ['take.tab', 'Open the source', '🗗'], ['take.fullscreen', 'Full screen', '⛶']]);
+  assert.deepEqual([menu('board', { ...TAKE_QUOTE_WEB, url: '' }), menu('observer', TAKE_QUOTE_WEB), plain(C.shown('take', SEATS.boardSimpleFull, TAKE_QUOTE_WEB)).map((e) => e.id)],
+    [['take.chat', 'take.minimise'], ['take.chat', 'take.minimise', 'take.tab'], ['take.chat', 'take.minimise', 'take.fullscreen']]);
   // Not connected: the report waits in the outbox, and every door stays live; the support view acts on none.
   assert.deepEqual(plain(C.items('take', seat({ role: 'board', uid: CHAIR, connected: false }), TAKE_HOT)).map((i) => i.disabled), ['', '', '']);
   assert.ok(plain(C.items('take', SEATS.supportBoard, TAKE_HOT)).every((i) => i.disabled === C.supportWords('Kim')));

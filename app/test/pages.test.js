@@ -1353,7 +1353,7 @@ test('cleanSnippet: a unit of its list carrying its one body; every field read b
   assert.deepEqual(quote({ unit: 'selection', text: 'one\r\ntwo\u202e', title: 'Cap\nex', note: ' Q3 \u0007' }), { kind: 'snippet', unit: 'selection', title: 'Capex', text: 'one\ntwo', note: 'Q3' });
 });
 
-test('cleanSnippet\'s source: a file of the hall by its name and place (never its address), the researcher\'s own copy said as theirs, a web page by its host; a place of its file\'s type; a picture has no words', () => {
+test('cleanSnippet\'s source: a file of the hall by its name and place (never its address), the researcher\'s own copy said as theirs, a web page by its host (its address kept only with its pusher\'s web right); a place of its file\'s type; a picture has no words', () => {
   // A file of the hall: sourceOk's verdict; kept by its name, type, place and side room, never its address.
   assert.deepEqual(quote({ unit: 'cell', table: { rows: [['4.2']], head: 0, side: 0 }, from: { url: Q_XLSX, at: { sheet: 1, ref: '\'Q3\'!C4' } } }).from, { name: 'Q3.xlsx', type: 'xlsx', at: { sheet: 1, ref: '\'Q3\'!C4' } });
   assert.deepEqual(quote({ unit: 'paragraph', text: 'x', from: { url: Q_DOCX, at: { block: 12, page: 3, approx: true, heading: 'Capex' } } }).from, { name: 'Minutes.docx', type: 'docx', at: { block: 12, page: 3, approx: true, heading: 'Capex' }, room: 'LGQ4MZP8', roomName: 'Legal' });
@@ -1370,15 +1370,26 @@ test('cleanSnippet\'s source: a file of the hall by its name and place (never it
   assert.deepEqual(quote({ unit: 'word', text: 'x', from: { local: true, name: 'plan.zip' } }), { error: 'AGMessage does not show that kind of file on the stage: share it for download.' });
   assert.deepEqual(quote({ unit: 'word', text: 'x', from: { local: true, name: 'stage.png' } }), { error: 'A picture has no words to quote: show a picture of it instead.' });
   assert.deepEqual(quote({ unit: 'word', text: 'x', from: { url: PIC } }), { error: 'A picture has no words to quote: show a picture of it instead.' });
-  // A web page: its address by webUrl's rules, kept with its host.
-  assert.deepEqual(quote({ unit: 'text', text: 'x', from: { web: 'https://vote.example.com/r?t=1#q' } }).from, { web: 'https://vote.example.com/r?t=1#q', host: 'vote.example.com' });
-  assert.deepEqual(quote({ unit: 'text', text: 'x', from: { web: 'http://vote.example.com/' } }), { error: 'A web page is shown by its https address, as a browser shows it.' });
+  // A web page: its address by webUrl's rules, kept with its host only where its pusher may show a web page itself
+  // (stage.web: `web` true); without that right, its host alone, the address neither kept nor told. A bad address is
+  // refused either way.
+  const WEB_RIGHT = { source: quoteSource, web: true, selfHosts: ['agm-laptop'] };
+  assert.deepEqual(quote({ unit: 'text', text: 'x', from: { web: 'https://vote.example.com/r?t=1#q' } }, WEB_RIGHT).from, { web: 'https://vote.example.com/r?t=1#q', host: 'vote.example.com' });
+  for (const web of [undefined, false, 'Web pages on the stage need their own right — ask an admin.', 1]) {
+    assert.deepEqual(quote({ unit: 'text', text: 'x', from: { web: 'https://vote.example.com/r?t=1#q' } }, { source: quoteSource, web }).from, { host: 'vote.example.com' }, 'without the right: ' + JSON.stringify(web));
+  }
+  for (const facts of [WEB_RIGHT, { source: quoteSource }]) {
+    assert.deepEqual(quote({ unit: 'text', text: 'x', from: { web: 'http://vote.example.com/' } }, facts), { error: 'A web page is shown by its https address, as a browser shows it.' });
+    assert.deepEqual(quote({ unit: 'text', text: 'x', from: { web: 'https://agm-laptop/hall' } }, { ...facts, selfHosts: ['agm-laptop'] }), { error: 'That address is AGMessage itself: show a page of another site.' });
+  }
+  // A host is never the asker's to name: a quote is from a file, a copy of one, a web page by its address, or typed.
+  assert.deepEqual(quote({ unit: 'text', text: 'x', from: { host: 'vote.example.com' } }, WEB_RIGHT), { error: 'A quote comes from a file of this hall, your own copy of one or a web page, or it is typed.' });
   // One way of coming, never two, and never a shape of none.
   const FROM = { error: 'A quote comes from a file of this hall, your own copy of one or a web page, or it is typed.' };
   for (const from of [{}, 'x', { url: Q_XLSX, web: 'https://vote.example.com/' }, { local: 'yes', name: 'a.pdf' }, { web: 5 }]) assert.deepEqual(quote({ unit: 'word', text: 'x', from }), FROM, JSON.stringify(from));
 });
 
-test('a quote kept and told: its source by name and room, a web page\'s address sealed at rest and told to no page, read back in its clean shape; described in two voices; its words in reading order', () => {
+test('a quote kept and told: its source by name and room, a web page\'s address sealed at rest and told to the pages it is shown on only from a pusher who may show a web page (its host alone otherwise), read back in its clean shape; described in two voices; its words in reading order', () => {
   const p = new Pages(path.join(folder(), 'pages.json'), { seal: (u) => 'enc1:' + Buffer.from(u).toString('base64'), open: (s) => Buffer.from(s.slice(5), 'base64').toString() });
   p.hold();
   const cell = quote({ unit: 'cell', table: { rows: [['', 'Q3'], ['Revenue', '4.2']], head: 1, side: 1, ref: 'C4', focus: [1, 1] }, from: { url: Q_XLSX, at: { sheet: 1, ref: '\'Q3\'!C4' } } });
@@ -1389,15 +1400,36 @@ test('a quote kept and told: its source by name and room, a web page\'s address 
   p.take(HALL, 'board', legal, { name: 'Ana' });
   const toldLegal = p.told(p.current(HALL, '', { board: true, layer: 'info' }).take.content);
   assert.deepEqual(toldLegal.from, { name: 'Minutes.docx', type: 'docx', at: { block: 4, page: 2 }, roomName: 'Legal' }, 'a side room said by its name, its key kept on this laptop');
-  const web = quote({ unit: 'text', text: 'Turnout 64%', from: { web: 'https://vote.example.com/r?token=s3cr3t' } });
+  // From a pusher who may show a web page: its address sealed at rest, and opened for the pages it is shown on (their Open
+  // the source), its fragment kept.
+  const web = quote({ unit: 'text', text: 'Turnout 64%', from: { web: 'https://vote.example.com/r?token=s3cr3t#results' } }, { source: quoteSource, web: true });
   const t3 = p.take(HALL, 'board', web, { name: 'Ana' });
   const kept = p.current(HALL, '', { board: true, layer: 'info' }).take.content;
-  assert.deepEqual(kept.from, { host: 'vote.example.com', urlSealed: 'enc1:' + Buffer.from('https://vote.example.com/r?token=s3cr3t').toString('base64') });
-  assert.deepEqual(p.told(kept).from, { host: 'vote.example.com' }, 'told by its host alone');
+  assert.deepEqual(kept.from, { host: 'vote.example.com', urlSealed: 'enc1:' + Buffer.from('https://vote.example.com/r?token=s3cr3t#results').toString('base64') });
+  assert.deepEqual(p.told(kept).from, { host: 'vote.example.com', url: 'https://vote.example.com/r?token=s3cr3t#results' }, 'told its address, for Open the source');
+  assert.equal(describePage(kept), '❝ a quote from vote.example.com', 'the console names the host alone');
+  assert.equal(describePage(kept, { voice: 'audit' }), 'a quote from a web page on vote.example.com', 'the audit names the host alone');
+  // From a pusher without that right: its host alone, kept and told; no address at rest or on any page.
+  const sealing = { seal: (u) => 'enc1:' + Buffer.from(u).toString('base64'), open: (s) => Buffer.from(s.slice(5), 'base64').toString() };
+  const own = new Pages(path.join(folder(), 'pages.json'), sealing);
+  own.hold();
+  const named = quote({ unit: 'text', text: 'Turnout 64%', from: { web: 'https://vote.example.com/r?token=n0r1ght' } });
+  own.take(HALL, 'board', named, { name: 'Sue' });
+  const keptNamed = own.current(HALL, '', { board: true, layer: 'info' }).take.content;
+  assert.deepEqual([keptNamed.from, own.told(keptNamed).from], [{ host: 'vote.example.com' }, { host: 'vote.example.com' }]);
+  own.flush();
+  assert.ok(!fs.readFileSync(own.lane.file, 'utf8').includes('n0r1ght') && !fs.readFileSync(own.lane.file, 'utf8').includes('enc1:'), 'no address at rest, sealed or in clear');
+  // A machine that cannot open the address, or one that opens to another host's or to no web page's address, tells the
+  // host alone.
+  const blind = new Pages(path.join(folder(), 'pages.json'), { open: () => '' });
+  const swapped = new Pages(path.join(folder(), 'pages.json'), { open: () => 'https://elsewhere.example.org/' });
+  const plain = new Pages(path.join(folder(), 'pages.json'), { open: () => 'http://vote.example.com/' });
+  for (const other of [blind, swapped, plain]) assert.deepEqual(other.told(kept).from, { host: 'vote.example.com' });
   // A run that cannot seal keeps the host alone, never the address in clear.
   const bare = new Pages(path.join(folder(), 'pages.json'), { seal: () => { throw new Error('no key'); } });
   bare.take(HALL, 'board', web, { name: 'Ana' });
   assert.deepEqual(bare.current(HALL, '', { board: true, layer: 'info' }).take.content.from, { host: 'vote.example.com' });
+  assert.deepEqual(bare.told(bare.current(HALL, '', { board: true, layer: 'info' }).take.content).from, { host: 'vote.example.com' });
   // Read back from the file in its clean shape; a quote of the wrong shape is dropped.
   p.flush();
   const back = new Pages(path.join(path.dirname(p.lane.file), 'pages.json'));

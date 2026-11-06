@@ -834,6 +834,39 @@ the Board):
   and from where ("Quoted by Ana - Board pack.pdf, p. 12"). AGMessage
   cannot check the words are in the file: the quote is yours.
 
+Show the Board words you paste or type (Quote)
+----------------------------------------------
+For a highlight inside a web page (AGMessage cannot read inside one), or
+a document open in Word or Excel on your own computer: open the Quote tab
+of the composer (backstage, on a seat that may show the Board).
+1. Paste into the box, or type. Cells copied from Excel or Sheets arrive
+   as a table; a web page's table or list as its rows or items; anything
+   else as text. The tab says what it read ("A table, 3 rows x 2
+   columns") and shows the quote as the Board will see it.
+2. From: Nothing (the Board reads "Typed by Ana"), a file of this room,
+   or A web page... with its address.
+3. Choose whom it goes to and where, add a line above it if you like,
+   and press Show the Board. The box empties once it has gone.
+- A paste reads only what the page showed you: a pasted page's pictures
+  never load, and its hidden words never arrive (where the pasted page's
+  formatting disagrees with its plain words, the plain words are used).
+- A quote from a web page names the site ("Quoted by Ana -
+  vote.example.com"). If you may show web pages yourself (the Web pages
+  right), the Board also gets Open the source, which opens that page in
+  their own browser tab at the quote's words; without it, the site's name
+  alone, as the tab says before you show it.
+- A web page shown at a place (its address ending #:~:text=...) says over
+  it what to look for ("Look for: net revenue rose ... in Q3"): the page
+  in the frame cannot highlight it. A Board page in the full view can open
+  it in a tab of its own (... -> Open in a new tab), which does; the simple
+  view keeps the layer's buttons alone.
+- A long quote is said "Long for the stage - the Board will scroll": it
+  still goes. Where someone else's quote went up under 15 s ago the tab
+  says so, with Replace and Show a person instead.
+- The tab is there only for a seat that may show the Board quotes (the
+  right to show files, pages and quotes to the people on stage); a seat
+  given the Web pages right alone has none.
+
 Stagewatch (the countdown) for each hall
 ----------------------------------------
 Halls -> a hall's Set up: the address of that hall's Stagewatch and a

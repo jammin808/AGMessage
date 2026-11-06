@@ -25,6 +25,10 @@
 //   fitQuote(box, el, o)      → {fits}                    a quote's type set to the largest that fits its box (`keep`: its
 //                                                          own type kept, a card's), its tables marked long where it is not
 //   quoteWords(content)       → string                    a quote's words in reading order, one line each
+//   lookFor(url)              → string                    the words a web page's address asks to be found (its text
+//                                                          directive), one clean line, or ''
+//   sourceHref(content)       → string                    where a quote from a web page opens (Open the source): its
+//                                                          address told, with a text directive of the quote's words, or ''
 //
 // Invariants for a file a take shows (a document, a picture):
 //   - Checked again here: its address is an upload of AGMessage's (/uploads/<name>) of a type the stage shows (a
@@ -50,7 +54,13 @@
 //   - A table wider than its card scrolls sideways inside it, and one in a quote longer than its box scrolls down inside it
 //     too, its label row and column kept in view either way; numbers read to the
 //     right; the cell it is of is outlined and bold, never marked by colour alone; a table cut short says how much is left.
-//   - Its source line says who quoted it and from where, in their voice: the quote is their claim, never AGMessage's.
+//   - Its source line says who quoted it and from where, in their voice: the quote is their claim, never AGMessage's. A
+//     quote from a web page names the site by its host; Open the source follows only where its address was told (its pusher
+//     may show a web page), a link in a tab of the person's own, no opener and no referrer, checked as a frame's address is.
+//
+// Invariants for a web page: its address checked again here (webAddress) before the one frame is made; a text directive
+// in it (#:~:text=…) is said in words beside the frame ("Look for: ❝ …"), since a frame never highlights it; nothing of it
+// is fetched by AGMessage.
 
 /** Each kind's card: its icon (no status mark: each mark has one meaning, common.js AGM.MARKS) and its name. */
 const KINDS = Object.freeze({
@@ -159,6 +169,65 @@ export function webAddress(v) {
   return { url: u.href, host: h };
 }
 
+/** What words read as one line of text a person may be shown: controls and the bidirectional marks and overrides dropped. */
+const UNSAFE_LINE = /[\p{Cc}\u061c\u200b\u200e\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]/gu;
+/** At most this many characters of a text directive's words are said: the strip is read at a glance. */
+const LOOK_MAX = 300;
+/**
+ * The words a web page's address asks a browser to find and highlight (a text directive, `#:~:text=start,end`, its prefix
+ * and suffix left out: URL Fragment Text Directives), decoded and made one clean line of at most LOOK_MAX characters:
+ * "net revenue rose … in Q3"; '' for an address with none, or one that cannot be read. A frame never highlights it (a
+ * browser applies one only to a navigation a person started at the top), so its words are said beside the frame, and the
+ * person's own Open in a new tab highlights them. Nothing is fetched.
+ */
+export function lookFor(url) {
+  const raw = typeof url === 'string' ? url : '';
+  const hash = raw.indexOf('#');
+  const at = hash < 0 ? -1 : raw.indexOf(':~:', hash);
+  if (at < 0) return '';
+  const directive = raw.slice(at + 3).split('&').find((d) => d.startsWith('text='));
+  if (!directive) return '';
+  const terms = directive.slice(5).split(',');
+  if (terms.length > 1 && terms[0].endsWith('-')) terms.shift();
+  if (terms.length > 1 && terms[terms.length - 1].startsWith('-')) terms.pop();
+  if (!terms.length || terms.length > 2) return '';
+  let words;
+  try { words = terms.map((t) => decodeURIComponent(t)); } catch { return ''; }   // a term that is no percent-encoding: no words to say
+  const line = words.map((w) => w.replace(UNSAFE_LINE, ' ').replace(/\s+/g, ' ').trim()).filter(Boolean).join(' … ');
+  const all = Array.from(line);
+  return all.length > LOOK_MAX ? all.slice(0, LOOK_MAX).join('').trimEnd() + '…' : line;
+}
+
+/** A text directive's term: its words percent-encoded, `-` `,` and `&` among them (they part a directive's terms). */
+const directiveTerm = (words) => encodeURIComponent(words).replace(/-/g, '%2D');
+/** How many words of a quote's first and last lines a text directive is built from. */
+const DIRECTIVE_WORDS = 4;
+/**
+ * Where a quote from a web page opens (Open the source): the address its pusher showed it from (told only where they may
+ * show a web page: lib/pages.js), checked again as a frame's is, and, where it has no fragment of its own, a text directive
+ * built from the quote's first and last words, so the person's browser finds and highlights them there. '' for a quote
+ * with no address told, or one webAddress refuses.
+ */
+export function sourceHref(content) {
+  const from = content && typeof content === 'object' && content.from && typeof content.from === 'object' ? content.from : null;
+  if (!from || !text(from.url)) return '';
+  const w = webAddress(from.url);
+  if (w.error) return '';
+  if (w.url.includes('#')) return w.url;
+  const lines = [];
+  const add = (s) => { for (const l of text(s).split('\n')) { const t = l.replace(UNSAFE_LINE, ' ').replace(/\s+/g, ' ').trim(); if (t) lines.push(t); } };
+  add(content.text);
+  for (const it of Array.isArray(content.items) ? content.items : []) add(it);
+  for (const r of rowsOf(content.table)) for (const cell of r) add(cell);
+  for (const b of Array.isArray(content.blocks) ? content.blocks : []) { if (b && b.table) { for (const r of rowsOf(b.table)) for (const cell of r) add(cell); } else if (b) add(b.text); }
+  if (!lines.length) return w.url;
+  const first = lines[0].split(' ');
+  const last = lines[lines.length - 1].split(' ');
+  // One short line is found whole; otherwise from its first words to its last.
+  if (lines.length === 1 && first.length <= DIRECTIVE_WORDS * 2) return w.url + '#:~:text=' + directiveTerm(lines[0]);
+  return w.url + '#:~:text=' + directiveTerm(first.slice(0, DIRECTIVE_WORDS).join(' ')) + ',' + directiveTerm(last.slice(-DIRECTIVE_WORDS).join(' '));
+}
+
 /**
  * The one frame a page makes (a web page shown to a person, or previewed by the one who shows it): scripts but no forms,
  * popups, top navigation, modal dialogs or downloads (sandbox: owner question 6), no referrer (the hall page's address
@@ -191,6 +260,9 @@ function drawWeb(box, content, ctx) {
   const w = make('div', 'take-web');
   const note = make('p', 'take-web-note', 'A web page chosen by ' + by + ' (' + (made.host || (content && content.host) || 'no address') + '). Don\'t type passwords here.');
   w.append(note);
+  // At a place: the words its address asks to be found, said beside the frame, which never highlights them.
+  const look = made.error ? '' : lookFor(made.url);
+  if (look) { const l = withDir(make('p', 'take-web-look', 'Look for: ❝ ' + look)); w.append(l); }
   box.append(w);
   if (made.error) return Promise.resolve({ state: 'failed', words: made.error });
   return new Promise((resolve) => {
@@ -399,7 +471,8 @@ function quotePlace(at, type) {
 }
 /**
  * A quote's source line, in its pusher's voice: "Quoted by Ana · Board pack.pdf, p. 12", "… · Minutes.docx (Legal), ≈ p.
- * 3", "Quoted by Ana from their copy of Board pack.pdf", "Quoted by Ana · vote.example.com", "Typed by Ana".
+ * 3", "Quoted by Ana from their copy of Board pack.pdf", "Quoted by Ana · vote.example.com" (the site by its host alone:
+ * its address, where told, is Open the source's, after it), "Typed by Ana".
  */
 function quoteSource(content, by) {
   const from = content.from && typeof content.from === 'object' ? content.from : null;
@@ -491,7 +564,20 @@ export function quote(content, ctx) {
     if (b.kind === 'quote') { body.append(quoteText(b.text)); continue; }
     body.append(withDir(make('p', b.kind === 'h' ? 'take-quote-title' : 'take-quote-p', text(b.text))));
   }
-  q.append(body, make('p', 'take-quote-line', quoteSource(c, (ctx && ctx.by) || '')));
+  const line = make('p', 'take-quote-line', quoteSource(c, (ctx && ctx.by) || ''));
+  // A quote from a web page whose address was told (its pusher may show a web page): Open the source, in a tab of the
+  // person's own, with no opener and no referrer, at the quote's words. Without it the line names the site alone.
+  const href = text(c.from && c.from.host) ? sourceHref(c) : '';
+  if (href) {
+    const a = make('a', 'take-quote-open', 'Open the source');
+    a.href = href;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.referrerPolicy = 'no-referrer';
+    a.draggable = false;
+    line.append(' · ', a);
+  }
+  q.append(body, line);
   return q;
 }
 /**

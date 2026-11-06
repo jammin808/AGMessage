@@ -139,7 +139,9 @@ nodes in the live page, where a `<meta http-equiv=refresh>` navigates a Board ta
 template's `.content`. `test/lint-rules.test.js` refuses each shape by a case of its own, lets through the one parse in
 `parseInert` (declared or assigned), an XML parse and a page's `getTextContent()`, holds the four files to it through
 the config, and counts exactly one `innerHTML` site among them, `parseInert`'s; the sanitiser and its two `innerHTML`
-sinks in `app.js` are gone with the readers it served.
+sinks in `app.js` are gone with the readers it served. The hall page's ❝ Quote tab (unit 28) parses what is pasted into
+it through the same `parseInert`, imported from `docmodel.mjs`, and reads its structure with `pastedQuote` there, so a
+paste is parsed in that one place too.
 
 ### 3.4 The source guard rail (`test/resilience.test.js`)
 

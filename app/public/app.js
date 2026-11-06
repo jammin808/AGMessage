@@ -3247,7 +3247,7 @@ function composerField({ text = false } = {}) {
   if (form === 'director') return dInput;
   if (text && form !== 'text') selectTab('text');
   const now = text ? 'text' : form;
-  return now === 'text' ? textInput : actionText;
+  return now === 'text' ? textInput : now === 'quote' ? QuoteTab.field() : actionText;
 }
 /** Open a tab of the backstage composer. */
 function selectTab(name) {
@@ -4841,8 +4841,15 @@ const Takes = (function () {
   AGM.menu.door(pastList, pastDoor, { stage: true });
 
   // ---- the objects the catalogue reads, and their bars
-  /** A web page's address as the take carries it ('' for any other kind): Open in a new tab opens it. */
-  const urlOf = (t) => (t && t.content.kind === 'web' && typeof t.content.url === 'string' ? t.content.url : '');
+  /**
+   * A web page's address as the take carries it, or where a quote from a web page opens (its address told, with a text
+   * directive of its words: pagelayer.mjs sourceHref); '' for any other: Open in a new tab, or Open the source, opens it.
+   */
+  const urlOf = (t) => {
+    if (!t) return '';
+    if (t.content.kind === 'web') return typeof t.content.url === 'string' ? t.content.url : '';
+    return t.content.kind === 'snippet' && renderer ? renderer.sourceHref(t.content) : '';
+  };
   /**
    * The take on the layer, as the catalogue reads it: `seq`, `kind`, `layer`, `strip` (a 🔥 message out of view), `full`
    * (the layer fills the screen), `url` (a web page's), `held` (information held under this blank: a touch shows it).
@@ -5436,7 +5443,13 @@ const Console = (function () {
     for (const fn of drawn) fn();
     refreshOpenMenu();
   }
-  return { read, draw, board, kindOf, takesOf, chipDoor, showFile, people, older, olderOf, rowOf, onDraw: (fn) => { drawn.add(fn); } };
+  /**
+   * Whether this page's information pushes hold stage.show in its hall, as its read says (the admin's and a code guest's
+   * always; an account's by its right there): false until it has read, so what needs it (the Preview's bar, the ❝ Quote tab)
+   * is drawn only once the server has said so, and never for a seat that may show only web pages.
+   */
+  const showsInfo = () => !!status && status.show !== false;
+  return { read, draw, board, kindOf, takesOf, chipDoor, showFile, people, older, olderOf, rowOf, showsInfo, onDraw: (fn) => { drawn.add(fn); } };
 })();
 
 /**
@@ -5827,12 +5840,12 @@ const PickBar = (() => {
   const columnLetters = (c) => { let s = ''; for (let n = c + 1; n > 0; n = Math.floor((n - 1) / 26)) s = String.fromCharCode(65 + ((n - 1) % 26)) + s; return s; };
   const read = (k) => { try { return localStorage.getItem(k) || ''; } catch { return ''; } };
   const keep = (k, v) => { try { localStorage.setItem(k, v); } catch { /* this device keeps no choice: the smallest unit stands */ } };
-  const may = () => docSeat() === 'research' && !ADMIN_VIEW && (F.canPush || F.canShow) && F.view !== 'simple';
+  const may = () => docSeat() === 'research' && !ADMIN_VIEW && (F.canPush || F.canShow) && F.view !== 'simple' && Console.showsInfo();
   let view = null;     // the Preview's view the pick is of
   let pick = null;     // its pick now (docview's pick()), or null
   let unit = '';       // the unit chosen
   let cut = false;     // the researcher chose to send the first 1,200 characters, or 25 rows × 10 columns
-  let freshTimer = 0;
+  const freshTimers = {};   // by the bar that asked (the Preview's, the ❝ Quote tab's): its redraw once no longer fresh
   let drawn = 0;       // each drawing numbered: a quote's preview drawn late for an older one is let go
   let pickNo = 0;      // each pick numbered as it comes (a new pick, its labels marked again)
   let cached = null;   // {key, q, glance}: the quote of the pick now, its preview's glance, kept while what they are of stands
@@ -5920,15 +5933,17 @@ const PickBar = (() => {
     sayEl.hidden = !parts.length;
   };
   const button = (label, fn) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'btn ghost small'; b.textContent = label; b.addEventListener('click', fn); return b; };
-  /** Whose information the target reads now, where another pusher put it up under FRESH_MS ago: words, or ''. */
-  function fresh() {
-    const t = PreviewBar.target();
+  /**
+   * Whose information the target (`t`: the Preview bar's, or the ❝ Quote tab's) reads now, where another pusher put it up
+   * under FRESH_MS ago: words, or null; `redraw` is called once it is no longer fresh (one timer for each `bar`).
+   */
+  function fresh(t = PreviewBar.target(), redraw = () => PreviewBar.draw(), bar = 'preview') {
     const u = PreviewBar.upThere(t).info;
     if (!u || u.mine || !u.by || !u.at) return null;
     const age = Date.now() - u.at;
     if (age >= FRESH_MS) return null;
-    clearTimeout(freshTimer);
-    freshTimer = setTimeout(() => PreviewBar.draw(), FRESH_MS - age + 50);
+    clearTimeout(freshTimers[bar]);
+    freshTimers[bar] = setTimeout(redraw, FRESH_MS - age + 50);
     const kind = kindSaid(u.kind).replace(/^an? /, '');
     return (t.to === 'board' ? 'The Board is' : t.name + ' is') + ' reading ' + u.by + '\'s ' + kind + ' (' + Math.max(1, Math.round(age / 1000)) + ' s)';
   }
@@ -6055,7 +6070,7 @@ const PickBar = (() => {
     'pick.person': (o, { value }) => { const p = Console.people().find((x) => x.key === value); if (p) send(unit || 'selection', { to: { uid: p.key }, name: p.name }); },
   });
   for (const [u] of AGM.catalog.PICK_UNITS) RUN['pick.' + u] = () => { unit = u; send(u); };
-  return { watch, reset, draw, object, seen, fresh, shown: () => !bar.hidden, GLANCE };
+  return { watch, reset, draw, object, seen, fresh, long, shown: () => !bar.hidden, GLANCE };
 })();
 
 /**
@@ -6094,12 +6109,13 @@ const PreviewBar = (() => {
   const ARRIVE = 'agm.showArrive';
   const read = (k) => { try { return localStorage.getItem(k) || ''; } catch { return ''; } };
   const keep = (k, v) => { try { localStorage.setItem(k, v); } catch { /* this device keeps no choice: the bar's default stands */ } };
-  const may = () => docSeat() === 'research' && !ADMIN_VIEW && (F.canPush || F.canShow) && F.view !== 'simple';
+  // Every push from the bar is information (a picture, a document, a quote): for a seat whose pushes hold stage.show.
+  const may = () => docSeat() === 'research' && !ADMIN_VIEW && (F.canPush || F.canShow) && F.view !== 'simple' && Console.showsInfo();
   const src = () => (previewing ? Show.sourceOf(previewing.msg || previewing) : null);
   const pageNow = () => { const p = docView ? docView.place() : null; return p && p.page >= 1 ? p.page : 1; };
-  /** Whom a push from the bar goes to: the Board, or the person chosen ({to: {uid}, name}). */
-  function target() {
-    const v = toSel.value;
+  /** Whom a push from the bar (or another To ▾, `sel`: the ❝ Quote tab's) goes to: the Board, or the person chosen ({to: {uid}, name}). */
+  function target(sel = toSel) {
+    const v = sel.value;
     if (!v || v === 'board') return { to: 'board', name: '' };
     const p = Console.people().find((x) => x.key === v);
     return p ? { to: { uid: p.key }, name: p.name } : { to: 'board', name: '' };
@@ -6109,30 +6125,37 @@ const PreviewBar = (() => {
     const o = t.to === 'board' ? Console.board() : Console.rowOf(t.to.uid);
     return o ? { info: o.info || o.beside || null, opOn: !!o.opOn } : { info: null, opOn: false };
   }
-  /** Where a push arrives: as chosen, but in their side bar for a seat that may only show over the operator's information there. */
-  function arrival(t = target()) {
+  /** Where a push arrives: as chosen (in `sel`), but in their side bar for a seat that may only show over the operator's information there. */
+  function arrival(t = target(), sel = arriveSel) {
     const u = upThere(t);
-    return !F.canPush && ((u.info && u.info.op) || u.opOn) ? 'side' : arriveSel.value === 'side' ? 'side' : '';
+    return !F.canPush && ((u.info && u.info.op) || u.opOn) ? 'side' : sel.value === 'side' ? 'side' : '';
   }
-  /** The targets: the Board, and the people the console's read lists (those seated On stage, for a seat that may only show). */
-  function drawTargets() {
-    const was = toSel.value || 'board';
+  /**
+   * The targets drawn into a To ▾ (`to`): the Board, and the people the console's read lists (those seated On stage, for a
+   * seat that may only show); where it arrives (`arrive`), the last chosen on this device, or their side bar, said why
+   * (`why`), for a seat that may only show over the operator's information there.
+   */
+  function fillTargets(to, arrive, why) {
+    const was = to.value || 'board';
     const list = [{ key: 'board', name: 'the Board' }].concat(Console.people());
     const keyOf = list.map((p) => p.key + '|' + p.name).join(',');
-    if (toSel.dataset.keys !== keyOf) {
-      toSel.dataset.keys = keyOf;
-      toSel.textContent = '';
-      for (const p of list) { const o = document.createElement('option'); o.value = p.key; o.textContent = 'Show ' + p.name; toSel.appendChild(o); }
+    if (to.dataset.keys !== keyOf) {
+      to.dataset.keys = keyOf;
+      to.textContent = '';
+      for (const p of list) { const o = document.createElement('option'); o.value = p.key; o.textContent = 'Show ' + p.name; to.appendChild(o); }
     }
-    toSel.value = list.some((p) => p.key === was) ? was : 'board';
-    const u = upThere();
+    to.value = list.some((p) => p.key === was) ? was : 'board';
+    const u = upThere(target(to));
     const forced = !F.canPush && ((u.info && u.info.op) || u.opOn);
-    arriveSel.disabled = forced;
-    if (forced) arriveSel.value = 'side';
-    else if (!arriveSel.dataset.chosen) arriveSel.value = read(ARRIVE) === 'side' ? 'side' : 'over';
-    arriveWhy.hidden = !forced;
-    arriveWhy.textContent = forced ? 'The operator is showing ' + kindSaid(u.info ? u.info.kind : 'web') + ' — this goes to their side bar.' : '';
+    arrive.disabled = forced;
+    if (forced) arrive.value = 'side';
+    else if (!arrive.dataset.chosen) arrive.value = read(ARRIVE) === 'side' ? 'side' : 'over';
+    why.hidden = !forced;
+    why.textContent = forced ? 'The operator is showing ' + kindSaid(u.info ? u.info.kind : 'web') + ' — this goes to their side bar.' : '';
   }
+  const drawTargets = () => fillTargets(toSel, arriveSel, arriveWhy);
+  /** A where-it-arrives choice made by hand (`sel`): kept for this bar, and on this device for every bar. */
+  const chosen = (sel) => { sel.dataset.chosen = '1'; keep(ARRIVE, sel.value); };
   // Offered only over a file the reader drew: one it could not read (a password-protected Office file, a broken one) is
   // shown nowhere, and its hidden parts are known only once it is read.
   function draw() {
@@ -6231,9 +6254,219 @@ const PreviewBar = (() => {
   });
   noMeta.addEventListener('change', draw);
   toSel.addEventListener('change', draw);
-  arriveSel.addEventListener('change', () => { arriveSel.dataset.chosen = '1'; keep(ARRIVE, arriveSel.value); draw(); });
-  Console.onDraw(() => { if (!bar.hidden) draw(); });
-  return { draw, target, arrival, upThere };
+  arriveSel.addEventListener('change', () => { chosen(arriveSel); draw(); });
+  // Each read of the console draws the bar again: where the target stands, and whether this seat may show at all.
+  Console.onDraw(() => { if (!bar.hidden || (src() && docShown)) draw(); });
+  return { draw, target, arrival, upThere, fillTargets, chosen };
+})();
+
+// ---------------- ❝ Quote: words pasted or typed, shown on people's pages as a quote ----------------
+/**
+ * The ❝ Quote tab (plan 4-§5.9.9; backstage, for a seat that may show the Board, in the full view): words pasted or typed
+ * in its box, shown on the Board's pages, or one person's, as a quote, the path for a highlight inside a web page (which a
+ * page cannot read) and for a document open on the researcher's own machine. A paste into the empty box is read from the
+ * paste event's own clipboard (which needs no secure context): its text/html flavour for its structure alone, through
+ * parseInert (docmodel.mjs: nothing in it loads or runs, and hidden parts are never read), and kept only where its words
+ * are its text/plain flavour's, so no word the person did not see arrives; tab-separated words are a table (pastedQuote).
+ * A paste among words already there, and words typed, are read as plain words. From: nothing (typed by them), a file of
+ * this room that has words, or a web page by its address: the Board's pages are given its link only where this seat may
+ * show a web page itself (the server keeps it so), and are otherwise named the site alone, as the tab says. Drawn first
+ * exactly as the Board's page will draw it (pagelayer.mjs quote), its bound said in the server's words with the cut as the
+ * researcher's own choice, and "Long for the stage" where it is longer than a glance on a tablet (never a refusal), then whom
+ * it goes to and where it arrives as the Preview's bar has them (over another pusher's fresh information: Replace, or Show
+ * a person instead), and Show. The box is emptied once the server took it. A file is never a quote: one pasted or dropped
+ * here is refused with words, never attached to a message. Drawn for a seat whose information pushes hold stage.show (the
+ * console's read), never for one that may show only web pages.
+ */
+const QuoteTab = (() => {
+  const $ = (id) => document.getElementById(id);
+  const tab = $('quoteTab');
+  const form = $('quotePane');
+  const box = $('quoteInput');
+  const fromSel = $('quoteFrom');
+  const webIn = $('quoteWeb');
+  const sayEl = $('quoteSay');
+  const preview = $('quotePreview');
+  const toSel = $('quoteTo');
+  const arriveSel = $('quoteArrive');
+  const arriveWhy = $('quoteArriveWhy');
+  const note = $('quoteNote');
+  const showBtn = $('quoteShow');
+  let pasted = null;   // the last paste as read ({words, quote}), while the box still holds its words
+  let cut = false;     // the researcher chose the cut
+  let model = null;    // docmodel.mjs, once imported
+  let drawn = 0;       // each drawing numbered: one drawn late for an older one is let go
+  let glanced = null;  // {key, long}: whether the quote drawn now is longer than a glance, kept while it stands
+  const may = () => docSeat() === 'research' && !ADMIN_VIEW && (F.canPush || F.canShow) && F.view !== 'simple' && Console.showsInfo();
+  const open = () => !form.classList.contains('hidden');
+  const reader = () => (model ? Promise.resolve(model) : import('/docmodel.mjs').then((m) => { model = m; return m; }));
+  /** The quote the box holds now: the paste as read while the box holds its words, else its words read as plain words; cut as chosen. */
+  function quoteNow() {
+    if (!model) return null;
+    const q = pasted && pasted.words === box.value ? pasted.quote : model.pastedQuote({ plain: box.value }).quote;
+    return q && cut ? model.pasteCut(q) : q;
+  }
+  /** This room's files a quote may say it is from: those the stage shows that hold words (a picture holds none). */
+  const files = () => [...roomFiles.values()].filter((m) => !m.transferOnly && isFileUrl(m.url) && Show.STAGE.includes(extOfName(m.url)) && !Show.IMAGE.includes(extOfName(m.url)));
+  function drawFrom() {
+    const was = fromSel.value || '';
+    const list = [['', 'Nothing (typed by ' + (pageFacts.name || 'you') + ')'], ['web', 'A web page…'], ...files().map((m) => ['file:' + m.id, m.filename || 'a file'])];
+    const key = list.map((o) => o.join('|')).join(',');
+    if (fromSel.dataset.key !== key) {
+      fromSel.dataset.key = key;
+      fromSel.textContent = '';
+      let group = null;
+      for (const [value, label] of list) {
+        const o = document.createElement('option');
+        o.value = value;
+        o.textContent = label;
+        if (value.startsWith('file:')) {
+          if (!group) { group = document.createElement('optgroup'); group.label = 'A file in this room'; fromSel.appendChild(group); }
+          group.appendChild(o);
+        } else fromSel.appendChild(o);
+      }
+    }
+    fromSel.value = list.some((o) => o[0] === was) ? was : '';
+    webIn.hidden = fromSel.value !== 'web';
+  }
+  /** Where the quote is from, as it is sent: a file of this room by its address, a web page by its address, or none (typed). */
+  function fromOf() {
+    const v = fromSel.value;
+    if (v === 'web') return { web: webIn.value.trim() };
+    if (v.startsWith('file:')) { const m = roomFiles.get(v.slice(5)); return m ? { url: m.url } : null; }
+    return undefined;
+  }
+  /**
+   * Where it is from as the Board's page will be told it ({from}, {} for typed), or {error}: a file by its name and type, a
+   * web page by its host, its address with it only where this seat may show a web page.
+   */
+  function toldFrom(m) {
+    const v = fromSel.value;
+    if (v === 'web') {
+      if (!webIn.value.trim()) return { error: 'Type the web page\'s address, or choose another From.' };
+      const w = m.webAddress(webIn.value);
+      return w.error ? { error: w.error } : { from: { host: w.host, ...(F.canWeb ? { url: w.url } : {}) } };
+    }
+    if (v.startsWith('file:')) { const f = roomFiles.get(v.slice(5)); return f ? { from: { name: f.filename || 'a file', type: extOfName(f.url) } } : { error: 'That file is no longer in this room.' }; }
+    return {};
+  }
+  /** What the box's quote is, in a few words: "A table, 3 rows × 2 columns", "A list, 2 items", "Text, 42 characters". */
+  function what(q) {
+    if (q.table) { const r = q.table.rows.length; const c = Math.max(0, ...q.table.rows.map((x) => x.length)); return 'A table, ' + r + (r === 1 ? ' row' : ' rows') + ' × ' + c + (c === 1 ? ' column' : ' columns'); }
+    if (Array.isArray(q.items)) return 'A list, ' + q.items.length + (q.items.length === 1 ? ' item' : ' items');
+    const n = model.charsOf(q.text);
+    return 'Text, ' + n + (n === 1 ? ' character' : ' characters');
+  }
+  const button = (label, fn) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'btn ghost small'; b.textContent = label; b.addEventListener('click', fn); return b; };
+  const say = (parts) => { sayEl.textContent = ''; for (const p of parts) sayEl.append(p); sayEl.hidden = !parts.length; };
+  /** The tab drawn as it stands: shown to a seat that may show the Board, and while it is open, its choices and what will go. */
+  async function draw() {
+    const on = may();
+    tab.hidden = !on;
+    if (!on) { if (open()) selectTab('text'); return; }
+    if (!open()) return;
+    drawFrom();
+    PreviewBar.fillTargets(toSel, arriveSel, arriveWhy);
+    const t = PreviewBar.target(toSel);
+    showBtn.textContent = '📺 Show ' + (t.to === 'board' ? 'the Board' : t.name);
+    const n = ++drawn;
+    let m;
+    try { [m] = await Promise.all([Takes.load(), reader()]); } catch {
+      if (n !== drawn) return;
+      say(['This page could not load what reads a quote: reload it.']);
+      showBtn.disabled = true;
+      return;
+    }
+    if (n !== drawn) return;
+    const q = quoteNow();
+    const told = toldFrom(m);
+    const over = q ? model.pasteOver(q) : null;
+    const words = note.value.trim();
+    // What will go, as the Board's page draws it: measured at a glance on a tablet (PickBar.long), once for each quote.
+    const content = q && !over && !told.error ? { kind: 'snippet', ...q, ...(told.from ? { from: told.from } : {}), ...(words ? { note: words } : {}) } : null;
+    const key = content ? JSON.stringify(content) : '';
+    if (content && (!glanced || glanced.key !== key)) glanced = { key, long: PickBar.long(m, content) };
+    const parts = [];
+    if (q) parts.push(what(q) + (q.cut ? ', cut as you chose' : '') + '. ');
+    if (over) {
+      parts.push(over.error + '. ');
+      if (over.cut) parts.push(button(over.cut === 'chars' ? 'Send the first 1,200 characters' : 'Send the first 25 rows × 10 columns', () => { cut = true; draw(); }));
+    }
+    if (told.error && (q || fromSel.value === 'web')) parts.push(told.error + ' ');
+    if (fromSel.value === 'web' && !told.error && !F.canWeb) parts.push('The Board is told the site\'s name, without a link: web pages on the stage need their own right. ');
+    const f = q ? PickBar.fresh(t, draw, 'quote') : null;
+    if (f) parts.push(f + ' — ', button('Replace', () => show()), ' · ', button('Show a person instead', () => toSel.focus()), ' ');
+    if (content && glanced.long) { const w = document.createElement('span'); w.className = 'pick-glance-words'; w.textContent = 'Long for the stage — the Board will scroll.'; parts.push(w); }
+    say(parts);
+    showBtn.disabled = !q || !!over || !!told.error;
+    preview.textContent = '';
+    if (content) preview.appendChild(m.quote(content, { by: pageFacts.name || '' }));
+  }
+  function clear() {
+    box.value = '';
+    note.value = '';
+    pasted = null;
+    cut = false;
+    draw();
+  }
+  // A paste into the empty box (or over all its words) is read for its structure; among words already there the browser
+  // pastes the plain words, read as typed. A paste here is a quote's words, never a file attached to a message.
+  box.addEventListener('paste', (e) => {
+    e.stopPropagation();
+    const cd = e.clipboardData;
+    if (!cd) return;
+    const plain = cd.getData('text/plain');
+    if (!plain) {
+      if (cd.files && cd.files.length) { e.preventDefault(); AGM.toast('A picture has no words to quote: open it in the Preview to show a picture of it.', true); }
+      return;
+    }
+    if (!(box.selectionStart === 0 && box.selectionEnd === box.value.length)) return;
+    e.preventDefault();
+    const html = cd.getData('text/html');
+    reader().then((mod) => {
+      const r = mod.pastedQuote({ plain, blocks: html ? mod.parseInert(html).blocks : null });
+      box.value = r.words;
+      pasted = r.quote ? { words: box.value, quote: r.quote } : null;
+      cut = false;
+      draw();
+    }, () => AGM.toast('This page could not load what reads a paste: reload it.', true));
+  });
+  // A file dragged over the tab is refused where it would land (no drop, the composer's included); one dropped anyway is said.
+  const carriesFiles = (e) => !!e.dataTransfer && [...(e.dataTransfer.types || [])].includes('Files');
+  form.addEventListener('dragover', (e) => { if (!carriesFiles(e)) return; e.stopPropagation(); e.preventDefault(); e.dataTransfer.dropEffect = 'none'; });
+  form.addEventListener('drop', (e) => {
+    if (!carriesFiles(e)) return;
+    e.stopPropagation();
+    e.preventDefault();
+    AGM.toast('A file is not a quote: open it in the Preview to show it from there, or paste the words to quote here.', true);
+  });
+  box.addEventListener('input', () => { cut = false; draw(); });
+  fromSel.addEventListener('change', () => { webIn.hidden = fromSel.value !== 'web'; if (!webIn.hidden) webIn.focus(); draw(); });
+  webIn.addEventListener('input', () => draw());
+  note.addEventListener('input', () => draw());
+  toSel.addEventListener('change', () => draw());
+  arriveSel.addEventListener('change', () => { PreviewBar.chosen(arriveSel); draw(); });
+  // Show is the one way it goes: Enter in a field never sends it (the form has no submit button).
+  form.addEventListener('submit', (e) => e.preventDefault());
+  /** The quote in the box shown as the tab has it: Show, and Replace over another pusher's fresh information. */
+  function show() {
+    if (!model || !may()) return;
+    const q = quoteNow();
+    if (!q) { AGM.toast('Paste or type what to show first.', true); box.focus(); return; }
+    const over = model.pasteOver(q);
+    if (over) { AGM.toast(over.error + '.', true); return; }
+    const from = fromOf();
+    if (from === null) { AGM.toast('That file is no longer in this room.', true); return; }
+    if (from && from.web === '') { AGM.toast('Type the web page\'s address, or choose another From.', true); webIn.focus(); return; }
+    const t = PreviewBar.target(toSel);
+    const words = note.value.trim();
+    const sent = box.value;
+    Console.showFile(t.to, { kind: 'snippet', ...q, ...(from ? { from } : {}), ...(words ? { note: words } : {}) }, { name: t.name, arrive: PreviewBar.arrival(t, arriveSel), taken: () => { if (box.value === sent) clear(); } });
+  }
+  showBtn.addEventListener('click', show);
+  tab.addEventListener('click', () => { draw(); box.focus(); });
+  Console.onDraw(() => draw());
+  return { draw, field: () => box };
 })();
 
 // ---------------- A web page previewed, or what was shown looked at again: on this page alone ----------------
@@ -6264,7 +6497,13 @@ const Preview = (function () {
     const made = m.framePage(url);
     if (made.error) { AGM.toast(made.error, true); return; }
     letBoxGo();
-    box.append(made.frame);
+    // At a place: the words its address asks to be found, said above the frame, which never highlights them.
+    const wrap = document.createElement('div');
+    wrap.className = 'take-web';
+    const look = m.lookFor(made.url);
+    if (look) { const p = document.createElement('p'); p.className = 'take-web-look'; p.textContent = 'Look for: ❝ ' + look; wrap.append(p); }
+    wrap.append(made.frame);
+    box.append(wrap);
     show(go ? 'Preview' : 'Look', made.host, go ? 'Only you see it here. Show it puts it on their pages; nothing is sent until then.' : LOOK, go);
   }
   /**

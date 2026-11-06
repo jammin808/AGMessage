@@ -102,6 +102,7 @@
         <div class="compose-tabs" role="tablist">
           <button class="tab active" data-tab="text" role="tab">Message</button>
           <button class="tab" data-tab="action" role="tab">Action prompt</button>
+          <button class="tab" data-tab="quote" role="tab" id="quoteTab" hidden>❝ Quote</button>
         </div>
         <!-- To: where the next message or file goes (the catalogue's compose.sendTo); set to another room, its line stays
              above the field at every width -->
@@ -143,6 +144,35 @@
           <div class="row end">
             <button type="button" class="btn ghost priority-btn" id="actionPriorityBtn" data-priority="0" aria-pressed="false" title="Mark as high priority">🔥 Priority</button>
             <button class="btn primary send-btn" type="submit" aria-label="Ask the Board"><span class="send-icon" aria-hidden="true">❓</span><span class="send-word">Ask the Board</span></button>
+          </div>
+        </form>
+
+        <!-- ❝ Quote (backstage, for a seat that may show the Board): words pasted or typed, shown on the Board's pages as a
+             quote. A paste is read for its structure alone (a table's rows and cells, a list's items, tab-separated cells),
+             only where it agrees with the words the page showed; then where it is from (nothing: typed; a file of this room;
+             a web page), drawn as the Board will see it, whom it goes to, where it arrives, a line above it, and Show
+             (app.js QuoteTab). -->
+        <form class="pane hidden quote-pane" id="quotePane" data-pane="quote">
+          <label class="field">
+            <span>Paste or type what to show</span>
+            <textarea id="quoteInput" rows="3" placeholder="Paste from a web page, Word or Excel, or type…"></textarea>
+          </label>
+          <div class="row quote-row">
+            <label class="quote-from"><span>From</span>
+              <select id="quoteFrom" aria-label="Where it is from"></select>
+            </label>
+            <input type="url" id="quoteWeb" maxlength="2048" placeholder="https://…" aria-label="The web page's address" autocomplete="off" hidden />
+          </div>
+          <p class="pick-say" id="quoteSay" role="status" hidden></p>
+          <div class="pick-preview" id="quotePreview" aria-label="As the Board will see it"></div>
+          <div class="row quote-row">
+            <select id="quoteTo" aria-label="Whom it goes to"></select>
+            <select id="quoteArrive" aria-label="Where it arrives"><option value="over">over their chat</option><option value="side">in their side bar</option></select>
+            <small class="muted" id="quoteArriveWhy" hidden></small>
+          </div>
+          <div class="row quote-row">
+            <input type="text" id="quoteNote" maxlength="200" placeholder="A line above it (optional)" aria-label="A line above it (optional)" />
+            <button class="btn primary" type="button" id="quoteShow">📺 Show the Board</button>
           </div>
         </form>
 

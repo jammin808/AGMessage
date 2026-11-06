@@ -429,7 +429,7 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   formula saved without its value says so, whatever its type). A picture's size is read from its header before anything
   decodes it (`public/imagecore.js`, the server's own reader): in the document worker for one inside an Office file, on
   the page for a picture shared on its own, and one over 40 megapixels, or whose size cannot be read, is never decoded on
-  the device. HTML (mammoth's, and a Markdown file's raw HTML) is parsed
+  the device. HTML (mammoth's, a Markdown file's raw HTML, and what is pasted into ❝ Quote) is parsed
   in one place, `parseInert`: an inert `<template>` walked into plain data, so nothing in it runs, loads or applies and no
   parsed node is put in the page; a lint rule refuses every other way to turn markup into nodes in those modules. The
   readers fetch a file with `cache: 'no-store'`, and a document's pictures are drawn through object URLs the page makes
@@ -553,12 +553,19 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   view go as plain strings and tables, each string cleaned on the server (`guard.cleanBlock`: controls, the bidi
   overrides, isolates and marks, U+200B, U+2060 and U+FEFF dropped; line breaks kept) and held to its bounds (1,200
   characters, 25 rows × 10 columns of 200, 4,000 in all), refused over them, never cut; a page draws it with the DOM and
-  `textContent` alone. It names its source by a file's name and place, never its address, a web page by its host (its
-  address sealed at rest); it hands the Board no file. The server never parses a document, so it cannot check that the
+  `textContent` alone. It names its source by a file's name and place, never its address, a web page by its host; a web
+  page's address is kept (sealed at rest) and told the pages it is shown on, for **Open the source**, only from a pusher
+  who may show a web page (`stage.web`, a code guest's by the hall's setting), since it is a web page offered on the
+  Board's devices; from anyone else no address of it is kept or told. Open the source opens it in the person's own tab
+  (no opener, no referrer), checked again as a frame's address is. It hands the Board no file. The server never parses a document, so it cannot check that the
   words are in the file: the card says who quoted it. Its words sit in `pages.json` in clear, as a room's messages sit in
   its file, from the same people; a web address is sealed because it can carry a sign-in token. A pick reads only what
   the Board's pages would draw: a hidden row, column or sheet, drawn dimmed in the researcher's Preview, is never picked,
   whatever names it (a header, a cell, a range's end, What I see), nor a hidden slide or shape, nor Word's hidden text.
+  A paste into ❝ Quote is read for its structure alone (a table's cells, a list's items), its hidden elements left out,
+  and only where its words are the words the browser says were selected (its `text/plain` flavour): where they disagree
+  (a part hidden by a style sheet AGMessage cannot see), the plain words alone are used. What a person pasted is still
+  theirs to check: the tab draws it as the Board will see it before it goes.
 - **A part of a page or a picture is a new picture.** A region of a PDF's page or of a picture, what is in view of
   either, and a picture tapped in a Word document or a slide, is drawn on the pusher's own page into a new picture (at
   most 2,048 px on its long edge) and uploaded: no original goes, and a picture's metadata (EXIF, its place) is never

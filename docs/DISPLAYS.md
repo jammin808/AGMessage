@@ -160,6 +160,12 @@ backstage guests are off in this hall — ask the admin."
   here."; its bar keeps **Back to chat** and **Minimise**, and in the full view its ⋯ (and a right-click) adds **🗗 Open
   in a new tab**, outside the frame, for a site that refuses to be framed or asks for a sign-in; the simple view keeps
   the layer's buttons alone. Minimised, its card reads "🌍 vote.example.com".
+- **At a place**: the address keeps its fragment. An `#id` scrolls inside the frame; a text directive
+  (`#:~:text=start,end`) is applied by a browser only to a navigation a person started at the top, never in a frame, so
+  its words are said over the frame, decoded and made one clean line of at most 300 characters ("Look for: ❝ net revenue
+  rose … in Q3"), and Open in a new tab, which keeps the fragment, highlights them: in the full view, where the take's ⋯
+  offers it (a Board page in the simple view, the default On stage, reads the words and has no tab to open). The
+  operator's Preview says the same. Nothing is fetched.
 - **What can be known**: nothing inside the frame. A site that refuses to be framed (its X-Frame-Options or
   frame-ancestors) still fires `load`. So a loaded web page reads **◇ Opened · AGMessage can't see inside web pages**,
   never ✓, and one that has not loaded in 15 s reads **△ Couldn't show it: the page did not load**. The person can
@@ -271,8 +277,10 @@ overrides and invisible characters dropped). `unit` carries its one body (a cell
 `{rows, head, side, ref?, focus?}`, its label row and column marked; a slide its title and items; what is in view its
 blocks). It names where it comes from by the file's name and its place (`from`: a page, a slide, a sheet and a cell's
 reference, a paragraph with its Word page, "≈" where approximate, a run of lines), never the file's address; the pusher's
-own copy is said as theirs; a web page by its host, its address sealed at rest; with none, it was typed. Its source is a
-file the stage may show from (`sourceOk`, as a document's); a picture has no words to quote.
+own copy is said as theirs; a web page by its host, and its address only from a pusher who may show a web page
+(`stage.web`; a code guest's by the hall's switch), sealed at rest and told the pages it is shown on for **Open the
+source**: from anyone else, no address of it is kept or told; with none, it was typed. Its source is a file the stage
+may show from (`sourceOk`, as a document's); a picture has no words to quote.
 
 - **Its bounds**, refused in words, never cut by the server: 1,200 characters of text ("Too long for the stage: 1,200
   characters at most (this is 1,860)"), 20 items of 300, 25 rows × 10 columns of 200 ("Too big for the stage: narrow it
@@ -283,7 +291,10 @@ file the stage may show from (`sourceOk`, as a document's); a picture has no wor
   largest type that fits (between 28 px, 20 px under 600 px wide, and 12vw, in at most 12 steps); numbers to the right,
   the cell it is of outlined and bold; a table wider than the screen scrolls sideways inside its card, its label row and
   column kept in view. Its line says who quoted it, in their voice: "Quoted by Ana · Board pack.pdf, p. 12", "Quoted by
-  Ana from their copy of …", "Quoted by Ana · vote.example.com", "Typed by Ana"; a side room's file adds its name. Its
+  Ana from their copy of …", "Quoted by Ana · vote.example.com · Open the source" (with the address told: a link in the
+  person's own tab, no opener and no referrer, at the quote's first and last words by a text directive where the address
+  has no fragment of its own; the take's ⋯ in the full view offers it too), "Quoted by Ana · vote.example.com" (without
+  it), "Typed by Ana"; a side room's file adds its name. Its
   card reads its first 40 characters ("❝ Revenue Q3 £4.2m"); one that arrives in the side bar keeps the card's type. It
   reports `shown` once laid out on a frame in view, with "longer than the screen: it scrolls" where it is ("longer than
   its card in the side bar" in a card); a table in a quote longer than its box scrolls down inside its own card too, its
@@ -308,6 +319,18 @@ file the stage may show from (`sourceOk`, as a document's); a picture has no wor
   refuses nothing for it; over the operator's information, a seat
   that may only show sends to their side bar, and the bar says so. A picture uploaded and turned away by the uploads' rate
   says "Sending in 2 s…" and goes again, three times at most.
+- **From ❝ Quote**, a tab of the backstage composer: words pasted or typed. A paste into the empty box is read from the
+  paste event's own clipboard (no secure context needed): tab-separated words (Excel's, Sheets') are a table; HTML is read
+  for its structure alone (one table's rows and cells, its header row the labels; a list's items) through `parseInert`,
+  so nothing in it loads or runs and its hidden elements are never read, and only where its words are the plain
+  flavour's, otherwise the plain words are used; anything else is text. **From** says where it is from: nothing ("Typed by
+  Ana"), a file of this room, or a web page by its address. The tab says what it read ("A table, 3 rows × 2 columns"),
+  draws the quote as the Board's page will, says a bound with the cut offered and "Long for the stage — the Board will
+  scroll" past a glance (never a refusal), and over another pusher's fresh information who the Board is reading, with
+  Replace and Show a person instead; Show sends it as the Preview's bar does, to the Board or a person, over their chat
+  or in their side bar. A file pasted or dropped on it is no quote and attaches nothing. The tab, like the Preview's bar,
+  is drawn only for a seat whose pushes may show quotes (`stage.show`, the console's read): `stage.web` alone shows web
+  pages and nothing else.
 
 ### Showing it: the Board chip and the console
 

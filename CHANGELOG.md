@@ -5275,7 +5275,7 @@ Part 5 §0 and §16.3 and Part 7 §0.3 amend them, and §5.12's "On the Board's 
 - **Where it comes from, by name and place, never by address** (`from`): a file of this hall by its name, type and
   place, its source held to `sourceOk` as a document's (a file of a side room says that room's name); **the pusher's own
   copy** (`local`) said as theirs; a web page by its host, its address sealed at rest beside the hall's web takes and
-  never told; none, typed. Each type's places are its own (a PDF's page; a deck's slide; a sheet and a cell's reference;
+  told only for Open the source (the ❝ Quote tab's unit, below); none, typed. Each type's places are its own (a PDF's page; a deck's slide; a sheet and a cell's reference;
   a Word paragraph with its page and "≈" where the page is a guess, and its heading; a text or Markdown file's line or
   run of lines; a CSV's line and cell) and any other is refused ("That place cannot be read for this file: …"). **A
   picture has no words to quote** ("A picture has no words to quote: show a picture of it instead."). The quote is its
@@ -5514,6 +5514,118 @@ and §0.4.10 amend it; the owner's answer 22, "Board will use a mixture of devic
   document floor, the probe, the stand-in, each fallback, what every push proves and the walk's stage rows), `README.md`,
   `README.txt` (older tablets and phones), `SECURITY.md` (a stand-in is checked as a picture or a quote; D1 and Fetch
   Metadata), `docs/DISPLAYS.md`, `docs/ANALYSIS.md` (the page floor's fence), `CLAUDE.md`.
+
+**A pasted or typed quote, and a web page at a place** (the plan's Part 4, unit 28, its §5.9.9 with §5.9.3's `web` row,
+§5.9.4's `from`, §5.9.11's source line and §5.10.3's one HTML parse, as Part 5 §0 keeps ❝ Quote a tab of the
+backstage composer)
+- **❝ Quote, a tab of the backstage composer** beside Message and Action prompt, for a seat that may show the Board (the
+  operator, or a seat with a right of its own) in the full view: a box to paste into or type in, **From** (nothing,
+  "typed by Ana"; a file of this room that holds words; a web page by its address), what will go drawn exactly as the
+  Board's page draws it, whom it goes to and where it arrives as the Preview's bar has them (the operator's information
+  sending a seat that may only show to the side bar, and another pusher's quote under 15 s old said with **Replace** and
+  **Show a person instead**), "Long for the stage — the Board will scroll" where the quote drawn off the screen at the
+  stage's smallest type is taller than a tablet's take (the pick bar's own glance, never a refusal), a line above it,
+  and **📺 Show the Board** / **Show Ana**; the box is emptied once the server took it. It is the path for a highlight
+  inside a web page, which a page cannot read, and for a document open on the researcher's own machine and never
+  uploaded. Show is the one way it goes: Enter in its fields never sends it. **It is drawn only for a seat whose
+  information pushes hold `stage.show`** (the console's read, `page:status`'s `show`, before which it is not drawn), as is
+  the Preview's bar, whose every push is information too: a seat given `stage.web` alone, which `canShow` admits for its
+  web pages, sees neither, where before it was offered the bar and refused at each push.
+- **A paste is read from the paste event's own clipboard** (`clipboardData`, which needs no secure context, so it works
+  over plain HTTP), into the empty box or over all its words (`docmodel.mjs` `pastedQuote`, pure): **tab-separated words**
+  (what Excel and Sheets put on the clipboard; a quoted cell may hold a tab or a line break) **become a table**; the
+  **`text/html` flavour is read for its structure alone** (one table's rows and cells, its first row the labels where every
+  cell of it was a header, a merged cell's words in its first place; a list's items, numbered where every one was)
+  **through `parseInert`**, so no picture or frame in it loads and nothing in it runs, and `<style>`, `<script>`,
+  `<noscript>`, `<template>`, `<head>` and any element marked `hidden`, `display:none` or `visibility:hidden` are never
+  read; and **the structure is kept only where its words, joined, are the `text/plain` flavour's** (white space made one):
+  where they disagree (a part hidden by a style sheet), the plain words alone are used, so no word the person did not see
+  arrives. Any other paste, a paste among words already there, and words typed are text. A picture pasted alone says "A
+  picture has no words to quote: open it in the Preview to show a picture of it." and is never attached to a message;
+  a file dragged over the tab finds no place to land (the composer's attach below it included), and one dropped anyway
+  says "A file is not a quote: …" and attaches nothing.
+- **Its bounds said before it goes, in the server's words** (`pasteOver`), with the cut as the researcher's own choice:
+  **Send the first 1,200 characters**, **Send the first 25 rows × 10 columns** (`pasteCut`: `cut`, and the rows and
+  columns left out counted in `more`); a list over 20 items or an item over 300 characters, a cell over 200 and 4,000 in
+  all are said and not offered a cut. What it reads as is said first: "A table, 3 rows × 2 columns", "A list, 2 items",
+  "Text, 42 characters". **Every bound the bar says is now the server's refusal word for word** (`docmodel.mjs`
+  `quoteOver`, the pick bar's too): "a cell is 200 characters at most", where the bar said "a cell 200", and "Too long
+  for the stage: 12 blocks at most" and "1,200 characters at most" as `cleanSnippet` words them; What I see keeps its own
+  "Too much in view for the stage: 1,200 characters a block at most".
+- **A quote from a web page carries its address only from a pusher who may show a web page** (`lib/pages.js`
+  `snippetFrom`: `stage.web`, a code guest's by the hall's setting): the address is then sealed at rest beside its host,
+  as a web take's is, and **told the pages the quote is shown on** (`told`: opened there, and told by its host alone where
+  this machine cannot open it or it opens to another host's), Earlier's included; without that right the quote keeps the
+  site's host alone, and **no address of it is kept, sealed or in clear, or told**. The Quote tab says so before it goes:
+  "The Board is told the site's name, without a link: web pages on the stage need their own right." A quote cannot name a
+  host of its own (`from: {host}` is refused, as every other shape is).
+- **Open the source** (`pagelayer.mjs` `sourceHref`): the quote's source line reads "Quoted by Ana · vote.example.com ·
+  Open the source", a link in a tab of the person's own (`target="_blank"`, `rel="noopener noreferrer"`, no referrer),
+  its address checked again as a frame's is, and, **where it has no fragment of its own, a text directive built from the
+  quote's first and last words** (`#:~:text=Net%20revenue%20rose%208,in%20the%20third%20quarter`; a short quote found
+  whole), so the person's browser finds and highlights them. In the full view the take's ⋯ and its right-click offer the
+  same act (`take.tab`, labelled Open the source on a quote). Without the address the line names the host with no link.
+- **A web page at a place** (`pagelayer.mjs` `lookFor`): a web take's address keeps its fragment (an `#id` scrolls inside
+  the frame), and **a text directive's words are said over the frame**, decoded and made one clean line of at most 300
+  characters ("Look for: ❝ net revenue rose … in Q3"; its prefix and suffix left out), since a browser highlights one only
+  for a navigation a person started at the top, never in a frame; Open in a new tab keeps the fragment, so there it does.
+  Open in a new tab is the take's ⋯ in the full view (Part 5's `take` row): a Board page in the simple view, the
+  default On stage, reads the words over the frame and has no tab to open, and the papers say so. The operator's Preview
+  of the address says the same. Nothing is fetched.
+- **A table's header row read as headers** (`docmodel.mjs` `inertBlocks`: `head` 1 where every cell of a table's first
+  row is a `<th>`): a Word table whose first row repeats as its header row, which mammoth writes as `<th>`, is drawn by
+  the documents' reader with that row as headers, and What I see of it carries it as the quote's label row, as a pasted
+  table's header row is.
+- Choices where the plan left room: a paste's structure is one table alone or list items alone, and anything else (a
+  heading with paragraphs, a table beside a paragraph) is its plain words; a paste among words already in the box is the
+  browser's own (plain words); the text directive is built from the first four words of the quote's first line and the
+  last four of its last (one line of eight words or fewer whole); whether the address goes is decided at the push by the
+  pusher's right then, so a quote already up keeps its link when the right is taken back or the admin turns a hall's
+  guests' web pages off, as a web page already up stays (the plan's "turned off, the next push is refused"; a test holds
+  it);
+  **not built here, and owed to this tab by the units that build them**: its 🔒 (the person's own mark on a typed or
+  pasted quote, §5.9.9 and §5.14) with the confidential mark's unit (31), and its ＋ the speaker's screen (§5.9.10) with
+  that line's unit (29), each joining the ❝ Quote tab as it joins the Preview's bar; a person is reached from the tab's own To ▾ (Show Ana), the People tab's Show them ▸ gaining no quote row
+  of its own. Bench: no measurement this round.
+- Rolling back: nothing new is kept: a web quote's sealed address sat beside its host already; 0.5.1 reads no quote.
+- Tests: `test/pages.test.js` (a web source's address kept only with the pusher's web right, the host alone otherwise, a
+  bad address and AGMessage's own refused either way, a host named by the asker refused; told opened where kept, by its
+  host alone where it cannot be opened or opens to another host or to no web page's address; no address at rest, sealed or
+  in clear, without the right; the console's and the audit's words name the host alone), `test/takes.test.js` (end to
+  end: the operator's web quote told the Board's page with its address and fragment, sealed at rest; a Staff account's
+  told the host alone with no address in any frame or in `pages.json`, its row naming the host; the operator's under
+  Earlier keeping its address; a locked hall's backstage guest's quote told its address only while the admin's switch is
+  on, and the one she showed while it was on keeping it, told again at a join, once it is off), `test/docmodel.test.js`
+  (each bound the paste's and the pick's bar say, word for word as `cleanPage` refuses it; a table's first row its labels
+  only where every cell of it is a header; `pastedQuote`: a table with its labels and a picture that adds nothing, a merged cell, a
+  hidden cell and row never read, HTML that disagrees falling back to the plain words as a table or text, items and
+  numbered items, other structure as text, tab-separated values with a quoted cell, a blank line and a short row, nothing
+  to quote; `pasteOver` and `pasteCut` at each bound; `pagelayer.mjs`'s `lookFor`, a directive's words with its prefix
+  and suffix left out, among other directives, cut at 300 and none where it cannot be read, and `sourceHref`, from the
+  first words of the first line to the last of the last, a short quote whole, its terms encoded, a table from its first
+  cell to its last, an own fragment kept, and nothing without an address or with one a frame would refuse),
+  `test/catalog.test.js` (Open the source on a quote with an address
+  in the full view, never without one, never in the simple view). The browser smoke (a hall of its own): pasted
+  tab-separated words a table snippet on the Board's page and the box emptied; pasted HTML with a table becoming its rows
+  with its header row, its `<img>` fetching nothing (the network log) and a `display:none` span's words absent; HTML whose
+  words disagree with its plain flavour falling back to the plain words; typed words reading "Typed by Ana Admin"; a web
+  quote from the operator offering Open the source with a text directive from its first and last words in a tab of the
+  person's own, and from a Staff account naming the host with no link and no take carrying its address; a web take with
+  `#:~:text=` saying "Look for: ❝ …" over its frame and keeping the fragment in the frame and in Open in a new tab, its
+  menu read once the page has drawn the take; a 25 × 10 table said "Long for the stage — the Board will scroll" with Show
+  still offered; a file dragged over the box with no place to land and one dropped said, nothing attached; over a Staff
+  account's fresh quote the operator's tab saying "The Board is reading Qia Staff's quote (n s) — Replace · Show a person
+  instead", and Replace showing the operator's; that account given web pages and not quotes drawn no tab and no Preview
+  bar; no console error or CSP violation. **On the device legs** (1180 × 820, 820 × 1180 and 390 × 844, touch) **and the
+  floor leg**: a web page at a place with its "Look for" words over the frame; the operator's web quote's Open the source
+  at its words, in a tab of the person's own with no opener or referrer, ✓ on all 3; a Staff account's naming the site
+  alone with no link; a Word table's header row drawn as headers. The floor leg's Look at a document
+  with its stand-in now waits for the Look before it to close: the dialog's close event, a task of its own after
+  `close()`, could empty the next Look when it came after it (a race of the smoke's own speed, seen once).
+- The papers: `README.md`, `README.txt` (❝ Quote), `SECURITY.md` (a pasted quote's HTML parsed inert and checked against
+  its plain words; a web quote's address only with `stage.web`), `docs/DISPLAYS.md` (a pasted quote, Open the source,
+  Look for), `docs/ACCOUNTS.md` (`stage.web` and a web quote's link), `docs/DESIGN.md`, `docs/ANALYSIS.md` (`parseInert`'s
+  callers), `docs/DEVICES.md` (Open the source and Look for below the floor), `CLAUDE.md`.
 
 **Fixed**
 - An upload whose stored path is no file (a folder in its place) is refused as one that could not be checked, on every
