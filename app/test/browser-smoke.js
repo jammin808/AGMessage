@@ -162,7 +162,6 @@ async function devtools(url, onEvent = () => {}) {
 async function launchEdge() {
   const exe = browserPath();
   if (!exe) throw new Error('no Edge, Chrome or Chromium found (set AGM_BROWSER to one)');
-  const port = await freePort();
   const prof = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-edge-'));
   // A container running as root has no user namespace for Chromium's sandbox; everywhere else the sandbox stays on.
   const sandbox = typeof process.getuid === 'function' && process.getuid() === 0 ? ['--no-sandbox'] : [];
@@ -171,10 +170,18 @@ async function launchEdge() {
   // WebSockets with "Page entered Back-Forward Cache." on any freeze. So every page has a window of its own (tab(), below)
   // and is visible, which is never frozen; these switches keep the timers and priority of a page that is not focused.
   const awake = ['--disable-background-timer-throttling', '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding'];
-  const proc = spawn(exe, ['--headless=new', '--disable-gpu', '--no-first-run', ...awake, ...sandbox, '--remote-debugging-port=' + port, '--user-data-dir=' + prof, '--window-size=1400,900', 'about:blank'], { stdio: 'ignore' });
+  const proc = spawn(exe, ['--headless=new', '--disable-gpu', '--no-first-run', ...awake, ...sandbox, '--remote-debugging-port=0', '--user-data-dir=' + prof, '--window-size=1400,900', 'about:blank'], { stdio: 'ignore' });
+  // The browser takes a port of its own and names it in its profile's DevToolsActivePort once it listens, so no port
+  // chosen here can be taken by another program first; a cold start on a busy runner has 30 s.
   let version = null;
-  for (let i = 0; i < 60 && !version; i++) { try { version = await (await fetch(`http://127.0.0.1:${port}/json/version`)).json(); } catch { await sleep(250); } }
-  if (!version) throw new Error('the browser opened no DevTools port');
+  let port = 0;
+  for (let i = 0; i < 120 && !version; i++) {
+    try {
+      port = Number((await fs.promises.readFile(path.join(prof, 'DevToolsActivePort'), 'utf8')).split('\n')[0]);
+      version = await (await fetch(`http://127.0.0.1:${port}/json/version`)).json();
+    } catch { await sleep(250); }
+  }
+  if (!version) throw new Error('the browser opened no DevTools port in 30 s');
   const browserHeard = [];
   const browser = await devtools(version.webSocketDebuggerUrl, (m) => { for (const f of browserHeard) f(m); });
   return {
