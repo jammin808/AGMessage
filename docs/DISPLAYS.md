@@ -30,6 +30,17 @@ is one `display.take` row in the audit log: who, which screen and what kind of t
 PDF at p. 3", "an image", "the countdown with words (8 characters)"), never the message's words or the file's name,
 which the console and the halls board quote and name.
 
+**A line from On stage.** A countdown screen's line can also come from a person seated On stage whom the admin has let
+send to one (**May send to a countdown screen**, off by default, `docs/ACCOUNTS.md`): their message, sent with **Also on ⏱
+Lectern**, goes to the room's feed and to the line under the countdown of each of the hall's screens that show the
+countdown at that moment, with 🔥's tone for a priority message, the countdown and the hall's timer kept. The line holds
+160 characters and is never cut: a longer one is refused with the count, as is a send while no screen shows the countdown.
+Its `display.take` row names the person and the length, never the words ("Lectern → the countdown with a line from
+Margaret Lowe, On stage (38 characters)"); the console shows the new content at once, its take row naming the person, and
+can put any line back. The message says, for everyone in the room, where it went and what the screen confirmed, by the
+screen's name alone: "⏱ Lectern: sending", "⏱ On Lectern ✓", "△ Lectern could not show it", "Replaced on Lectern at
+14:12" once anything else is put there.
+
 Every take is numbered. The screen renders it and says so, and only then does the console say **✓ on screen**. Until
 then it says **◷ sending**; **△** and the reason when the screen could not show it (an image that did not load, a PDF
 that did not render — the screen is then black, never the picture before it); **✕ offline** when no browser has the

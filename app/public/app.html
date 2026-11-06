@@ -100,6 +100,14 @@
       <p class="bv-alone" id="bvAlone" hidden>Nobody backstage is online. Use Help if you need someone.</p>
 
       <section class="compose director-compose" id="directorCompose" hidden>
+        <!-- Also on: where else the next message goes, only while the admin has turned on one of the person's switches; a
+             chip each, drawn from the catalogue's compose.also, off after every send; with ⏱ chosen, what it replaces and
+             the count against a countdown screen's line, which describes the group -->
+        <div class="also-row" id="alsoRow" role="group" aria-labelledby="alsoLabel" aria-describedby="alsoLine" hidden>
+          <span class="also-label" id="alsoLabel">Also on</span>
+          <span class="also-chips" id="alsoChips"></span>
+          <p class="also-line" id="alsoLine" hidden><span id="alsoWhat"></span> <span class="also-count" id="alsoCount"></span></p>
+        </div>
         <form id="directorForm">
           <!-- 🔥 Priority first: a toggle, off after every send; its word on a tablet, its mark on a phone, its name always -->
           <button type="button" class="btn ghost priority-btn" id="dirPriorityBtn" data-priority="0" aria-pressed="false" aria-label="Priority" title="Mark as high priority"><span aria-hidden="true">🔥</span><span class="pri-word" aria-hidden="true"> Priority</span></button>
@@ -427,6 +435,7 @@
         <span class="pinned-mark" hidden><span aria-hidden="true">📌</span> <span class="pin-words"></span></span>
         <time></time>
         <span class="bv-said"></span>
+        <span class="also-said" hidden></span>
         <span class="msg-acts"></span>
       </header>
       <div class="body"></div>

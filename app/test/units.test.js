@@ -1282,7 +1282,7 @@ test('op table: each change is committed, then sent under the event the table na
   const add = t.apply(t.room, { o: 'add', m: { id: 'm1', type: 'action', text: 'Ready?', at: 1 } });
   const sys = t.apply(t.room, { o: 'add', m: { id: 's1', type: 'system', text: 'Ana joined', at: 2 } });
   assert.equal(add.m.seq, 1, 'an added message carries its seq');
-  const fields = { responses: [{ uid: 'u1', optionIndex: 0 }], pinned: true, reactions: [{ uid: 'u1', emoji: '👍' }], stage: { ack: 'sent' }, proposal: { id: 'p1', state: 'pending' }, help: { state: 'coming' }, sentTo: { roomName: 'Legal', hallName: 'Hall 2', ref: 'rLG', id: 'm9', withdrawn: 2 }, replyTo: { id: 'm8', name: 'Lou', snippet: '', withdrawn: true } };
+  const fields = { responses: [{ uid: 'u1', optionIndex: 0 }], pinned: true, reactions: [{ uid: 'u1', emoji: '👍' }], stage: { ack: 'sent' }, proposal: { id: 'p1', state: 'pending' }, help: { state: 'coming' }, sentTo: { roomName: 'Legal', hallName: 'Hall 2', ref: 'rLG', id: 'm9', withdrawn: 2 }, replyTo: { id: 'm8', name: 'Lou', snippet: '', withdrawn: true }, also: { screens: [{ name: 'Lectern', seq: 4, state: 'shown' }] } };
   // Every field in one op, written in the reverse of the table's order: sent in the table's order, each with the seq.
   const all = t.apply(t.room, { o: 'upd', id: 'm1', f: Object.fromEntries(Object.entries(fields).reverse()) });
   t.apply(t.room, { o: 'meta', name: 'Main hall, day 2' });
@@ -1316,7 +1316,7 @@ test('op table: each change is committed, then sent under the event the table na
   assert.deepEqual(t.room.settings.lockRoles, true);
   // The events the table names are the events apply() sends, every one of them: the wire fence reads them from EVENTS.
   assert.deepEqual([...new Set(t.sent.map((x) => x[1]))].sort(), [...ops.EVENTS].sort());
-  assert.deepEqual(Object.keys(ops.UPD_EVENTS), ['responses', 'pinned', 'reactions', 'stage', 'proposal', 'help', 'sentTo', 'replyTo']);
+  assert.deepEqual(Object.keys(ops.UPD_EVENTS), ['responses', 'pinned', 'reactions', 'stage', 'proposal', 'help', 'sentTo', 'replyTo', 'also']);
   assert.ok(Object.isFrozen(ops.UPD_EVENTS) && Object.isFrozen(ops.EVENTS) && Object.isFrozen(ops.KINDS));
   assert.deepEqual(ops.eventsOf({ o: 'nothing', s: 1 }, t.room), [], 'a kind the table does not hold sends nothing');
 });
@@ -2366,4 +2366,38 @@ test('cleanClock: the admin\'s choice over the one kept, each field by type; unk
   assert.deepStrictEqual([views.lockWords({ show: 'time', locked: true }, null), views.lockWords({ show: 'time', locked: false }, { show: 'time', locked: true }), views.lockWords({ show: 'time', locked: false }, null)],
     ['locked', 'unlocked', '']);
   assert.ok(views.sameClock({ show: 'time', locked: false }, { show: 'time', locked: false }) && !views.sameClock({ show: 'time', locked: false }, { show: 'time', locked: true }) && views.noClock(undefined));
+});
+
+test('cleanOnStage: what the admin lets a seat On stage do, three booleans over those kept, each by type; an unknown key, a string and {toString: 1} refused in words; and `also`, where else a message from On stage goes, read by type', () => {
+  const WORDS = 'Choose on or off.';
+  const OFF = { screens: false, people: false, clears: false };
+  assert.deepStrictEqual([...views.ON_STAGE_KEYS], ['screens', 'people', 'clears']);
+  // Each switch taken, each left out kept from `was` (none kept: every one off); a change names only what it changes.
+  assert.deepStrictEqual(views.cleanOnStage({ screens: true, people: true, clears: true }), { screens: true, people: true, clears: true });
+  assert.deepStrictEqual(views.cleanOnStage({ screens: true }), { screens: true, people: false, clears: false });
+  assert.deepStrictEqual(views.cleanOnStage({ clears: true }, { screens: true, people: false, clears: false }), { screens: true, people: false, clears: true });
+  assert.deepStrictEqual(views.cleanOnStage({ screens: false }, { screens: true, people: true, clears: true }), { screens: false, people: true, clears: true });
+  assert.deepStrictEqual(views.cleanOnStage({ people: true }, 'nonsense'), { screens: false, people: true, clears: false }, 'what is kept read whole, else every one off');
+  // None named (never answered as done), an unknown key, a string, a value that is no boolean, null, and values no String()
+  // can convert: refused, never thrown.
+  for (const o of [{}, { web: true }, { screens: true, web: true }, 'screens', { screens: 'yes' }, { people: 1 }, { clears: null }, { toString: 1 }, { screens: { toString: 1 } }, null, undefined, 7, [], [true]]) {
+    assert.deepStrictEqual(views.cleanOnStage(o), { error: WORDS }, JSON.stringify(o));
+  }
+  assert.deepStrictEqual(views.onStageAsked(JSON.parse('{"__proto__": {"screens": true}}')), { error: WORDS }, 'a key a parse makes its own is refused');
+  // A store's switches read back whole, else every one off; the same, and none.
+  assert.deepStrictEqual([views.onStageOf({ screens: true, people: false, clears: true }), views.onStageOf({ screens: true }), views.onStageOf(undefined)], [{ screens: true, people: false, clears: true }, OFF, OFF]);
+  assert.ok(views.sameOnStage({ screens: true, people: false, clears: false }, { screens: true, people: false, clears: false }) && !views.sameOnStage(OFF, { screens: true, people: false, clears: false }) && views.noOnStage(null));
+  // The audit row's words: a guest's by the switches moved, an account's all three in short; never a code or a text.
+  assert.equal(views.onStageSaid({ screens: true, people: false, clears: true }, OFF, { guest: true }), 'may send to a countdown screen: on, Got it clears: on');
+  assert.equal(views.onStageSaid({ screens: false, people: true, clears: false }, { screens: true, people: true, clears: false }, { guest: true }), 'may send to a countdown screen: off');
+  assert.equal(views.onStageSaid({ screens: true, people: false, clears: false }, OFF), 'countdown screens on, people On stage off, Got it clears off');
+  assert.equal(views.ON_STAGE_ADMIN, 'Only an admin may choose what an On stage seat may do.');
+
+  // `also`: an object naming at least one of screens and people, each true, and nothing else; `{}` refused.
+  const SHAPE = 'Choose where else it goes: a countdown screen or people On stage.';
+  assert.deepStrictEqual([views.alsoAsked({ screens: true }), views.alsoAsked({ people: true }), views.alsoAsked({ screens: true, people: true })], [{ screens: true }, { people: true }, { screens: true, people: true }]);
+  for (const a of [{}, { screens: 'yes' }, { web: true }, { screens: true, web: true }, { screens: false }, { people: 1 }, null, undefined, 'screens', ['screens'], { toString: 1 }]) {
+    assert.deepStrictEqual(views.alsoAsked(a), { error: SHAPE }, JSON.stringify(a));
+  }
+  assert.deepStrictEqual(Object.keys(views.ALSO_WORDS), ['onStage', 'shape', 'text', 'noScreens', 'noPeople', 'noCountdown', 'nobody']);
 });

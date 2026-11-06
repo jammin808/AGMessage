@@ -730,7 +730,7 @@ test('(d), (i), (j) the contexts: conn made in the connection after each helper 
   const call = groupAt(server, built + 'const { ctx, takesCtx } = contexts('.length - 1);
   assert.equal(call.entries.length, 1, 'contexts() is given the parts and nothing else');
   const parts = groupAt(server, call.at[0]).entries.map(keyOf);
-  assert.deepEqual(parts.map((k) => k.key), ['store', 'apply', 'systemMessage', 'readSend', 'messageOf', 'uploadOnDisk', 'fileCopy', 'tickets', 'makeMessageId', 'removeUnused', 'fileNamesOf', 'audit', 'accounts', 'boardDirty', 'newSideRoom', 'renameRoom', 'roomNameRefused', 'newGuestCode', 'guestPagesOf', 'sendGuestsOut', 'codeChanged', 'invitesFor', 'settings', 'sendersOf', 'sendsInto', 'setRoomSends', 'linkFor', 'stagePayload', 'pages', 'stageRecord', 'hallPages', 'takeSends', 'holdingOf', 'pagesChanged', 'pageHidden', 'selfHosts', 'tellWebRights', 'viewChanged', 'clockChanged', 'pinsChanged', 'ownPins', 'stageSource', 'stageCheck', 'freshUpload', 'stageDropped', 'io', 'marked', 'fileMarked', 'inUseRooms', 'markShared', 'markFresh', 'markRefusal', 'markedTakes', 'screensShowing', 'madeUrls']);
+  assert.deepEqual(parts.map((k) => k.key), ['store', 'apply', 'systemMessage', 'readSend', 'messageOf', 'uploadOnDisk', 'fileCopy', 'tickets', 'makeMessageId', 'removeUnused', 'fileNamesOf', 'audit', 'accounts', 'boardDirty', 'newSideRoom', 'renameRoom', 'roomNameRefused', 'newGuestCode', 'guestPagesOf', 'sendGuestsOut', 'codeChanged', 'invitesFor', 'settings', 'sendersOf', 'sendsInto', 'setRoomSends', 'linkFor', 'stagePayload', 'pages', 'stageRecord', 'hallPages', 'takeSends', 'holdingOf', 'pagesChanged', 'pageHidden', 'selfHosts', 'tellWebRights', 'viewChanged', 'clockChanged', 'pinsChanged', 'onStageChanged', 'ownPins', 'stageSource', 'stageCheck', 'freshUpload', 'stageDropped', 'io', 'marked', 'fileMarked', 'inUseRooms', 'markShared', 'markFresh', 'markRefusal', 'markedTakes', 'screensShowing', 'madeUrls']);
   assert.ok(parts.every((k) => k.value === null), 'each part by its own name');
   const declared = new Map();
   for (const m of server.matchAll(/^(?:const|let|var|class|function\*?|async function\*?)\s+([A-Za-z_$][\w$]*)/gm)) if (!declared.has(m[1])) declared.set(m[1], m.index);
@@ -1579,6 +1579,9 @@ const ANY_ROOM = {
     'a held line\'s rooms, Main or side, are kept while they are still here',
     'a person\'s pins for themselves are read in the room, Main or side, their page sits in',
     'and kept at a start for every room, Main or side, still here',
+    'what the admin lets a person do On stage is told to each page of theirs with the countdown screens of the hall of its room, Main or side',
+    'a hall\'s countdown screens told again to the pages in each of its rooms, Main or side, whose person may send to them',
+    'a message from On stage followed for where it also went is read in its room by its key, wherever it sits',
   ],
   'lib/handlers/rooms.js': [
     'a hall full of rooms says how many it holds',
@@ -1591,6 +1594,7 @@ const ANY_ROOM = {
     'the rooms of a hall a pusher may read, Main or side: a holding picture shared in them, and the people a push names or a console lists seated in them',
     'the room the admin names a person\'s chat view in, by its key, Main or side: the person seated there',
     'the room the admin names a person\'s clock or countdown in, by its key, Main or side: the person seated there',
+    'the room the admin names what a person may do On stage in, by its key, Main or side: the person seated there',
     'a confidential file shown where it is not in use names each room, Main or side, it will be in use in',
     'and its pusher confirms it from a room, Main or side, where it is in use',
   ],

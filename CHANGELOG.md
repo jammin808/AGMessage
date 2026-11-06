@@ -6142,6 +6142,148 @@ themselves", and the three readings answered the same day)
   offline, For the room disabled and For me ◷).
 - The papers: `README.md`, `README.txt`, `SECURITY.md`, `docs/ACCOUNTS.md` (pins by seat), `docs/ANALYSIS.md` (the gate's rights, the typed case), `CLAUDE.md`.
 
+**What a seat On stage may do: where its messages also go, and what Got it does** (the plan's Part 7, unit 20d, its §17.6
+with §17.1's `message {also}` rows, `compose.also` and the `person` and `account` rows, and §17.2's Also on, status words
+and cleared line, as Part 7 §0.1-§0.3 amend Part 1 §1.8, §1.10, §2.7, §3.3 and §6, Part 5 §13.3.4, §14.2, §14.4 and §16.7
+and Part 4 §5.9.1, §5.9.10, §5.9.11 and §5.13; the owner's answers B2, "An account seated on stage gets messages on that
+page … An admin can choose if messages can go onto other screens - such as on a countdown screen, or anyone with an On
+stage seat", and B4, "Got it tells the backstage team with the members name. Clearing the message is an admin option, off
+by default", with "Pins 3", a pinned message never cleared; "the admin" read as Part 0 §0.8 C14's one predicate)
+- **Three switches for a person, each off by default and the admin's alone**: **May send to a countdown screen**, **May
+  send to people On stage** and **Got it clears the message** (`onStage {screens, people, clears}`, cleaned fail-closed by
+  `lib/views.js` `cleanOnStage`: each a boolean, a change naming only what it changes, anything else "Choose on or off.",
+  400 over HTTP, never a throw). A guest's is kept by their uid in `pages.json`'s `views` beside their chat view and clock,
+  an account's in `accounts.json` beside them (`Accounts.view` tells it last); `POST /api/users` ignores it, so an account
+  is made with every switch off, whoever makes it. **The admin** is the laptop's token or an account whose role is admin
+  (`theAdmin()` on the socket, the signed-in account's role on the PATCH); a manager granted `settings.manage` or
+  `users.manage` is refused, "Only an admin may choose what an On stage seat may do.", and its pages draw the switches
+  disabled with those words; nobody sets their own (the self-change words). On the socket, `admin:setOnStage {roomCode,
+  socketId, screens?, people?, clears?}` (the takes module, behind the admin page's gate, then the predicate), an account
+  reached only as the Accounts page would reach it; over HTTP, `PATCH /api/users/:id {onStage}`. A change that names no
+  switch (`{}`), or `admin:setOnStage` naming anything but the person, the switches and the outbox's `cid`, is refused in
+  the same words on both doors, never answered as done.
+- **Three doors, in the same words, each a tick with the admin's words under it.** The admin page's people rows (an **On
+  stage** column, for a person seated On stage: each tick named for the person, why it cannot be ticked drawn under them;
+  "Applies On stage." for anyone else), the hall page's People panel (the person's ⋯, the admin's own page, full view, a
+  `menuitemcheckbox` each) and the Accounts page (under **When On stage** in the editor, once per account whatever the hall,
+  and in the account's ⋯; disabled with "Applies On stage." while the account sits On stage in no hall; a Save sends them
+  only from an admin account).
+- **Told live, nothing closed.** The join's answer appends `onStage` after `pins`, its last key (the support view's, the
+  person's), with the names of the hall's screens showing the countdown now (`countdownScreens`, names only, never a link,
+  a token or an id) while `screens` is on; a change is told as `onStage` to every page of the person's and the admin's view
+  of them, and to no other page; the names are told again to those pages when they move (read when the screens' frame
+  goes). The admin's people list carries `onStage` beside `view` and `clock`, the admin's alone.
+- **Also on.** With one of the two places' switches on, the On stage composer (in either view: the server reads the seat
+  and the switch, never the view) draws a row above its field, "Also on", with a chip for each switch on: **⏱ Lectern**
+  (the hall's countdown screen by name, "⏱ 2 countdown screens" where there are more, their names in its title and the line
+  under it; waiting, with "No screen in this hall shows the countdown now.", while none does) and **👥 Everyone On stage**
+  ("👥 On stage" on a phone), each an `aria-pressed` toggle, ✓ and filled when on, off after every send, in a group labelled
+  "Also on" and described by the line under it. With ⏱ chosen the field holds 160 characters and says "Replaces Lectern's
+  countdown line." with the count ("19 / 160"). Such a send is `message {type: 'text', text, priority?, replyTo?, also: {screens?, people?}}`, sent **now**, never
+  held: offline it is refused at once and the text kept; a refusal keeps the text, its 🔥, its reply and its chips, and says
+  the server's words.
+- **The checks, in order, before anything is written**, so a refusal posts nothing: the seat On stage ("Only On stage seats
+  send this way: use ⧉ Show on screens or 📺 Show the Board."); `also` by type, at least one of the two places, each `true`
+  (`{}` refused: "Choose where else it goes: a countdown screen or people On stage."); a message, not a help request ("Only
+  a message goes there, not a help request."); each place's switch **read from the store at each send** ("The admin has
+  not let you send to countdown screens." / "… to people On stage."), so one turned off while the page is open refuses the
+  next send with no reload; a screen of the hall showing the countdown now, and a line of 160 characters at most, never cut
+  ("A countdown screen's line holds 160 characters (this is 212)."); another person seated On stage, a second device of the
+  sender's being the sender ("Nobody else is On stage now."), and a line a card holds ("A line shown On stage holds 1,200
+  characters (this is 1,201).", which only a page other than AGMessage's own can reach: the composer holds 300); then one
+  token of the writes bucket for each place, beside the message's own.
+- **Then:** the message is posted with `also`, names only (`{screens: [{name, seq, state}], people: {seq, shown, of,
+  state}}`, each take's number as it will be given, `of` the people On stage it goes to); only once it is posted are the
+  places taken, so a message not posted puts nothing anywhere: each countdown screen's line becomes the message (its tone
+  🔥's for a priority message: the countdown and the hall's timer stay), one `display.take` row each naming the person and
+  the length, never the words ("Lectern → the countdown with a line from Margaret Lowe, On stage (38 characters)"); the
+  Board's pages are given a typed line
+  (`{kind: 'snippet', unit: 'text', text}`, by `{name, onStage: true}`) that always arrives in the side bar, kept in a place
+  of the Board's own for it (`lib/pages.js`'s `line`, told to a page as `page:take {layer: 'line'}` and in the join's answer
+  as `line`), which only another such line replaces: it supersedes nothing anyone was shown and nothing of anyone else's
+  supersedes it. It never takes the Board's information place, never puts away a card beside it (a researcher's for the
+  Board, or one for a person, with its answer) and covers no chat (a quote or the operator's web page over a Board
+  member's chat stays, with its answers); the operator's Back to chat leaves it, a Take down never names it, and a
+  withdrawal or a Main room's reset ends it as any take. It is numbered as a take, entered in the hall's Earlier list as it
+  is sent (so a page that comes back draws it there), drawn on every Board page as a card in Shown to you, the sender's own
+  included, "Typed by Margaret Lowe (On stage)", one `page.push` row ("the Board (5 pages) → a line typed by
+  Margaret Lowe, On stage (41 characters), beside their chat") and an entry of the stage record naming the sender "(On
+  stage)". The ack carries `also` as sent ("sending", never "shown").
+- **Attempts are not facts.** The message says where it also went, at the end of its author's line, for every reader of
+  the room, in both views: "⏱ Lectern: sending", "⏱ On Lectern ✓", "△ Lectern could not show it" (in warn's colour beside
+  its △), "⏱ Lectern: offline", "Replaced on Lectern at 14:12"; "👥 On stage: sending", then "👥 Shown to 5 of 6 On stage",
+  counted by person, never by page: of the people On stage it went to (an account's every device one person, a guest's page
+  by its uid; the sender among them), those a page of whose said it showed the card in their side bar, so a page that comes
+  back on a new connection counts as its person once, and someone who sat down On stage after it was sent counts for
+  nothing. The server follows each such message (its screens by their ids, kept on the server beside the message's id: the
+  newest per person and place, 500 at most, let go once nothing more can change, and with its hall) and updates its `also`
+  by an `upd` op (a new field of the op table, `alsoUpdate`) when the hall's screens or pages change, once a second at most
+  (a new state frame, `also`). A line on a screen is followed until the screen moves on, so its readers are told when it
+  was replaced; an older message's line taken by the same person's newer one is read once more as it is let go. No frame to
+  a page of the room, the message, its updates or the ack holds a screen's id, link or token.
+- **Got it clears the message** (B4), with the switch on: Got it is the same act and the same report to backstage ("👍
+  Margaret got it"); then the person's own pages seated On stage, in either view (the full view's React ▸ 👍 is the same
+  fact), draw the message as one muted 44 px line in its place, "👍 Got and cleared: Ana Ribeiro 14:02 · Show", 🔥 before
+  the name for a priority message, a run of them one line ("👍 Got and cleared: 3 messages · Show"). **Show** draws them
+  again, marked got, until the page reloads; **Hide** folds them back (a catalogue kind of its own, `cleared`, its one act
+  local). The page reads it from facts it has (its person's 👍, the switch: `AGM.catalog.gotCleared`), so an account's
+  devices clear together; a 🔥 message got and cleared leaves the strip too, and Got all N clears each. **Never cleared:** a
+  message pinned for the room or for the person, a question, one's own, and anything on anyone else's page or on a page
+  seated backstage. The room's record, the backstage page, the transcript and the minutes keep every message. Off, the
+  message stays, "👍 You: got it", as before.
+- **Audited, one row a change, no code and no text:** `person.onStage` for a guest ("Rita (guest) → may send to a countdown
+  screen: on", the switches moved), `user.update` for an account ("onStage → countdown screens on, people On stage off, Got
+  it clears off"); a change that changes nothing writes none.
+- **Rolling back:** 0.5.1 keeps the accounts' `onStage` and ignores it, and reads no `pages.json`; a message's `also` is kept
+  and ignored.
+- Choices where the plan left room: a screen with no browser on its link reads "⏱ Lectern: offline" (a state the plan's
+  words did not name) and is followed until a browser shows it; a line on screen is followed until the screen moves on,
+  where §17.6 stops at the confirm, so "Replaced on Lectern at 14:12" is said after it was shown too; the Board's card is
+  kept in a place of its own (`line`) rather than beside the Board's information, so that it supersedes nothing there, and
+  a newer line from anyone On stage replaces it (the older message then says its card moved on, keeping how many saw it);
+  "👥 Shown to N of M" counts people, `M` those seated On stage when it was sent; "Nobody else" means another person, so a
+  second device of the sender's alone is refused; the two audit rows count a line's characters as every quote's row does
+  (code points), while the 160 is the screen's own bound, counted as the composer counts it.
+- Tests: `test/also.test.js` (new, end to end: the switches off by default and never set by create, by the admin and by a
+  manager, over the socket and the PATCH; a guest's in `pages.json`, an account's in `accounts.json`, read from the files;
+  told to the person's pages and support view and nobody else, the join's last key, the admin's people list alone; a
+  `settings.manage` and a `users.manage` manager refused on the socket and the PATCH, and a PATCH on oneself with the
+  self-change words; what is no switch refused with 400, `{}` among them, and `admin:setOnStage` naming no switch or a key
+  of another name refused in the same words; a switches-only change ending no socket; one row a change, no code and no
+  text; the default refusals, posting nothing; a backstage guest's `also`, `{}`, `{screens: 'yes'}`, `{web: true}` and a
+  help request with `also`; no screen on the countdown, its names told to that person alone when one is put on it; 161
+  characters; the Lectern's line at its next take and the Foyer untouched; the screen's confirm turning `also` to shown for
+  every reader; the row with no text; 🔥 urgent; a line replaced, by the same person's newer one and by the operator, said
+  with when; alone On stage, and with only a second device of one's own; a line longer than a card holds; the message
+  posted saying the number its card's take is given; the line as a card in its own place on every Board page, the
+  sender's included, with the operator's quote over the chat, a researcher's card beside it for the Board and one for a
+  person with that person's answer all kept, in `pages.json` and on a page that comes back, and the line in Earlier;
+  "Shown to 1 of 2" after one person's confirm, kept at 1 when that person's page comes back and confirms again and when
+  someone seated On stage since confirms, then "Shown to 2 of 2"; the `page.push` row; no screen's id or link in any frame
+  or ack; a Board account's switch turned off by the PATCH with its page open refusing its next send), `test/pages.test.js`
+  (the Board's `line` place: only a line typed On stage to the Board in the side bar, superseding nothing and superseded by
+  nothing else, in Earlier as it is sent, reported on in its place, read back in it and dropped there when it is no such
+  line, withdrawn; `nextSeq`), `test/units.test.js` (`cleanOnStage`, `{}` refused, `alsoAsked`, the audit words; the op
+  table's `also`), `test/catalog.test.js` (the facts' `onStage`; `compose.also` in both views and its chips, ⏱ waiting with
+  why, "⏱ 2 countdown screens" with their names, `now`; the three switches on the admin page, the People panel and the
+  Accounts page, disabled for a manager and with "Applies On stage."; `alsoWords` and `alsoParts`' warn; `gotCleared` in
+  both views and never backstage, and what it never clears; the `cleared` kind in both views), `test/menus.test.js`
+  (`admin:setOnStage` refused to every seat but the admin's; Also on refused to every seat the admin has let send nowhere
+  else, On stage in the table's words; the join's keys), `test/inputs.test.js` (`admin:setOnStage`'s and `also`'s typed
+  cases, a request naming no switch among them), `test/modules.test.js` (`onStageChanged` in the contexts; the any-room
+  readers' reasons), `test/resilience.test.js` and `test/server.test.js` (the `also` frame), and the browser smoke (Also on
+  absent with both switches off and one chip per switch on, ⏱ alone and then both, `aria-pressed`, the group described by
+  its line, off after a send; the field's 160 with ⏱ chosen and its words and count; the line on the Lectern's page and "⏱
+  On Lectern ✓" for every reader; offline, a send with a chip on refused at once, its text, 🔥 and chip kept, nothing held
+  or posted; 👥's card in its own place, "Typed by Mia (On stage)", with no layer over the chat; no sideways scroll at 390
+  px with "👥 On stage" in short; Got it clears off and on, its line 44 px, Show and Hide, a message pinned for the room,
+  one pinned for the person, a question and one's own kept, a 👍 from the person's other device clearing it there too, and
+  the backstage page keeping it, "👍 Mia got it"; the admin page's On stage cell, its ticks named for the person, kept by
+  the server, and "Applies On stage." beside a backstage guest; the Accounts editor's three switches and the account's ⋯).
+- The papers: `README.md`, `README.txt`, `SECURITY.md`, `docs/ACCOUNTS.md`, `docs/DISPLAYS.md`, `docs/DESIGN.md`,
+  `docs/ANALYSIS.md` (the typed cases), `CLAUDE.md`. `docs/NODES.md` and `docs/SHOWBUS.md` are unchanged: nothing of this
+  reaches the Show Bus, the context or the hello.
+
 **Fixed**
 - An upload whose stored path is no file (a folder in its place) is refused as one that could not be checked, on every
   platform. The archive's check opened it and, on Windows, read a folder as an empty file, so it was refused in the

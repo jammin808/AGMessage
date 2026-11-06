@@ -487,7 +487,7 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     assert.ok(typeof read.kb === 'number' && read.kb > 0, 'and its snapshot\'s size, kept when the hall was made');
 
     // What coalescing saves: each state frame's changes, and the frames sent for them.
-    assert.deepEqual(Object.keys(h.latest), ['board', 'screens', 'people', 'seen', 'rooms', 'sends', 'pages', 'activity']);
+    assert.deepEqual(Object.keys(h.latest), ['board', 'screens', 'people', 'seen', 'rooms', 'sends', 'pages', 'also', 'activity']);
     for (const l of Object.values(h.latest)) assert.ok(Number.isInteger(l.marks) && Number.isInteger(l.flushes) && l.flushes <= l.marks, JSON.stringify(h.latest));
     assert.ok(h.latest.board.flushes >= 1, 'the board was sent: ' + JSON.stringify(h.latest.board));
     assert.ok(gone.latest.screens.marks > h.latest.screens.marks, 'a screen made, opened and closed is marked: ' + JSON.stringify(gone.latest.screens));
@@ -783,7 +783,7 @@ test('state frames: no per-message deflate; a join storm\'s people list and a bu
 
   await t.test('health says what each state frame saved: the changes marked and the frames sent', async () => {
     const { latest } = await (await fetch(srv.base + '/api/health', { headers: { cookie: admin } })).json();
-    assert.deepEqual(Object.keys(latest), ['board', 'screens', 'people', 'seen', 'rooms', 'sends', 'pages', 'activity']);
+    assert.deepEqual(Object.keys(latest), ['board', 'screens', 'people', 'seen', 'rooms', 'sends', 'pages', 'also', 'activity']);
     for (const [name, l] of Object.entries(latest)) assert.ok(Number.isInteger(l.marks) && Number.isInteger(l.flushes) && l.flushes <= l.marks, name + ' ' + JSON.stringify(l));
     assert.ok(latest.people.marks >= 30 && latest.people.flushes < latest.people.marks / 3, 'the join storm\'s people lists: ' + JSON.stringify(latest.people));
     assert.equal(latest.seen.marks, 21, 'every receipt that moved is marked');
@@ -855,7 +855,7 @@ test('a first open carries the newest 200 messages, what a page keeps in view fr
     assert.deepEqual(j.files, [{ id: picture, filename: 'stage.png', mime: 'image/png' }], 'every file of the room, its message held or not, and no link for an observer');
     assert.ok(!j.history.some((m) => m.id === quoted) && j.history.at(-1).id === reply && j.history.at(-1).replyTo.id === quoted && !j.history.at(-1).replyTo.gone, 'a reply whose quoted message is earlier than the window');
     assert.deepEqual(j.history.find((m) => m.id === toDoomed).replyTo, { id: doomed, name: 'Chair', snippet: 'Is the lectern mic on?', gone: true }, 'a reply whose quoted message has gone says so');
-    assert.deepEqual(Object.keys(j).slice(-6), ['more', 'older', 'files', 'theAdmin', 'clock', 'pins'], 'appended at the end of the answer, before the clock or countdown\'s and the person\'s pins');
+    assert.deepEqual(Object.keys(j).slice(-7), ['more', 'older', 'files', 'theAdmin', 'clock', 'pins', 'onStage'], 'appended at the end of the answer, before the clock or countdown\'s, the person\'s pins and what they may do On stage');
     assert.equal(j.seq, now.at(-1).seq);
 
     // Read back from the window's oldest, a page at a time, until nothing is left: every message once, in order. A change

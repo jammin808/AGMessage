@@ -133,6 +133,12 @@ const SEATS = {
   supportBoard: seat({ role: 'board', uid: 'a-root', uploadToken: null, forwardable: false, adminView: true, name: 'Kim' }),
   // The simple view with a question pinned for this person (the join's `pins`), and one answered.
   boardSimplePinned: seat({ role: 'board', uid: CHAIR, uploadToken: null, forwardable: false, view: 'simple', waiting: { plain: ['m8', 'm9'], priority: ['m10'] }, pins: ['m4', 'm11'] }),
+  // What the admin lets a seat On stage do (plan 7-§17.6): both places, in either view, the Lectern on the countdown; the
+  // countdown screens alone while no screen shows it; Got it clears, in the simple view.
+  boardBoth: seat({ role: 'board', uid: CHAIR, uploadToken: null, forwardable: false, onStage: { screens: true, people: true, clears: false, countdownScreens: ['Lectern'] } }),
+  boardSimpleBoth: seat({ role: 'board', uid: CHAIR, uploadToken: null, forwardable: false, view: 'simple', onStage: { screens: true, people: true, clears: false, countdownScreens: ['Lectern'] } }),
+  boardScreensOnly: seat({ role: 'board', uid: CHAIR, uploadToken: null, forwardable: false, onStage: { screens: true, people: false, clears: false, countdownScreens: [] } }),
+  boardSimpleClears: seat({ role: 'board', uid: CHAIR, uploadToken: null, forwardable: false, view: 'simple', onStage: { screens: false, people: false, clears: true }, pins: ['m9'] }),
 };
 const from = (uid, role, name) => ({ uid, role, name });
 const OBJECTS = {
@@ -242,7 +248,10 @@ const PICK_INSIDE = { id: 'pick', units: [], copy: '', picture: 'inside', seen: 
 const PICK_ALONE = { ...PICK_WORDS, people: [] };
 // Every other unit: a sentence and items of a document's blocks, a range of a sheet's cells, and a slide.
 const PICK_MORE = { ...PICK_WORDS, units: [{ unit: 'sentence', size: '40 ch' }, { unit: 'item', size: '2 items' }, { unit: 'range', size: '4 cells' }, { unit: 'slide', size: '30 ch' }] };
-const HALL_OBJECTS = { compose: Object.values(COMPOSE), chip: [STAGE], header: [HEADER, HEADER_OFF, HEADER_UNTOLD, HEADER_ACCOUNT], take: [TAKE, TAKE_HOT, TAKE_FULL, TAKE_WEB, TAKE_HELD, TAKE_DOC, TAKE_DOC_PLAIN], card: [CARD, CARD_SIDE, CARD_DOC], past: [PAST, PAST_DOC], sheet: [SHEET, SHEET_SMALLEST, SHEET_FULL], board: [BOARD_CHAT, BOARD_MINE, BOARD_THEIRS, BOARD_EMPTY, BOARD_INFO, BOARD_OPERATOR, BOARD_BESIDE, BOARD_BESIDE_ONLY, BOARD_OP_ON, BOARD_DOC], earlier: [EARLIER, EARLIER_NONE, QUOTE_EARLIER],
+// The simple view's line in place of messages the person got and cleared (Got it clears, plan 7-§17.6): folded, and shown.
+const CLEARED = { id: 'cleared:m8', run: 'm8', open: false, count: 2 };
+const CLEARED_OPEN = { ...CLEARED, open: true };
+const HALL_OBJECTS = { compose: Object.values(COMPOSE), chip: [STAGE], header: [HEADER, HEADER_OFF, HEADER_UNTOLD, HEADER_ACCOUNT], take: [TAKE, TAKE_HOT, TAKE_FULL, TAKE_WEB, TAKE_HELD, TAKE_DOC, TAKE_DOC_PLAIN], card: [CARD, CARD_SIDE, CARD_DOC], past: [PAST, PAST_DOC], sheet: [SHEET, SHEET_SMALLEST, SHEET_FULL], board: [BOARD_CHAT, BOARD_MINE, BOARD_THEIRS, BOARD_EMPTY, BOARD_INFO, BOARD_OPERATOR, BOARD_BESIDE, BOARD_BESIDE_ONLY, BOARD_OP_ON, BOARD_DOC], earlier: [EARLIER, EARLIER_NONE, QUOTE_EARLIER], cleared: [CLEARED, CLEARED_OPEN],
   pick: [PICK_WORDS, PICK_LONG, PICK_GUESS, PICK_CELL, PICK_REGION, PICK_INSIDE, PICK_ALONE, PICK_MORE] };
 
 // ---------------------------------------------------------------- the other pages' seats and objects, as their answers make them
@@ -284,6 +293,8 @@ const PAGE_OBJECTS = {
   person: {
     guest: { socketId: 's-kim', uid: 'u-kim', name: 'Kim', role: 'research', account: false, linkedRooms: [], hall: 'Hall 2' },
     account: { socketId: 's-ana', uid: 'a-ana', name: 'Ana', role: 'research', account: true, linkedRooms: ['M3N4PQ'], hall: 'Hall 2' },
+    // A guest seated On stage, May send to a countdown screen on: the admin's three On stage switches are theirs.
+    board: { socketId: 's-gil', uid: 'u-gil', name: 'Gil', role: 'board', account: false, linkedRooms: [], hall: 'Hall 2', onStage: { screens: true, people: false, clears: false } },
     // On the hall page: a person whose key on people's pages the page knows, their pages showing the clock.
     keyed: { id: 'person:u-kim', uid: 'u-kim', name: 'Kim', role: 'research', key: 'u:u-kim', kind: 'clock' },
     // And a web page over their clock, which Take down hands back.
@@ -347,7 +358,7 @@ const PAGE_OBJECTS = {
     sideCrew: { code: 'LGQ4MZP8', id: 'h5', state: 'coming', canRespond: true, canOpen: false, hall: 'Hall 2 › Legal', room: 'Legal', category: 'Vision' },
   },
   account: {
-    other: { id: 'a-kim', name: 'Kim Tech', username: 'kim', disabled: false, locked: '', self: false, clock: { show: 'time', locked: false } },
+    other: { id: 'a-kim', name: 'Kim Tech', username: 'kim', disabled: false, locked: '', self: false, clock: { show: 'time', locked: false }, onStage: { screens: false, people: true, clears: false }, board: ['K7P2QX'] },
     off: { id: 'a-kim', name: 'Kim Tech', username: 'kim', disabled: true, locked: '', self: false },
     locked: { id: 'a-root', name: 'Root Admin', username: 'root', disabled: false, locked: 'Only an admin may change an admin\'s account.', self: false },
     self: { id: 'a-root', name: 'Root Admin', username: 'root', disabled: false, locked: '', self: true },
@@ -364,7 +375,7 @@ const KIND_SEATS = {
   msg: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple, SEATS.researchSends], file: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple], screen: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple],
   compose: [SEATS.admin, SEATS.researchNoDesk, SEATS.board, SEATS.boardSimple, SEATS.researchSends], chip: [SEATS.admin, SEATS.researchNoDesk], header: [SEATS.admin, SEATS.board, SEATS.research],
   take: [SEATS.board, SEATS.boardSimple, SEATS.boardFull, SEATS.research], card: [SEATS.board, SEATS.boardSimple, SEATS.observer], past: [SEATS.board, SEATS.boardSimple, SEATS.observer], sheet: [SEATS.boardSimple, SEATS.boardSimpleFull, SEATS.supportBoard], board: [SEATS.adminPush, SEATS.pushNoStagewatch, SEATS.adminWeb, SEATS.staffShow],
-  earlier: [SEATS.research, SEATS.boardSimple, SEATS.observer], pick: [SEATS.adminPush, SEATS.staffShow],
+  earlier: [SEATS.research, SEATS.boardSimple, SEATS.observer], cleared: [SEATS.boardSimpleClears, SEATS.boardSimple], pick: [SEATS.adminPush, SEATS.staffShow],
   adminRoom: [PAGE.admin, PAGE.adminNoAi, PAGE.adminUsers, PAGE.boardAdmin], person: [PAGE.admin, SEATS.research, SEATS.board, SEATS.techPush, SEATS.guestWeb], adminMsg: [PAGE.admin], link: [PAGE.admin], tunnel: [PAGE.admin], laptop: [PAGE.admin],
   hall: [PAGE.board], room: [PAGE.board, SEATS.research], help: [PAGE.board], account: [PAGE.accountsAdmin], audit: [PAGE.accountsAdmin, PAGE.filtered],
 };
@@ -399,7 +410,7 @@ test('the file types: the pages\' one copy of the types the stage shows and of t
 });
 
 test('the entries: kind.verb ids, known groups in order with danger last, labels, keys, icons that are no marks', () => {
-  assert.deepEqual(KINDS, ['msg', 'file', 'screen', 'compose', 'chip', 'header', 'take', 'card', 'past', 'sheet', 'board', 'earlier', 'pick', 'adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop', 'hall', 'room', 'help', 'account', 'audit'], 'the kinds landed so far');
+  assert.deepEqual(KINDS, ['msg', 'file', 'screen', 'compose', 'chip', 'header', 'take', 'card', 'past', 'sheet', 'board', 'earlier', 'cleared', 'pick', 'adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop', 'hall', 'room', 'help', 'account', 'audit'], 'the kinds landed so far');
   const seen = new Set();
   for (const kind of KINDS) {
     const list = C.KINDS[kind];
@@ -463,7 +474,8 @@ test('the verbs: each is one the server registers, a route it mounts, or local; 
     assert.ok(SOCKET_VERBS.has(e.verb), e.id + ': ' + e.verb + ' is a socket verb the server registers');
     assert.ok(['now', 'hold', 'self'].includes(e.mode), e.id + ': a mode of the outbox');
     // What a person wrote or answered is held; a report of one's own page is self; an act on something is now.
-    if (['message', 'room:send', 'actionResponse', 'help:respond', 'forward'].includes(e.verb)) assert.equal(e.mode, 'hold', e.id + ': ' + e.verb + ' is held');
+    // A message that also goes to a screen or people's pages (Also on, plan 7-§17.6) is sent now: never shown late.
+    if (['message', 'room:send', 'actionResponse', 'help:respond', 'forward'].includes(e.verb)) assert.equal(e.mode, e.id === 'compose.also' ? 'now' : 'hold', e.id + ': ' + e.verb + (e.id === 'compose.also' ? ' with also is sent now' : ' is held'));
     if (e.verb === 'page:report') assert.equal(e.mode, 'self', e.id);
     // Got it sets the person's 👍 (react with on), so a replay is harmless and it is held through a blip; every other
     // reaction is an act on the message now.
@@ -492,7 +504,8 @@ test('one word for one act: "…" for an act that asks first or opens a dialog, 
         assert.equal(!!a.danger, e.group === '9_danger' || e.id === 'link.accept', e.id + ': an ask is a danger exactly when its act is (and a certificate accepted)');
       }
       // "Full screen" is the device's own mode, which a take enters only by the person's gesture: no screen of the hall's.
-      if (/screen/i.test(label) && !/^(Leave )?[Ff]ull screen$/.test(label)) assert.ok(e.verb.startsWith('display:') || (e.verb.startsWith('stage:') && /speaker's screen/i.test(label)), e.id + ': "' + label + '" says screen and acts on one');
+      // The admin's switch that lets a message from On stage reach a countdown screen's line (plan 7-§17.6) names one too.
+      if (/screen/i.test(label) && !/^(Leave )?[Ff]ull screen$/.test(label)) assert.ok(e.verb.startsWith('display:') || (e.verb.startsWith('stage:') && /speaker's screen/i.test(label)) || (/\.onStageScreens$/.test(e.id) && label === 'May send to a countdown screen'), e.id + ': "' + label + '" says screen and acts on one');
       // What puts something on people's pages says Show (Show the clock, Show them); what takes it off says the words that
       // undo it (Back to chat, Back to Stagewatch (undo your …), Take down), and nothing else does. A pick's list names what
       // is shown (a paragraph, a picture of this page, what I see): the stage addendum's previewActions exactly, whose
@@ -507,7 +520,12 @@ test('one word for one act: "…" for an act that asks first or opens a dialog, 
 
 test('the facts: read from the server\'s answers, the link\'s words by its state, and nothing a page could name for itself', () => {
   const f = plain(C.facts({ role: 'director', uid: 'u1', uploadToken: '', canSendToStage: 1, stage: { status: 'connected' }, forwardable: 'yes', screens: { manage: true, displays: [{}, {}] }, connected: true }));
-  assert.deepEqual(f, { page: 'hall', role: 'board', view: 'full', uid: 'u1', post: true, viewer: false, pin: false, pinMine: true, ask: false, respondHelp: false, waiting: { plain: [], priority: [] }, tapped: '', changing: '', files: false, canSendToStage: true, canPropose: false, stageWhy: '', ai: false, download: false, takeDownloads: true, canScreens: true, screensManage: true, screens: 2, forwardable: true, sends: false, targets: [], mayKnowCode: false, setsCode: false, admin: false, connected: true, support: '', canPush: false, stagewatch: true, fullscreen: false, canWeb: false, canShow: false, docs: true, theAdmin: false, pins: [] });
+  assert.deepEqual(f, { page: 'hall', role: 'board', view: 'full', uid: 'u1', post: true, viewer: false, pin: false, pinMine: true, ask: false, respondHelp: false, waiting: { plain: [], priority: [] }, tapped: '', changing: '', files: false, canSendToStage: true, canPropose: false, stageWhy: '', ai: false, download: false, takeDownloads: true, canScreens: true, screensManage: true, screens: 2, forwardable: true, sends: false, targets: [], mayKnowCode: false, setsCode: false, admin: false, connected: true, support: '', canPush: false, stagewatch: true, fullscreen: false, canWeb: false, canShow: false, docs: true, theAdmin: false, pins: [], onStage: { screens: false, people: false, clears: false, countdownScreens: [] } });
+  // What the admin lets this person do On stage (the join's `onStage`), read by type: true alone is on, and the countdown
+  // screens are named only while `screens` is.
+  assert.deepEqual(plain(C.facts({ onStage: { screens: true, people: 'yes', clears: true, countdownScreens: ['Lectern', 5, ''] } }).onStage), { screens: true, people: false, clears: true, countdownScreens: ['Lectern'] });
+  assert.deepEqual(plain(C.facts({ onStage: { screens: false, countdownScreens: ['Lectern'] } }).onStage), { screens: false, people: false, clears: false, countdownScreens: [] });
+  assert.deepEqual(plain(C.facts({ onStage: 'all' }).onStage), { screens: false, people: false, clears: false, countdownScreens: [] });
   // The room's pin from a seat that posts and is not On stage; a pin for oneself from every seat (plan 7-§17.5); the
   // person's own pins as the join's `pins` lists them, ids only.
   assert.deepEqual(['observer', 'board', 'research'].map((role) => { const x = C.facts({ role }); return [x.pin, x.pinMine]; }), [[false, true], [false, true], [true, true]]);
@@ -1030,8 +1048,10 @@ test('the rest of the hall page: what each seat is shown on the composer, the st
     ['compose', 'research', COMPOSE.replying, ['compose.draft', 'compose.send', 'compose.priority', 'compose.attach', 'compose.cancelReply']],
     ['compose', 'research', COMPOSE.action, ['compose.send', 'compose.priority']],
     ['compose', 'research', COMPOSE.fileChosen, ['compose.draft', 'compose.send', 'compose.priority', 'compose.confidential', 'compose.attach', 'compose.removeFile']],
-    // On stage: its words, 🔥 and Send, no file and no draft.
+    // On stage: its words, 🔥 and Send, no file and no draft; Also on only while the admin has turned on a switch.
     ['compose', 'board', COMPOSE.director, ['compose.send', 'compose.priority']],
+    ['compose', 'boardBoth', COMPOSE.director, ['compose.send', 'compose.priority', 'compose.also']],
+    ['compose', 'boardScreensOnly', COMPOSE.director, ['compose.send', 'compose.priority', 'compose.also']],
     ['compose', 'board', COMPOSE.directorReplying, ['compose.send', 'compose.priority', 'compose.cancelReply']],
     // A Viewer granted posting sits backstage: it drafts, sends and attaches.
     ['compose', 'viewerPost', COMPOSE.text, ['compose.draft', 'compose.send', 'compose.priority', 'compose.attach']],
@@ -1075,8 +1095,23 @@ test('the rest of the hall page: what each seat is shown on the composer, the st
   assert.deepEqual(ids('person', PAGE.admin, PERSON), ['person.seat', 'person.forward', 'person.view', 'person.kick']);
   for (const f of Object.values(SEATS)) assert.ok(ids('person', f, PERSON).every((id) => id === 'person.mention'), 'a hall seat is shown only the hall page\'s half');
 
-  // The simple view: no menu door; its composer's acts are its buttons (Send, 🔥).
+  // The simple view: no menu door; its composer's acts are its buttons (Send, 🔥, and Also on's chips with a switch on).
   assert.deepEqual([ids('compose', SEATS.boardSimple, COMPOSE.director), plain(C.shown('compose', SEATS.boardSimple, COMPOSE.director)).map((e) => e.id)], [[], ['compose.send', 'compose.priority']]);
+  assert.deepEqual([ids('compose', SEATS.boardSimpleBoth, COMPOSE.director), plain(C.shown('compose', SEATS.boardSimpleBoth, COMPOSE.director)).map((e) => e.id)], [[], ['compose.send', 'compose.priority', 'compose.also']]);
+  // Also on's chips (plan 7-§17.6): one for each switch on, in both views alike (the server reads the seat, never the
+  // view); ⏱ named for the hall's countdown screen, or counted where there are several (their names for its title and
+  // the line under it), and waiting, with why, while none shows the countdown; each pressed as the composer holds it. A
+  // backstage seat is shown none, whatever its facts say.
+  const chips = (f, also) => plain(C.submenu('compose', 'compose.also', f, { ...COMPOSE.director, also })).map((c) => [c.value, c.icon + ' ' + c.label, c.role, c.checked, c.disabled]);
+  assert.deepEqual(chips(SEATS.boardBoth, {}), [['screens', '⏱ Lectern', 'menuitemcheckbox', false, ''], ['people', '👥 Everyone On stage', 'menuitemcheckbox', false, '']]);
+  assert.deepEqual(chips(SEATS.boardSimpleBoth, { screens: true }), [['screens', '⏱ Lectern', 'menuitemcheckbox', true, ''], ['people', '👥 Everyone On stage', 'menuitemcheckbox', false, '']]);
+  assert.deepEqual(chips(SEATS.boardScreensOnly, {}), [['screens', '⏱ Countdown screen', 'menuitemcheckbox', false, C.WORDS.noCountdown]]);
+  const several = plain(C.submenu('compose', 'compose.also', seat({ role: 'board', onStage: { screens: true, countdownScreens: ['Lectern', 'Foyer', 'Bar'] } }), { ...COMPOSE.director, also: {} }))[0];
+  assert.deepEqual([several.icon + ' ' + several.label, several.names], ['⏱ 3 countdown screens', 'Lectern, Foyer and Bar']);
+  assert.deepEqual(plain(C.submenu('compose', 'compose.also', seat({ role: 'board', onStage: { screens: true, countdownScreens: ['Lectern', 'Foyer'] } }), { ...COMPOSE.director, also: {} }))[0].label, '2 countdown screens');
+  assert.deepEqual(ids('compose', seat({ role: 'research', uploadToken: 't', onStage: { screens: true, people: true } }), COMPOSE.text).includes('compose.also'), false);
+  const also = C.entry('compose', 'compose.also');
+  assert.deepEqual([also.verb, also.mode, C.COUNTDOWN_LINE], ['message', 'now', 160], 'sent now, never held: a line for a screen or people\'s pages is never shown late');
   assert.deepEqual([ids('person', SEATS.boardSimple, PERSON), ids('chip', SEATS.boardSimple, STAGE)], [[], []], 'nothing of a person or the chip in the simple view');
 
   // The bar: Send alone, named for where it sends (its aria-label and its menu item alike).
@@ -1254,6 +1289,9 @@ test('the other pages\' matrix: what each seat is shown on each object of the ad
     ['person', 'admin', O.person.guest, ['person.chatView', 'person.clock', 'person.clockLock', 'person.seat', 'person.forward', 'person.view', 'person.kick']],
     ['person', 'admin', O.person.account, ['person.chatView', 'person.clock', 'person.clockLock', 'person.forward', 'person.unforward', 'person.view', 'person.kick']],
     ['person', 'manager', O.person.guest, ['person.chatView', 'person.clock', 'person.clockLock', 'person.seat', 'person.forward', 'person.view', 'person.kick']],
+    // And for a person seated On stage, the admin's three switches (plan 7-§17.6), on a manager's page too, disabled there.
+    ['person', 'admin', O.person.board, ['person.chatView', 'person.clock', 'person.clockLock', 'person.onStageScreens', 'person.onStagePeople', 'person.onStageClears', 'person.seat', 'person.forward', 'person.view', 'person.kick']],
+    ['person', 'manager', O.person.board, ['person.chatView', 'person.clock', 'person.clockLock', 'person.onStageScreens', 'person.onStagePeople', 'person.onStageClears', 'person.seat', 'person.forward', 'person.view', 'person.kick']],
     ['person', 'notAdmin', O.person.guest, []],
     ['adminMsg', 'admin', O.adminMsg.text, ['adminMsg.copy', 'adminMsg.delete']],
     // A file of the watched room: ⬇ Download, the server's act by a ticket, as on the hall page.
@@ -1319,8 +1357,9 @@ test('the other pages\' matrix: what each seat is shown on each object of the ad
     // An account: Edit, a new one-time password and Sign out everywhere; Turn off and Remove last, never on one's own;
     // a locked row keeps Edit alone (disabled, with its reason); one who reads only the log is shown none.
     // The clock or countdown chosen for the account and its lock, account fields, never on one's own.
-    ['account', 'accountsAdmin', O.account.other, ['account.edit', 'account.password', 'account.signout', 'account.clock', 'account.clockLock', 'account.disable', 'account.remove']],
-    ['account', 'accountsManager', O.account.other, ['account.edit', 'account.password', 'account.signout', 'account.clock', 'account.clockLock', 'account.disable', 'account.remove']],
+    // What it may do On stage, its three switches, account fields too, never on one's own (a manager's drawn disabled).
+    ['account', 'accountsAdmin', O.account.other, ['account.edit', 'account.password', 'account.signout', 'account.clock', 'account.clockLock', 'account.onStageScreens', 'account.onStagePeople', 'account.onStageClears', 'account.disable', 'account.remove']],
+    ['account', 'accountsManager', O.account.other, ['account.edit', 'account.password', 'account.signout', 'account.clock', 'account.clockLock', 'account.onStageScreens', 'account.onStagePeople', 'account.onStageClears', 'account.disable', 'account.remove']],
     ['account', 'accountsAdmin', O.account.self, ['account.edit', 'account.password', 'account.signout']],
     ['account', 'accountsManager', O.account.locked, ['account.edit']],
     ['account', 'auditor', O.account.other, []],
@@ -1385,6 +1424,14 @@ test('the other pages: what may be done but not now is shown, disabled, with the
   assert.deepEqual(why('laptop', 'adminOffline', O.laptop.two), { 'laptop.refresh': C.WORDS.offline, 'laptop.copy': '' });
   // The Accounts page has no socket: nothing there is refused for a connection.
   assert.deepEqual(Object.values(why('account', 'accountsAdmin', O.account.other)).filter(Boolean), []);
+  // The On stage switches (plan 7-§17.6) are the admin's alone: a manager's page, and the admin page of a manager granted
+  // settings.manage, draw them disabled with the server's words; on an account seated On stage in no hall they do nothing,
+  // and say so.
+  const switches = ['screens', 'people', 'clears'].map((k) => 'onStage' + k[0].toUpperCase() + k.slice(1));
+  assert.deepEqual(switches.map((id) => why('account', 'accountsManager', O.account.other)['account.' + id]), Array(3).fill(C.WORDS.onStageAdmin));
+  assert.deepEqual(switches.map((id) => why('account', 'accountsAdmin', { ...O.account.other, board: [] })['account.' + id]), Array(3).fill(C.WORDS.appliesOnStage));
+  assert.deepEqual(switches.map((id) => why('person', 'manager', O.person.board)['person.' + id]), Array(3).fill(C.WORDS.onStageAdmin));
+  assert.deepEqual(switches.map((id) => why('person', 'admin', O.person.board)['person.' + id]), ['', '', '']);
   // Lock it on their devices is the admin's alone, and only on a choice: a manager's page shows it disabled with the
   // server's words, and on an account whose choice is theirs, so does the admin's.
   assert.equal(why('account', 'accountsManager', O.account.other)['account.clockLock'], 'Only an admin may lock the clock or countdown.');
@@ -1783,4 +1830,54 @@ test('every kind the hall page runs whose acts may ask is read again by objectNo
   const missing = asking.filter((k) => runs.has(k) && !read.has(k));
   assert.deepEqual(missing, [], 'kinds the hall page runs that may ask, with no case in objectNow');
   assert.ok(read.has('sheet'));
+});
+
+test('where a message from On stage also went, in the words every reader of its room reads; and Got it clears, the messages it folds and those it never does', () => {
+  // AGM.mark is common.js's, which every page loads before the catalogue.
+  const time = (t) => new Date(t).toISOString().slice(11, 16);
+  const W = (also) => C.alsoWords(also, time);
+  assert.equal(W(undefined), '', 'a message that went nowhere else says nothing');
+  assert.equal(W({ screens: [{ name: 'Lectern', seq: 4, state: 'sending' }] }), '⏱ Lectern: sending', 'sent, never said shown');
+  assert.equal(W({ screens: [{ name: 'Lectern', seq: 4, state: 'shown' }] }), '⏱ On Lectern ✓');
+  assert.equal(W({ screens: [{ name: 'Lectern', seq: 4, state: 'failed' }] }), '△ Lectern could not show it');
+  assert.equal(W({ screens: [{ name: 'Lectern', seq: 4, state: 'offline' }] }), '⏱ Lectern: offline');
+  assert.equal(W({ screens: [{ name: 'Lectern', seq: 4, state: 'replaced', at: Date.UTC(2026, 10, 6, 14, 12) }] }), 'Replaced on Lectern at 14:12');
+  assert.equal(W({ people: { seq: 9, shown: 0, of: 6, state: 'sending' } }), '👥 On stage: sending');
+  assert.equal(W({ people: { seq: 9, shown: 5, of: 6, state: 'sending' } }), '👥 Shown to 5 of 6 On stage');
+  assert.equal(W({ screens: [{ name: 'Lectern', seq: 4, state: 'shown' }, { name: 'Foyer', seq: 2, state: 'sending' }], people: { seq: 9, shown: 6, of: 6, state: 'shown' } }), '⏱ On Lectern ✓ · ⏱ Foyer: sending · 👥 Shown to 6 of 6 On stage');
+  assert.equal(W({ screens: [{ seq: 4 }, null], people: { seq: 9 } }), '', 'what is no place says nothing');
+  // Each part with its tone: a screen that could not show it in warn's colour beside its △, the rest muted.
+  assert.deepEqual(plain(C.alsoParts({ screens: [{ name: 'Lectern', seq: 4, state: 'failed' }, { name: 'Foyer', seq: 2, state: 'shown' }], people: { seq: 9, shown: 1, of: 2, state: 'sending' } }, time)),
+    [{ words: '△ Lectern could not show it', tone: 'warn' }, { words: '⏱ On Foyer ✓', tone: '' }, { words: '👥 Shown to 1 of 2 On stage', tone: '' }]);
+
+  // Got it clears: a page seated On stage, the switch on, a text or a file of someone else's with this person's 👍.
+  const f = SEATS.boardSimpleClears;
+  const got = (o) => ({ ...o, reactions: [{ uid: CHAIR, name: 'Chair', emoji: '👍' }] });
+  assert.equal(C.gotCleared(f, got(OBJECTS.anaOld)), true);
+  assert.equal(C.gotCleared(f, got(OBJECTS.anaFile)), true, 'a file got is cleared too');
+  assert.equal(C.gotCleared(f, got(OBJECTS.anaHot)), true, 'a 🔥 message got leaves the feed, and its strip');
+  assert.equal(C.gotCleared(f, OBJECTS.anaOld), false, 'not got: it waits');
+  assert.equal(C.gotCleared(f, { ...got(OBJECTS.anaOld), reactions: [{ uid: ANA, emoji: '👍' }] }), false, 'someone else\'s 👍 is theirs');
+  // Never cleared: pinned for the room, pinned for the person, a question, one's own, a system line; nor anywhere but a
+  // page seated On stage with the switch on.
+  assert.equal(C.gotCleared(f, { ...got(OBJECTS.anaOld), pinned: true }), false);
+  assert.equal(C.gotCleared(f, got(OBJECTS.anaNote)), false, 'm9 is pinned for this person');
+  assert.equal(C.gotCleared(f, got(OBJECTS.anaQuestion)), false);
+  assert.equal(C.gotCleared(f, got(OBJECTS.boardText)), false);
+  assert.equal(C.gotCleared(f, got(OBJECTS.system)), false);
+  assert.equal(C.gotCleared(SEATS.boardSimple, got(OBJECTS.anaOld)), false, 'the switch off: the message stays, marked got');
+  // The full view clears it too: React ▸ 👍 there is the same fact as Got it. A seat backstage clears nothing, whatever
+  // its switch says (the switches apply On stage).
+  const fullClears = seat({ role: 'board', uid: CHAIR, onStage: { clears: true } });
+  assert.equal(C.gotCleared(fullClears, got(OBJECTS.anaOld)), true, 'the full view clears it as the simple view does');
+  assert.equal(C.gotCleared(seat({ role: 'research', uid: CHAIR, view: 'simple', onStage: { clears: true } }), got(OBJECTS.anaOld)), false, 'backstage: never');
+  // Its line's one act: Show, then Hide, this page's own (nothing on the wire), in either view.
+  assert.deepEqual([CLEARED, CLEARED_OPEN].map((o) => plain(C.inline('cleared', f, o)).map((i) => [i.id, i.label])), [[['cleared.show', 'Show']], [['cleared.show', 'Hide']]]);
+  assert.deepEqual([C.entry('cleared', 'cleared.show').verb, C.entry('cleared', 'cleared.show').mode], ['local', 'local']);
+  assert.deepEqual(plain(C.shown('cleared', fullClears, CLEARED)).map((e) => e.id), ['cleared.show']);
+  // The admin's three switches, in the doors' words, with the admin's words under each.
+  assert.deepEqual(plain(C.ON_STAGE_SWITCHES).map((x) => x.slice(0, 2)), [['screens', 'May send to a countdown screen'], ['people', 'May send to people On stage'], ['clears', 'Got it clears the message']]);
+  assert.deepEqual(plain(C.items('person', PAGE.admin, PAGE_OBJECTS.person.board)).filter((i) => /onStage/.test(i.id)).map((i) => [i.label, i.role, i.checked, i.note]),
+    plain(C.ON_STAGE_SWITCHES.map(([key, label, words]) => [label, 'menuitemcheckbox', key === 'screens', words])));
+  assert.deepEqual(['person.onStageScreens', 'account.onStageScreens'].map((id) => C.entry(id.split('.')[0], id).verb), ['admin:setOnStage', 'http:PATCH /api/users/:id']);
 });

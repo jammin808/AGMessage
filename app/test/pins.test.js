@@ -70,7 +70,7 @@ test('pins for the room or for me: every seat pins for itself, kept by its key a
   await joined(beaView, { roomCode: hall, name: 'Bea Board', role: 'board', adminView: true, viewOf: bea.id });
   assert.deepEqual([anaJoin.role, obiJoin.role, gilJoin.role, beaJoin.role, vicJoin.role], ['research', 'observer', 'board', 'board', 'observer']);
   // The join answer's pins: this person's in this room, none yet, and its last key.
-  for (const j of [anaJoin, obiJoin, gilJoin, beaJoin, vicJoin]) assert.deepEqual([j.pins, Object.keys(j).at(-1)], [[], 'pins']);
+  for (const j of [anaJoin, obiJoin, gilJoin, beaJoin, vicJoin]) assert.deepEqual([j.pins, Object.keys(j).at(-2)], [[], 'pins'], 'pins before onStage, the last key');
 
   const said = await emit(ana, 'message', { type: 'text', text: 'Capex is on slide 14' });
   const second = await emit(ana, 'message', { type: 'text', text: 'Resolution 3: proxies counted' });

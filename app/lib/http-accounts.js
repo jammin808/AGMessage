@@ -211,7 +211,7 @@ function mountAccounts(app, o) {
    * would sit On stage in (it reaches the hall and may post there); an entry already on the account passes, so a Save that
    * sends its lists back as they are changes nothing. Its halls keep 0.5.1's rule: a hall's key is taken as given. The
    * chat view is '' (by the seat), 'simple' or 'full'; the clock or countdown is one lib/views.js cleanClock makes over
-   * the account's.
+   * the account's, and what it may do On stage one cleanOnStage makes.
    */
   function listsRefusal(change, target) {
     for (const [field, what] of [['halls', 'halls'], ['board', 'On stage halls'], ['rooms', 'rooms']]) {
@@ -238,6 +238,7 @@ function mountAccounts(app, o) {
     }
     if ('view' in change && !isView(change.view)) return 'A chat view is By seat (\'\'), Simple (\'simple\') or Full (\'full\').';
     if ('clock' in change) { const c = views.cleanClock(change.clock, views.clockOf(target && target.clock)); if (c.error) return c.error; }
+    if ('onStage' in change) { const o = views.cleanOnStage(change.onStage, views.onStageOf(target && target.onStage)); if (o.error) return o.error; }
     return '';
   }
 
@@ -290,9 +291,13 @@ function mountAccounts(app, o) {
   app.patch('/api/users/:id', signedIn('users.manage'), (req, res) => {
     const target = accounts.get(req.params.id);
     if (!target) return res.status(404).json({ ok: false, error: 'No such account.' });
-    const change = pick(req.body || {}, ['name', 'role', 'grant', 'revoke', 'halls', 'allHalls', 'disabled', 'rooms', 'board', 'view', 'clock']);
+    const change = pick(req.body || {}, ['name', 'role', 'grant', 'revoke', 'halls', 'allHalls', 'disabled', 'rooms', 'board', 'view', 'clock', 'onStage']);
     const refusal = rbac.mayChange(req.agm.account, target, change, { activeAdmins: accounts.activeAdmins() });
     if (refusal) return res.status(403).json({ ok: false, error: refusal });
+    // What an account may do On stage is the admin's alone to choose (an account whose role is admin; plan 7-§17.6): a
+    // manager who may change everything else of the account is refused it, whatever it names.
+    if ('onStage' in change && req.agm.account.role !== 'admin') return res.status(403).json({ ok: false, error: views.ON_STAGE_ADMIN });
+    const wasOnStage = views.onStageOf(target.onStage);
     // The clock or countdown's lock is the admin's alone (an account whose role is admin): whoever manages the account may
     // choose for it, and a change that names the lock as it stands changes no lock.
     const wasClock = views.clockOf(target.clock);
@@ -301,11 +306,12 @@ function mountAccounts(app, o) {
     if (wrong) return res.status(400).json({ ok: false, error: wrong });
     const changed = accounts.update(target.id, change);
     if (changed.length) {
-      // A change of the chat view or the clock alone is said to the account's pages, which stay open (neither is a right);
-      // any other change ends them, so their next connection is judged by the account as it is now.
+      // A change of the chat view, the clock or what it may do On stage alone is said to the account's pages, which stay
+      // open (none is a right); any other change ends them, so their next connection is judged by the account as it is now.
       onAccountChanged(target.id, changed.join(','));
       const named = sideRooms();
-      audit.write(actorOf(req.agm), 'user.update', target.username, changed.map((f) => f + ' → ' + (f === 'clock' ? clockChangeWords(target.clock, wasClock) : describe(f, target, named))).join('; '), guard.clientIp(req));
+      const said = (f) => (f === 'clock' ? clockChangeWords(target.clock, wasClock) : f === 'onStage' ? views.onStageSaid(target.onStage, wasOnStage) : describe(f, target, named));
+      audit.write(actorOf(req.agm), 'user.update', target.username, changed.map((f) => f + ' → ' + said(f)).join('; '), guard.clientIp(req));
     }
     res.json({ ok: true, user: Accounts.view(target), changed });
   });

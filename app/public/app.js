@@ -235,7 +235,7 @@ function rejoin() {
       forwardable: them ? them.forwardable === true : !!res.forwardable, name: NAME,
       guestCode: typeof res.guestCode === 'string' ? res.guestCode : '', codeOn: !!res.codeOn, setsCode: !!res.setsCode, sends: them ? them.sends === true : !!res.sends, ...((them ? them.sends : res.sends) ? {} : { targets: [] }), admin: res.admin === true,
       canPush: them ? them.canPush === true : res.canPush === true, canWeb: them ? them.canWeb === true : res.canWeb === true, canShow: them ? them.canShow === true : res.canShow === true,
-      theAdmin: res.theAdmin === true, pins: Array.isArray(res.pins) ? res.pins : [] });
+      theAdmin: res.theAdmin === true, pins: Array.isArray(res.pins) ? res.pins : [], onStage: res.onStage || null });
     // The admin's clock or countdown for this person, and AGMessage's clock and zone, before the view draws it.
     Clock.joined(res);
     // The chat view, before a message is drawn with it: the support view draws the person's.
@@ -357,6 +357,7 @@ function factsChanged(patch) {
   Console.draw();
   Earlier.redraw();
   refreshOpenMenu();
+  drawCleared();
 }
 
 /**
@@ -672,6 +673,7 @@ const UPD_EVENTS = {
   help: ['helpUpdate', setHelp],
   sentTo: ['sentUpdate', setSentTo],
   replyTo: ['replyUpdate', setReplyTo],
+  also: ['alsoUpdate', setAlso],
 };
 const ownField = (o, f) => Object.prototype.hasOwnProperty.call(o, f);
 function applyOp(op) {
@@ -1571,6 +1573,7 @@ function drawPinMark(node, msg) {
 
 function rerenderMessage(node, msg) {
   drawPinMark(node, msg);
+  drawAlsoSaid(node, msg);
   node.classList.toggle('is-action', msg.type === 'action');
   node.classList.toggle('is-help', msg.type === 'help');
   if (msg.type === 'help') node.dataset.help = (msg.help && msg.help.state) || 'open';
@@ -1821,6 +1824,7 @@ function objectNow(kind, o) {
   if (kind === 'card') return Takes.cardObject(o && o.layer);
   if (kind === 'past') return Takes.pastObject(o && o.seq);
   if (kind === 'sheet') return Simple.sheetNow();
+  if (kind === 'cleared') return Cleared.object(o && o.run);
   return null;
 }
 /**
@@ -1922,11 +1926,11 @@ const personOf = (p) => {
   if (!p || typeof p.uid !== 'string' || !p.uid) return null;
   // An AI's line (the Minutes) is no person's page: no key, so no act on what pages show is offered on it.
   const key = p.ai ? '' : (p.account || p.acct ? 'a:' : 'u:') + p.uid;
-  // A row of the room's people also carries its page (`socketId`) and, on the admin's own page, the chat view and the
-  // clock or countdown the admin chose for them (`view`, `clock`): Chat view ▸ and Clock or countdown ▸ read them; a
-  // message's sender carries none.
+  // A row of the room's people also carries its page (`socketId`) and, on the admin's own page, the chat view, the clock or
+  // countdown the admin chose for them and what they may do On stage (`view`, `clock`, `onStage`): Chat view ▸, Clock or
+  // countdown ▸ and the On stage switches read them; a message's sender carries none.
   return { id: 'person:' + p.uid, uid: p.uid, name: String(p.name || ''), role: p.role || '', key, kind: key ? Console.kindOf(key) : '',
-    socketId: typeof p.socketId === 'string' ? p.socketId : '', view: typeof p.view === 'string' ? p.view : '', clock: AGM.catalog.adminClockOf(p), ...(key ? Console.takesOf(key) : {}) };
+    socketId: typeof p.socketId === 'string' ? p.socketId : '', view: typeof p.view === 'string' ? p.view : '', clock: AGM.catalog.adminClockOf(p), onStage: AGM.catalog.onStageOf(p), ...(key ? Console.takesOf(key) : {}) };
 };
 const personHeader = (p) => p.name + ' · ' + roleLabel(p.role);
 /**
@@ -2478,6 +2482,38 @@ function setSentTo(messageId, sentTo) {
   const node = messagesById.get(messageId);
   if (node && node.classList.contains('msg')) rerenderMessage(node, msg);
 }
+/**
+ * Where a message from On stage also went, as its targets confirmed it (plan 7-§17.6): its words at the end of its author's
+ * line drawn again, for every reader of the room.
+ */
+function setAlso(messageId, also) {
+  const msg = findMessage(messageId);
+  if (!msg || !also || typeof also !== 'object') return;
+  msg.also = also;
+  const node = messagesById.get(messageId);
+  if (node && node.classList.contains('msg')) drawAlsoSaid(node, msg);
+}
+/**
+ * A message's words of where it also went, at the end of its author's line, in both views, a part for each place, muted,
+ * and one whose target could not show it in warn's colour beside its △; none for one that went nowhere else.
+ */
+function drawAlsoSaid(node, msg) {
+  const el = node.querySelector(':scope > header .also-said');
+  if (!el) return;
+  const parts = AGM.catalog.alsoParts(msg.also, formatTime);
+  const key = JSON.stringify(parts);
+  if (el.dataset.said === key) return;
+  el.dataset.said = key;
+  el.textContent = '';
+  parts.forEach((x, i) => {
+    if (i) el.append(' · ');
+    const span = document.createElement('span');
+    if (x.tone) { span.className = 'toned'; span.dataset.tone = x.tone; }
+    span.textContent = x.words;
+    el.append(span);
+  });
+  el.hidden = !parts.length;
+}
 /** A reply whose quote changed (the message it answered withdrawn from this room): the reply drawn again from its record. */
 function setReplyTo(messageId, replyTo) {
   const msg = findMessage(messageId);
@@ -2742,6 +2778,8 @@ function setMessagePinned(messageId, pinned) {
   refreshDocPinnedList();
   if (currentDocMsgId === messageId) drawDocActs();
   refreshOpenMenu();
+  // A message pinned is never cleared by Got it: drawn again in its place.
+  drawCleared();
 }
 
 /**
@@ -3461,6 +3499,15 @@ function setClock(p, change) {
     AGM.toast(p.name + '\'s clock or countdown: ' + clockSaid(r.clock) + (r.already ? ' already.' : '.'));
   });
 }
+/** One of the admin's On stage switches for a person of the room (admin:setOnStage), turned the other way, said once the server has it. */
+function setOnStage(p, key) {
+  const on = !p.onStage[key];
+  AGM.outbox.now('admin:setOnStage', { roomCode: ROOM, socketId: p.socketId, [key]: on }, (r) => {
+    if (!r || !r.ok) { AGM.toast((r && r.error) || 'Not changed.', true); return; }
+    const label = (AGM.catalog.ON_STAGE_SWITCHES.find(([k]) => k === key) || ['', ''])[1];
+    AGM.toast(p.name + ': ' + label + (on ? ' — on' : ' — off') + (r.already ? ' already.' : '.'));
+  });
+}
 /** The admin's choice in its words: "Stagewatch countdown, locked", "Their choice". */
 const clockSaid = (c) => { const k = AGM.catalog.adminClockOf({ clock: c }); return (AGM.catalog.ADMIN_CLOCKS.find(([v]) => v === (k.show || '')) || ['', ''])[1].replace(/ \(.*\)$/, '') + (k.locked ? ', locked' : ''); };
 Object.assign(RUN, {
@@ -3479,6 +3526,10 @@ Object.assign(RUN, {
     setClock(p, AGM.catalog.clockChange(value));
   },
   'person.clockLock': (p) => setClock(p, { locked: !p.clock.locked }),
+  // What a person seated On stage may do (plan 7-§17.6): each switch turned the other way, told to their pages at once.
+  'person.onStageScreens': (p) => setOnStage(p, 'screens'),
+  'person.onStagePeople': (p) => setOnStage(p, 'people'),
+  'person.onStageClears': (p) => setOnStage(p, 'clears'),
   // @ Mention: the person's name in the composer, where the cursor is, and the focus there to go on writing.
   'person.mention': (p) => {
     const field = composerField({ text: true });
@@ -3657,7 +3708,11 @@ function drawCompose(form) {
     send.after(more);
   } else if (!menu && more) more.remove();
 }
-function drawComposers() { for (const form of Object.keys(COMPOSER_FORMS)) drawCompose(form); drawTo(); }
+function drawComposers() { for (const form of Object.keys(COMPOSER_FORMS)) drawCompose(form); drawTo(); drawAlso(); }
+/** Also on drawn as the facts say it now, once it is built (below): every composer's redraw redraws it. */
+function drawAlso() { if (drawAlso.ready) Also.draw(); }
+/** Got it clears drawn as the facts and the messages say it now, once it is built (below). */
+function drawCleared() { if (drawCleared.ready) Cleared.draw(); }
 const FORM_OF = new Map();   // a composer's form element → its name
 function composeDoor(t) {
   const formEl = t.closest('form');
@@ -3689,6 +3744,11 @@ const SENDS = {
   director: () => {
     const text = dInput.value.trim();
     if (!text || composerHeld('director')) return;
+    // Also on a countdown screen or everyone On stage: sent now, never held (Also.send); else held as every message is.
+    // One such send at a time: a second Send while the first waits for its answer sends nothing.
+    if (Also.busy()) return;
+    const also = Also.take();
+    if (also) { Also.send(text, also); return; }
     holdMessage('director', { type: 'text', text, priority: consumePriority(dirPriBtn), replyTo: consumeReplyTo() });
   },
   text: () => {
@@ -3726,12 +3786,130 @@ Object.assign(RUN, {
   'compose.attach': () => { selectTab('text'); fileInput.click(); },
   'compose.removeFile': () => { removePendingFile(); textInput.focus(); },
   'compose.cancelReply': () => { cancelReply(); const field = composerField(); if (field) field.focus(); },
+  'compose.also': (o, { value }) => Also.toggle(value),
 });
 
 // ---------------- Compose: director ----------------
 const dForm = document.getElementById('directorForm');
 const dInput = document.getElementById('directorInput');
 dForm?.addEventListener('submit', (e) => { e.preventDefault(); sendFrom('director', e.submitter); });
+
+// ---------------- Also on: where else a message from On stage goes (plan 7-§17.6) ----------------
+// A row above the On stage composer's field, only while the admin has turned on one of the person's switches: a chip for
+// each (the catalogue's compose.also), an aria-pressed toggle, ✓ and filled when on, off after every send. With ⏱ chosen,
+// the field holds a countdown screen's line (160 characters) and says what it replaces, with the count. A message with a
+// chip on is sent now, never held (the outbox's `now`): refused while not connected, its text, its 🔥, its reply and its
+// chips kept for another try, and on a refusal the server's words said.
+const Also = (function () {
+  const row = document.getElementById('alsoRow');
+  const chipsEl = document.getElementById('alsoChips');
+  const line = document.getElementById('alsoLine');
+  const chosen = { screens: false, people: false };
+  let busy = false;
+  const object = () => { const o = composeObject('director'); return o ? { ...o, also: { ...chosen } } : null; };
+  const chipsNow = () => {
+    const o = object();
+    return o && AGM.catalog.shown('compose', F, o).some((e) => e.id === 'compose.also') ? AGM.catalog.submenu('compose', 'compose.also', F, o) || [] : [];
+  };
+  function draw() {
+    const chips = chipsNow();
+    // A chip the admin turned off, or one that waits (no countdown screen now), is chosen no more.
+    for (const k of Object.keys(chosen)) if (!chips.some((c) => c.value === k && !c.disabled)) chosen[k] = false;
+    row.hidden = !chips.length;
+    const keys = chips.map((c) => c.value).join(',');
+    if (chipsEl.dataset.keys !== keys) {
+      chipsEl.dataset.keys = keys;
+      chipsEl.textContent = '';
+      for (const c of chips) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'btn ghost small also-chip';
+        b.dataset.value = c.value;
+        const tick = document.createElement('span');
+        tick.className = 'also-tick';
+        tick.setAttribute('aria-hidden', 'true');
+        tick.textContent = AGM.mark('ok') + ' ';
+        const icon = document.createElement('span');
+        icon.setAttribute('aria-hidden', 'true');
+        icon.textContent = c.icon + ' ';
+        const name = document.createElement('span');
+        name.className = 'also-name';
+        b.append(tick, icon, name);
+        chipsEl.append(b);
+      }
+    }
+    for (const c of chips) {
+      const b = chipsEl.querySelector('.also-chip[data-value="' + c.value + '"]');
+      if (!b) continue;
+      const name = b.querySelector('.also-name');
+      // On a phone, "👥 On stage": the long words where there is room (styles.css), the short ones to every reader.
+      const words = c.short ? c.label.slice(0, c.label.length - c.short.length) : '';
+      name.textContent = '';
+      if (words) { const long = document.createElement('span'); long.className = 'also-long'; long.textContent = words; name.append(long, document.createTextNode(c.short)); } else name.textContent = c.label;
+      b.setAttribute('aria-pressed', chosen[c.value] ? 'true' : 'false');
+      b.classList.toggle('on', chosen[c.value]);
+      if (c.disabled) b.setAttribute('aria-disabled', 'true'); else b.removeAttribute('aria-disabled');
+      b.title = c.disabled || c.names || c.label;
+      b.disabled = busy;
+    }
+    // With ⏱ chosen: what it replaces, the count against the screen's line, and the field held to it.
+    const names = F.onStage.countdownScreens;
+    const max = chosen.screens ? AGM.catalog.COUNTDOWN_LINE : 300;
+    if (dInput.maxLength !== max) dInput.maxLength = max;
+    line.hidden = !chosen.screens;
+    if (chosen.screens) {
+      document.getElementById('alsoWhat').textContent = names.length === 1 ? 'Replaces ' + names[0] + '\'s countdown line.' : 'Replaces the countdown line on ' + names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1] + '.';
+      document.getElementById('alsoCount').textContent = dInput.value.trim().length + ' / ' + AGM.catalog.COUNTDOWN_LINE;
+    }
+  }
+  /** A chip turned the other way (the catalogue's compose.also, through act()); one that waits says why. */
+  function toggle(value) {
+    const c = chipsNow().find((x) => x.value === value);
+    if (!c) return;
+    if (c.disabled) { AGM.toast(c.disabled, true); return; }
+    chosen[value] = !chosen[value];
+    draw();
+  }
+  /** The places chosen for the message being sent now ({screens?, people?}), each chip off again; null for none. */
+  function take() {
+    const a = { ...(chosen.screens ? { screens: true } : {}), ...(chosen.people ? { people: true } : {}) };
+    chosen.screens = false;
+    chosen.people = false;
+    draw();
+    return Object.keys(a).length ? a : null;
+  }
+  /**
+   * The message sent now, with where else it goes: the field cleared once the server took it; refused (or not connected),
+   * its text, 🔥, reply and chips kept, and the server's words said.
+   */
+  function send(text, also) {
+    const reply = replyState;
+    const args = { type: 'text', text, priority: consumePriority(dirPriBtn), replyTo: consumeReplyTo(), also };
+    busy = true;
+    draw();
+    AGM.outbox.now('message', args, (r) => {
+      busy = false;
+      if (r && r.ok) {
+        if (dInput.value.trim() === text) dInput.value = '';
+        draw();
+        return;
+      }
+      setPriority(dirPriBtn, !!args.priority);
+      if (reply && !replyState) { replyState = reply; renderReplyChip(); }
+      for (const k of Object.keys(also)) chosen[k] = true;
+      draw();
+      AGM.toast((r && r.error) || 'Not sent.', true);
+    });
+  }
+  chipsEl.addEventListener('click', (e) => {
+    const b = e.target.closest('.also-chip');
+    const o = b && object();
+    if (o) act('compose', 'compose.also', o, { value: b.dataset.value, opener: b, anchor: b });
+  });
+  dInput.addEventListener('input', () => { if (chosen.screens) draw(); });
+  return { draw, toggle, take, send, busy: () => busy };
+})();
+drawAlso.ready = true;
 
 // ---------------- Compose: research tabs ----------------
 document.querySelectorAll('.compose-tabs .tab').forEach((tab) => {
@@ -4783,16 +4961,19 @@ const Takes = (function () {
   /** How long Back to chat can be taken back (lib/pages.js AGAIN_MS): the toast's Show it again, a card's Undo. */
   const AGAIN_MS = 10000;
   /**
-   * Where the takes this page is told are kept: the show, the information over it, and the information beside it (in the
-   * side bar beside the operator's: a card, said "in the side bar", drawn over the chat only by the person's choice).
+   * Where the takes this page is told are kept: the show, the information over it, the information beside it (in the
+   * side bar beside the operator's: a card, said "in the side bar", drawn over the chat only by the person's choice), and
+   * a Board page's line typed On stage (plan 7-§17.6: a card in the side bar too, which only another such line replaces).
    */
-  const LAYERS = ['show', 'info', 'beside'];
+  const LAYERS = ['show', 'info', 'beside', 'line'];
+  /** The places whose information arrives in the side bar, or over the show: every place but the show's. */
+  const SIDES = ['info', 'beside', 'line'];
   let renderer = null;     // pagelayer.mjs, once imported
   let loading = null;
   let readied = false;     // a Board page's timed import, asked once
-  // The takes this page is told now, one in each place (the show, information over it, information beside it): {seq,
-  // content, by, at, hallName, holding, answer, arrive}, or null for none.
-  const told = { show: null, info: null, beside: null };
+  // The takes this page is told now, one in each place (the show, information over it, information beside it, the Board's
+  // line): {seq, content, by, at, hallName, holding, answer, arrive}, or null for none.
+  const told = { show: null, info: null, beside: null, line: null };
   let past = [];           // the information taken off this page lately, the newest first: {seq, content, by, at}
   let offset = 0;          // AGMessage's clock against this device's
   let tz = '';
@@ -4803,17 +4984,17 @@ const Takes = (function () {
   let turn = 0;            // each draw's number: a draw a newer one overtook is let go
   let waiting = null;      // a draw waiting for a field to be left
   let again = 0;           // the take this person asked to see again: its next report says so (`again`)
-  const said = { show: '', info: '', beside: '' };   // the last report sent on this socket in each place, so the same is not said twice
-  // The information that arrived in the side bar (over the show's place, or beside it), which the person chose to see over
-  // the chat: its number, in each.
-  const raised = { info: 0, beside: 0 };
+  const said = { show: '', info: '', beside: '', line: '' };   // the last report sent on this socket in each place, so the same is not said twice
+  // The information that arrived in the side bar (over the show's place, beside it, or the Board's line), which the person
+  // chose to see over the chat: its number, in each.
+  const raised = { info: 0, beside: 0, line: 0 };
   let unheld = 0;          // an information take held under blank, which the person touched to see
   let unread = 0;          // others' messages heard since the layer came up
   let hot = null;          // the newest 🔥 message from someone else since it came up
   let ticker = null;
   // The cards in the side bar (📺 On stage), one for each place: a take minimised, or information that arrived there.
   // {key, li, side, result} (`result`, what an arrived card's drawing said).
-  const cardOf = { show: null, info: null, beside: null };
+  const cardOf = { show: null, info: null, beside: null, line: null };
 
   const load = () => {
     if (renderer) return Promise.resolve(renderer);
@@ -4834,7 +5015,8 @@ const Takes = (function () {
   const keyOf = (t) => [t.seq, JSON.stringify(t.content), t.holding || '', t.hallName || '', t.arrive || ''].join('|');
   /** A take's kind as a person reads it: "the clock", "Stagewatch", "a web page". */
   const kindWords = (kind) => (AGM.catalog.SHOW_KINDS.find((x) => x[0] === kind) || [0, 0, 'something'])[2];
-  const byWords = (t) => (t.by && t.by.name ? 'from ' + t.by.name : '') + (t.at ? (t.by && t.by.name ? ' · ' : '') + formatTime(t.at) : '');
+  // A line a person On stage typed (plan 7-§17.6) says so: "Typed by Margaret Lowe (On stage) · 14:07".
+  const byWords = (t) => (t.by && t.by.name ? (t.by.onStage === true ? 'Typed by ' + t.by.name + ' (On stage)' : 'from ' + t.by.name) : '') + (t.at ? (t.by && t.by.name ? ' · ' : '') + formatTime(t.at) : '');
   /** A take that draws something and was not put away with Back to chat (a hand-back draws nothing). */
   const live = (t) => !!t && t.content.kind !== 'chat' && t.answer !== 'dismissed';
   /** Information that arrived in the side bar and stays there until the person shows it over the chat. */
@@ -4843,25 +5025,28 @@ const Takes = (function () {
   const up = (t) => !!t && t.answer !== 'minimised' && !inSide(t);
 
   /**
-   * Where each take this page is told is drawn now: on the layer (`over`, and its place): the information beside the
-   * operator's when the person chose to see it over the chat, else the information over the show, else the show; held
-   * under blank (`held`: blank is the operator's "keep this tablet dark"; a touch shows it); or as a card in the side bar
-   * (`cards`: minimised, or arrived there). A take that would be on the layer but for another drawn over it is `under` it.
+   * Where each take this page is told is drawn now: on the layer (`over`, and its place): the Board's line, then the
+   * information beside the operator's, when the person chose to see it over the chat, else the information over the show,
+   * else the show; held under blank (`held`: blank is the operator's "keep this tablet dark"; a touch shows it); or as a
+   * card in the side bar (`cards`: minimised, or arrived there). A take that would be on the layer but for another drawn
+   * over it is `under` it.
    */
   function plan() {
     const show = live(told.show) ? told.show : null;
     const info = live(told.info) ? told.info : null;
     const beside = live(told.beside) ? told.beside : null;
+    const line = live(told.line) ? told.line : null;
     const blank = !!show && show.content.kind === 'blank' && show.answer !== 'minimised';
+    const lineUp = up(line);
     const besideUp = up(beside);
     const infoUp = up(info);
-    const held = !besideUp && infoUp && blank && unheld !== info.seq ? info : null;
-    const over = besideUp ? beside : infoUp && !held ? info : show && show.answer !== 'minimised' ? show : null;
+    const held = !lineUp && !besideUp && infoUp && blank && unheld !== info.seq ? info : null;
+    const over = lineUp ? line : besideUp ? beside : infoUp && !held ? info : show && show.answer !== 'minimised' ? show : null;
     const card = (t) => (t && (t.answer === 'minimised' || inSide(t)) ? t : null);
     return {
-      over, layer: !over ? '' : over === beside ? 'beside' : over === info ? 'info' : 'show', held, show, info, beside,
-      under: [show && show.answer !== 'minimised' ? show : null, infoUp && !held ? info : null].filter((t) => t && over && t !== over),
-      cards: { show: show && show.answer === 'minimised' ? show : null, info: card(info), beside: card(beside) },
+      over, layer: !over ? '' : over === line ? 'line' : over === beside ? 'beside' : over === info ? 'info' : 'show', held, show, info, beside, line,
+      under: [show && show.answer !== 'minimised' ? show : null, infoUp && !held ? info : null, besideUp ? beside : null].filter((t) => t && over && t !== over),
+      cards: { show: show && show.answer === 'minimised' ? show : null, info: card(info), beside: card(beside), line: card(line) },
     };
   }
 
@@ -4888,6 +5073,7 @@ const Takes = (function () {
     told.show = read(res.page || null, 'show');
     told.info = read(res.over || null, 'info');
     told.beside = read(res.beside || null, 'beside');
+    told.line = read(res.line || null, 'line');
     past = readPast(res.earlier);
     settle();
     apply();
@@ -4902,7 +5088,7 @@ const Takes = (function () {
   /** What this page is shown now in a place, as the server tells it: a take, or (number 0, no content) nothing there. */
   function tell(t) {
     if (t && Number.isInteger(t.withdrawn)) { withdrawn(t.withdrawn); return; }
-    const layerName = t && (t.layer === 'info' || t.layer === 'beside') ? t.layer : 'show';
+    const layerName = t && SIDES.includes(t.layer) ? t.layer : 'show';
     told[layerName] = read(t, layerName);
     if (layerName === 'info' && t && Array.isArray(t.earlier)) past = readPast(t.earlier);
     settle();
@@ -4923,7 +5109,7 @@ const Takes = (function () {
   function settle() {
     const seqs = LAYERS.map((l) => (told[l] ? told[l].seq : 0));
     if (again && !seqs.includes(again)) again = 0;
-    for (const l of ['info', 'beside']) if (raised[l] && (!told[l] || told[l].seq !== raised[l])) raised[l] = 0;
+    for (const l of SIDES) if (raised[l] && (!told[l] || told[l].seq !== raised[l])) raised[l] = 0;
     if (unheld && (!told.info || told.info.seq !== unheld)) unheld = 0;
     // A Look at an Earlier entry no longer under Earlier (taken off by a reset, a delete or a withdrawal) closes.
     for (const seq of Preview.looking()) if (!past.some((e) => e.seq === seq)) Preview.letGo(seq);
@@ -5147,8 +5333,8 @@ const Takes = (function () {
   }
 
   // ---- Earlier: the information taken off this page lately, each opened with a Look (no report, no take)
-  /** The Earlier entries drawn: those this page is told, but the information it is shown now (over the show or beside it). */
-  const pastNow = () => past.filter((e) => !['info', 'beside'].some((l) => told[l] && told[l].seq === e.seq && live(told[l])));
+  /** The Earlier entries drawn: those this page is told, but the information it is shown now (over the show, beside it, its line). */
+  const pastNow = () => past.filter((e) => !SIDES.some((l) => told[l] && told[l].seq === e.seq && live(told[l])));
   function drawPast() {
     const list = pastNow();
     const keys = list.map((e) => 'past:' + e.seq).join(',');
@@ -7434,19 +7620,23 @@ const Simple = (function () {
     }
     return { plain, priority };
   }
-  /** What waits read again, once after whatever this task draws (a history is many messages, read once). */
+  /**
+   * What waits read again, once after whatever this task draws (a history is many messages, read once); in the full view,
+   * what Got it clears alone (the person's 👍 is the same fact there).
+   */
   let waitsDue = false;
   function waits() {
-    if (!isSimple() || waitsDue) return;
+    if (waitsDue) return;
     waitsDue = true;
     Promise.resolve().then(() => {
       waitsDue = false;
-      if (!isSimple()) return;
+      if (!isSimple()) { drawCleared(); return; }
       // A response drawn or taken away moves what is below it: a reader at the end of the chat stays at its end.
       const end = place.atEnd || nearEnd();
       factsChanged({ waiting: waitingNow() });
       if (end) { feed.scrollTop = feed.scrollHeight; place.atEnd = true; }
       for (const m of allMessages) { const n = messagesById.get(m.id); if (n && n.classList.contains('msg')) said(n, m); }
+      drawCleared();
       drawStrip();
       drawEmpty();
     });
@@ -7806,6 +7996,96 @@ const Simple = (function () {
     sheetNow: () => (sheetOpen() ? sheetObject() : null) };
 })();
 socket.on('view', (v) => { if (v && typeof v.view === 'string') Simple.setView(v.view); });
+// ---------------- Got it clears (plan 7-§17.6, owner answer B4) ----------------
+// While the admin has turned on Got it clears the message for this person, their page seated On stage draws each message
+// they got (a text or a file of someone else's that carries their 👍, by Got it or, in the full view, React ▸ 👍; never one
+// pinned for the room or for them, a question or their own: AGM.catalog.gotCleared) as one muted line in its place, a run
+// of them as one: "👍 Got and cleared: Ana Ribeiro 14:02 · Show", 🔥 before the name for a priority message, "👍 Got and
+// cleared: 3 messages · Show". Show draws them again, marked got, until the page reloads; Hide folds them back. It reads
+// facts the page has (the person's 👍, the switch), so an account's devices clear together; the room's record, the
+// backstage team's pages, the transcript and the minutes keep every message.
+const Cleared = (function () {
+  const open = new Set();      // the messages the person chose to see again (Show), until the page reloads
+  const lines = new Map();     // a run's first message's id → its line
+  let runs = new Map();        // a run's first message's id → its messages, in the feed's order
+  /** The runs of cleared messages now, in the feed's order: a message that stays breaks a run, a system line does not. */
+  function runsNow() {
+    const out = new Map();
+    let cur = null;
+    for (const node of feed.querySelectorAll('.msg[data-id]:not(.pinned-copy)')) {
+      const m = findMessage(node.dataset.id);
+      if (m && AGM.catalog.gotCleared(F, m)) {
+        if (!cur) { cur = []; out.set(m.id, cur); }
+        cur.push(m);
+      } else cur = null;
+    }
+    return out;
+  }
+  /** A run's line as the catalogue reads it: its id, whether it is shown, how many it holds. */
+  function object(run) {
+    const list = runs.get(run);
+    return list ? { id: 'cleared:' + run, run, open: list.some((m) => open.has(m.id)), count: list.length } : null;
+  }
+  const wordsOf = (list) => '👍 Got and cleared: ' + (list.length === 1
+    ? (list[0].priority ? '🔥 ' : '') + ((list[0].from && list[0].from.name) || 'Backstage') + ' ' + formatTime(list[0].at)
+    : list.length + ' messages');
+  function draw() {
+    // Nothing to fold, and nothing folded: a page whose switch is off reads no message.
+    if (!(F.role === 'board' && F.onStage.clears) && !lines.size) return;
+    runs = runsNow();
+    const kept = new Set();
+    for (const [run, list] of runs) {
+      const shown = list.some((m) => open.has(m.id));
+      // A run that grows while it is shown is shown whole.
+      if (shown) for (const m of list) open.add(m.id);
+      for (const m of list) { const n = messagesById.get(m.id); if (n) n.dataset.cleared = shown ? 'open' : '1'; }
+      let line = lines.get(run);
+      if (!line) {
+        line = document.createElement('div');
+        line.className = 'bv-cleared';
+        line.dataset.run = run;
+        const words = document.createElement('span');
+        words.className = 'bv-cleared-words';
+        const acts = document.createElement('span');
+        acts.className = 'bv-cleared-acts';
+        line.append(words, document.createTextNode(' · '), acts);
+        lines.set(run, line);
+      }
+      const first = messagesById.get(run);
+      if (first && line.nextElementSibling !== first) first.before(line);
+      const said = wordsOf(list);
+      const w = line.querySelector('.bv-cleared-words');
+      if (w.textContent !== said) w.textContent = said;
+      drawBar(line.querySelector('.bv-cleared-acts'), 'cleared', object(run), { words: true });
+      kept.add(run);
+    }
+    for (const [run, line] of lines) if (!kept.has(run)) { line.remove(); lines.delete(run); }
+    const inRuns = new Set([...runs.values()].flat().map((m) => m.id));
+    for (const n of feed.querySelectorAll('.msg[data-cleared]')) if (!inRuns.has(n.dataset.id)) delete n.dataset.cleared;
+  }
+  /** Show or Hide a run: its messages drawn again, or folded back into its line, the focus kept on the line's button. */
+  function toggle(run) {
+    const list = runs.get(run);
+    if (!list) return;
+    const shown = list.some((m) => open.has(m.id));
+    for (const m of list) { if (shown) open.delete(m.id); else open.add(m.id); }
+    draw();
+    const b = lines.get(run) && lines.get(run).querySelector('[data-action="cleared.show"]');
+    if (b) b.focus();
+  }
+  feed.addEventListener('click', (e) => {
+    const b = e.target.closest('.bv-cleared [data-action="cleared.show"]');
+    const line = b && b.closest('.bv-cleared');
+    const o = line && object(line.dataset.run);
+    if (o) act('cleared', 'cleared.show', o, { opener: b, anchor: b });
+  });
+  return { draw, object, toggle };
+})();
+drawCleared.ready = true;
+RUN['cleared.show'] = (o) => Cleared.toggle(o.run);
+
 // The admin's clock or countdown for this person changed: drawn at once, the sheet's row in place; their device's own
 // choice still wins unless the admin locked theirs (AGM.clockFor).
 socket.on('clock', (c) => { Clock.admin(c); Simple.sheetChanged(); });
+// What the admin lets this person do On stage, told live (plan 7-§17.6): Also on's chips and Got it clears follow it.
+socket.on('onStage', (o) => { if (o && typeof o === 'object') factsChanged({ onStage: o }); });

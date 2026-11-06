@@ -72,6 +72,13 @@
  * `clockChanged`. Whoever sets a chat view sets the choice; the lock is "the admin's" alone (conn.theAdmin: the host token,
  * or an account whose role is admin, never a manager granted settings.manage).
  *
+ * What a seat On stage may do (plan 7-§17.6, owner answers B2 and B4): `admin:setOnStage {roomCode, socketId, screens?,
+ * people?, clears?}` turns on or off, for a person, whether a message of theirs may also go to the line under the countdown
+ * on their hall's screens, whether it may also be shown beside the chat of everyone On stage, and whether their Got it
+ * clears the message from their own feed; each off until turned on, kept as their chat view is, and told to their pages
+ * and the admin's view of them by the named effect `onStageChanged`. It is "the admin's" alone (conn.theAdmin), and an
+ * account target is reached only as the Accounts page would reach it.
+ *
  * A pin for oneself (plan 7-§17.5): `pin:mine {messageId, on}` keeps, for the person alone (their key: an account's on every
  * device of it, a guest's by its uid), the id of a message of the room they sit in, or takes it off (`on`, true or false),
  * in `pages.json` (lib/pages.js `pin`), at most 50 a room; an id whose message has gone is dropped at the person's next
@@ -84,8 +91,10 @@
 const { str } = require('../guard');
 const { cleanPage, askedOf, canShow, describePage, personKey, layerOf, filesOf, ARRIVALS, FILE_KINDS, STAGE_FULL } = require('../pages');
 const { mayChange } = require('../rbac');
-const { clockAsked, cleanClock, clockOf, sameClock, clockWords, lockWords, CLOCK_ADMIN } = require('../views');
+const { clockAsked, cleanClock, clockOf, sameClock, clockWords, lockWords, CLOCK_ADMIN, ON_STAGE_KEYS, ON_STAGE_ADMIN, ON_STAGE_WORDS, onStageAsked, cleanOnStage, onStageOf, sameOnStage, onStageSaid } = require('../views');
 
+/** What `admin:setOnStage` may name: the person (by the room and their page), the outbox's cid, and the switches it turns. */
+const SET_ON_STAGE_ARGS = Object.freeze(['roomCode', 'socketId', 'cid', 'screens', 'people', 'clears']);
 /** What the admin's support view is told of an act: it shows the person's page, and acts on nothing (as its doors say). */
 const SUPPORT = 'This is someone else\'s view — act from your own page.';
 /** What an On stage page is told of a push: its seat holds messages only (rbac.SEAT_LIMITS). */
@@ -178,7 +187,7 @@ const pagesWords = (n) => n + ' page' + (n === 1 ? '' : 's');
  * @param {object} ctx    the takes context, frozen: none of lib/gate.js `ROOM_SENDS` (`contexts`)
  */
 function register(socket, conn, ctx) {
-  const { store, audit, accounts, linkFor, sendersOf, pages, stageRecord, tickets, hallPages, takeSends, holdingOf, pagesChanged, pageHidden, selfHosts, viewChanged, clockChanged, pinsChanged, stageSource, stageCheck, freshUpload, stageDropped, inUseRooms, screensShowing, markFresh, madeUrls, sendTo } = ctx;
+  const { store, audit, accounts, linkFor, sendersOf, pages, stageRecord, tickets, hallPages, takeSends, holdingOf, pagesChanged, pageHidden, selfHosts, viewChanged, clockChanged, pinsChanged, onStageChanged, stageSource, stageCheck, freshUpload, stageDropped, inUseRooms, screensShowing, markFresh, madeUrls, sendTo } = ctx;
 
   const write = (action, target, words) => audit.write(conn.actor(), action, target, words, socket.data.ip);
   /**
@@ -748,6 +757,51 @@ function register(socket, conn, ctx) {
     }
     clockChanged(key);
     answer({ ok: true, clock: next });
+  });
+
+  // What the admin lets a person seated in a room do On stage (plan 7-§17.6): `screens`, `people` and `clears`, each a
+  // boolean, each left out kept, for the person seated on `socketId` in the room `roomCode` names, resolved as their chat
+  // view is. The admin alone (theAdmin: a manager granted settings.manage passes the admin page's gate and is refused here),
+  // then what is asked, read by type, then the person, and an account reached from an account's page only where the
+  // Accounts page would let that account change it; all before anything is written. A guest's is kept by their uid
+  // (pages.json), an account's on the account (accounts.json). Every page of the person's, and the admin's view of them, is
+  // told the switches now (`onStage`), live, nothing closed; the admin's people rows are drawn again; one row says what
+  // moved, holding no code and no text. As they stand already: said so, no row.
+  socket.on('admin:setOnStage', (args, ack) => {
+    if (!conn.gate(ack, { joined: false, bucket: conn.writes, admin: true })) return;
+    const answer = conn.ok(ack);
+    if (!conn.theAdmin()) return answer({ ok: false, error: ON_STAGE_ADMIN });
+    const a = isRecord(args) ? args : {};
+    // What it asks, by type: at least one of the three switches (onStageAsked), and nothing but them beside the person it
+    // names and the outbox's cid. A request that names none, or names anything else, is refused in the switches' words,
+    // never answered as done.
+    if (Object.keys(a).some((k) => !SET_ON_STAGE_ARGS.includes(k))) return answer({ ok: false, error: ON_STAGE_WORDS });
+    const asked = onStageAsked(Object.fromEntries(ON_STAGE_KEYS.filter((k) => Object.hasOwn(a, k)).map((k) => [k, a[k]])));
+    if (asked.error) return answer({ ok: false, error: asked.error });
+    const own = conn.room();
+    const room = own && keyOf(a.roomCode) === keyOf(socket.data.joinedAs) ? own : store.room(keyOf(a.roomCode));
+    const target = room ? room.users.get(str(a.socketId)) : undefined;
+    if (!target) return answer({ ok: false, error: NOT_IN_ROOM });
+    const key = personKey(target.uid, !!target.acct);
+    if (!key) return answer({ ok: false, error: NOT_IN_ROOM });
+    const account = target.acct ? accounts.get(target.uid) : null;
+    if (target.acct && !account) return answer({ ok: false, error: NOT_IN_ROOM });
+    const actor = socket.data.account;
+    const refusal = account && actor ? mayChange(actor, account, { onStage: asked }, { activeAdmins: accounts.activeAdmins() }) : null;
+    if (refusal) return answer({ ok: false, error: refusal });
+    const was = account ? onStageOf(account.onStage) : pages.onStageOf(target.uid);
+    const next = cleanOnStage(asked, was);
+    if (next.error) return answer({ ok: false, error: next.error });
+    if (sameOnStage(next, was)) return answer({ ok: true, already: true, onStage: next });
+    if (account) {
+      if (!accounts.update(account.id, { onStage: next }).length) return answer({ ok: true, already: true, onStage: next });
+      write('user.update', account.username, 'onStage → ' + onStageSaid(next, was));
+    } else {
+      if (!pages.setOnStage(target.uid, next)) return answer({ ok: false, error: NOT_IN_ROOM });
+      write('person.onStage', room.hall, target.name + ' (guest) → ' + onStageSaid(next, was, { guest: true }));
+    }
+    onStageChanged(key);
+    answer({ ok: true, onStage: next });
   });
 
   // A pin for oneself (plan 7-§17.5): seated in the room, a token, and a right to read it, which every seat holds; never

@@ -453,6 +453,28 @@ test('a guest\'s clock or countdown: the admin\'s choice and its lock, kept besi
   assert.deepEqual(p.clockOf({ toString: () => 'uguest00001' }), { show: null, locked: false });
 });
 
+test('what a guest may do On stage: the admin\'s three switches, kept beside their view and clock in one record, every one off again none', () => {
+  const p = store();
+  const OFF = { screens: false, people: false, clears: false };
+  assert.deepEqual(p.onStageOf('uguest00001'), OFF, 'every one off until the admin turns one on');
+  assert.equal(p.setOnStage('uguest00001', { screens: true, people: false, clears: true }, 1), true);
+  assert.deepEqual(p.onStageOf('uguest00001'), { screens: true, people: false, clears: true });
+  assert.equal(p.setClock('uguest00001', { show: 'time', locked: false }, 2), true);
+  assert.deepEqual(onDisk(p).views, { 'u:uguest00001': { onStage: { screens: true, people: false, clears: true }, clock: { show: 'time', locked: false }, at: 2 } }, 'one record, beside the clock');
+  // Only whole switches are kept: one missing, one that is no boolean, a key of another name, and a uid that is none are
+  // refused and change nothing.
+  for (const [uid, o] of [['uguest00001', { screens: true }], ['uguest00001', { screens: 'yes', people: false, clears: false }], ['uguest00001', { screens: true, people: false, clears: false, web: true }], ['uguest00001', 'all'], ['', OFF], [null, OFF]]) {
+    assert.equal(p.setOnStage(uid, o), false, JSON.stringify([uid, o]));
+  }
+  assert.deepEqual(p.onStageOf('uguest00001'), { screens: true, people: false, clears: true }, 'a refused change changes nothing');
+  // Every one off: none kept, the clock beside it kept; the record goes once it holds nothing.
+  assert.equal(p.setOnStage('uguest00001', OFF, 3), true);
+  assert.deepEqual(onDisk(p).views, { 'u:uguest00001': { clock: { show: 'time', locked: false }, at: 3 } });
+  assert.equal(p.setClock('uguest00001', null, 4), true);
+  assert.deepEqual(onDisk(p).views, {});
+  assert.deepEqual(p.onStageOf({ toString: () => 'uguest00001' }), OFF);
+});
+
 test('a person\'s pins for themselves: by their key and the room, in the order pinned, once each; gone ids dropped at the next write; 50 a room; a room forgotten; 5,000 persons, the oldest written first', () => {
   const p = store();
   const LEGAL = 'LEGAL123';
@@ -670,6 +692,10 @@ test('a record of the wrong shape is dropped as the file is read; the rest is ke
       'u:uclock0001': { clock: { show: 'stage', locked: true }, at: 3 }, 'u:uclock0002': { clock: { show: null, locked: true }, at: 3 },
       'u:uclock0003': { view: 'full', clock: { show: 'tiny', locked: false }, at: 3 }, 'u:uclock0004': { clock: { show: 'off', locked: 'yes' }, at: 3 },
       'u:uclock0005': { clock: { show: null, locked: false }, at: 3 },
+      // What the admin lets a guest do On stage: whole switches kept, alone or beside a view; switches not whole, or every
+      // one off, dropped (and the view beside them kept).
+      'u:uonst00001': { onStage: { screens: true, people: false, clears: true }, at: 4 }, 'u:uonst00002': { view: 'simple', onStage: { screens: 'yes', people: false, clears: false }, at: 4 },
+      'u:uonst00003': { onStage: { screens: false, people: false, clears: false }, at: 4 }, 'u:uonst00004': { onStage: { screens: true }, at: 4 },
     },
     halls: {
       [HALL]: {
@@ -701,7 +727,8 @@ test('a record of the wrong shape is dropped as the file is read; the rest is ke
   assert.ok(fs.readFileSync(file, 'utf8').includes('"__proto__"'), 'a key a parse makes its own');
   const p = new Pages(file);
   assert.equal(p.unread, '');
-  assert.deepEqual(Object.fromEntries(p.views), { 'u:ugood00001': { view: 'simple', at: 1 }, 'u:ugood00002': { view: 'full', at: 2 }, 'u:uclock0001': { clock: { show: 'stage', locked: true }, at: 3 }, 'u:uclock0003': { view: 'full', at: 3 } });
+  assert.deepEqual(Object.fromEntries(p.views), { 'u:ugood00001': { view: 'simple', at: 1 }, 'u:ugood00002': { view: 'full', at: 2 }, 'u:uclock0001': { clock: { show: 'stage', locked: true }, at: 3 }, 'u:uclock0003': { view: 'full', at: 3 },
+    'u:uonst00001': { onStage: { screens: true, people: false, clears: true }, at: 4 }, 'u:uonst00002': { view: 'simple', at: 4 } });
   assert.deepEqual(Object.keys(p.halls), [HALL, 'HALLD4']);
   assert.deepEqual(p.halls.HALLD4, { seq: 2, board: {}, people: {}, answers: {}, earlier: [] }, 'a hall\'s parts that do not read are empty, its counter kept');
   const h = p.halls[HALL];
@@ -1053,6 +1080,57 @@ test('arrivals: information in the side bar is said so; over the operator\'s it 
   assert.deepEqual([held.mark, held.words], [MARKS.partly, 'Held under blank']);
   const mixed = Pages.status({ seq: 4, content: { kind: 'clock' }, by: { name: 'Tom' } }, [{ state: 'shown', name: 'A' }, { state: 'hidden', words: '', name: 'B' }, { state: 'hidden', words: 'under a web page', name: 'C' }], { board: true });
   assert.equal(mixed.words, '1 of 3 showing · 1 asleep or in another app · 1 under a web page');
+});
+
+test('a line typed On stage for the Board: its own place, which only another such line replaces; it supersedes no take or answer anyone was shown, nothing of theirs supersedes it, it is in Earlier as it is sent, and it is read back in its place', () => {
+  const p = store();
+  const quote = (text) => cleanPage({ kind: 'snippet', unit: 'text', text });
+  const page = { sid: 's1', key: ANA, board: true, name: 'Ana' };
+  // The operator's quote over the Board's chat; a researcher's beside it for the Board; one beside it for Ben alone, which
+  // he minimised (his answer).
+  const op = p.take(HALL, 'board', quote('Resolution 4'), { name: 'Tom', op: true }, { onStage: [ANA, BEN] });
+  const asideBoard = p.take(HALL, 'board', quote('For the Board'), { name: 'Sue' }, { arrive: 'side', aside: true, onStage: [ANA, BEN] });
+  const asideBen = p.take(HALL, BEN, quote('For Ben'), { name: 'Sue' }, { arrive: 'side', aside: true });
+  assert.ok(p.report(HALL, 's2', { key: BEN, board: true, seq: asideBen.seq, state: 'minimised' }).ok);
+  // Only a line typed On stage, to the Board, arriving in the side bar, is kept as one.
+  assert.equal(p.take(HALL, 'board', quote('x'), { name: 'Gil' }, { arrive: 'side', line: true }), null, 'not typed On stage');
+  assert.equal(p.take(HALL, BEN, quote('x'), { name: 'Gil', onStage: true }, { arrive: 'side', line: true }), null, 'to one person');
+  assert.equal(p.take(HALL, 'board', quote('x'), { name: 'Gil', onStage: true }, { line: true }), null, 'over the chat');
+  const line = p.take(HALL, 'board', quote('Can we take five?'), { name: 'Gil', onStage: true }, { arrive: 'side', line: true, onStage: [ANA, BEN] });
+  assert.deepEqual([line.arrive, line.aside, line.by], ['side', undefined, { name: 'Gil', onStage: true }]);
+  const at = (key, layer) => { const c = p.current(HALL, key, { board: true, layer }); return [c.take && c.take.seq, c.answer && c.answer.state]; };
+  // Nothing anyone was shown moved: the quote over the chat, the Board's card beside it, Ben's card and his answer.
+  assert.deepEqual([at(ANA, 'info'), at(ANA, 'beside'), at(ANA, 'line'), at(BEN, 'beside'), at(BEN, 'line')],
+    [[op.seq, null], [asideBoard.seq, null], [line.seq, null], [asideBen.seq, 'minimised'], [line.seq, null]]);
+  assert.deepEqual(p.earlierOf(HALL, ANA, { board: true }).map((e) => [e.seq, e.by]), [[line.seq, { name: 'Gil', onStage: true }]], 'in Earlier as it is sent, and only it');
+  // Reported on in its own place; the person's answer to it is theirs.
+  assert.deepEqual(p.report(HALL, 's1', { key: ANA, board: true, seq: line.seq, state: 'shown', words: 'in the side bar' }), { ok: true, answer: null });
+  assert.deepEqual(p.pageState(HALL, page, 'line').state, 'shown');
+  // Nothing of anyone else's puts it away: the operator's new quote, a researcher's side card, Back to chat for the Board,
+  // and a Take down of the information.
+  p.take(HALL, 'board', quote('Resolution 5'), { name: 'Tom', op: true }, { onStage: [ANA, BEN] });
+  p.take(HALL, 'board', quote('Beside again'), { name: 'Sue' }, { arrive: 'side', aside: true, onStage: [ANA, BEN] });
+  p.take(HALL, 'board', { kind: 'chat' }, { name: 'Tom', op: true }, { onStage: [ANA, BEN] });
+  p.take(HALL, 'board', { kind: 'chat', layer: 'info' }, { name: 'Tom', op: true }, { onStage: [ANA, BEN] });
+  assert.deepEqual(at(ANA, 'line'), [line.seq, null]);
+  // Another line replaces it, and the answers to it; it stays under Earlier, once.
+  assert.ok(p.report(HALL, 's2', { key: BEN, board: true, seq: line.seq, state: 'minimised' }).ok);
+  const line2 = p.take(HALL, 'board', quote('Thank you'), { name: 'Hana', onStage: true }, { arrive: 'side', line: true, onStage: [ANA, BEN] });
+  assert.deepEqual([at(ANA, 'line'), at(BEN, 'line')], [[line2.seq, null], [line2.seq, null]]);
+  assert.deepEqual(p.earlierOf(HALL, ANA, { board: true }).filter((e) => e.seq === line.seq || e.seq === line2.seq).map((e) => e.seq), [line2.seq, line.seq]);
+  // Read back in its place; a take in it that is no line typed On stage is dropped as the file is read.
+  p.flush();
+  assert.deepEqual(new Pages(p.file).current(HALL, ANA, { board: true, layer: 'line' }).take.seq, line2.seq);
+  const kept = JSON.parse(fs.readFileSync(p.file, 'utf8'));
+  kept.halls[HALL].board.line = { ...kept.halls[HALL].board.line, by: { name: 'Sue' } };
+  fs.writeFileSync(p.file, JSON.stringify(kept));
+  assert.equal(new Pages(p.file).current(HALL, ANA, { board: true, layer: 'line' }).take, null);
+  // Withdrawn by the operator, it is handed back there and gone from Earlier.
+  assert.ok(p.withdraw(HALL, line2.seq));
+  assert.deepEqual([at(ANA, 'line')[0] === line2.seq, p.earlierOf(HALL, ANA, { board: true }).some((e) => e.seq === line2.seq)], [false, false]);
+  // The hall's next number, read without making a book.
+  assert.deepEqual([p.nextSeq(HALL), p.nextSeq('NOHALL1'), p.nextSeq({ toString: 1 })], [p.halls[HALL].seq + 1, 1, 1]);
+  assert.equal(Object.hasOwn(p.halls, 'NOHALL1'), false);
 });
 
 test('canShow: who may show what on the Board\'s pages, each row of the table and each refusal in its words', () => {

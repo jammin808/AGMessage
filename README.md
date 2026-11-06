@@ -272,8 +272,10 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   internet link, a help request, an account and an entry of the audit log each have their ⋯, right-click and
   Shift+F10, and each of these pages has a skip link and lists that are one Tab stop (↑ and ↓ between their rows).
 - **The Board.** People On stage read, reply, answer the backstage team's questions, send 🔥 Priority, pin messages for
-  themselves and ask for help, and mark their own help request sorted; what they write stays in their room, where the
-  backstage team reads it. They never share files, ask questions, forward or send anything into another room, pin for
+  themselves and ask for help, and mark their own help request sorted; what they write is in their room's feed, where the
+  backstage team reads it, and goes nowhere else unless the admin lets that person also send to a countdown screen's line
+  or to everyone On stage (each its own switch, off by default; the admin may also make **Got it clear the message** from
+  their screen). They never share files, ask questions, forward or send anything into another room, pin for
   everyone or answer other people's help requests: the
   server refuses each by the seat, for the admin and an account seated On stage too. An account seated On stage in a
   hall answers none of that hall's help requests from its halls board either, but marks its own sorted.
@@ -289,7 +291,12 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   the room's pins first, then the person's own ("📌 For everyone · …", "📌 For you · …", "1 of 2"): a tap goes to the
   message and on to the next pin, and a pinned question is answered there, out of the chat until it is unpinned; "↓ 3 new · 1 question" below a chat scrolled
   up; "○ Nobody backstage is online" when no one backstage has been in the room for 10 s. The composer is **🔥 Priority**,
-  "Message everyone here…" and Send, and keeps its words when a send is refused. The header holds the hall's name, the
+  "Message everyone here…" and Send, and keeps its words when a send is refused; with one of the admin's switches on, an
+  **Also on** row above it offers **⏱ Lectern** (the line under the countdown of the hall's screens that show it, 160
+  characters, "Replaces Lectern's countdown line.") and **👥 Everyone On stage** (a card beside the chat of everyone On
+  stage, covering nothing), off after every send, and the message says where it went ("⏱ On Lectern ✓", "👥 Shown to 5 of
+  6 On stage") for everyone in the room. With **Got it clears** on, a message got gives its place to one line, "👍 Got and
+  cleared: Ana Ribeiro 14:02 · Show"; a pinned message, a question and one's own never go. The header holds the hall's name, the
   **time of day by default, or Stagewatch's countdown** ("⏱ 4:30 left" with its title and line, ▲ near the end and
   "0:30 over" past it, "--:--" with why when it is not live), set on the tablet or by the admin, who may lock it (or Off),
   then Help and ⋯, whose sheet holds Text size, Clock or countdown, Theme, Full screen (where the device offers it), why

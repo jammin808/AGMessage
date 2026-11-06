@@ -130,11 +130,13 @@
 
   /**
    * An account as the catalogue reads it: its id, name, whether it is off, why this viewer may not change it, whether it is
-   * one's own, the clock or countdown chosen for it, and its Chat view (beside Full, the clock applies in the simple view).
+   * one's own, the clock or countdown chosen for it, its Chat view (beside Full, the clock applies in the simple view), what
+   * it may do On stage and its On stage halls (the switches apply only where it sits On stage).
    */
   function accountObject(id) {
     const u = data && data.users.find((x) => x.id === id);
-    return u ? { id: u.id, name: u.name, username: u.username, disabled: !!u.disabled, locked: u.locked || '', self: u.id === meId, clock: AGM.catalog.adminClockOf(u), view: typeof u.view === 'string' ? u.view : '' } : null;
+    return u ? { id: u.id, name: u.name, username: u.username, disabled: !!u.disabled, locked: u.locked || '', self: u.id === meId, clock: AGM.catalog.adminClockOf(u), view: typeof u.view === 'string' ? u.view : '',
+      onStage: AGM.catalog.onStageOf(u), board: Array.isArray(u.board) ? u.board : [] } : null;
   }
   /** The accounts, each kept by its id and drawn again in place: its words, its Edit and its ⋯. */
   function renderUsers() {
@@ -201,6 +203,7 @@
     $('uView').disabled = self;
     drawClockFields(u, self);
     drawTree(u, self);
+    drawOnStageFields(u, self);
     $('uAll').disabled = self || !mayGive.allHalls();
     $('uAll').checked = (self || !$('uAll').disabled) && (u ? u.rights.allHalls : roleOf(sel.value).allHalls);
     $('uAll').dataset.touched = u && u.allHalls !== null ? '1' : '';
@@ -370,6 +373,43 @@
   clockSelect.addEventListener('change', drawClockLock);
   $('uView').addEventListener('change', drawClockLock);
 
+  // ---------------------------------------------------------------- the editor's On stage switches
+  // What the account may do On stage (plan 7-§17.6), account fields beside Chat view, one value whatever the hall, in the
+  // catalogue's words (account.onStageScreens, …People, …Clears) with the admin's words under each: an admin account's
+  // alone (the PATCH's rule), and disabled with "Applies On stage." while no hall's On stage box is ticked. An account is
+  // made with none, so a new one draws no row, and a Save sends them only from an admin, who alone may change them.
+  const onStageBox = (key) => $('uOnStage').querySelector('input[data-switch="' + key + '"]');
+  for (const [key, label, words] of AGM.catalog.ON_STAGE_SWITCHES) {
+    const wrap = document.createElement('div');
+    const lab = document.createElement('label');
+    lab.className = 'check';
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.dataset.switch = key;
+    box.setAttribute('aria-describedby', 'uOnStageWhy');
+    lab.append(box, document.createTextNode(' ' + label));
+    const hint = document.createElement('small');
+    hint.className = 'hint';
+    hint.textContent = words;
+    wrap.append(lab, hint);
+    $('uOnStage').append(wrap);
+  }
+  /** The editor's switches as the catalogue reads them: the account's, with the On stage halls the form has ticked now. */
+  const onStageInForm = () => ({ ...(accountObject(editing ? editing.id : '') || {}), board: Array.from($('uHalls').querySelectorAll('input.t-board:checked')).map((c) => c.value) });
+  function drawOnStageWhy() {
+    const why = editing && !isSelf(editing) ? AGM.catalog.ready('account', 'account.onStageScreens', F, onStageInForm()) : true;
+    for (const [key] of AGM.catalog.ON_STAGE_SWITCHES) onStageBox(key).disabled = isSelf(editing) || why !== true;
+    $('uOnStageWhy').textContent = why === true ? '' : why;
+  }
+  function drawOnStageFields(u, self) {
+    $('uOnStageRow').hidden = !u;
+    const o = AGM.catalog.onStageOf(u || {});
+    for (const [key] of AGM.catalog.ON_STAGE_SWITCHES) onStageBox(key).checked = o[key];
+    if (self) { for (const [key] of AGM.catalog.ON_STAGE_SWITCHES) onStageBox(key).disabled = true; $('uOnStageWhy').textContent = ''; return; }
+    drawOnStageWhy();
+  }
+  $('uHalls').addEventListener('change', () => { if (editing) drawOnStageWhy(); });
+
   /** The form as a change: role, halls, side rooms, On stage halls, chat view, and the rights that differ from the role's (grant / revoke). */
   function formChange() {
     if (isSelf(editing)) return { name: $('uName').value.trim() };
@@ -391,6 +431,9 @@
       // The clock or countdown, on an account already made (one is made with none): the choice, and the lock as the form
       // holds it (a box this viewer may not change holds the account's, so it asks no change of it).
       ...(editing ? { clock: { show: clockSelect.value || null, locked: $('uClockLock').checked } } : {}),
+      // What it may do On stage, on an account already made, from an admin account alone (the PATCH's rule): another
+      // viewer's Save asks no change of them.
+      ...(editing && F.adminRole ? { onStage: Object.fromEntries(AGM.catalog.ON_STAGE_SWITCHES.map(([key]) => [key, onStageBox(key).checked])) } : {}),
       grant: caps.filter((c) => !role.caps.includes(c)),
       revoke: role.caps.filter((c) => !caps.includes(c)),
     };
@@ -412,7 +455,7 @@
       if (!r.ok) { sayIn(lateWords(r) + r.error); return; }
       if (inEditor()) $('userDialog').close();
       if (r.password) showSecret(r.user.name, r.password);
-      else say(lateWords(r) + (was ? 'Saved — ' + (!r.changed.length ? 'nothing changed.' : r.changed.every((f) => f === 'view' || f === 'clock') ? 'their open pages draw it now.' : 'their open pages reconnect with the new rights.') : 'Added.'));
+      else say(lateWords(r) + (was ? 'Saved — ' + (!r.changed.length ? 'nothing changed.' : r.changed.every((f) => f === 'view' || f === 'clock' || f === 'onStage') ? 'their open pages draw it now.' : 'their open pages reconnect with the new rights.') : 'Added.'));
       load();
     };
     if (was) http('PATCH', '/api/users/' + encodeURIComponent(was.id), change, done, sayIn);
@@ -443,7 +486,17 @@
     // The clock or countdown chosen for the account ('' their own choice), and its lock: saved at once, its pages told live.
     'account.clock': (o, c) => { if (typeof c.value === 'string') accountAct(o, 'PATCH', '', { clock: AGM.catalog.clockChange(c.value) }, (r, late) => say(late + clockSaid(o, r.user))); },
     'account.clockLock': (o) => accountAct(o, 'PATCH', '', { clock: { locked: !o.clock.locked } }, (r, late) => say(late + clockSaid(o, r.user))),
+    // What the account may do On stage: each switch turned the other way, saved at once, its pages told live.
+    'account.onStageScreens': (o) => onStageAct(o, 'screens'),
+    'account.onStagePeople': (o) => onStageAct(o, 'people'),
+    'account.onStageClears': (o) => onStageAct(o, 'clears'),
   });
+  /** One of the account's On stage switches turned the other way, and said: "Kim: May send to a countdown screen — on." */
+  function onStageAct(o, key) {
+    const on = !o.onStage[key];
+    const label = (AGM.catalog.ON_STAGE_SWITCHES.find(([k]) => k === key) || ['', ''])[1];
+    accountAct(o, 'PATCH', '', { onStage: { [key]: on } }, (r, late) => say(late + o.name + ': ' + label + (on ? ' — on.' : ' — off.')));
+  }
   /** What an account's clock or countdown is now, in the admin's words: "Kim's clock or countdown: Time of day, locked on their devices." */
   function clockSaid(o, user) {
     const c = AGM.catalog.adminClockOf(user || {});

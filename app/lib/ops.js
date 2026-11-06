@@ -23,6 +23,7 @@ const UPD_EVENTS = Object.freeze({
   help: 'helpUpdate',
   sentTo: 'sentUpdate',
   replyTo: 'replyUpdate',
+  also: 'alsoUpdate',
 });
 /** The kinds of op a room's log holds (`lib/store.js`). */
 const KINDS = Object.freeze(['add', 'upd', 'del', 'reset', 'meta']);

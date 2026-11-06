@@ -149,6 +149,19 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   those out; a room reset or removed, a room no longer there at a start and an account removed take theirs with them.
   Neither kind is an audit row (a pin for oneself is a person's act on their own page), and a pin for oneself is in no
   transcript, context, hello or AI brief.
+- What an On stage seat writes reaches a screen or people's pages only by the admin's switch for that person (May send to a
+  countdown screen, May send to people On stage; each off by default, set by the laptop's token or an account whose role
+  is admin, never by a manager granted `settings.manage` or `users.manage`, never on one's own account, never by `create`,
+  and audited without a code or a text). The server reads the switch from its store at each send, never the page's word
+  or a copy taken at the join, so one turned off refuses the next send with no reload, and checks the seat, the shape of
+  `also` (`{}` refused), the kind of message and every place before anything is written: a refusal posts nothing. On a
+  screen it is only the line under the countdown, on a screen that shows the countdown already, at most 160 characters
+  (never cut); on people's pages it is a typed line beside their chat (a side card), kept in a place of the Board's own for
+  it that only another such line replaces: it never takes the Board's information place, never puts away anyone's take or
+  answer, and covers no chat. The message, its updates
+  and the ack name screens by their names alone: a screen's id, link or token is never sent to a page. Such a send is
+  `now`, never held, so it is never shown late; it takes one token of the connection's writes bucket for each place
+  beside the message's own.
 - A take on people's pages (`page:push`) is the admin's, an account's with `display.control` in the hall, or a code
   guest's seated backstage in the hall's Main room while its seats are locked (the seat came from an invite, or was one
   the admin kept by locking the room, who sees and may move each seat kept): never a page seated On stage, the admin's

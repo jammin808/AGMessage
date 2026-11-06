@@ -8,7 +8,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const path = require('path');
 const { io } = require('socket.io-client');
-const { ROOT, startServer, stopServer, api, connect, emit, handlerFiles, TOKEN, readSource } = require('./helpers');
+const { ROOT, startServer, stopServer, api, connect, emit, handlerFiles, inviteOf, TOKEN, readSource } = require('./helpers');
 
 const EVENTS = [...new Set(handlerFiles().flatMap((f) => [...readSource(path.join(ROOT, f)).matchAll(/socket\.on\('([^']+)'/g)].map((m) => m[1])))]
   .filter((e) => e !== 'disconnect');
@@ -78,6 +78,9 @@ test('client values are read by their type: a value String() cannot convert reac
   const guest = await connect(base); sockets.push(guest);
   const rita = await emit(guest, 'join', { roomCode: hall, name: 'Rita', role: 'research' });
   assert.ok(rita.ok);
+  // A guest On stage, by the hall's On stage link: where else its message goes is read by type.
+  const board = await connect(base); sockets.push(board);
+  assert.ok((await emit(board, 'join', { roomCode: hall, name: 'Gil', role: 'board', invite: inviteOf(srv.dataDir, hall) })).ok);
   // A message of the guest's own, so a reaction's `on` is read: an unknown message is refused before it.
   const posted = await emit(guest, 'message', { type: 'text', text: 'react to me' });
   assert.ok(posted.ok, JSON.stringify(posted));
@@ -151,6 +154,14 @@ test('client values are read by their type: a value String() cannot convert reac
     // and a room or a page that is none.
     [ctl, 'admin:setClock', { roomCode: U, socketId: U, show: U, locked: U }], [ctl, 'admin:setClock', { roomCode: U, socketId: U, show: 'time', locked: U }],
     [ctl, 'admin:setClock', { roomCode: hall, socketId: U, show: 'stage' }], [ctl, 'admin:setClock', U],
+    // What the admin lets a person On stage do, each switch by type, none named, a key that is none of its own, and a room
+    // or a page that is none (plan 7-§17.6).
+    [ctl, 'admin:setOnStage', { roomCode: U, socketId: U, screens: U, people: U, clears: U }], [ctl, 'admin:setOnStage', { roomCode: hall, socketId: U, screens: true }],
+    [ctl, 'admin:setOnStage', { roomCode: hall, socketId: U }], [ctl, 'admin:setOnStage', U],
+    // Where else a message goes (`also`), by type: from a seat backstage, refused for its seat whatever it holds; from On
+    // stage, an `also` that is no place (`{}` among them) and one on a help request, each in its words, nothing posted.
+    [guest, 'message', { type: 'text', text: 'x', also: U }], [board, 'message', { type: 'text', text: 'x', also: U }],
+    [board, 'message', { type: 'text', text: 'x', also: {} }], [board, 'message', { type: 'help', text: 'x', also: { screens: true } }],
     // A room's earlier messages, read back from a change number that is none (and from no room: the admin's page sits in none),
     // and one of them read by an id that is none.
     [guest, 'history:before', { beforeSeq: U }], [guest, 'history:before', U], [ctl, 'history:before', { beforeSeq: U }],
@@ -215,6 +226,18 @@ test('client values are read by their type: a value String() cannot convert reac
     if (ev === 'admin:setView') {
       assert.deepEqual(r, { ok: false, error: arg.view === U ? 'Choose By seat, Simple or Full.' : 'That person is not in this room now.' }, ev + ' ' + JSON.stringify(arg));
       await new Promise((resolve) => setTimeout(resolve, 250));
+      continue;
+    }
+    if (ev === 'admin:setOnStage') {
+      // Only a request naming a switch, by type, and nothing else reaches the person it names.
+      const typed = !(arg && typeof arg === 'object' && arg.screens === true);
+      assert.deepEqual(r, { ok: false, error: typed ? 'Choose on or off.' : 'That person is not in this room now.' }, ev + ' ' + JSON.stringify(arg));
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      continue;
+    }
+    if (ev === 'message' && arg && Object.hasOwn(arg, 'also')) {
+      const words = s === guest ? 'Only On stage seats send this way: use ⧉ Show on screens or 📺 Show the Board.' : arg.type === 'help' ? 'Only a message goes there, not a help request.' : 'Choose where else it goes: a countdown screen or people On stage.';
+      assert.deepEqual(r, { ok: false, error: words }, ev + ' ' + JSON.stringify(arg));
       continue;
     }
     if (ev === 'admin:setClock') {

@@ -182,8 +182,9 @@ class Accounts {
 
   /**
    * What a page may know about an account: never its hash. Its side rooms (`rooms`), its On stage halls (`board`), its
-   * chat view (`view`: '' by its seat, 'simple' or 'full') and the clock or countdown the admin chose for it (`clock`:
-   * {show, locked}, lib/views.js) last, each as stored: none when never set.
+   * chat view (`view`: '' by its seat, 'simple' or 'full'), the clock or countdown the admin chose for it (`clock`:
+   * {show, locked}) and what the admin lets it do On stage (`onStage`: {screens, people, clears}, lib/views.js) last, each
+   * as stored: none (every switch off) when never set.
    */
   static view(a) {
     if (!a) return null;
@@ -192,7 +193,7 @@ class Accounts {
       grant: a.grant || [], revoke: a.revoke || [], disabled: !!a.disabled, mustChange: !!a.mustChange,
       createdAt: a.createdAt, lastLoginAt: a.lastLoginAt || 0, pwSetAt: a.pwSetAt || 0, rights: rbac.rightsView(a),
       rooms: Array.isArray(a.rooms) ? a.rooms : [], board: Array.isArray(a.board) ? a.board : [], view: isView(a.view) ? a.view : '',
-      clock: views.clockOf(a.clock),
+      clock: views.clockOf(a.clock), onStage: views.onStageOf(a.onStage),
     };
   }
   list() { return Array.from(this.users.values()).map(Accounts.view).sort((x, y) => x.username.localeCompare(y.username)); }
@@ -236,8 +237,9 @@ class Accounts {
    * Set fields an admin may change (checked by the caller with rbac.mayChange). Returns the names of the fields that
    * now hold something else: a field sent as it already is is no change (no reconnect, no audit row). Side rooms and On
    * stage halls are lists of keys, compared as sets; the chat view is '' (by the seat), 'simple' or 'full', and any other
-   * value changes nothing (the caller refuses it with words); the clock or countdown is what its change makes over the
-   * one kept (lib/views.js cleanClock), and one it refuses changes nothing (the caller refuses it with words).
+   * value changes nothing (the caller refuses it with words); the clock or countdown, and what it may do On stage, are what
+   * their change makes over the one kept (lib/views.js cleanClock, cleanOnStage), and one refused changes nothing (the
+   * caller refuses it with words).
    */
   update(id, change) {
     const a = this.get(id);
@@ -257,6 +259,13 @@ class Accounts {
       if (!next.error && !views.sameClock(next, a.clock)) {
         if (views.noClock(next)) delete a.clock; else a.clock = next;
         changed.push('clock');
+      }
+    }
+    if ('onStage' in change) {
+      const next = views.cleanOnStage(change.onStage, views.onStageOf(a.onStage));
+      if (!next.error && !views.sameOnStage(next, a.onStage)) {
+        if (views.noOnStage(next)) delete a.onStage; else a.onStage = next;
+        changed.push('onStage');
       }
     }
     if ('allHalls' in change) {

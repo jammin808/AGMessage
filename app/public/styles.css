@@ -2379,7 +2379,27 @@ body[data-view="simple"] .priority-btn.on { border-color: var(--c-fault); box-sh
 body[data-view="simple"] .priority-btn .pri-word { display: inline; }
 body[data-view="simple"] .reply-chip { font-size: var(--fs-md); }
 body[data-view="simple"] .reply-chip .reply-cancel { min-height: var(--target-touch); padding: 0 var(--sp-2); color: var(--c-action); font-size: var(--fs-md); font-weight: 600; }
+/* Also on (plan 7-§17.6): one row above the field, a chip for each switch the admin turned on, ✓ and filled when on, 44 px
+   to the finger; with ⏱ chosen, what it replaces and the count, muted. Both views draw it on the On stage composer. */
+.also-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin: 0 0 var(--sp-2); min-width: 0; }
+.also-label { font-size: var(--fs-sm); color: var(--c-ink-muted); }
+.also-chips { display: flex; flex-wrap: wrap; gap: var(--sp-2); min-width: 0; }
+.also-chip { min-height: var(--target-touch); border: 2px solid var(--c-edge); }
+.also-chip[aria-pressed="true"] { background: var(--c-action); border-color: var(--c-action); color: var(--c-on-action); font-weight: 600; }
+.also-chip[aria-pressed="false"] .also-tick { display: none; }
+.also-chip[aria-disabled="true"] { color: var(--c-ink-muted); border-style: dashed; }
+.also-line { flex: 1 0 100%; margin: 0; font-size: var(--fs-sm); color: var(--c-ink-muted); }
+.also-count { font-variant-numeric: tabular-nums; }
+/* Where a message also went, at the end of its author's line, in both views: muted, read on demand. */
+.msg .also-said { font-size: var(--fs-sm); color: var(--c-ink-muted); }
+.msg .also-said[hidden] { display: none; }
+/* Got it clears (B4): a message the person got gives its place to one muted line, 44 px tall, with Show; shown again, it
+   is drawn whole. Both views draw it for a page seated On stage; the simple view at its own size and edges. */
+.bv-cleared { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); min-height: var(--target-touch); padding: 0 var(--sp-3); font-size: var(--fs-sm); color: var(--c-ink-muted); }
+body[data-view="simple"] .bv-cleared { margin: 0 auto; padding: 0 max(16px, env(safe-area-inset-left)); font-size: calc(var(--fs-sm) * var(--zoom-msg, 1)); }
+.msg[data-cleared="1"] { display: none; }
 @media (max-width: 600px) {
+  .also-chip .also-long { display: none; }
   body[data-view="simple"] .priority-btn .pri-word { display: none; }
   body[data-view="simple"] .priority-btn { padding: 0; }
   body[data-view="simple"] #directorForm { gap: 6px; }

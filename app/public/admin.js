@@ -382,7 +382,7 @@ const hallName = () => (currentRoom ? currentRoom.title || roomNameForCode(curre
 function renderUsers(users) {
   const tb = document.getElementById('usersTbody');
   if (!users.length) {
-    tb.innerHTML = '<tr><td colspan="6" class="muted">No-one has joined yet.</td></tr>';
+    tb.innerHTML = '<tr><td colspan="7" class="muted">No-one has joined yet.</td></tr>';
     ADMIN.refresh();
     return;
   }
@@ -395,12 +395,12 @@ function renderUsers(users) {
       tr = document.createElement('tr');
       tr.dataset.key = u.socketId;
       tr.className = 'person-row';
-      for (let i = 0; i < 6; i++) tr.appendChild(document.createElement('td'));
+      for (let i = 0; i < 7; i++) tr.appendChild(document.createElement('td'));
       const bar = document.createElement('span');
       bar.className = 'obj-bar';
       tr.lastElementChild.appendChild(bar);
     }
-    const [nameTd, seatTd, viewTd, clockTd, linksTd] = tr.children;
+    const [nameTd, seatTd, viewTd, clockTd, onStageTd, linksTd] = tr.children;
     const nameHtml = `<strong>${escapeHtml(u.name)}</strong>`;
     if (nameTd.innerHTML !== nameHtml) nameTd.innerHTML = nameHtml;
     // A code guest's seat is set here; an account's follows its rights, which are set on the Accounts page.
@@ -417,6 +417,7 @@ function renderUsers(users) {
     if (!viewSel) viewTd.innerHTML = `<select class="view-select" aria-label="Chat view of ${escapeHtml(u.name)}">${chatViewOptionsHtml(viewNow)}</select>`;
     else if (document.activeElement !== viewSel) viewSel.value = viewNow;
     drawClockCell(clockTd, u);
+    drawOnStageCell(onStageTd, u);
     const linksHtml = (u.linkedRooms || []).map((rm) => {
       const nm = roomNameForCode(rm);
       const labelHtml = nm
@@ -469,6 +470,42 @@ function drawClockCell(td, u) {
   applies.hidden = u.view !== 'full';
   applies.textContent = AGM.catalog.WORDS.clockApplies;
 }
+/**
+ * A person's On stage cell (plan 7-§17.6): for a person seated On stage, the admin's three switches, each a tick named for
+ * the person (the catalogue's person.onStageScreens, …People, …Clears, the same act as the row's ⋯), with the admin's
+ * words under each; the admin's alone, disabled with the server's words on another page the gate admits. Anyone else:
+ * "Applies On stage.". Drawn in place: a tick being used keeps its focus.
+ */
+let onStageCells = 0;
+function drawOnStageCell(td, u) {
+  const rows = AGM.catalog.ON_STAGE_SWITCHES;
+  const seated = seatValue(u.role) === 'board';
+  if (!seated) {
+    if (!td.querySelector('.on-stage-none')) td.innerHTML = '<small class="muted on-stage-none"></small>';
+    td.querySelector('.on-stage-none').textContent = AGM.catalog.WORDS.appliesOnStage;
+    return;
+  }
+  if (!td.querySelector('.on-stage-box')) {
+    td.innerHTML = onStageSwitchesHtml() + '<small class="muted on-stage-why" hidden></small>';
+    const whyEl = td.querySelector('.on-stage-why');
+    whyEl.id = 'onStageWhy' + (++onStageCells);
+    for (const box of td.querySelectorAll('.on-stage-box')) box.setAttribute('aria-describedby', whyEl.id);
+  }
+  const o = AGM.catalog.onStageOf(u);
+  let why = true;
+  for (const box of td.querySelectorAll('.on-stage-box')) {
+    const key = box.dataset.switch;
+    const label = (rows.find(([k]) => k === key) || ['', ''])[1];
+    const id = 'person.onStage' + key[0].toUpperCase() + key.slice(1);
+    box.checked = o[key];
+    box.setAttribute('aria-label', label + ' for ' + u.name);
+    why = AGM.catalog.ready('person', id, ADMIN_F, u);
+    box.disabled = why !== true;
+  }
+  const whyEl = td.querySelector('.on-stage-why');
+  whyEl.textContent = why === true ? '' : why;
+  whyEl.hidden = why === true;
+}
 /** A seat as its select's value: the server's word, On stage's older name read as On stage. */
 const seatValue = (role) => (role === 'director' ? 'board' : role);
 const seatSelect = (sid) => document.querySelector('#usersTbody > tr[data-key="' + CSS.escape(sid) + '"] .role-select');
@@ -513,6 +550,16 @@ usersTbody.addEventListener('change', (e) => {
     sel.checked = c.locked;
     ADMIN.act('person', 'person.clockLock', o, { anchor: sel, node: tr, opener: sel, get, gone: 'That person has left the hall.' });
   }
+});
+// A person's On stage switch ticked is the catalogue's person.onStage… for it: what the server keeps is shown until it answers.
+usersTbody.addEventListener('change', (e) => {
+  const box = e.target.closest('.on-stage-box');
+  const tr = box && box.closest('tr[data-key]');
+  const o = tr && personObject(tr.dataset.key);
+  if (!o) return;
+  const key = box.dataset.switch;
+  box.checked = AGM.catalog.onStageOf(o)[key];
+  ADMIN.act('person', 'person.onStage' + key[0].toUpperCase() + key.slice(1), o, { anchor: box, node: tr, opener: box, get: () => personObject(tr.dataset.key), gone: 'That person has left the hall.' });
 });
 // A link's × takes back that one hall: the catalogue's No longer forward into ▸, as unticking it in the menu is.
 usersTbody.addEventListener('click', (e) => {
@@ -704,11 +751,25 @@ function setClock(o, change) {
     say(o.name + '\'s clock or countdown' + (res.already ? ' is already: ' : ': ') + label + (k.locked ? ', locked on their devices.' : '.'));
   });
 }
+/** One of the admin's On stage switches for a person of the watched room (admin:setOnStage), turned the other way: said once the server has it. */
+function setOnStage(o, key) {
+  const on = !AGM.catalog.onStageOf(o)[key];
+  AGM.outbox.now('admin:setOnStage', { roomCode: currentRoom.code, socketId: o.socketId, [key]: on }, (res) => {
+    if (!res || !res.ok) { say((res && res.error) || 'Not changed.', true); return; }
+    const label = (AGM.catalog.ON_STAGE_SWITCHES.find(([k]) => k === key) || ['', ''])[1];
+    say(o.name + ': ' + label + (on ? ' — on' : ' — off') + (res.already ? ' already.' : '.'));
+  });
+}
 /** Whether the watched room is a hall's Main room (a side room has no stage: no seat there is On stage). */
 function watchedIsMain() { return !currentRoom || currentRoom.main !== false; }
 /** The chat views a person's pages may draw, in the catalogue's words (By seat, Simple, Full), the one chosen selected. */
 function chatViewOptionsHtml(current) {
   return AGM.catalog.CHAT_VIEWS.map(([v, label]) => '<option value="' + escapeHtml(v) + '"' + (v === current ? ' selected' : '') + '>' + escapeHtml(label) + '</option>').join('');
+}
+/** The admin's On stage switches, each a tick with its words under it, in the catalogue's words. */
+function onStageSwitchesHtml() {
+  return AGM.catalog.ON_STAGE_SWITCHES.map(([key, label, words]) => '<label class="check on-stage-switch"><input type="checkbox" class="on-stage-box" data-switch="' + escapeHtml(key) + '"> ' + escapeHtml(label) + '</label>'
+    + '<small class="muted on-stage-words">' + escapeHtml(words) + '</small>').join('');
 }
 /** The admin's clock or countdown choices, in the catalogue's words ('' their own choice). */
 function clockOptionsHtml() {
@@ -870,6 +931,10 @@ Object.assign(ADMIN_RUN, {
   // people list it sends.
   'person.clock': (o, c) => { if (typeof c.value === 'string') setClock(o, AGM.catalog.clockChange(c.value)); },
   'person.clockLock': (o) => setClock(o, { locked: !AGM.catalog.adminClockOf(o).locked }),
+  // What a person seated On stage may do: each switch turned the other way; the row follows the people list it sends.
+  'person.onStageScreens': (o) => setOnStage(o, 'screens'),
+  'person.onStagePeople': (o) => setOnStage(o, 'people'),
+  'person.onStageClears': (o) => setOnStage(o, 'clears'),
   // A hall ticked already is unticked: that is No longer forward into ▸, its own act.
   'person.forward': (o, c) => {
     if (!c.value) return;

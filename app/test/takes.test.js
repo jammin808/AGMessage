@@ -808,7 +808,7 @@ test('a person\'s chat view: the join\'s view by the seat, the admin\'s choice f
   const tomPage = await page(tom.cookie, 'Tom backstage');
   await joined(tomPage, { roomCode: hall, as: 'account' });
   assert.deepEqual([gilJoin.view, riaJoin.view, beaJoin.view], ['simple', 'full', 'simple']);
-  assert.deepEqual(Object.keys(gilJoin).slice(-7), ['view', 'more', 'older', 'files', 'theAdmin', 'clock', 'pins'], 'the join\'s view, appended before a first open\'s bounds, and the clock or countdown and the person\'s pins after them');
+  assert.deepEqual(Object.keys(gilJoin).slice(-8), ['view', 'more', 'older', 'files', 'theAdmin', 'clock', 'pins', 'onStage'], 'the join\'s view, appended before a first open\'s bounds, and the clock or countdown, the person\'s pins and what they may do On stage after them');
 
   // The admin page reads the room's people, with the view the admin chose for each ('' by the seat).
   const ctl = await page(admin, 'the admin page');
@@ -954,7 +954,7 @@ test('the clock or countdown: the admin\'s choice and lock for a guest or an acc
   // The admin's own account seated in the hall, which a manager may not reach.
   const anaPage = await page(admin, 'Ana in the hall');
   const anaJoin = await joined(anaPage, { roomCode: hall, as: 'account' });
-  assert.deepEqual([gilJoin.clock, riaJoin.clock, beaJoin.clock, Object.keys(gilJoin).at(-2), Object.keys(beaJoin).at(-2)], [NONE, NONE, NONE, 'clock', 'clock']);
+  assert.deepEqual([gilJoin.clock, riaJoin.clock, beaJoin.clock, Object.keys(gilJoin).at(-3), Object.keys(beaJoin).at(-3)], [NONE, NONE, NONE, 'clock', 'clock']);
   assert.deepEqual([gilJoin.theAdmin, beaJoin.theAdmin, anaJoin.theAdmin], [false, false, true], 'the join says which page is "the admin"');
 
   // The admin page reads the room's people with the clock the admin chose for each, beside their chat view; no other

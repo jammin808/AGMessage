@@ -77,6 +77,11 @@
     clockChoose: 'Choose one to lock it.',
     noClockStage: 'This hall has no Stagewatch linked.',
     clockApplies: 'Applies in the simple view.',
+    // What a seat On stage may do (plan 7-§17.6): the switches' reason where they cannot be changed, as the server refuses
+    // them; where they do nothing; and ⏱ while no screen of the hall shows the countdown.
+    onStageAdmin: 'Only an admin may choose what an On stage seat may do.',
+    appliesOnStage: 'Applies On stage.',
+    noCountdown: 'No screen in this hall shows the countdown now.',
   });
   /** The support view's words (R8): every door the person has, drawn, and none of them acts. */
   const supportWords = (name) => 'This is ' + name + '\'s view — act from your own page.';
@@ -322,6 +327,43 @@
   const clockChange = (value) => (value ? { show: value } : { show: null, locked: false });
   /** Clock or countdown's line under it beside a person whose Chat view is Full: it applies in the simple view. */
   const clockNote = (f, o) => (o && o.view === 'full' ? WORDS.clockApplies : '');
+  /**
+   * What the admin lets a seat On stage do (plan 7-§17.6), each switch with its label and the admin's words under it: a
+   * message of theirs may also go to a countdown screen's line, may also be shown beside the chat of everyone On stage,
+   * and their Got it clears it from their own feed. Each off until the admin turns it on.
+   */
+  const ON_STAGE_SWITCHES = Object.freeze([
+    ['screens', 'May send to a countdown screen', 'Their messages can go to the line under the countdown on this hall\'s screens.'],
+    ['people', 'May send to people On stage', 'Their messages can be shown on the pages of everyone On stage, beside their chat.'],
+    ['clears', 'Got it clears the message', 'Off: the message stays in their feed, marked got.'],
+  ].map((x) => Object.freeze(x)));
+  /**
+   * A person's or a page's switches as the server tells them (`onStage`: {screens, people, clears, countdownScreens?}),
+   * read by type: each off where it is not true; the hall's screens showing the countdown by their names, only while
+   * `screens` is on.
+   */
+  const onStageOf = (o) => {
+    const v = o && o.onStage && typeof o.onStage === 'object' ? o.onStage : {};
+    const names = v.screens === true && Array.isArray(v.countdownScreens) ? v.countdownScreens.filter((n) => typeof n === 'string' && n.length > 0) : [];
+    return Object.freeze({ screens: v.screens === true, people: v.people === true, clears: v.clears === true, countdownScreens: Object.freeze(names) });
+  };
+  /** Names in words: "Lectern", "Lectern and Foyer", "Lectern, Foyer and Bar". */
+  const namesSaid = (xs) => (xs.length <= 1 ? xs.join('') : xs.slice(0, -1).join(', ') + ' and ' + xs[xs.length - 1]);
+  /** A switch of the admin's doors, now: the admin's alone (locksClocks' predicate), and only for a seat On stage. */
+  const onStageWhy = (f, o, seated) => (!locksClocks(f) ? WORDS.onStageAdmin : !seated ? WORDS.appliesOnStage : true);
+  /** A person of the room seated On stage now (the People panel's and the admin page's rows), where the switches apply. */
+  const seatedOnStage = (o) => !!o && (o.role === 'board' || o.role === 'director');
+  /** An account seated On stage in a hall at all (its On stage halls), where the Accounts page's switches apply. */
+  const accountOnStage = (o) => !!o && Array.isArray(o.board) && o.board.length > 0;
+  /**
+   * The admin's three switches on a kind's object (`person`, `account`): one menuitemcheckbox each (`switch` names it), in
+   * the doors' words with the admin's words under it, checked where it is on, and no icon of its own (the countdown's, the
+   * Board's and Got it's are other acts'); `base` the kind's verb, `may`, `fits` and `ready`.
+   */
+  const onStageRows = (kind, base) => ON_STAGE_SWITCHES.map(([key, label, words]) => Object.freeze({
+    id: kind + '.onStage' + key[0].toUpperCase() + key.slice(1), label, group: '4_manage', mode: 'now',
+    checked: (f, o) => onStageOf(o)[key], note: () => words, switch: key, ...base,
+  }));
   const seatOf = (role) => (role === 'director' ? 'board' : role);
   /**
    * The ask before a room's guest code is switched off (the design's three-way choice): the guest pages in with it stay
@@ -577,6 +619,14 @@
           .concat(f.targets.map((t) => ({ value: t.ref, label: placeOf(t), role: 'menuitemradio', checked: o.to === t.ref }))) },
       { id: 'compose.priority', label: 'Priority', icon: '🔥', group: '2_send', verb: 'local', mode: 'local', checked: (f, o) => !!o.priority,
         may: (f) => f.post, fits: () => true },
+      // Also on (plan 7-§17.6): where else the next message goes from a seat On stage, while the admin has turned on one of
+      // the person's switches, a chip for each (⏱ the hall's countdown screens, 👥 everyone On stage), each a toggle off
+      // after every send (`also`: the places chosen). Sent now, never held: a line meant for a screen or people's pages is
+      // never shown late. ⏱ waits, with why, while no screen of the hall shows the countdown. The server reads the seat
+      // and the switches, never the view, so both views draw it.
+      { id: 'compose.also', label: 'Also on', icon: '📣', group: '2_send', verb: 'message', mode: 'now',
+        may: (f) => f.role === 'board' && (f.onStage.screens || f.onStage.people), fits: (f, o) => o.form === 'director',
+        submenu: (f, o) => alsoChips(f, o) },
       // 🔒 Confidential beside 🔥 Priority, on a file shared: whoever shares it marks it as it is shared (plan 4-§5.14).
       { id: 'compose.confidential', label: 'Confidential', icon: '🔒', group: '2_send', verb: 'local', mode: 'local', checked: (f, o) => !!o.confidential,
         may: (f) => f.files, fits: (f, o) => o.form === 'text' && !!o.file },
@@ -740,6 +790,13 @@
       { id: 'earlier.show', label: (f, o) => (o.find ? 'Show it' : 'Show earlier'), group: '3_keep', inline: () => 1, verb: 'history:before', mode: 'now',
         may: () => true, fits: (f, o) => o.more === true },
     ],
+    // The line in place of the messages the person got (Got it, or React ▸ 👍 in the full view), while the admin's Got it
+    // clears the message is on for them (plan 7-§17.6, B4), in either view: Show draws them again, marked got, until the
+    // page reloads, and Hide folds them back (`open`: the run is shown). This page's own act: nothing on the wire.
+    cleared: [
+      { id: 'cleared.show', label: (f, o) => (o.open ? 'Hide' : 'Show'), group: '3_keep', inline: () => 1, verb: 'local', mode: 'local',
+        may: () => true, fits: () => true },
+    ],
     // A pick in the Preview: what a researcher highlighted in a file there (words, cells, a region), and the stage
     // addendum's previewActions(pick) exactly, in its order, Copy first (plan 5-§16.3: the one kind whose order is not its
     // groups'): Copy · each unit that holds the pick · a picture of the page · what is in view · the document at this
@@ -870,6 +927,11 @@
         may: (f) => f.admin, fits: (f, o) => (onAdmin(f) || (onHall(f) && full(f))) && typeof o.socketId === 'string' && o.socketId.length > 0, submenu: adminClocks },
       { id: 'person.clockLock', label: 'Lock it on their devices', icon: '🗝', group: '4_manage', verb: 'admin:setClock', mode: 'now', checked: (f, o) => adminClockOf(o).locked,
         may: (f) => f.admin, fits: (f, o) => (onAdmin(f) || (onHall(f) && full(f))) && typeof o.socketId === 'string' && o.socketId.length > 0, ready: clockLockWhy },
+      // What a person seated On stage may do (plan 7-§17.6): May send to a countdown screen, May send to people On stage, Got
+      // it clears the message, each a tick, the admin's alone (`theAdmin`: an admin page of a manager granted
+      // settings.manage draws them disabled with the server's words), on the admin's rows and the People panel's ⋯.
+      ...onStageRows('person', { verb: 'admin:setOnStage', may: (f) => f.admin,
+        fits: (f, o) => (onAdmin(f) || (onHall(f) && full(f))) && typeof o.socketId === 'string' && o.socketId.length > 0 && seatedOnStage(o), ready: (f, o) => onStageWhy(f, o, true) }),
       { id: 'person.seat', label: 'Seat', icon: '💺', group: '4_manage', verb: 'admin:setRole', mode: 'now',
         may: (f) => f.admin, fits: (f, o) => onAdmin(f) && !o.account,
         submenu: (f, o) => (o.main === false ? SEATS_SIDE : SEATS).map(([value, label]) => ({ value, label, role: 'menuitemradio', checked: seatOf(o.role) === value })) },
@@ -1057,6 +1119,10 @@
         may: (f, o) => f.manageUsers && !o.locked, fits: (f, o) => !o.self, submenu: adminClocks },
       { id: 'account.clockLock', label: 'Lock it on their devices', icon: '🗝', group: '4_manage', verb: 'http:PATCH /api/users/:id', mode: 'now', checked: (f, o) => adminClockOf(o).locked,
         may: (f, o) => f.manageUsers && !o.locked, fits: (f, o) => !o.self, ready: clockLockWhy },
+      // What the account may do On stage, an account field like its Chat view (one value whatever the hall): the admin
+      // account's alone (`adminRole`, the PATCH's rule), and drawn disabled with "Applies On stage." while it sits On stage
+      // in no hall.
+      ...onStageRows('account', { verb: 'http:PATCH /api/users/:id', may: (f, o) => f.manageUsers && !o.locked, fits: (f, o) => !o.self, ready: (f, o) => onStageWhy(f, o, accountOnStage(o)) }),
       { id: 'account.disable', label: (f, o) => (o.disabled ? 'Turn on' : 'Turn off…'), icon: '⏻', group: '9_danger', verb: 'http:PATCH /api/users/:id', mode: 'now',
         may: (f, o) => f.manageUsers && !o.locked, fits: (f, o) => !o.self,
         confirm: (f, o) => (o.disabled ? null : { title: 'Turn ' + o.name + '\'s account off?', words: o.name + ' is signed out everywhere and cannot sign in until it is turned on again. Their messages stay.', yes: 'Turn off', no: 'Keep it on', danger: true }) },
@@ -1176,6 +1242,9 @@
       // The messages this person pinned for themselves in this room (the join's `pins`, then each `pins` the server tells:
       // for the support view, the person's), in the order pinned.
       pins: idList(s.pins),
+      // What the admin lets this person do On stage (the join's `onStage`, then each `onStage` the server tells; for the
+      // support view, the person's): Also on's chips, and whether Got it clears the message from their feed.
+      onStage: onStageOf(s),
     });
   }
 
@@ -1334,6 +1403,63 @@
     return admin.show || 'time';
   }
 
-  const catalog = Object.freeze({ GROUPS, REACTIONS, WORDS, FOLDS, SHOW_KINDS, FILE_KINDS, PICKED_KINDS, PICK_UNITS, STAGE_EXT, TRANSFER_EXT, READER_EXT, CHAT_VIEWS, CLOCKS, ADMIN_CLOCKS, ZOOM_MIN, ZOOM_MAX, KINDS, supportWords, stageWhy, downOf, withdrawOf, facts, adminFacts, boardFacts, accountFacts, actorKey, entry, shown, ready, items, ids, inline, submenu, byKey, placeOf, lasted, adminClockOf, clockChange, locksClocks });
+  /**
+   * Also on's chips (compose.also), one for each switch the admin turned on for this person: ⏱ the hall's countdown
+   * screen by its name, or how many there are ("⏱ 2 countdown screens", their names in `names`, which the chip's title and
+   * the line under the chips say), disabled with why while none shows the countdown; 👥 everyone On stage; each pressed
+   * where the composer holds it chosen (`o.also`).
+   */
+  function alsoChips(f, o) {
+    const chosen = o && o.also && typeof o.also === 'object' ? o.also : {};
+    const out = [];
+    if (f.onStage.screens) {
+      const names = f.onStage.countdownScreens;
+      const label = names.length === 1 ? names[0] : names.length ? names.length + ' countdown screens' : 'Countdown screen';
+      out.push({ value: 'screens', icon: '⏱', label, names: namesSaid(names), role: 'menuitemcheckbox', checked: chosen.screens === true, disabled: names.length ? '' : WORDS.noCountdown });
+    }
+    if (f.onStage.people) out.push({ value: 'people', icon: '👥', label: 'Everyone On stage', short: 'On stage', role: 'menuitemcheckbox', checked: chosen.people === true, disabled: '' });
+    return out;
+  }
+  /** A countdown screen's line, in characters: the composer's field holds no more while ⏱ is chosen, and the server takes no more. */
+  const COUNTDOWN_LINE = 160;
+  /**
+   * Where a message also went (its `also`, plan 7-§17.6), in the words every reader of the room reads at the end of its
+   * author's line (pure), a part for each place, each with its tone ('warn' where a target could not show it, drawn in
+   * warn's colour beside its △; '' muted): each screen "⏱ Lectern: sending", "⏱ On Lectern ✓", "△ Lectern could not show
+   * it", "⏱ Lectern: offline" or "Replaced on Lectern at 14:12" (`time` draws the time); the Board's cards "👥 On stage:
+   * sending" until one confirms, then "👥 Shown to 5 of 6 On stage". None for a message that went nowhere else.
+   */
+  function alsoParts(also, time) {
+    if (!also || typeof also !== 'object') return [];
+    const parts = [];
+    const at = (t) => (Number.isFinite(t) && typeof time === 'function' ? ' at ' + time(t) : '');
+    for (const x of Array.isArray(also.screens) ? also.screens : []) {
+      if (!x || typeof x.name !== 'string') continue;
+      parts.push({ words: x.state === 'shown' ? '⏱ On ' + x.name + ' ' + root.AGM.mark('ok') : x.state === 'failed' ? root.AGM.mark('couldNot') + ' ' + x.name + ' could not show it'
+        : x.state === 'replaced' ? 'Replaced on ' + x.name + at(x.at) : x.state === 'offline' ? '⏱ ' + x.name + ': offline' : '⏱ ' + x.name + ': sending', tone: x.state === 'failed' ? 'warn' : '' });
+    }
+    const p = also.people;
+    if (p && typeof p === 'object' && Number.isInteger(p.of)) {
+      const shown = Number.isInteger(p.shown) ? p.shown : 0;
+      parts.push({ words: shown < 1 && p.state !== 'moved' ? '👥 On stage: sending' : '👥 Shown to ' + shown + ' of ' + p.of + ' On stage', tone: '' });
+    }
+    return parts;
+  }
+  /** alsoParts' words as one line, the parts apart by " · "; '' for a message that went nowhere else. */
+  const alsoWords = (also, time) => alsoParts(also, time).map((x) => x.words).join(' · ');
+  /**
+   * Whether a message the person got leaves their feed for one muted line (plan 7-§17.6, B4: Got it clears the message,
+   * the admin's switch for them): on a page seated On stage, where the switch applies, in either view (the full view's
+   * React ▸ 👍 is the same fact as Got it), with the switch on, a text or a file of someone else's that carries this
+   * person's 👍; never one pinned for the room or for them, a question, one's own or a system line. Pure: the page reads
+   * it from facts it has, so an account's devices clear together.
+   */
+  function gotCleared(f, m) {
+    if (!f || f.role !== 'board' || !f.onStage.clears || !m || !m.from || !(m.type === 'text' || m.type === 'file')) return false;
+    if (!f.uid || m.from.uid === f.uid || m.pinned || f.pins.includes(m.id)) return false;
+    return Array.isArray(m.reactions) && m.reactions.some((r) => r && r.uid === f.uid && r.emoji === '👍');
+  }
+
+  const catalog = Object.freeze({ GROUPS, REACTIONS, WORDS, FOLDS, SHOW_KINDS, FILE_KINDS, PICKED_KINDS, PICK_UNITS, STAGE_EXT, TRANSFER_EXT, READER_EXT, CHAT_VIEWS, CLOCKS, ADMIN_CLOCKS, ZOOM_MIN, ZOOM_MAX, KINDS, supportWords, stageWhy, downOf, withdrawOf, facts, adminFacts, boardFacts, accountFacts, actorKey, entry, shown, ready, items, ids, inline, submenu, byKey, placeOf, lasted, adminClockOf, clockChange, locksClocks, ON_STAGE_SWITCHES, COUNTDOWN_LINE, onStageOf, alsoParts, alsoWords, gotCleared });
   Object.assign(root.AGM = root.AGM || {}, { catalog, clockFor });
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -36,7 +36,7 @@
  *
  * Stored in `pages.json` (one write lane, written only once this copy holds its data folder: `hold()`): the takes by
  * hall and layer, the persons' answers, each hall's Earlier list, stage files and withdrawn takes, and what the admin
- * chose for each guest (`views`: their chat view and their clock or countdown, lib/views.js); each bounded, the oldest going first; once
+ * chose for each guest (`views`: their chat view, their clock or countdown and what they may do On stage, lib/views.js); each bounded, the oldest going first; once
  * there are any, each person's pins for themselves (`pins`: by their key and the room, the ids of the messages they pinned
  * for themselves alone, never the room's pin, which is the message's own); and, once there are any, the confidential marks (`marks`, one record a
  * file by its upload's name, gone with the file) and the holds on Stagewatch frames that carry a confidential line
@@ -83,11 +83,14 @@ const KINDS_WORDS = 'Choose what to show: back to chat, Stagewatch, the clock, h
 const LAYERS = Object.freeze(['show', 'info']);
 /**
  * Where a target's takes are kept, each place with its own take and its own answer, numbered by the hall's one counter: the
- * two layers, and `beside`, a researcher's information that arrived in the side bar beside the operator's (plan 4-§5.9.1),
- * drawn as a card there. A place shows the highest-numbered take addressed to the page; `beside` draws only a take put
- * there so (`aside`): any other take there is the information that put it away, or a hand-back, and draws nothing.
+ * two layers; `beside`, a researcher's information that arrived in the side bar beside the operator's (plan 4-§5.9.1),
+ * drawn as a card there; and `line`, the Board's alone, a line a person seated On stage typed for everyone On stage (plan
+ * 7-§17.6), drawn as a card in the side bar too, which only another such line replaces: it supersedes nothing in the other
+ * places, and nothing in them supersedes it. A place shows the highest-numbered take addressed to the page; `beside` draws
+ * only a take put there so (`aside`): any other take there is the information that put it away, or a hand-back, and draws
+ * nothing.
  */
-const SLOTS = Object.freeze(['show', 'info', 'beside']);
+const SLOTS = Object.freeze(['show', 'info', 'beside', 'line']);
 /** The show layer's kinds: the operator's (canPush's alone). */
 const SHOW_LAYER = Object.freeze(['stage', 'clock', 'holding', 'blank']);
 /** The information layer's kinds, by name: a web page, a document, a picture and a quote. */
@@ -122,17 +125,18 @@ const layersOf = (c) => {
   return l ? [l] : [];
 };
 /**
- * The places a take is kept in (SLOTS): a show kind the show's; `chat` all three (back to chat: nothing over the show and
- * nothing beside it); an information take put beside the operator's (`aside`) `beside` alone; any other information take
- * the information layer's, and `beside` with it (the newest information puts away what is beside it). A hand-back of the
- * information alone (`{chat, layer: 'info'}`) the place it names (`slot`: the take its Take down names is over the show,
- * or beside it), else both.
+ * The places a take is kept in (SLOTS): a show kind the show's; `chat` the show's, the information's and what is beside
+ * it (back to chat: nothing over the show and nothing beside it; the Board's line is no take of theirs to hand back); a
+ * line typed On stage (`line`) `line` alone; an information take put beside the operator's (`aside`) `beside` alone; any
+ * other information take the information layer's, and `beside` with it (the newest information puts away what is beside
+ * it). A hand-back of the information alone (`{chat, layer: 'info'}`) the place it names (`slot`: the take its Take down
+ * names is over the show, or beside it), else both.
  */
-const slotsOf = (c, { aside = false, slot = '' } = {}) => {
+const slotsOf = (c, { aside = false, slot = '', line = false } = {}) => {
   const layers = layersOf(c);
   if (!layers.includes('info')) return layers;
-  if (own(c, 'kind') === 'chat') return layers.length > 1 ? [...SLOTS] : slot === 'info' || slot === 'beside' ? [slot] : ['info', 'beside'];
-  return aside ? ['beside'] : ['info', 'beside'];
+  if (own(c, 'kind') === 'chat') return layers.length > 1 ? ['show', 'info', 'beside'] : slot === 'info' || slot === 'beside' ? [slot] : ['info', 'beside'];
+  return line ? ['line'] : aside ? ['beside'] : ['info', 'beside'];
 };
 /** How an information take arrives on a page: over its chat (the layer), or as an open card in its side bar. */
 const ARRIVALS = Object.freeze(['over', 'side']);
@@ -1159,11 +1163,17 @@ function canShow(facts, kind, to, arrive = 'over') {
  * told the name alone.
  */
 const WHO = /^(?:account|code|admin):[A-Za-z0-9_-]{1,64}$/;
+/**
+ * Who put a take up, as it is kept: a name, whether a code guest (`guest`), whether its pusher held canPush (`op`), who
+ * (`who`, its pusher's key), and whether it is a line a person On stage typed (`onStage`, plan 7-§17.6: "Typed by Margaret
+ * Lowe (On stage)"), which never held canPush.
+ */
 const byOf = (by) => ({
   name: guard.cleanText(isRecord(by) ? by.name : '', 60),
   ...(isRecord(by) && by.guest === true ? { guest: true } : {}),
-  ...(isRecord(by) && by.op === true ? { op: true } : {}),
+  ...(isRecord(by) && by.op === true && by.onStage !== true ? { op: true } : {}),
   ...(isRecord(by) && typeof by.who === 'string' && WHO.test(by.who) ? { who: by.who } : {}),
+  ...(isRecord(by) && by.onStage === true ? { onStage: true } : {}),
 });
 /**
  * A take read back: {seq, content, by: {name, guest?, op?, who?}, at, arrive?, aside?, made?}, its number at most the
@@ -1203,8 +1213,14 @@ const storedStageFile = (f) => (isRecord(f) && Number.isFinite(f.at) && HALL.tes
   ? { at: f.at, room: f.room, uid: f.uid, name: f.name, ...(f.named === true ? { named: true } : {}) } : null);
 /** A withdrawn take read back: its number and who withdrew it (an actor's kind and id), or null. */
 const storedWithdrawn = (w, top) => (isRecord(w) && whole(w.seq) && w.seq <= top ? { seq: w.seq, ...(typeof w.who === 'string' && WHO.test(w.who) ? { who: w.who } : {}) } : null);
-/** Whether a take read back belongs in a place (SLOTS): one of its layers, the information's never a take put beside. */
-const fitsSlot = (t, slot) => (slot === 'beside' ? layersOf(t.content).includes('info') : layersOf(t.content).includes(slot) && !(slot === 'info' && t.aside === true));
+/**
+ * Whether a take read back belongs in a place (SLOTS): one of its layers, the information's never a take put beside; the
+ * Board's line a line typed On stage, or the hand-back that ended one.
+ */
+const fitsSlot = (t, slot) => {
+  if (slot === 'line') return layersOf(t.content).includes('info') && (t.content.kind === 'chat' || t.by.onStage === true);
+  return slot === 'beside' ? layersOf(t.content).includes('info') : layersOf(t.content).includes(slot) && !(slot === 'info' && t.aside === true);
+};
 /** An Earlier entry read back: a take of the information layer with whom it was for (`to`: 'board' or a person's key). */
 function storedEarlier(e, top) {
   const t = isRecord(e) ? storedTake(e, top) : null;
@@ -1413,7 +1429,8 @@ class Pages {
         if (!/^u:/.test(k) || !GUEST.test(k.slice(2)) || !isRecord(v) || !Number.isFinite(v.at)) continue;
         const view = VIEWS.includes(v.view) && v.view ? v.view : '';
         const clock = views.isClock(v.clock) && !views.noClock(v.clock) ? views.clockOf(v.clock) : null;
-        if (view || clock) this.views.set(k, { ...(view ? { view } : {}), ...(clock ? { clock } : {}), at: v.at });
+        const onStage = views.isOnStage(v.onStage) && !views.noOnStage(v.onStage) ? views.onStageOf(v.onStage) : null;
+        if (view || clock || onStage) this.views.set(k, { ...(view ? { view } : {}), ...(clock ? { clock } : {}), ...(onStage ? { onStage } : {}), at: v.at });
       }
     }
     // Each person's pins for themselves (plan 7-§17.5), in the order their records were last written (the oldest first),
@@ -1481,17 +1498,21 @@ class Pages {
    * hand-back of the information alone hands back the place `slot` names ('info' or 'beside', what its Take down named),
    * else both. Where a place takes a take it does not draw (`beside` an information take over the show), it keeps that
    * take's number as a hand-back, so nothing older beside it shows again. A web page's address is kept sealed (`_kept`);
-   * `by.guest` marks a code guest's take, `by.op` one its pusher held canPush for; `made`, the uploads a picture or a quote
-   * was made from (by their names, kept by their references: the server's alone, storedTake). Returns the take, or null when
-   * a part is not one the store keeps (a web page this run cannot seal among them).
+   * `by.guest` marks a code guest's take, `by.op` one its pusher held canPush for, `by.onStage` a line typed On stage; `made`,
+   * the uploads a picture or a quote was made from (by their names, kept by their references: the server's alone,
+   * storedTake). A line typed On stage for the Board (`line`, plan 7-§17.6: to 'board', `by.onStage`, arriving `side`) is
+   * kept in the Board's `line` alone and entered in Earlier as it is sent, so a page that comes back finds it there: it
+   * puts away only the line before it (and the answers to that one), never a take or an answer of another place. Returns
+   * the take, or null when a part is not one the store keeps (a web page this run cannot seal among them).
    */
-  take(hall, to, content, by = {}, { onStage = [], at = Date.now(), arrive = 'over', aside = false, slot = '', sent = null, made = [] } = {}) {
+  take(hall, to, content, by = {}, { onStage = [], at = Date.now(), arrive = 'over', aside = false, slot = '', sent = null, made = [], line = false } = {}) {
     const clean = storedPage(this._kept(content));
     const from = Array.isArray(made) && made.every((n) => typeof n === 'string' && guard.validUploadUrl('/uploads/' + n)) ? madeOf(made.map(uploadRef)) : null;
     if (!HALL.test(guard.str(hall)) || !(to === 'board' || PERSON.test(guard.str(to))) || !clean || !from || !Number.isFinite(at) || !ARRIVALS.includes(arrive)) return null;
     const side = arrive === 'side' && layerOf(clean.kind) === 'info';
-    const beside = aside === true && side;
-    const slots = slotsOf(clean, { aside: beside, slot });
+    if (line === true && !(to === 'board' && side && isRecord(by) && by.onStage === true)) return null;
+    const beside = aside === true && side && line !== true;
+    const slots = slotsOf(clean, { aside: beside, slot, line: line === true });
     const sentFrom = sentOf(sent);
     const book = this._book(hall);
     book.seq += 1;
@@ -1514,9 +1535,16 @@ class Pages {
         this._drop(book.answers, to, s);
       }
     }
+    if (line === true) this._earlier(book, t, to);
     this._trim(book, at);
     this.save();
     return t;
+  }
+
+  /** The number a hall's next take is given (its book's counter, plus one), its book made by nothing. */
+  nextSeq(hall) {
+    const book = HALL.test(guard.str(hall)) ? own(this.halls, hall) : undefined;
+    return (book ? book.seq : 0) + 1;
   }
 
   /** A hall's book, made empty where it has none yet. */
@@ -1537,11 +1565,11 @@ class Pages {
 
   /**
    * The Earlier entries a page is told (plan 4-§5.9.1): those for its person (`key`) and, on a page seated On stage in
-   * Main (`board`), the Board's, the newest EARLIER_TOLD, the newest first, each as {seq, content, by: {name}, at}: its
+   * Main (`board`), the Board's, the newest EARLIER_TOLD, the newest first, each as {seq, content, by: {name, onStage?}, at}: its
    * content as the pages it was shown on are told it (`told`: a web page's address opened).
    */
   earlierOf(hall, key, { board = false, observer = false } = {}) {
-    return this._earlierFor(hall, key, board).map((e) => ({ seq: e.seq, content: this.told(e.content, { observer }), by: { name: e.by.name }, at: e.at }));
+    return this._earlierFor(hall, key, board).map((e) => ({ seq: e.seq, content: this.told(e.content, { observer }), by: { name: e.by.name, ...(e.by.onStage === true ? { onStage: true } : {}) }, at: e.at }));
   }
   /** The numbers of the Earlier entries a page is told, as one word: what moved there, read without opening an address. */
   earlierSaid(hall, key, { board = false } = {}) {
@@ -1791,7 +1819,7 @@ class Pages {
       if (key) this._drop(book.answers, key, s);
       return true;
     };
-    for (const s of ['info', 'beside']) {
+    for (const s of ['info', 'beside', 'line']) {
       if (end(book.board, '', s)) for (const key of Object.keys(book.answers)) { const a = own(book.answers[key], s); if (a && ended.has(a.seq)) this._drop(book.answers, key, s); }
       for (const [key, r] of Object.entries(book.people)) end(r, key, s);
     }
@@ -2259,8 +2287,23 @@ class Pages {
     return this._setChoice(uid, 'clock', views.noClock(c) ? null : views.clockOf(c), at);
   }
 
+  /** What the admin let a guest do On stage ({screens, people, clears}, lib/views.js; every one off where none is kept), by their uid. */
+  onStageOf(uid) {
+    const v = this.views.get('u:' + guard.str(uid));
+    return views.onStageOf(v && v.onStage);
+  }
+
   /**
-   * One of a guest's choices (`field`: their chat view or their clock) set to `value`, or taken out (null), the rest of
+   * Set what the admin lets a guest do On stage: whole switches (lib/views.js cleanOnStage's); every one off is none kept.
+   * False when the uid or the switches are not ones kept.
+   */
+  setOnStage(uid, onStage, at = Date.now()) {
+    if (!GUEST.test(guard.str(uid)) || !views.isOnStage(onStage) || !Number.isFinite(at)) return false;
+    return this._setChoice(uid, 'onStage', views.noOnStage(onStage) ? null : views.onStageOf(onStage), at);
+  }
+
+  /**
+   * One of a guest's choices (`field`: their chat view, their clock, or what they may do On stage) set to `value`, or taken out (null), the rest of
    * theirs kept: the record moves to the end, as the one set last, and goes once it holds nothing.
    */
   _setChoice(uid, field, value, at) {
@@ -2426,5 +2469,5 @@ class Pages {
 
 module.exports = {
   Pages, cleanPage, cleanSnippet, snippetText, stepHold, answerHold, sentHold, uploadRef, UPLOAD_REF, HELD_LINE, HOLD_MAX, SECRET_ITEM, MARK_WORDS, askedOf, canShow, describePage, sourceOk, mayDownload, FOR_DOWNLOAD, placeOf, placeWords, webUrl, personKey, layerOf, layersOf, reportsOf, inViewOf, KINDS, LAYERS, SLOTS, SHOW_LAYER, INFO_LAYER,
-  FILE_KINDS, fileOf, filesOf, ARRIVALS, EARLIER_TOLD, IMAGE_EXT, STAGE_TYPES, TRANSFER_ONLY, PLACES, UNITS, SNIPPET, REPORTS, ANSWERS, AGAIN_MS, VIEWS, MARKS, BOUNDS, WEB_MAX, STAGE_FULL,
+  FILE_KINDS, fileOf, filesOf, ARRIVALS, EARLIER_TOLD, IMAGE_EXT, STAGE_TYPES, TRANSFER_ONLY, PLACES, UNITS, SNIPPET, grouped, REPORTS, ANSWERS, AGAIN_MS, VIEWS, MARKS, BOUNDS, WEB_MAX, STAGE_FULL,
 };

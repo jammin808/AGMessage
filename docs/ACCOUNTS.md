@@ -125,6 +125,30 @@ nothing is closed, and the admin's people list carries it (`clock`) beside `view
 choice (`clock`). The device's own choice is the device's: told to the admin's support view of the
 person alone, never kept on the server, never audited.
 
+**What a seat On stage may do, beside Chat view** (owner answers B2 and B4). What an On stage seat writes is a message in
+its room's feed, read by everyone in that room, and by default nothing more. The admin may allow a person two more places
+and one more act, each its own switch, off by default: **May send to a countdown screen** (a message of theirs may also go
+to the line under the countdown on this hall's screens that show it now), **May send to people On stage** (it may also be
+shown on the pages of everyone seated On stage, as a card beside their chat, never over it) and **Got it clears the
+message** (their Got it also folds the message on their own pages into one line, "👍 Got and cleared: … · Show"; off, it
+stays marked got). They are **the admin's alone**: the laptop's token, or an account whose role is admin (on a page with a
+socket, through the tunnel only where admins may sign in there; on the Accounts page, the signed-in account's role). A
+manager granted `settings.manage` or `users.manage` is not the admin here, and is refused with "Only an admin may choose
+what an On stage seat may do."; its pages draw the switches disabled with those words. They are account fields like Chat
+view (one value whatever the hall), drawn once in the Accounts page's editor under **When On stage** and in the account's
+⋯ (`PATCH /api/users/:id {onStage: {screens?, people?, clears?}}`, each a boolean, a change naming only what it changes;
+anything else, "Choose on or off."), disabled with "Applies On stage." while the account sits On stage in no hall; and set
+for a person seated On stage on the admin page's people rows (an On stage column) and in the person's ⋯ in the hall page's
+People panel (`admin:setOnStage {roomCode, socketId, screens?, people?, clears?}`). An account is made with none
+(`POST /api/users` ignores `onStage`, as it does `clock`), nobody sets their own (the self-change words), and a guest's is
+kept by their uid in `pages.json` beside their chat view and clock. Each of the person's pages and the admin's view of them
+is told them at once (`onStage`, with the names of the hall's screens showing the countdown while the first is on), nothing
+is closed, and the join's answer appends `onStage` after `pins`, as its last key. The server reads the two places' switches
+again at each send, from the store, so one turned off refuses the next send with no reload. One audit row a change, holding
+no code and no text: `person.onStage` for a guest ("Rita (guest) → may send to a countdown screen: on"), `user.update` for
+an account ("onStage → countdown screens on, people On stage off, Got it clears off"). A Board member's line on a screen is
+a `display.take` row and on people's pages a `page.push` row, each naming the person and the length, never the words.
+
 **Pins, by seat.** A pin is for the room (the default: the message's own, which everyone in the room sees, On stage
 included) or for me (the person's alone: on every device of an account, a guest's in that browser). For the room is
 backstage's, a side room's Member's and the admin's off stage: a seat that may post and is not On stage. For me is every

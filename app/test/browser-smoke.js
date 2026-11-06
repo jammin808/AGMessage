@@ -1925,8 +1925,20 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     // open the same menu by right-click, ⋯ and Shift+F10; an account's Edit is its bar.
     const KIM_ROW = `[...document.querySelectorAll('#userRows > tr[data-key]')].find((tr) => tr.textContent.includes('kim'))`;
     const accountDoors = await doorsOf(users, 'account', KIM_ROW, `AGM.page.object('account', (${KIM_ROW}).dataset.key)`, { ...PAGE_DOORS_HALLS, hit: 'td strong' });
-    report(doorsInStep(accountDoors) && accountDoors.want === JSON.stringify(['account.edit', 'account.password', 'account.signout', 'account.clock', 'account.clockLock', 'account.disable', 'account.remove']),
-      `an account's row: right-click = ⋯ = Shift+F10 = Edit…, New one-time password…, Sign out everywhere…, Clock or countdown ▸, Lock it on their devices, Turn off…, Remove…, Edit in its bar (${accountDoors.want}; ${accountDoors.right} / ${accountDoors.dots} / ${accountDoors.key}; ${accountDoors.inline})`);
+    report(doorsInStep(accountDoors) && accountDoors.want === JSON.stringify(['account.edit', 'account.password', 'account.signout', 'account.clock', 'account.clockLock', 'account.onStageScreens', 'account.onStagePeople', 'account.onStageClears', 'account.disable', 'account.remove']),
+      `an account's row: right-click = ⋯ = Shift+F10 = Edit…, New one-time password…, Sign out everywhere…, Clock or countdown ▸, Lock it on their devices, May send to a countdown screen, May send to people On stage, Got it clears the message, Turn off…, Remove…, Edit in its bar (${accountDoors.want}; ${accountDoors.right} / ${accountDoors.dots} / ${accountDoors.key}; ${accountDoors.inline})`);
+    // The editor's On stage switches (plan 7-§17.6): three ticks in the catalogue's words under When On stage, each with the
+    // admin's words under it, enabled for the admin while the account sits On stage in a hall, else "Applies On stage.".
+    await users.eval(`(${KIM_ROW}).querySelector('[data-action="account.edit"]').click()`);
+    await users.until(`document.getElementById('userDialog').open`);
+    const onStageFields = await users.eval(`(() => { const row = document.getElementById('uOnStageRow');
+      const boxes = [...row.querySelectorAll('input[type="checkbox"]')]; const board = [...document.querySelectorAll('#uHalls input.t-board')].some((b) => b.checked);
+      const out = JSON.stringify({ shown: !row.hidden, labels: boxes.map((b) => b.closest('label').textContent.trim()), hints: [...row.querySelectorAll('small.hint')].length, disabled: boxes.map((b) => b.disabled), why: document.getElementById('uOnStageWhy').textContent, board });
+      document.getElementById('userDialog').close('cancel'); return out; })()`);
+    const osf = JSON.parse(onStageFields || '{}');
+    report(osf.shown && JSON.stringify(osf.labels) === JSON.stringify(['May send to a countdown screen', 'May send to people On stage', 'Got it clears the message']) && osf.hints === 4
+      && (osf.board ? osf.disabled.every((d) => !d) && osf.why === '' : osf.disabled.every((d) => d) && osf.why === 'Applies On stage.'),
+      `the Accounts editor draws the three On stage switches under When On stage, each with the admin's words, enabled for the admin where the account sits On stage and "Applies On stage." otherwise (${onStageFields})`);
     // Remove…, asked in place inside the page and answered "Keep it": the account stays.
     await users.eval(`(${KIM_ROW}).querySelector('.obj-more').click()`);
     await users.until(`!!document.querySelector('.agm-menu [data-action="account.remove"]')`, 3000);
@@ -5250,17 +5262,36 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       && JSON.stringify(clockBefore.options) === JSON.stringify(['Their choice (the clock at first)', 'Time of day', 'Stagewatch countdown', 'Off'])
       && !!clockChosen && JSON.parse(clockChosen).why === '' && !!clockLocked && keptLocked === JSON.stringify({ show: 'stage', locked: true }) && !!clockBack,
       `the admin page's Clock or countdown cell: Their choice first, Lock named for the person and disabled with why drawn under it until a choice is made; the countdown chosen and locked, each kept by the server and said back in the row; their choice again, unlocked (${JSON.stringify({ clockBefore, clockChosen, clockLocked, keptLocked, clockBack })})`);
+    // A person seated On stage: the admin's three switches in their row's On stage cell, each a tick named for the person
+    // with the admin's words under it; ticked, the server keeps it and says it back in the row, live; ticked again, off. A
+    // backstage guest's cell says "Applies On stage.".
+    const ola = await connect(base);
+    await emit(ola, 'join', { roomCode: code, name: 'Ola', role: 'board', invite: inviteOf(dataDir, code), docs: true });
+    await admin.until(`[...document.querySelectorAll('#usersTbody tr[data-key]')].some((x) => x.textContent.includes('Ola') && !!x.querySelector('.on-stage-box'))`, 8000);
+    const ON_STAGE_CELL = `(() => { const tr = [...document.querySelectorAll('#usersTbody tr[data-key]')].find((x) => x.querySelector('td strong') && x.querySelector('td strong').textContent === 'Ola'); if (!tr) return null;
+      const boxes = [...tr.querySelectorAll('.on-stage-box')]; return JSON.stringify({ sid: tr.dataset.key, names: boxes.map((b) => b.getAttribute('aria-label')), checked: boxes.map((b) => b.checked), disabled: boxes.map((b) => b.disabled), words: tr.querySelectorAll('.on-stage-words').length }); })()`;
+    const onStageBefore = JSON.parse(await admin.eval(ON_STAGE_CELL) || 'null');
+    const backstageCell = await admin.eval(`(() => { const tr = ${viewRow}; const n = tr && tr.querySelector('.on-stage-none'); return n ? n.textContent : ''; })()`);
+    if (onStageBefore) await admin.eval(`document.querySelector('#usersTbody tr[data-key=' + JSON.stringify(${codeLiteral((onStageBefore || {}).sid || '')}) + '] .on-stage-box[data-switch="screens"]').click(); true`);
+    const onStageTicked = onStageBefore && await admin.until(`(() => { const c = ${ON_STAGE_CELL}; return c && JSON.parse(c).checked[0] && c; })()`, 5000);
+    const keptOnStage = onStageBefore ? await admin.eval(`new Promise((r) => socket.emit('admin:watchRoom', { roomCode: ${codeLiteral(code)} }, (a) => { const u = a && a.ok && a.users.find((x) => x.socketId === ${codeLiteral((onStageBefore || {}).sid || '')}); r(u ? JSON.stringify(u.onStage) : null); }))`) : null;
+    if (onStageBefore) await admin.eval(`document.querySelector('#usersTbody tr[data-key=' + JSON.stringify(${codeLiteral((onStageBefore || {}).sid || '')}) + '] .on-stage-box[data-switch="screens"]').click(); true`);
+    const onStageOff = onStageBefore && await admin.until(`(() => { const c = ${ON_STAGE_CELL}; return c && !JSON.parse(c).checked[0] && c; })()`, 5000);
+    report(!!onStageBefore && onStageBefore.names.length === 3 && /^May send to a countdown screen for \S/.test(onStageBefore.names[0]) && onStageBefore.words === 3 && onStageBefore.checked.every((c) => !c) && onStageBefore.disabled.every((d) => !d)
+      && backstageCell === 'Applies On stage.' && !!onStageTicked && keptOnStage === JSON.stringify({ screens: true, people: false, clears: false }) && !!onStageOff,
+      `the admin page's On stage cell: for a person seated On stage, May send to a countdown screen, May send to people On stage and Got it clears the message, each named for the person with the admin's words, off by default; ticked, kept by the server and said back; ticked again, off; a backstage guest's cell says "Applies On stage." (${JSON.stringify({ onStageBefore, backstageCell, keptOnStage })})`);
+    ola.close();
     // The admin page in the copy deck's words, watching a hall; then every page read says no old word in its chrome.
     const adminDeck = JSON.parse(await admin.eval(`JSON.stringify({
       tagline: document.querySelector('#loginPanel .tagline').textContent, newHall: document.getElementById('newSessionBtn').textContent,
       halls: document.querySelector('.admin-sidebar h3').textContent, none: document.getElementById('noRooms').textContent,
       code: document.querySelector('#roomHeader span.muted').textContent, clear: AGM.catalog.entry('adminRoom', 'adminRoom.clear').label,
       close: AGM.catalog.entry('adminRoom', 'adminRoom.remove').label(ADMIN_F, roomObject('${code}')), closing: AGM.catalog.entry('adminRoom', 'adminRoom.remove').confirm(ADMIN_F, roomObject('${code}')).title.slice(0, 11),
-      people: document.querySelector('#usersSection h3').textContent, view: document.querySelectorAll('.admin-users th')[2].textContent, clock: document.querySelectorAll('.admin-users th')[3].textContent, forward: document.querySelectorAll('.admin-users th')[4].textContent,
+      people: document.querySelector('#usersSection h3').textContent, view: document.querySelectorAll('.admin-users th')[2].textContent, clock: document.querySelectorAll('.admin-users th')[3].textContent, onStage: document.querySelectorAll('.admin-users th')[4].textContent, forward: document.querySelectorAll('.admin-users th')[5].textContent,
       local: document.querySelector('#tunnelOffState p').textContent.trim().split('\\n')[0], empty: [...document.querySelectorAll('#adminEmpty p')].map((p) => p.textContent) })`));
     report(JSON.stringify(adminDeck) === JSON.stringify({
       tagline: 'Halls, rooms and people, for the admin.', newHall: 'New hall', halls: 'Halls', none: 'No halls yet. Choose New hall to make one.', code: 'Code',
-      clear: 'Clear messages…', close: 'Close hall…', closing: 'Close hall ', people: 'People in this room', view: 'Chat view', clock: 'Clock or countdown', forward: 'May forward to',
+      clear: 'Clear messages…', close: 'Close hall…', closing: 'Close hall ', people: 'People in this room', view: 'Chat view', clock: 'Clock or countdown', onStage: 'On stage', forward: 'May forward to',
       local: 'AGMessage is reachable only on the venue\'s network now.',
       empty: ['Choose a hall on the left, or New hall.', 'Each room has a 6-character guest code: share it with the people who join without an account.'],
     }), `the admin page says hall, room and code: New hall, Halls, Code, Clear messages…, Close hall…, People in this room, Chat view, May forward to (${JSON.stringify(adminDeck)})`);
@@ -6819,6 +6850,152 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
         `with the link down the countdown reads --:-- "Stagewatch offline", never a stale time; no script error on the tablet (${down}${kay.problems.length ? ' — ' + kay.problems.slice(0, 3).join(' | ') : ''})`);
       kay.close();
       ckAdmin.close();
+    }
+
+    // ---------------- What the admin lets a seat On stage do (unit 20d): Also on, and Got it clears ----------------
+    // A hall of its own with a screen on the countdown (its page open, so it confirms), a Board tablet (Mia), a second Board
+    // page and a backstage guest (sockets), and the admin's socket (the laptop's token: "the admin").
+    {
+      const osHall = (await (await fetch(base + '/api/rooms', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ name: 'Also hall' }) })).json()).code;
+      const osAdmin = await connect(base, cookie);
+      const lectern = (await emit(osAdmin, 'display:create', { code: osHall, name: 'Lectern' })).display;
+      await emit(osAdmin, 'display:take', { id: lectern.id, content: { kind: 'countdown' } });
+      const lecternTab = await edge.tab(base + lectern.path, { alone: true });
+      const mia = await edge.tab(`${base}/app.html?code=${osHall}&name=Mia&role=board&invite=${inviteOf(dataDir, osHall)}`, { metrics: { width: 1180, height: 820, phone: true }, alone: true });
+      await mia.until(`typeof joined !== 'undefined' && joined && document.body.dataset.view === 'simple'`, 10000);
+      const noa = await connect(base);
+      await emit(noa, 'join', { roomCode: osHall, name: 'Noa', role: 'board', invite: inviteOf(dataDir, osHall), docs: true });
+      const rio = await connect(base);
+      await emit(rio, 'join', { roomCode: osHall, name: 'Rio', role: 'research' });
+      const sidOf = async (name) => (await emit(osAdmin, 'admin:watchRoom', { roomCode: osHall })).users.find((u) => u.name === name).socketId;
+      const ALSO = `JSON.stringify({ row: !document.getElementById('alsoRow').hidden && document.getElementById('alsoRow').getClientRects().length > 0, chips: [...document.querySelectorAll('#alsoChips .also-chip')].map((b) => [b.dataset.value, b.innerText.replace(/\\s+/g, ' ').trim(), b.getAttribute('aria-pressed'), b.getAttribute('aria-disabled')]),
+        max: document.getElementById('directorInput').maxLength, line: document.getElementById('alsoLine').hidden ? '' : document.getElementById('alsoLine').textContent.replace(/\\s+/g, ' ').trim(), scroll: document.documentElement.scrollWidth <= document.documentElement.clientWidth })`;
+      const also = async (tab) => JSON.parse(await tab.eval(ALSO) || 'null');
+      // Both switches off: no Also on.
+      const off = await also(mia);
+      // The admin turns one on: its chip alone, live; then the other: a chip each, none pressed.
+      const miaSid = await sidOf('Mia');
+      const one = await emit(osAdmin, 'admin:setOnStage', { roomCode: osHall, socketId: miaSid, screens: true });
+      await mia.until(`document.querySelectorAll('#alsoChips .also-chip').length === 1`, 5000);
+      const single = await also(mia);
+      const on = await emit(osAdmin, 'admin:setOnStage', { roomCode: osHall, socketId: miaSid, people: true });
+      await mia.until(`document.querySelectorAll('#alsoChips .also-chip').length === 2`, 5000);
+      const both = await also(mia);
+      // The group is described by the line under it.
+      const described = await mia.eval(`document.getElementById('alsoRow').getAttribute('aria-describedby') === 'alsoLine' && document.getElementById('alsoRow').getAttribute('role') === 'group'`);
+      // ⏱ chosen: pressed, the field held to a countdown screen's line, and what it replaces with the count.
+      await mia.eval(`document.querySelector('#alsoChips .also-chip[data-value="screens"]').click(); true`);
+      await mia.until(`document.querySelector('#alsoChips .also-chip[data-value="screens"]').getAttribute('aria-pressed') === 'true'`, 3000);
+      await mia.eval(`(() => { const i = document.getElementById('directorInput'); i.value = 'Two minutes, please'; i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+      const chosen = await also(mia);
+      // Sent: both chips off again, the field empty and back to its length; the message says where it went, the screen's
+      // confirm turning it to ✓ for every reader (the backstage socket hears it too).
+      const updates = [];
+      rio.on('alsoUpdate', (u) => updates.push(u));
+      await mia.eval(`document.querySelector('#directorForm .send-btn').click(); true`);
+      await mia.until(`document.getElementById('directorInput').value === '' && document.querySelector('#alsoChips .also-chip[data-value="screens"]').getAttribute('aria-pressed') === 'false'`, 5000);
+      const after = await also(mia);
+      const said = await mia.until(`(() => { const m = [...document.querySelectorAll('#feed .msg')].find((n) => n.querySelector('.body') && n.querySelector('.body').textContent.includes('Two minutes, please')); const a = m && m.querySelector('.also-said'); return a && !a.hidden && a.textContent === '⏱ On Lectern ✓' && a.textContent; })()`, 8000);
+      const lecternLine = await lecternTab.until(`document.body.textContent.includes('Two minutes, please') && 'shown'`, 8000);
+      report(one && one.ok && on && on.ok && !!off && !off.row && off.chips.length === 0 && off.max === 300
+        && !!single && single.row && JSON.stringify(single.chips) === JSON.stringify([['screens', '⏱ Lectern', 'false', null]]) && described === true
+        && !!both && both.row && JSON.stringify(both.chips) === JSON.stringify([['screens', '⏱ Lectern', 'false', null], ['people', '👥 Everyone On stage', 'false', null]])
+        && !!chosen && chosen.chips[0][1] === '✓ ⏱ Lectern' && chosen.chips[0][2] === 'true' && chosen.max === 160 && chosen.line === 'Replaces Lectern\'s countdown line. 19 / 160'
+        && !!after && after.chips.every((c) => c[2] === 'false') && after.max === 300 && after.line === '' && said === '⏱ On Lectern ✓' && lecternLine === 'shown'
+        && updates.some((u) => u.also && u.also.screens && u.also.screens[0].state === 'shown'),
+        `Also on: absent with both of the admin's switches off; one aria-pressed chip per switch on (⏱ Lectern alone, then with 👥 Everyone On stage), the group described by its line; ⏱ chosen holds the field to 160 characters and says "Replaces Lectern's countdown line." with the count; after a send both chips are off, the field empty, the line on the Lectern, and its message reads "⏱ On Lectern ✓" once the screen confirms, for every reader (${JSON.stringify({ off, single, both, chosen, after, said, updates: updates.length })})`);
+
+      // Offline: a send with a chip on is refused at once, never held by the outbox: its text, its 🔥 and its chips are kept
+      // for another try, and nothing reaches the room.
+      const heardBefore = updates.length;
+      const rioHeard = [];
+      rio.on('message', (m) => rioHeard.push(m.text));
+      // A chip is the outbox's `now`: chosen while connected, then the connection drops.
+      await mia.eval(`(() => { document.querySelector('#alsoChips .also-chip[data-value="screens"]').click(); document.getElementById('dirPriorityBtn').click();
+        const i = document.getElementById('directorInput'); i.value = 'Sent while offline'; i.dispatchEvent(new Event('input', { bubbles: true })); socket.disconnect(); return true; })()`);
+      await mia.until(`!socket.connected`, 3000);
+      await mia.eval(`document.querySelector('#directorForm .send-btn').click(); true`);
+      const offline = await mia.until(`(() => { const t = document.querySelector('.agm-toast'); return t && t.textContent.trim() && JSON.stringify({ kept: document.getElementById('directorInput').value, hot: document.getElementById('dirPriorityBtn').getAttribute('aria-pressed'),
+        chip: document.querySelector('#alsoChips .also-chip[data-value="screens"]').getAttribute('aria-pressed'), held: AGM.outbox.items().length }); })()`, 3000);
+      await mia.eval(`socket.connect(); true`);
+      await mia.until(`socket.connected && typeof joined !== 'undefined' && joined`, 10000);
+      await sleep(500);
+      // Put back as it was: the chip and 🔥 off, the field empty.
+      await mia.eval(`(() => { document.querySelector('#alsoChips .also-chip[data-value="screens"]').click(); document.getElementById('dirPriorityBtn').click(); const i = document.getElementById('directorInput'); i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+      report(offline === JSON.stringify({ kept: 'Sent while offline', hot: 'true', chip: 'true', held: 0 }) && !rioHeard.includes('Sent while offline') && updates.length === heardBefore,
+        `offline, a send with Also on is refused at once and never held: its text, 🔥 and ⏱ are kept for another try, the outbox holds nothing, and nothing reaches the room (${offline})`);
+
+      // 👥 chosen: the line is a card beside the chat of every page On stage, the sender's own included, and covers no chat.
+      await mia.eval(`document.querySelector('#alsoChips .also-chip[data-value="people"]').click(); (() => { const i = document.getElementById('directorInput'); i.value = 'Can we take five?'; return true; })()`);
+      const noaTakes = [];
+      noa.on('page:take', (t) => noaTakes.push(t));
+      await mia.eval(`document.querySelector('#directorForm .send-btn').click(); true`);
+      const card = await mia.until(`(() => { const c = [...document.querySelectorAll('.take-card')].find((n) => n.textContent.includes('Can we take five?')); return c && c.textContent.includes('Typed by Mia (On stage)') && document.getElementById('pageLayer').hidden && 'card'; })()`, 8000);
+      report(card === 'card' && noaTakes.some((t) => t.layer === 'line' && t.arrive === 'side' && t.content && t.content.text === 'Can we take five?' && t.by && t.by.onStage === true),
+        `👥 Everyone On stage: the line is a card in Shown to you on every Board page, in a place of its own, the sender's own included, "Typed by Mia (On stage)", and covers no chat (${JSON.stringify({ card, noa: noaTakes.length })})`);
+
+      // At 390 px wide (a phone): the row fits, "👥 On stage" in short, and the page scrolls no wider than the screen.
+      const pia = await edge.tab(`${base}/app.html?code=${osHall}&name=Pia&role=board&invite=${inviteOf(dataDir, osHall)}`, { metrics: PHONE, alone: true });
+      await pia.until(`typeof joined !== 'undefined' && joined && document.body.dataset.view === 'simple'`, 10000);
+      await emit(osAdmin, 'admin:setOnStage', { roomCode: osHall, socketId: await sidOf('Pia'), screens: true, people: true });
+      await pia.until(`document.querySelectorAll('#alsoChips .also-chip').length === 2`, 5000);
+      const phone = await also(pia);
+      const short = await pia.eval(`(() => { const b = document.querySelector('#alsoChips .also-chip[data-value="people"]'); const l = b.querySelector('.also-long'); return JSON.stringify({ long: !!l && l.getClientRects().length > 0, name: b.getAttribute('title') }); })()`);
+      report(!!phone && phone.row && phone.scroll && JSON.parse(short).long === false && pia.problems.length === 0,
+        `at 390 px the Also on row fits with "👥 On stage" in short, and nothing scrolls sideways (${JSON.stringify({ phone, short })})`);
+      pia.close();
+
+      // Got it clears, the admin's switch for Mia: off, a message she got stays, "👍 You: got it"; on, it gives its place to
+      // one muted line with Show, which draws it again and Hide folds it back; a message pinned for the room never goes.
+      const sendAs = async (s, text) => { const r = await emit(s, 'message', { type: 'text', text }); return r && r.id; };
+      const keptId = await sendAs(rio, 'Doors open at seven');
+      await mia.until(`!!document.querySelector('#feed .msg[data-id="${keptId}"] [data-action="msg.ack"]')`, 8000);
+      await mia.eval(`document.querySelector('#feed .msg[data-id="${keptId}"] [data-action="msg.ack"]').click(); true`);
+      const stays = await mia.until(`(() => { const n = document.querySelector('#feed .msg[data-id="${keptId}"]'); const w = n && n.querySelector('.bv-said'); return n && getComputedStyle(n).display !== 'none' && w && w.textContent === '👍 You: got it' && 'stays'; })()`, 8000);
+      // Mia's page came back on a new connection after the offline step: the admin names the page she sits on now.
+      await emit(osAdmin, 'admin:setOnStage', { roomCode: osHall, socketId: await sidOf('Mia'), clears: true });
+      const cleared = await mia.until(`(() => { const n = document.querySelector('#feed .msg[data-id="${keptId}"]'); const l = document.querySelector('#feed .bv-cleared'); const m = allMessages.find((x) => x.id === '${keptId}'); const said = l && l.textContent.replace(/\\s+/g, ' ').trim(); return n && getComputedStyle(n).display === 'none' && m && said === '👍 Got and cleared: Rio ' + formatTime(m.at) + ' · Show' && said; })()`, 8000);
+      const lineHeight = await mia.eval(`document.querySelector('#feed .bv-cleared').getBoundingClientRect().height`);
+      await mia.eval(`document.querySelector('#feed .bv-cleared [data-action="cleared.show"]').click(); true`);
+      const shown = await mia.until(`(() => { const n = document.querySelector('#feed .msg[data-id="${keptId}"]'); const b = document.querySelector('#feed .bv-cleared [data-action="cleared.show"]'); return n && getComputedStyle(n).display !== 'none' && b && b.textContent.includes('Hide') && n.querySelector('.bv-said').textContent; })()`, 5000);
+      await mia.eval(`document.querySelector('#feed .bv-cleared [data-action="cleared.show"]').click(); true`);
+      const folded = await mia.until(`getComputedStyle(document.querySelector('#feed .msg[data-id="${keptId}"]')).display === 'none' && 'folded'`, 5000);
+      // A message pinned for the room, got: never cleared.
+      const pinnedId = await sendAs(rio, 'Keep this in view');
+      await emit(rio, 'pin', { messageId: pinnedId, pinned: true });
+      await mia.until(`!!document.querySelector('#feed .msg[data-id="${pinnedId}"]') && document.querySelector('#feed .msg[data-id="${pinnedId}"]').dataset.pinned === '1'`, 8000);
+      await mia.eval(`(() => { AGM.outbox.now('react', { messageId: '${pinnedId}', emoji: '👍', on: true }, () => {}); return true; })()`);
+      const pinnedKept = await mia.until(`(() => { const m = allMessages.find((x) => x.id === '${pinnedId}'); return m && (m.reactions || []).some((r) => r.uid === MY_UID) && !document.querySelector('#feed .msg[data-id="${pinnedId}"]').dataset.cleared && 'kept'; })()`, 8000);
+      // Never cleared, each got: one pinned for Mia alone, a question, and her own.
+      const mineId = await sendAs(rio, 'Mine to keep');
+      await mia.until(`!!document.querySelector('#feed .msg[data-id="${mineId}"]')`, 8000);
+      await mia.eval(`new Promise((r) => socket.emit('pin:mine', { messageId: '${mineId}', on: true }, () => r(true)))`);
+      const askId = (await emit(rio, 'message', { type: 'action', text: 'Adjourn at twelve?', options: ['Yes', 'No'] })).id;
+      const ownId = await mia.eval(`new Promise((r) => socket.emit('message', { type: 'text', text: 'Thanks, all' }, (a) => r(a && a.id)))`);
+      for (const id of [mineId, askId, ownId]) await mia.eval(`new Promise((r) => socket.emit('react', { messageId: '${id}', emoji: '👍', on: true }, () => r(true)))`);
+      const neverCleared = await mia.until(`(() => { const ids = ['${mineId}', '${askId}', '${ownId}']; const got = ids.every((id) => { const m = allMessages.find((x) => x.id === id); return m && (m.reactions || []).some((r) => r.uid === MY_UID); });
+        return got && ids.every((id) => { const n = document.querySelector('#feed .msg[data-id="' + id + '"]'); return !n || !n.dataset.cleared; }) && 'kept'; })()`, 8000);
+      // On her other device: a 👍 given there (a page of hers on the same identity) clears it on this one too.
+      const miaPhone = await connect(base);
+      await emit(miaPhone, 'join', { roomCode: osHall, name: 'Mia', role: 'board', uid: await mia.eval(`IDENTITY`), invite: inviteOf(dataDir, osHall), docs: true });
+      const elsewhereId = await sendAs(rio, 'Lights down at nine');
+      await mia.until(`!!document.querySelector('#feed .msg[data-id="${elsewhereId}"]')`, 8000);
+      await emit(miaPhone, 'react', { messageId: elsewhereId, emoji: '👍', on: true });
+      const elsewhere = await mia.until(`(() => { const n = document.querySelector('#feed .msg[data-id="${elsewhereId}"]'); return n && n.dataset.cleared === '1' && getComputedStyle(n).display === 'none' && 'cleared'; })()`, 8000);
+      miaPhone.close();
+      // The backstage team's page keeps every message, and says who got it.
+      const rex = await edge.tab(`${base}/app.html?code=${osHall}&name=Rex&role=research`, { alone: true });
+      await rex.until(`typeof joined !== 'undefined' && joined && !!document.querySelector('#feed .msg[data-id="${keptId}"]')`, 10000);
+      const backstage = await rex.until(`(() => { const n = document.querySelector('#feed .msg[data-id="${keptId}"]'); const g = n && n.querySelector('.got-line'); return n && getComputedStyle(n).display !== 'none' && !n.dataset.cleared && g && g.textContent; })()`, 8000);
+      rex.close();
+      report(stays === 'stays' && !!cleared && lineHeight >= 44 && shown === '👍 You: got it' && folded === 'folded' && pinnedKept === 'kept' && neverCleared === 'kept' && elsewhere === 'cleared' && backstage === '👍 Mia got it'
+        && mia.problems.length === 0 && lecternTab.problems.length === 0,
+        `Got it clears: off, a message got stays marked "👍 You: got it"; on, it gives its place to "${cleared}" (${lineHeight} px tall), Show draws it again marked "👍 You: got it" and Hide folds it back; a message pinned for the room, one pinned for the person, a question and one's own stay whole once got; a 👍 given on her other device clears it here too; the backstage page keeps it, "${backstage}" (${JSON.stringify({ stays, shown, folded, pinnedKept, neverCleared, elsewhere })})`);
+      mia.close();
+      lecternTab.close();
+      noa.close();
+      rio.close();
+      osAdmin.close();
     }
 
     // Oli's page, untouched since "First new" arrived 30 s or more ago and every message since: its New divider is

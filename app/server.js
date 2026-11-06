@@ -51,6 +51,7 @@ const { Exporter } = require('./lib/auditexport');
 const { Archiver } = require('./lib/auditarchive');
 const rbac = require('./lib/rbac');
 const views = require('./lib/views');
+const { alsoAsked, ALSO_WORDS } = views;
 const { mountAccounts } = require('./lib/http-accounts');
 const board = require('./lib/board');
 const stagelines = require('./lib/stagelines');
@@ -62,7 +63,7 @@ const roomVerbs = require('./lib/handlers/rooms');
 const takeVerbs = require('./lib/handlers/takes');
 const { Latest, sendEach } = require('./lib/latest');
 const { Displays, cleanContent, describe: describeContent } = require('./lib/displays');
-const { Pages, personKey, sourceOk, mayDownload: seatMayDownload, describePage, snippetText, FILE_KINDS, filesOf, stepHold, answerHold, sentHold, uploadRef, HELD_LINE, HOLD_MAX, MARK_WORDS } = require('./lib/pages');
+const { Pages, personKey, cleanPage, SNIPPET, grouped, sourceOk, mayDownload: seatMayDownload, describePage, snippetText, FILE_KINDS, filesOf, stepHold, answerHold, sentHold, uploadRef, HELD_LINE, HOLD_MAX, MARK_WORDS } = require('./lib/pages');
 const uploadcheck = require('./lib/uploadcheck');
 const downloads = require('./lib/downloads');
 const readings = require('./lib/peaks');
@@ -452,7 +453,8 @@ const frames = {
   board: new Latest({ name: 'board', delayMs: 300, flush: () => { sendBoards(); keepAwake(); } }),
   // A hall's screens console re-reads its list (keyed by the hall): a take on 50 screens is one re-read per console. Told
   // to every room of the hall, a signal with no content, so a console in a side room hears it and no page is sent a key.
-  screens: new Latest({ name: 'screens', delayMs: 150, flush: (halls) => eachRoom('screens', halls, (r) => { for (const room of store.roomsOf(r.code)) io.to(room.code).emit('displays:changed', {}); }) }),
+  // The pages whose person may send to a countdown screen are told the hall's countdown screens again when they move.
+  screens: new Latest({ name: 'screens', delayMs: 150, flush: (halls) => eachRoom('screens', halls, (r) => { for (const room of store.roomsOf(r.code)) io.to(room.code).emit('displays:changed', {}); tellCountdowns(r.code); }) }),
   // A room's people list (keyed by the room, a hall's Main room or a side room): a join storm is one list per window, not
   // one per join to every page.
   people: new Latest({ name: 'people', delayMs: 100, flush: (rooms) => eachRoom('people', rooms, (r) => sendPeople(r)) }),
@@ -471,6 +473,9 @@ const frames = {
   // What a hall's people's pages show changed, or the pages that hold it (keyed by the hall): each console of the hall
   // re-reads it (page:status), so a push to 6 Board pages and their 6 reports are one re-read per console, not seven.
   pages: new Latest({ name: 'pages', delayMs: 150, flush: (halls) => eachRoom('pages', halls, (r) => tellPushers(r.code)) }),
+  // Where a message from On stage also went (keyed by the hall): its screens' and its cards' states read again when the
+  // hall's screens or pages change, and the message's words updated, once a second at most (plan 7-§17.6).
+  also: new Latest({ name: 'also', delayMs: 1000, flush: (halls) => eachRoom('also', halls, (r) => alsoStep(r.code)) }),
   // What is new in a room changed (keyed by the room; lib/ops.js newsOf: a message came, one was removed, the room was
   // cleared): the pages that may move into it from another room of its hall, its watchers (watchRooms), are told the
   // room's news as it stands when the frame goes (store.news: its newest message's seq and its newest priority one's,
@@ -1014,8 +1019,9 @@ function roomUserSummary(room, { links = false } = {}) {
     ...(links ? { linkedRooms: u.linkedRooms instanceof Set ? Array.from(u.linkedRooms) : [] } : {}),
     account: !!u.acct,
     // The admin's list alone: the chat view the admin chose for the person ('' by their seat), its Chat view's choice,
-    // and the clock or countdown the admin chose ({show, locked}: show null for their own choice).
-    ...(links ? { view: chosenView(personKey(u.uid, !!u.acct)), clock: chosenClock(personKey(u.uid, !!u.acct)) } : {}),
+    // the clock or countdown the admin chose ({show, locked}: show null for their own choice), and what the admin lets
+    // them do On stage ({screens, people, clears}).
+    ...(links ? { view: chosenView(personKey(u.uid, !!u.acct)), clock: chosenClock(personKey(u.uid, !!u.acct)), onStage: chosenOnStage(personKey(u.uid, !!u.acct)) } : {}),
   }));
 }
 /** Who is in the room changed: its people list goes to every page in it once per 100 ms at most (`frames.people`). */
@@ -2657,6 +2663,8 @@ io.on('connection', (socket) => {
       earlier: shownHere ? pages.earlierOf(r.hall, shownHere.key, { board: shownHere.board, observer: shownHere.observer }) : [],
       // The information beside it, in its side bar beside the operator's (as `over` is told: null for none).
       beside: shownHere && shownHere.beside.take ? takeTold(r.hall, shownHere.beside, 'beside', null, { observer: shownHere.observer }) : null,
+      // The Board's line typed On stage, in its side bar (plan 7-§17.6, as `beside` is told: null for none).
+      line: shownHere && shownHere.line.take && shownHere.line.take.content.kind !== 'chat' ? takeTold(r.hall, shownHere.line, 'line') : null,
       // The chat view this page draws (plan 1-§6): the person's own choice, else the simple view On stage and the full
       // view elsewhere; told again live (`view`) when the admin or the Accounts page changes it. The support view draws
       // the person's, which its `person` says.
@@ -2679,6 +2687,10 @@ io.on('connection', (socket) => {
       // pinned; the support view, the person's it shows), told again live (`pins`). Never the room's pins, which each
       // message carries.
       pins: pinnedMine,
+      // What the admin lets this person do On stage (plan 7-§17.6: {screens, people, clears}, and the names of this hall's
+      // screens showing the countdown while `screens` is on; the support view, the person's it shows), told again live
+      // (`onStage`). The server reads the switches again at each send; the page draws Also on and Got it clears by them.
+      onStage: onStageTold(isAdminView ? (socket.data.viewOf ? socket.data.viewOf.key : '') : personKey(id, !!acct), r.hall),
     });
 
     if (!isAdminView) {
@@ -2740,6 +2752,11 @@ io.on('connection', (socket) => {
     if (!mayPost(ack)) return;
     if (payload && payload.type === 'file' && !allowed('hall.files')) return ok(ack)({ ok: false, error: onStage() ? 'On stage seats send messages, not files.' : 'Your account may not share files here.' });
     if (payload && payload.type === 'action' && !mayAsk()) return ok(ack)({ ok: false, error: ASKS_BACKSTAGE });
+    // Where else a message from On stage goes (plan 7-§17.6, `also`): every check before anything is written, so a refusal
+    // posts nothing and the composer keeps the text.
+    const also = payload && Object.hasOwn(payload, 'also') && payload.also !== undefined ? alsoPlan(payload) : null;
+    if (also && also.busy) return limited(ack);
+    if (also && also.error) return ok(ack)({ ok: false, error: also.error });
     // A file shared marked confidential (🔒 beside 🔥): its sharer marks it as it is shared; a message is never marked.
     const secret = payload && payload.type === 'file' ? tickOf(payload.confidential) : false;
     if (secret !== true && secret !== false) return ok(ack)({ ok: false, error: MARK_WORDS });
@@ -2758,11 +2775,116 @@ io.on('connection', (socket) => {
     // Marked before it is posted, so no page is ever given it unmarked; never while it is on a screen.
     const mark = secret ? markShared(msg.url.slice(9), actor(), msg.filename, room, socket.data.ip, { uid: me.uid, by: me.name }) : null;
     if (mark && mark.error) return ok(ack)({ ok: false, error: mark.error });
+    // Where it also goes, by names alone (alsoTold: each screen's next take and the Board's next take, as they will be
+    // numbered), posted with the message; only once it is posted are the screens' lines and the Board's card taken
+    // (alsoSend), their targets kept on the server, so a message that was not posted put nothing anywhere.
+    if (also) msg.also = alsoTold(also);
     const posted = !!apply(room, { o: 'add', m: msg });
     if (mark) mark.posted(posted);
     if (!posted) return ok(ack)(OP_REFUSED);
-    ok(ack)({ ok: true, id: msg.id, seq: msg.seq, ...(msg.type === 'file' && pages.isConfidential(msg.url) ? { confidential: true } : {}) });
+    const went = also ? alsoSend(also, msg) : null;
+    if (went) alsoFollow(msg.id, room, went, msg.also);
+    ok(ack)({ ok: true, id: msg.id, seq: msg.seq, ...(msg.type === 'file' && pages.isConfidential(msg.url) ? { confidential: true } : {}), ...(went ? { also: alsoAck(went.told) } : {}) });
   });
+
+  /**
+   * Where a message from this page may also go (plan 7-§17.6), read before anything is written, in this order: the page
+   * is seated On stage; `also` names where, by type (an object of `screens` and `people`, each true, one at least); the
+   * message is words (a file and a question are refused before this); the person's switch for each place, read from the
+   * store now (never the page's word, never a copy taken at the join); then each place: a screen of the hall that shows
+   * the countdown now, with a line that fits it (160 characters: a screen's line is never cut), and another person seated
+   * On stage in the hall, with a line that fits a card (a typed quote's bound, said in words of its own); then one token of
+   * the writes bucket for each place, beside the message's own. {error} in words, {busy} for the rate, or what to send:
+   * the screens, the Board's card's content, the line, and the people On stage it goes to (`targets`, their keys: an
+   * account's every device is one person, a guest's page by its uid), the sender among them.
+   */
+  function alsoPlan(payload) {
+    if (!onStage()) return { error: ALSO_WORDS.onStage };
+    const want = alsoAsked(payload.also);
+    if (want.error) return want;
+    if (payload.type !== 'text') return { error: ALSO_WORDS.text };
+    const text = guard.str(payload.text).trim().slice(0, 4000);
+    const sw = chosenOnStage(personKey(me.uid, !!me.acct));
+    if (want.screens && !sw.screens) return { error: ALSO_WORDS.noScreens };
+    if (want.people && !sw.people) return { error: ALSO_WORDS.noPeople };
+    const hall = room.hall;
+    const line = guard.cleanText(text, LINE_MEASURE);
+    let screens = [];
+    if (want.screens) {
+      screens = displays.ofHall(hall).filter((d) => d.content && d.content.kind === 'countdown');
+      if (!screens.length) return { error: ALSO_WORDS.noCountdown };
+      if (line.length > COUNTDOWN_LINE) return { error: 'A countdown screen\'s line holds ' + COUNTDOWN_LINE + ' characters (this is ' + line.length + ').' };
+    }
+    let card = null;
+    let targets = null;
+    if (want.people) {
+      const mine = personKey(me.uid, !!me.acct);
+      targets = new Set(hallPages(hall).filter((p) => p.board && !p.support).map((p) => p.key));
+      if (![...targets].some((k) => k !== mine)) return { error: ALSO_WORDS.nobody };
+      targets.add(mine);
+      const n = Array.from(guard.cleanBlock(text)).length;
+      if (n > SNIPPET.text) return { error: 'A line shown On stage holds ' + grouped(SNIPPET.text) + ' characters (this is ' + grouped(n) + ').' };
+      const content = cleanPage({ kind: 'snippet', unit: 'text', text });
+      if (content.error) return { error: content.error };
+      card = content;
+    }
+    for (let i = 0; i < (want.screens ? 1 : 0) + (want.people ? 1 : 0); i++) if (!writes.take()) return { busy: true };
+    return { hall, screens, card, line, targets };
+  }
+  /**
+   * What a message says of where it also goes as it is posted (after alsoPlan, before alsoSend): each screen by its name
+   * with the number its line's take will carry (its next), and the Board's card with the number its take will carry (the
+   * hall's next) and how many people On stage it goes to; each `sending`. Names and numbers, never a screen's id, link or
+   * token. Nothing runs between this and alsoSend, so the numbers are those the takes are given.
+   */
+  function alsoTold({ hall, screens, card, targets }) {
+    return {
+      ...(screens.length ? { screens: screens.map((d) => ({ name: d.name, seq: d.seq + 1, state: 'sending' })) } : {}),
+      ...(card ? { people: { seq: pages.nextSeq(hall), shown: 0, of: targets.size, state: 'sending' } } : {}),
+    };
+  }
+  /**
+   * A message's places made (once it is posted): each screen's line under its countdown (its tone 🔥's: urgent), one
+   * `display.take` row each naming the person and the line's length, never its words; the Board's card, a typed line kept
+   * in the Board's own place for it (lib/pages.js `take` with `line`: it supersedes nothing anyone was shown, and only
+   * another such line replaces it), entered in the hall's Earlier list as it is sent, each Board page told it by its
+   * socket, one `page.push` row and the stage record's entry. Both rows count the line's characters as every quote's row
+   * does. What the message says of it (`told`: names, numbers and states, never a screen's id, link or token), and what
+   * the server follows (`screens` with their ids, `people` with the people it went to by their keys).
+   */
+  function alsoSend(plan, msg) {
+    const { hall, screens, card, line, targets } = plan;
+    const who = actor();
+    const n = plural(Array.from(card ? card.text : line).length, 'character');
+    const told = {};
+    const out = { hall, key: personKey(me.uid, !!me.acct), told, screens: null, people: null };
+    if (screens.length) {
+      const content = cleanContent({ kind: 'countdown', text: line, tone: msg.priority ? 'urgent' : 'info' });
+      out.screens = screens.map((d) => {
+        displays.take(d.id, content, me.name);
+        io.to('display:' + d.id).emit('display:state', displayState(d));
+        audit.write(who, 'display.take', d.id, d.name + ' → the countdown with a line from ' + me.name + ', On stage (' + plural(Array.from(line).length, 'character') + ')', socket.data.ip);
+        return { id: d.id, name: d.name, seq: d.seq };
+      });
+      told.screens = out.screens.map((x) => ({ name: x.name, seq: x.seq, state: 'sending' }));
+      displaysChanged(hall);
+    }
+    if (card) {
+      const before = hallPages(hall);
+      const board = before.filter((p) => p.board && !p.support);
+      const take = pages.take(hall, 'board', card, { name: me.name, onStage: true }, { onStage: [...new Set(board.map((p) => p.key))], arrive: 'side', line: true });
+      if (take) {
+        for (const t of takeSends(hall, before)) { const s = io.sockets.sockets.get(t.sid); if (s) s.emit('page:take', t.take); }
+        const holders = hallPages(hall).filter((p) => !p.support && p.line.take && p.line.take.seq === take.seq);
+        stageRecord.shown(hall, take, { to: 'board', name: 'the Board', role: 'board', hallHolding: holdingOf(hall), pages: holders.map((p) => ({ sid: p.sid, docs: p.docs })) });
+        audit.write(who, 'page.push', hall, 'the Board (' + plural(board.length, 'page') + ') → a line typed by ' + me.name + ', On stage (' + n + '), beside their chat', socket.data.ip);
+        out.people = { seq: take.seq, targets, seen: new Set() };
+        told.people = { seq: take.seq, shown: 0, of: targets.size, state: 'sending' };
+        pagesChanged(hall);
+      }
+    }
+    return out;
+  }
 
   socket.on('actionResponse', ({ messageId, optionIndex, note } = {}, ack) => {
     if (!need(ack)) return;
@@ -3723,6 +3845,7 @@ io.on('connection', (socket) => {
     if (hallStagewatch(r.code)) { delete settings.hallStagewatch[r.code]; saveSettings(); }
     for (const d of displays.ofHall(r.code)) revokeDisplaySockets(d.id, 'This screen\'s hall was closed.');
     displays.removeHall(r.code);
+    alsoForget(r.code);
     // What its people's pages were shown goes too, unless the hall comes back at the next start, and its stage files
     // (uploads a take named that no message holds) leave the disk with it, purged or not: nothing could keep them.
     const stageFiles = (!removed.back.includes(r.code) && pages.forgetHall(r.code)) || [];
@@ -4189,6 +4312,119 @@ function revokeDisplaySockets(id, words) {
 function displaysChanged(code) {
   boardDirty();
   frames.screens.mark(code);
+  alsoMoved(code);
+}
+
+// ---------------------------------------------------------------- where a message from On stage also went
+// A message a person seated On stage sent with `also` (plan 7-§17.6) says where it also went, for every reader of its room:
+// each countdown screen's line, and the Board's cards. Attempts are not facts: each place's state is read from what its
+// targets confirmed (a screen's report, the Board's pages' reports on the card), never from the send. The server follows
+// each such message (`alsoLive`, its targets by their ids, which no page is told) until every target has confirmed, could
+// not, or moved on, and updates the message's `also` by an `upd` op when a hall's screens or pages change, once a second
+// at most (the `also` frame). It follows the newest message per person and place: an older one keeps the words it had.
+/** A countdown screen's line, in characters as its cleaner counts them (lib/displays.js cleanContent): never cut. */
+const COUNTDOWN_LINE = 160;
+/** How far a line is measured before it is refused for its length: far past the line, short of the message's own bound. */
+const LINE_MEASURE = 4000;
+/**
+ * The messages followed, by id: {room, hall, key, screens: [{id, name, seq}] | null, people: {seq, targets, seen} | null}:
+ * `targets` the people On stage the card went to and `seen` those of them a page of whose confirmed it, each by their key.
+ */
+const alsoLive = new Map();
+/** The message followed for each person and place (`<key>|screens`, `<key>|people`): the newest alone, while it is followed. */
+const alsoNewest = new Map();
+/** The most messages followed at once: past it, the oldest is let go with the words it had. */
+const ALSO_LIVE_MAX = 500;
+/** What a message's `also` says beside the ack: names and numbers, as sent ("sending"), never "shown". */
+const alsoAck = (told) => ({ ...(told.screens ? { screens: told.screens.map(({ name, seq, state }) => ({ name, seq, state })) } : {}), ...(told.people ? { people: { seq: told.people.seq, of: told.people.of } } : {}) });
+/** A followed message let go: no longer followed, nor the newest of its person's for any place. */
+function alsoLetGo(id) {
+  const e = alsoLive.get(id);
+  alsoLive.delete(id);
+  if (e) for (const place of ['screens', 'people']) { const k = e.key + '|' + place; if (alsoNewest.get(k) === id) alsoNewest.delete(k); }
+}
+/**
+ * A message posted with `also` (its id, its room, what alsoSend made of it, and what the message said as it was posted)
+ * is followed from now on, for the newest per person and place. Where a take was numbered otherwise than the message
+ * said (or the Board's card could not be kept), the message says what was made, by an `upd` op, before anyone reads on.
+ */
+function alsoFollow(id, room, went, said) {
+  if (JSON.stringify(went.told) !== JSON.stringify(said)) apply(room, { o: 'upd', id, f: { also: went.told } });
+  const entry = { room: room.code, hall: went.hall, key: went.key, screens: went.screens, people: went.people };
+  for (const place of ['screens', 'people']) {
+    if (!entry[place]) continue;
+    const k = went.key + '|' + place;
+    const was = alsoNewest.get(k);
+    const old = was && alsoLive.get(was);
+    // The older message keeps the words it has now: its line read once more (replaced, where this one took its screen).
+    if (old) { alsoUpdate(was, old); old[place] = null; if (!old.screens && !old.people) alsoLetGo(was); }
+    alsoNewest.set(k, id);
+  }
+  alsoLive.set(id, entry);
+  while (alsoLive.size > ALSO_LIVE_MAX) alsoLetGo(alsoLive.keys().next().value);
+  frames.also.mark(went.hall);
+}
+/** A hall removed: the messages followed there are let go, and the names of its countdown screens last told forgotten. */
+function alsoForget(hall) {
+  for (const [id, e] of Array.from(alsoLive)) if (e.hall === hall) alsoLetGo(id);
+  countdownsTold.delete(hall);
+}
+/** A hall's screens or pages moved: the messages followed there are read again, once a second at most. */
+function alsoMoved(hall) {
+  for (const e of alsoLive.values()) if (e.hall === hall) { frames.also.mark(hall); return; }
+}
+/** A screen's state for a line put on it (`seq`): its own words while that line is its newest take, else moved on. */
+const SCREEN_STATE = Object.freeze({ shown: 'shown', error: 'failed', offline: 'offline', sending: 'sending' });
+/**
+ * Where a followed message went, now, as its readers are told it (names, numbers and states): each screen `shown`, `failed`,
+ * `offline`, `sending`, or `replaced` (with when) once another take is on it; the Board's card `shown` once every person On
+ * stage it went to confirmed it in view on a page of theirs ("in the side bar"), `moved` once no Board page holds it,
+ * else `sending`, with how many of them have confirmed (`shown`) of how many it went to (`of`). Counted by person, never
+ * by page: a page that comes back on a new connection is the person it was, and a page of someone it did not go to (who
+ * sat down On stage after it was sent) is counted nowhere. `done` once nothing more can change: a screen's line could not
+ * be shown or moved on (one on screen is followed until it is replaced, so its readers are told when), and the card was
+ * seen by everyone it went to or moved on.
+ */
+function alsoNow(e) {
+  const told = {};
+  let done = true;
+  if (e.screens) {
+    told.screens = e.screens.map((x) => {
+      const d = displays.get(x.id);
+      if (!d || d.seq > x.seq) return { name: x.name, seq: x.seq, state: 'replaced', ...(d && Number.isFinite(d.takenAt) ? { at: d.takenAt } : {}) };
+      const state = SCREEN_STATE[Displays.status(d, displays.hallHolding(d.hall)).state] || 'sending';
+      if (state !== 'failed') done = false;
+      return { name: x.name, seq: x.seq, state };
+    });
+  }
+  if (e.people) {
+    const board = hallPages(e.hall).filter((p) => p.board && !p.support);
+    const holding = board.filter((p) => p.line.take && p.line.take.seq === e.people.seq);
+    for (const p of holding) if (e.people.targets.has(p.key) && pages.pageState(e.hall, p, 'line').state === 'shown') e.people.seen.add(p.key);
+    const of = e.people.targets.size;
+    const shown = e.people.seen.size;
+    const state = shown >= of ? 'shown' : !holding.length ? 'moved' : 'sending';
+    if (state === 'sending') done = false;
+    told.people = { seq: e.people.seq, shown, of, state };
+  }
+  return { told, done };
+}
+/**
+ * A followed message (`id`, its entry `e`) read again: its words updated by an `upd` op where they moved (the places it is
+ * no longer followed for keep the words they had). Whether it is done, or gone with its room or itself.
+ */
+function alsoUpdate(id, e) {
+  const r = store.room(e.room);
+  const m = r ? r.byId.get(id) : null;
+  if (!m) return true;
+  const now = alsoNow(e);
+  const next = { ...(m.also || {}), ...now.told };
+  if (JSON.stringify(next) !== JSON.stringify(m.also || {})) apply(r, { o: 'upd', id, f: { also: next } });
+  return now.done;
+}
+/** A frame of the hall's followed messages: each whose words moved is updated, each that is done let go. */
+function alsoStep(hall) {
+  for (const [id, e] of Array.from(alsoLive)) if (e.hall === hall && alsoUpdate(id, e)) alsoLetGo(id);
 }
 
 // ---------------------------------------------------------------- people's pages
@@ -4201,8 +4437,9 @@ function displaysChanged(code) {
  * false, observer}) and each admin's support view of a person seated in that room ({…, support: true}: shown that
  * person's takes, it never reports); `observer`, whether the page (or the person it shows) sits there as an observer, who
  * is never handed a document's address. `current` (with `seq` and `answer`) is the show layer's, `info` the information layer's, `beside`
- * the information beside it (in its side bar, beside the operator's), and `earlier` the newest of its Earlier entries, as
- * a page is told them (pages.earlierOf), their numbers in a word. `key` is
+ * the information beside it (in its side bar, beside the operator's), `line` the Board's line typed On stage (in its side
+ * bar too: a Board page's alone), and `earlier` the newest of its Earlier entries, as a page is told them
+ * (pages.earlierOf), their numbers in a word. `key` is
  * the person's (an account's `a:<id>`, every device of it; a guest's `u:<uid>`, that device); `board`, whether the person
  * sits On stage in the hall's Main room there; `docs`, whether the page said at its join that it opens documents. A page
  * that has gone is among none: a room's seats are its pages open now.
@@ -4215,11 +4452,12 @@ function hallPages(hall) {
       const current = pages.current(hall, key, { board });
       const info = pages.current(hall, key, { board, layer: 'info' });
       const beside = pages.current(hall, key, { board, layer: 'beside' });
+      const line = pages.current(hall, key, { board, layer: 'line' });
       const earlier = pages.earlierSaid(hall, key, { board });
       // Whether the page opens documents (its join's probe, plan 4-§5.15.2): a page that cannot draws a document's stand-in.
       const s = io.sockets.sockets.get(sid);
       const docs = !!s && s.data.docs === true;
-      out.push({ sid, key, board, name, room: r, support, observer, seq: current.take ? current.take.seq : 0, answer: current.answer ? current.answer.state : null, current, info, beside, earlier, docs });
+      out.push({ sid, key, board, name, room: r, support, observer, seq: current.take ? current.take.seq : 0, answer: current.answer ? current.answer.state : null, current, info, beside, line, earlier, docs });
     };
     for (const [sid, u] of r.users) { const key = personKey(u.uid, !!u.acct); if (key) add(sid, key, main && u.role === 'board', u.name, false, u.role === 'observer'); }
     for (const sid of io.sockets.adapter.rooms.get(r.code) || []) {
@@ -4239,7 +4477,8 @@ const layerSaid = (c) => (c.take ? c.take.seq : 0) + '|' + (c.answer ? c.answer.
  * of its own shows the hall's), AGMessage's clock and zone (a clock take is drawn in them), and the person's answer to it
  * ('dismissed', 'minimised' or null). Shown nothing (no take, or none since a seat moved): number 0 and no content, the
  * page's chat, or nothing over the show. An information take says how it arrives (`arrive`: 'over' or 'side'; beside the
- * operator's, `layer: 'beside'`, always 'side'), and the information layer's word carries the page's Earlier entries
+ * operator's, `layer: 'beside'`, and the Board's line typed On stage, `layer: 'line'`, always 'side'), and the information
+ * layer's word carries the page's Earlier entries
  * (`earlier`, given as pages.earlierOf gives them). No key or
  * code. A web page's address is opened here, for the page it is shown on and nothing else (pages.told); a document is told
  * a page seated as an observer (`observer`) without its address.
@@ -4247,7 +4486,7 @@ const layerSaid = (c) => (c.take ? c.take.seq : 0) + '|' + (c.answer ? c.answer.
 function takeTold(hall, { take, answer }, layer = 'show', earlier = null, { observer = false } = {}) {
   const h = store.get(hall);
   return {
-    layer, seq: take ? take.seq : 0, content: take ? pages.told(take.content, { observer }) : null, by: take ? { name: take.by.name } : null, at: take ? take.at : 0,
+    layer, seq: take ? take.seq : 0, content: take ? pages.told(take.content, { observer }) : null, by: take ? { name: take.by.name, ...(take.by.onStage === true ? { onStage: true } : {}) } : null, at: take ? take.at : 0,
     hallName: (h && h.name) || '', holding: displays.hallHolding(hall), now: Date.now(), tz: TIME_ZONE, answer: answer ? answer.state : null,
     ...(layer !== 'show' ? { arrive: take && take.arrive === 'side' ? 'side' : 'over' } : {}),
     ...(earlier ? { earlier } : {}),
@@ -4271,6 +4510,7 @@ function takeSends(hall, before) {
     if (fresh || p.seq !== was.seq || p.answer !== was.answer) out.push({ sid: p.sid, take: takeTold(hall, p.current, 'show') });
     if (fresh || !was.info || layerSaid(p.info) !== layerSaid(was.info) || p.earlier !== was.earlier || p.observer !== was.observer) out.push({ sid: p.sid, take: takeTold(hall, p.info, 'info', pages.earlierOf(hall, p.key, { board: p.board, ...seat }), seat) });
     if (fresh || !was.beside || layerSaid(p.beside) !== layerSaid(was.beside) || p.observer !== was.observer) out.push({ sid: p.sid, take: takeTold(hall, p.beside, 'beside', null, seat) });
+    if (fresh || !was.line || layerSaid(p.line) !== layerSaid(was.line)) out.push({ sid: p.sid, take: takeTold(hall, p.line, 'line') });
   }
   return out;
 }
@@ -4352,7 +4592,7 @@ const stageDropped = (names) => { if (names.length) removeUnused(names).catch(()
  * What a hall's people's pages show, or the pages that hold it, changed: its consoles are told once per 150 ms at most
  * (`frames.pages`), and each reads `page:status` again, so the newest state is what it reads.
  */
-function pagesChanged(hall) { frames.pages.mark(hall); }
+function pagesChanged(hall) { frames.pages.mark(hall); alsoMoved(hall); }
 /**
  * `pages:changed` to each page in a room of the hall whose push (canPush) or show (canShow) held for it at its join
  * (`pushes`, `shows`): a signal, no content.
@@ -4471,11 +4711,11 @@ const SIGNED_OUT = 'Signed out — sign in again to carry on.';
 /**
  * An account changed (role, rights, halls, rooms, On stage halls, password, turned off, removed): every socket it has
  * open is told and closed, so its next connection is judged by the rights it has now — never by the ones it had. Its chat
- * view and its clock or countdown are no rights: a change of those alone tells each of its pages in a room the view it
- * draws now (`view`) and the admin's clock (`clock`), none is closed, and the admin's people rows of those rooms say the
- * new choice. `what` names the fields changed, by commas.
+ * view, its clock or countdown and what it may do On stage are no rights: a change of those alone tells each of its pages
+ * in a room the view it draws now (`view`), the admin's clock (`clock`) and its On stage switches (`onStage`), none is
+ * closed, and the admin's people rows of those rooms say the new choice. `what` names the fields changed, by commas.
  */
-const NO_RIGHTS = ['view', 'clock'];
+const NO_RIGHTS = ['view', 'clock', 'onStage'];
 function accountChanged(id, what) {
   const fields = String(what).split(',');
   // A removed account's pins for itself go with it (plan 7-§17.5): nobody else's page ever reads them.
@@ -4483,6 +4723,7 @@ function accountChanged(id, what) {
   if (fields.every((f) => NO_RIGHTS.includes(f))) {
     if (fields.includes('view')) viewChanged(personKey(id, true));
     if (fields.includes('clock')) clockChanged(personKey(id, true));
+    if (fields.includes('onStage')) onStageChanged(personKey(id, true));
     return undefined;
   }
   return endSockets((s) => s.data.accountId === id, what, 'Your account was changed by an admin — reconnecting with your current rights.');
@@ -4558,6 +4799,71 @@ function clockChanged(key) {
   }
   for (const code of rooms) usersChanged(code);
   return told;
+}
+
+/**
+ * What the admin lets a person do On stage, by their key ('a:<account id>', 'u:<uid>'), read from the store now (plan
+ * 7-§17.6): {screens, people, clears}, every one off for anyone else.
+ */
+function chosenOnStage(key) {
+  if (typeof key !== 'string') return { ...views.ON_STAGE_NONE };
+  if (key.startsWith('a:')) { const a = accounts.get(key.slice(2)); return views.onStageOf(a && a.onStage); }
+  return key.startsWith('u:') ? pages.onStageOf(key.slice(2)) : { ...views.ON_STAGE_NONE };
+}
+/** The screens of a hall (its key) that show the countdown now, by their names, sorted: never a link, a token or an id. */
+const countdownScreens = (hall) => displays.ofHall(hall).filter((d) => d.content && d.content.kind === 'countdown').map((d) => d.name);
+/**
+ * What a page is told of its person's On stage switches (`onStage`, at its join and live): the switches, and, only while
+ * `screens` is on, the names of its hall's screens showing the countdown now (`countdownScreens`), so its Also on draws
+ * ⏱ with the screen's name, or disabled with why. `hall` is the hall of the room the page sits in.
+ */
+function onStageTold(key, hall) {
+  const o = chosenOnStage(key);
+  return { ...o, ...(o.screens && hall ? { countdownScreens: countdownScreens(hall) } : {}) };
+}
+/**
+ * What the admin lets a person do On stage changed (`key`, as viewChanged's): each of their pages seated in a room, and the
+ * admin's view of that person, is told it (`onStage`, with its hall's countdown screens while `screens` is on), live;
+ * nothing is closed and no other page is told. The admin's people rows of each room a page of theirs sits in say the new
+ * choice (usersChanged). The number of pages told.
+ */
+function onStageChanged(key) {
+  const account = key.startsWith('a:');
+  const id = key.slice(2);
+  let told = 0;
+  const rooms = new Set();
+  for (const [, s] of io.sockets.sockets) {
+    if (!s.data || !s.data.userRoom) continue;
+    const theirs = account ? s.data.accountId === id : !s.data.accountId && s.data.uid === id;
+    const support = !!s.data.adminView && !!s.data.viewOf && s.data.viewOf.key === key;
+    if (!(theirs && !s.data.adminView) && !support) continue;
+    const r = store.room(s.data.userRoom);
+    s.emit('onStage', onStageTold(key, r ? r.hall : ''));
+    told++;
+    if (!support) rooms.add(s.data.userRoom);
+  }
+  for (const code of rooms) usersChanged(code);
+  return told;
+}
+/**
+ * A hall's screens changed: where the names of its screens showing the countdown moved since they were last told, each page
+ * in its rooms whose person may send to a countdown screen (and the admin's view of such a person) is told its switches
+ * again, with the names now (plan 7-§17.6). Read when the screens' frame goes, so a burst of takes and reports is one read.
+ */
+const countdownsTold = new Map();
+function tellCountdowns(hall) {
+  const names = countdownScreens(hall);
+  const said = names.join('\n');
+  if ((countdownsTold.get(hall) || '') === said) return;
+  if (said) countdownsTold.set(hall, said); else countdownsTold.delete(hall);
+  for (const r of store.roomsOf(hall)) {
+    for (const sid of io.sockets.adapter.rooms.get(r.code) || []) {
+      const s = io.sockets.sockets.get(sid);
+      if (!s || !s.data || s.data.userRoom !== r.code) continue;
+      const key = s.data.adminView ? (s.data.viewOf ? s.data.viewOf.key : '') : personKey(s.data.uid, !!s.data.accountId);
+      if (key && chosenOnStage(key).screens) s.emit('onStage', onStageTold(key, hall));
+    }
+  }
 }
 
 /**
@@ -6151,7 +6457,7 @@ function firstWrites() {
 // room's op or a room's broadcast.
 const { ctx, takesCtx } = contexts({
   store, apply, systemMessage, readSend, messageOf, uploadOnDisk, fileCopy, tickets, makeMessageId, removeUnused, fileNamesOf, audit, accounts, boardDirty, newSideRoom, renameRoom, roomNameRefused, newGuestCode, guestPagesOf, sendGuestsOut, codeChanged, invitesFor, settings, sendersOf, sendsInto, setRoomSends, linkFor, stagePayload,
-  pages, stageRecord, hallPages, takeSends, holdingOf, pagesChanged, pageHidden, selfHosts, tellWebRights, viewChanged, clockChanged, pinsChanged, ownPins, stageSource, stageCheck, freshUpload, stageDropped, io,
+  pages, stageRecord, hallPages, takeSends, holdingOf, pagesChanged, pageHidden, selfHosts, tellWebRights, viewChanged, clockChanged, pinsChanged, onStageChanged, ownPins, stageSource, stageCheck, freshUpload, stageDropped, io,
   marked, fileMarked, inUseRooms, markShared, markFresh, markRefusal, markedTakes, screensShowing, madeUrls,
 });
 

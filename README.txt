@@ -289,6 +289,24 @@ Every day of the event
   account whose role is Admin; a manager given Manage settings or Manage
   accounts may choose, never lock. Every change, lock and unlock is an
   audit row (person.clock for a guest, user.update for an account).
+- For a person On stage the admin also chooses, each off until ticked:
+  May send to a countdown screen (their message can also go to the line
+  under the countdown on this hall's screens that show it), May send to
+  people On stage (it can also be shown on the pages of everyone On
+  stage, beside their chat) and Got it clears the message (off: it stays
+  in their feed, marked got). They are in the same three places: the
+  admin page's people list (On stage column), the person's ... in People,
+  and the Accounts page (once per account, beside Chat view, while it
+  sits On stage in a hall). Only an admin sets them: the token at the
+  laptop or an account whose role is Admin. Every change is an audit row
+  (person.onStage for a guest, user.update for an account).
+- On stage, with one of those switches on, "Also on" above the message
+  box offers the countdown screen (by its name, e.g. Lectern) and/or
+  Everyone On stage: tap one, then Send. With the screen chosen the box
+  holds 160 characters and says what it replaces. The message still goes
+  to the room, and says where else it went ("On Lectern", "Shown to 5 of
+  6 On stage"). With Got it clears on, a message you got becomes one line
+  with Show; Show brings it back until the page reloads.
 - A browser signed in to an account opens its halls from the halls board,
   never with a code: a code link opened there says so and offers "Open your
   halls" or "Sign out". To join as a guest on that device, sign out first.
