@@ -50,7 +50,7 @@ export const WORDS = Object.freeze({
 });
 
 /** A count as the words write it: 5000 → "5,000". */
-const counted = (n) => {
+export const counted = (n) => {
   const digits = String(n);
   let out = '';
   for (let i = 0; i < digits.length; i++) out += (i > 0 && (digits.length - i) % 3 === 0 ? ',' : '') + digits[i];
@@ -780,4 +780,223 @@ export function readInWorker(bytes, task, { ms = BOUNDS.workerMs, make = () => n
     const transfer = bytes && bytes.byteLength !== undefined && !ArrayBuffer.isView(bytes) ? [bytes] : [];
     try { worker.postMessage({ task, bytes, opts }, transfer); } catch { end({ ok: false, why: 'worker' }); }
   });
+}
+
+// ---------------------------------------------------------------- picks: what a researcher sends to the stage (plan 4-§5.9.4, §5.9.6)
+
+/**
+ * A quote's bounds, as the server holds them (lib/pages.js SNIPPET): characters counted as code points. The bar refuses
+ * before sending what the server would refuse, and offers the cut as the researcher's own choice.
+ */
+export const QUOTE_BOUNDS = Object.freeze({ text: 1200, items: 20, item: 300, rows: 25, cols: 10, cell: 200, blocks: 12, whole: 4000 });
+/** A string's length in characters (code points). */
+export const charsOf = (s) => Array.from(String(s || '')).length;
+/** The first `n` characters of a string, never half a surrogate pair. */
+export const firstChars = (s, n) => Array.from(String(s || '')).slice(0, n).join('');
+/** A grid's cell in A1 notation, from its row and column (from 0): "C14". */
+export const cellRef = (r, c) => columnName(c) + (r + 1);
+
+/**
+ * The segment of `text` of a `granularity` ('word' or 'sentence') that holds [start, end): {start, end, text}, or null
+ * where the span crosses segments (or holds no word: a space, a mark). Read with Intl.Segmenter, so a tap on a word works
+ * in every script it knows; without it, words are runs of letters and digits and sentences end at . ! ? and a space.
+ */
+export function segmentOf(text, start, end, granularity) {
+  const s = String(text || '');
+  const segs = [];
+  if (typeof Intl === 'object' && typeof Intl.Segmenter === 'function') {
+    for (const g of new Intl.Segmenter(undefined, { granularity }).segment(s)) {
+      if (granularity === 'word' && !g.isWordLike) continue;
+      segs.push({ start: g.index, end: g.index + g.segment.length });
+    }
+  } else {
+    const re = granularity === 'word' ? /[\p{L}\p{N}\p{M}'’_-]+/gu : /[^.!?]+(?:[.!?]+|$)/g;
+    for (let m = re.exec(s); m; m = re.exec(s)) { segs.push({ start: m.index, end: m.index + m[0].length }); if (!m[0].length) re.lastIndex++; }
+  }
+  const hit = segs.find((g) => g.start <= start && end <= g.end && (end > start || start < g.end));
+  if (!hit) return null;
+  const t = s.slice(hit.start, hit.end).trim();
+  return t ? { start: hit.start, end: hit.end, text: t } : null;
+}
+
+/**
+ * A grid's cells for a quote (pure): a cell, a row, a column or a range of `get(r, c)` (the cell's words), over the rows and
+ * columns a seat may pick (`rows`, `cols`: their indexes in order, hidden ones never among them), with the sheet's labels
+ * (`labels`: {row, col}, the row of headers and the column of names, either -1 for none) where `withLabels`:
+ *   - a cell: with each label it has, its value the focus: the 2 × 2 table of its corner, its column's label, its row's
+ *     label and itself; the 2 × 1 of its column's label over it, or the 1 × 2 of its row's label beside it, where only one
+ *     is marked; alone (1 × 1) without labels, or where it is a label itself;
+ *   - a row: the label row above it; a column: its label cell above it; a range: the label row and column beside it where
+ *     they are outside it.
+ * {unit, table: {rows, head, side, ref, focus?}, size} (`size`: its cells but a single cell's characters, for the bar), or
+ * where it is over QUOTE_BOUNDS's 25 rows × 10 columns {error, over: {rows, cols}}; with `cut`, its first 25 rows and 10 columns,
+ * the labels kept, `cut` true and `more` the rows and columns left out. `name` makes `ref` a sheet's ("'Q3'!C14"). null where a
+ * row or a column it names (r, c, r1, c1) is not among `rows` and `cols`: a hidden one is never quoted.
+ */
+export function gridQuote(get, { unit, r, c, r1 = r, c1 = c, rows, cols, labels = { row: -1, col: -1 }, withLabels = true, name = '', cut = false }) {
+  if (![r, r1].every((x) => rows.includes(x)) || ![c, c1].every((x) => cols.includes(x))) return null;
+  const lr = withLabels && rows.includes(labels.row) ? labels.row : -1;
+  const lc = withLabels && cols.includes(labels.col) ? labels.col : -1;
+  const sheetRef = (ref) => (name ? '\'' + String(name).replace(/'/g, '\'\'') + '\'!' + ref : ref);
+  let rowIds, colIds, head, side = 0, focus = null, ref;
+  if (unit === 'cell') {
+    const label = r === lr || c === lc;
+    const above = !label && lr >= 0;
+    const beside = !label && lc >= 0;
+    rowIds = above ? [lr, r] : [r];
+    colIds = beside ? [lc, c] : [c];
+    head = above ? 1 : 0;
+    side = beside ? 1 : 0;
+    focus = [head, side];
+    ref = cellRef(r, c);
+  } else if (unit === 'row') {
+    rowIds = lr >= 0 && r !== lr ? [lr, r] : [r];
+    colIds = cols.slice();
+    head = rowIds.length > 1 ? 1 : 0;
+    side = lc >= 0 && colIds[0] === lc ? 1 : 0;
+    ref = 'row ' + (r + 1);
+  } else if (unit === 'column') {
+    rowIds = lr >= 0 && c !== lc ? [lr, ...rows.filter((x) => x !== lr)] : rows.slice();
+    colIds = [c];
+    head = lr >= 0 && c !== lc ? 1 : 0;
+    ref = 'column ' + columnName(c);
+  } else {
+    const inRows = rows.filter((x) => x >= Math.min(r, r1) && x <= Math.max(r, r1));
+    const inCols = cols.filter((x) => x >= Math.min(c, c1) && x <= Math.max(c, c1));
+    rowIds = lr >= 0 && !inRows.includes(lr) && lr < inRows[0] ? [lr, ...inRows] : inRows;
+    colIds = lc >= 0 && !inCols.includes(lc) && lc < inCols[0] ? [lc, ...inCols] : inCols;
+    head = lr >= 0 && rowIds[0] === lr ? 1 : 0;
+    side = lc >= 0 && colIds[0] === lc ? 1 : 0;
+    ref = cellRef(Math.min(r, r1), Math.min(c, c1)) + ':' + cellRef(Math.max(r, r1), Math.max(c, c1));
+  }
+  const over = { rows: Math.max(0, rowIds.length - QUOTE_BOUNDS.rows), cols: Math.max(0, colIds.length - QUOTE_BOUNDS.cols) };
+  if ((over.rows || over.cols) && !cut) return { error: 'Too big for the stage: narrow it to 25 rows × 10 columns', over: { rows: rowIds.length, cols: colIds.length } };
+  const keptRows = rowIds.slice(0, QUOTE_BOUNDS.rows);
+  const keptCols = colIds.slice(0, QUOTE_BOUNDS.cols);
+  const table = { rows: keptRows.map((y) => keptCols.map((x) => String(get(y, x) || ''))), head, side, ref: unit === 'cell' || unit === 'range' ? sheetRef(ref) : ref };
+  if (focus) table.focus = focus;
+  const values = Math.max(0, keptRows.length - head) * Math.max(0, keptCols.length - side);
+  const size = unit === 'cell' ? charsOf(table.rows[focus[0]][focus[1]]) + ' ch' : values + (values === 1 ? ' cell' : ' cells');
+  return { unit, table, size, ...(over.rows || over.cols ? { cut: true, more: over } : {}) };
+}
+
+/**
+ * A sheet's labels by default (pure; plan 4-§5.9.4): its label row the last of its frozen rows and its label column the
+ * last of its frozen columns (`frozen`, {rows, cols} counted from the first read), where it freezes them and a pick may
+ * read that row or column; else the first row and the first column a pick may read (row 1 and column A where none is
+ * hidden). A finance sheet's title rows above its frozen header are so never a cell's label. {row, col}, -1 for none.
+ */
+export function labelsOf(frozen, rows, cols) {
+  const f = frozen && typeof frozen === 'object' ? frozen : {};
+  const at = (n, list) => (Number.isInteger(n) && n >= 1 && list.includes(n - 1) ? n - 1 : list.length ? list[0] : -1);
+  return { row: at(f.rows, rows), col: at(f.cols, cols) };
+}
+
+/**
+ * A tagged PDF's table cell, row or column as a quote's body (pure): `get(r, c)` its cells' words, `roles` its rows' cells'
+ * structure roles ('TH' or 'TD'), the first row its labels where every cell of it is a TH. {unit, table, cut?, more?}, or
+ * {error, over} over 25 rows × 10 columns unless the researcher chose the cut, or null for any other unit or a cell not
+ * in it. A cell's place is said as its row and column, which is all a PDF's table names.
+ */
+export function structQuote(get, roles, { unit, r, c, labels = true, cut = false }) {
+  if (!['cell', 'row', 'column'].includes(unit) || !roles[r] || c >= roles[r].length) return null;
+  const width = Math.max(0, ...roles.map((x) => x.length));
+  const headRow = roles[0] && roles[0].length && roles[0].every((k) => k === 'TH') ? 0 : -1;
+  const q = gridQuote(get, { unit, r, c, rows: roles.map((_, i) => i), cols: Array.from({ length: width }, (_, i) => i), labels: { row: headRow, col: -1 }, withLabels: labels, cut });
+  if (!q || q.error) return q;
+  return { unit, table: { ...q.table, ref: unit === 'cell' ? 'row ' + (r + 1) + ', column ' + (c + 1) : q.table.ref }, ...(q.cut ? { cut: true, more: q.more } : {}) };
+}
+
+/** A dense grid of a table's words from its occupancy rows ({text, c, colspan, rowspan}): a merged cell's words in each place it covers. */
+export function denseRows(rows, width) {
+  const out = rows.map(() => Array.from({ length: width }, () => ''));
+  rows.forEach((row, r) => {
+    for (const cell of row) {
+      for (let y = r; y < Math.min(rows.length, r + (cell.rowspan || 1)); y++) {
+        for (let x = cell.c; x < Math.min(width, cell.c + (cell.colspan || 1)); x++) out[y][x] = String(cell.text || '');
+      }
+    }
+  });
+  return out;
+}
+
+/**
+ * Words cut to a quote's bound, as the researcher chose: {text, cut} — the first QUOTE_BOUNDS.text characters and `cut` true where
+ * it was longer, the words as they are otherwise.
+ */
+export function cutText(text) {
+  const all = Array.from(String(text || ''));
+  return all.length > QUOTE_BOUNDS.text ? { text: all.slice(0, QUOTE_BOUNDS.text).join(''), cut: true } : { text: all.join(''), cut: false };
+}
+
+/** A quote's size as the bar says it beside its unit: "240 ch", "6 cells", "3 items". */
+export function quoteSize(q) {
+  if (!q) return '';
+  if (q.table && q.unit !== 'cell') {
+    const n = Math.max(0, q.table.rows.length - (q.table.head || 0)) * Math.max(0, (q.table.rows[0] || []).length - (q.table.side || 0));
+    return n + (n === 1 ? ' cell' : ' cells');
+  }
+  if (q.table && Array.isArray(q.table.focus)) return charsOf(q.table.rows[q.table.focus[0]][q.table.focus[1]]) + ' ch';
+  if (Array.isArray(q.items) && q.unit === 'item') return q.items.length + (q.items.length === 1 ? ' item' : ' items');
+  const words = [q.title, q.text, ...(q.items || []), ...((q.blocks || []).map((b) => (b.table ? b.table.rows.flat().join(' ') : b.text)))].filter(Boolean).join(' ');
+  return charsOf(words) + ' ch';
+}
+
+/** Every string of a quote the stage draws, as the server counts them (lib/pages.js snippetStrings): its title, note and body. */
+function quoteStrings(q) {
+  const out = [q.title, q.note, q.text, ...(Array.isArray(q.items) ? q.items : [])];
+  const cells = (t) => { if (t && t.ref) out.push(t.ref); for (const r of (t && t.rows) || []) out.push(...r); };
+  if (q.table) cells(q.table);
+  for (const b of q.blocks || []) { if (b.table) cells(b.table); else out.push(b.text); }
+  return out.filter((s) => typeof s === 'string');
+}
+/**
+ * The bound a quote passes, in the server's words, or '' within every bound (pure): a cell of more than 200 characters, more
+ * than 12 blocks, a block's text of more than 1,200, more than 4,000 characters in all. The bar says it before anything goes.
+ */
+export function quoteOver(q) {
+  if (!q) return '';
+  const B = QUOTE_BOUNDS;
+  const tables = [q.table, ...((q.blocks || []).map((b) => b.table))].filter(Boolean);
+  const cell = Math.max(0, ...tables.flatMap((t) => (t.rows || []).flat().map(charsOf)));
+  if (cell > B.cell) return 'Too long for the stage: a cell ' + counted(B.cell) + ' characters at most (this is ' + counted(cell) + ')';
+  if (Array.isArray(q.blocks) && q.blocks.length > B.blocks) return 'Too much for the stage: ' + B.blocks + ' blocks at most (this is ' + counted(q.blocks.length) + ')';
+  const block = Math.max(0, ...(q.blocks || []).filter((b) => !b.table).map((b) => charsOf(b.text)));
+  if (block > B.text) return 'Too long for the stage: ' + counted(B.text) + ' characters a block at most (this is ' + counted(block) + ')';
+  const all = quoteStrings(q).reduce((n, s) => n + charsOf(s), 0);
+  if (all > B.whole) return 'Too long for the stage: ' + counted(B.whole) + ' characters at most (this is ' + counted(all) + ')';
+  return '';
+}
+/**
+ * The blocks in view as What I see sends them (pure; `blocks` each {kind, text} or {kind: 'table', table}, a table whole as
+ * drawn): {blocks} within the stage's bounds, else {blocks, over} with `over` the first bound passed in words and `blocks`
+ * what fits — the first 12 blocks, each table's first 25 rows × 10 columns, each block's first 1,200 characters, a cell's
+ * first 200, and no block past 4,000 characters in all with its `note`. What fits goes only as the researcher chooses (Send
+ * what fits), told first how much is in view.
+ */
+export function viewQuote(blocks, { note = '' } = {}) {
+  const B = QUOTE_BOUNDS;
+  const tableOver = blocks.find((b) => b.table && ((b.table.rows || []).length > B.rows || Math.max(0, ...(b.table.rows || []).map((r) => r.length)) > B.cols));
+  const whole = { unit: 'view', blocks, ...(note ? { note } : {}) };
+  const over = blocks.length > B.blocks ? 'Too much in view for the stage: ' + counted(blocks.length) + ' blocks (' + B.blocks + ' at most)'
+    : tableOver ? 'Too much in view for the stage: a table of ' + counted(tableOver.table.rows.length) + ' rows × ' + counted(Math.max(0, ...tableOver.table.rows.map((r) => r.length))) + ' columns (25 rows × 10 columns at most)'
+      : quoteOver(whole).replace(/^Too (long|much) for the stage/, 'Too much in view for the stage');
+  if (!over) return { blocks };
+  const fit = [];
+  let left = B.whole - charsOf(note);
+  for (const b of blocks.slice(0, B.blocks)) {
+    if (b.table) {
+      const rows = b.table.rows.slice(0, B.rows).map((r) => r.slice(0, B.cols).map((c) => firstChars(c, B.cell)));
+      const n = rows.flat().reduce((s, c) => s + charsOf(c), 0);
+      if (n > left) break;
+      left -= n;
+      fit.push({ ...b, table: { ...b.table, rows } });
+      continue;
+    }
+    const text = firstChars(b.text, Math.min(B.text, left));
+    if (!text) break;
+    left -= charsOf(text);
+    fit.push({ ...b, text });
+  }
+  return { blocks: fit, over };
 }

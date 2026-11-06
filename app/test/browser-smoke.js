@@ -18,7 +18,7 @@ const path = require('path');
 const http = require('http');
 const crypto = require('crypto');
 const { pathToFileURL } = require('url');
-const { fakeStagewatch, fakeNode, chainOf, unzipTo, keyedLogWithPoints, FIXTURE_KEY, connect, emit, freePort, readSource, officeZip, wordParts, wordPicture, deckParts, deckShape, deckPicture, deckSlide, workbookParts, inviteOf, pngOf } = require('./helpers');
+const { fakeStagewatch, fakeNode, chainOf, unzipTo, keyedLogWithPoints, FIXTURE_KEY, connect, emit, freePort, readSource, officeZip, wordParts, wordPicture, deckParts, deckShape, deckPicture, deckSlide, workbookParts, inviteOf, pngOf, sheetParts } = require('./helpers');
 const { io: ioClient } = require('socket.io-client');
 const ops = require('../lib/ops');
 
@@ -3533,7 +3533,9 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       await bo.eval(`document.querySelector('#takeEarlier [data-action="past.look"]').click()`);
       const boLook = await bo.until(`document.getElementById('webPreview').open && (() => { const img = document.querySelector('#webPreviewBox img'); return img && img.complete && img.naturalWidth > 0 && JSON.stringify({ what: document.getElementById('webPreviewWhat').textContent, show: !document.getElementById('webPreviewShow').hidden, drag: img.getAttribute('draggable') }); })()`, 8000);
       await bo.eval(`document.getElementById('webPreview').close()`);
-      const lookAfter = await bo.eval(`JSON.stringify({ revoked: window.__urls.made.slice(${lookFrom.made}).every((u) => window.__urls.revoked.includes(u)), said: window.__said.filter((e) => e === 'page:report').length })`);
+      // The dialog's close event comes as a task of its own after close(): the Look's URLs are read once it has had its turn.
+      const LOOK_AFTER = `JSON.stringify({ revoked: window.__urls.made.slice(${lookFrom.made}).every((u) => window.__urls.revoked.includes(u)), said: window.__said.filter((e) => e === 'page:report').length })`;
+      const lookAfter = (await bo.until(`(() => { const r = ${LOOK_AFTER}; return JSON.parse(r).revoked && r; })()`, 3000)) || await bo.eval(LOOK_AFTER);
       report(boUrls1 === 'true' && boLook === JSON.stringify({ what: 'Look', show: false, drag: 'false' }) && lookAfter === JSON.stringify({ revoked: true, said: 0 }),
         `Back to chat revokes every object URL made for the picture; under Earlier its Look draws it again on Bo's page alone, says nothing to the server, and revokes its own URL as it closes (${JSON.stringify({ boUrls1, boLook, lookAfter })})`);
 
@@ -3699,6 +3701,330 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       const shareProblems = [['desk', desk], ['cy', cy], ['ox', ox]].flatMap(([n, t]) => t.problems.map((p) => n + ': ' + p));
       report(shareProblems.length === 0, `the share hall's pages: no console error and no CSP violation${shareProblems.length ? ' — ' + shareProblems.slice(0, 4).join(' | ') : ''}`);
       for (const t of [desk, cy, ox]) { await t.send('Page.navigate', { url: 'about:blank' }); t.close(); }
+    }
+
+    // ---------------- The researcher shows a picked word, line, item, paragraph, cell, row or column, a picture or the document (unit 27) ----------------
+    // In a hall of its own: the admin account's page backstage (the operator) with a file in its Preview, and Cy On stage on
+    // a device of her own. A highlight made first is honoured: the bar offers the units that hold it, the smallest chosen,
+    // and each reaches Cy's page as a quote drawn from data, ✓ on the console; a picture, what is in view and the document
+    // go from the same bar and its menu, which a right-click on the pick opens.
+    {
+      const pkHall = (await (await fetch(base + '/api/rooms', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ name: 'Pick hall' }) })).json()).code;
+      const TOASTS = `(() => { window.__toasts = []; document.addEventListener('DOMContentLoaded', () => { new MutationObserver(() => { const t = document.getElementById('agmToast'); if (t && t.textContent) window.__toasts.push(t.textContent); }).observe(document.body, { subtree: true, childList: true, characterData: true }); }); })();`;
+      // The operator on a device of its own, signed in as Ana's account alone (no admin token in its browser), so the
+      // laptop's admin pushing below is another pusher.
+      const desk = await edge.tab(`${base}/`, { init: TOASTS, alone: true });
+      await desk.until(`document.readyState === 'complete'`);
+      const deskIn = await desk.eval(`(async () => { for (let i = 0; i < 5; i++) { const r = await fetch('/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'ana', password: 'the green room kettle' }) }); if (r.status !== 429) return r.status; await new Promise((ok) => setTimeout(ok, 2100)); } return 429; })()`);
+      if (deskIn !== 200) throw new Error('the pick hall\'s operator could not sign in: ' + deskIn);
+      await desk.eval(`location.href = ${codeLiteral(`/app.html?code=${pkHall}&as=account&role=research`)}`);
+      await desk.until(`typeof joined !== 'undefined' && joined && F.canPush`, 10000);
+      desk.expectFailure(/\/api\/upload$/);   // the uploads' rate turns a fifth quick picture away: the bar waits it out
+      const cy = await edge.tab(`${base}/app.html?code=${pkHall}&name=Cy&role=board&invite=${inviteOf(dataDir, pkHall)}`, { alone: true });
+      await cy.until(`typeof joined !== 'undefined' && joined`, 10000);
+      // A file attached on this device, drawn in the Preview from its own copy (nothing uploaded until it is shown).
+      const attach = (bytes, name, type) => desk.eval(`(() => { attachFile(new File([Uint8Array.from(atob('${bytes.toString('base64')}'), (c) => c.charCodeAt(0))], ${codeLiteral(name)}, { type: ${codeLiteral(type)} })); return true; })()`);
+      // The words `from` to `to` of the first text node holding `words` under `scope` selected, as a drag selects them.
+      const select = (words, from, to, scope = '#docDisplay') => desk.eval(`(() => {
+        const root = document.querySelector(${codeLiteral(scope)}); if (!root) return 'no scope';
+        const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        for (let n = w.nextNode(); n; n = w.nextNode()) {
+          const i = n.nodeValue.indexOf(${codeLiteral(words)});
+          if (i < 0) continue;
+          const r = document.createRange(); r.setStart(n, i + ${from}); r.setEnd(n, i + ${to});
+          const s = getSelection(); s.removeAllRanges(); s.addRange(r); return 'selected';
+        }
+        return 'not found';
+      })()`);
+      // The bar's chips once they hold `id` (each [its act, chosen]), read after the pick is.
+      const chipsWith = async (id) => JSON.parse((await desk.until(`(() => { const b = document.getElementById('pickBar'); const c = [...document.querySelectorAll('#pickChips .pick-chip')]; return !b.hidden && c.some((x) => x.dataset.action === ${codeLiteral(id)}) && JSON.stringify(c.map((x) => [x.dataset.action, x.getAttribute('aria-checked') === 'true'])); })()`, 8000)) || '[]');
+      const choose = (id) => desk.eval(`(() => { const c = document.querySelector('#pickChips [data-action="${id}"]'); if (!c) return false; c.click(); return true; })()`);
+      const infoSeq = () => desk.eval(`(() => { const b = Console.board(); return b && b.info ? b.info.seq : 0; })()`);
+      // The console's mark on the Board's information once a take newer than `before` is up: "✓|snippet" when every page said.
+      const markAfter = async (before) => {
+        for (let i = 0; i < 80; i++) {
+          await desk.eval(`Console.read()`);
+          const m = await desk.eval(`(() => { const b = Console.board(); return b && b.info ? b.info.mark + '|' + b.info.kind + '|' + b.info.seq : ''; })()`);
+          if (m && Number(m.split('|')[2]) > before && m.startsWith('✓')) return m.split('|').slice(0, 2).join('|');
+          await sleep(250);
+        }
+        return '';
+      };
+      const QUOTE_ON_CY = `(() => { const q = document.querySelector('#layerBox .take-quote:not([data-old])'); return !document.getElementById('pageLayer').hidden && q && JSON.stringify({ unit: q.dataset.unit,
+        text: q.querySelector('.take-quote-body').innerText.replace(/\\n+/g, '\\n').trim(), line: q.querySelector('.take-quote-line').textContent, table: [...q.querySelectorAll('tr')].map((tr) => [...tr.children].map((td) => td.textContent)),
+        focus: (q.querySelector('.take-quote-focus') || {}).textContent || '', heads: q.querySelectorAll('.take-quote-head').length, px: parseFloat(getComputedStyle(q).fontSize) }); })()`;
+      // Show (the bar's button, or `run`) and read what Cy's page draws and the console's mark.
+      const shows = async (run) => {
+        const before = await infoSeq();
+        await cy.eval(`(() => { for (const q of document.querySelectorAll('#layerBox .take-quote')) q.dataset.old = '1'; return true; })()`);
+        await desk.eval(run || `document.getElementById('pickShow').click()`);
+        const mark = await markAfter(before);
+        return { mark, drawn: JSON.parse((await cy.until(QUOTE_ON_CY, 10000)) || 'null') };
+      };
+      const showUnit = async (id) => { await choose(id); return shows(); };
+
+      // A tagged PDF (LibreOffice Writer's export, its structure kept): its words picked on its pages' text layer.
+      await attach(fixture('board-pack-tagged.pdf'), 'board pack.pdf', 'application/pdf');
+      const layered = await desk.until(`document.querySelectorAll('#docDisplay .textLayer span[role="presentation"]').length > 0 && !document.getElementById('previewBar').hidden && 'drawn'`, 20000);
+      await select('about agenda', 6, 12);
+      const firstChips = await chipsWith('pick.word');
+      const word = await showUnit('pick.word');
+      const line = await showUnit('pick.line');
+      const para = await showUnit('pick.paragraph');
+      await desk.eval(`docView.goto({ page: 3 })`);
+      const P3 = '#docDisplay .textLayer[data-page="3"]';
+      await desk.until(`document.querySelectorAll('${P3} span[role="presentation"]').length > 3`, 10000);
+      await select('Revenue up', 0, 7, P3);
+      await chipsWith('pick.item');
+      const item = await showUnit('pick.item');
+      await desk.eval(`(() => { const s = [...document.querySelectorAll('${P3} span[role="presentation"]')].find((x) => x.textContent === '5'); const r = document.createRange(); r.selectNodeContents(s.firstChild); getSelection().removeAllRanges(); getSelection().addRange(r); return true; })()`);
+      const cellChips = await chipsWith('pick.cell');
+      const cell = await showUnit('pick.cell');
+      const row = await showUnit('pick.row');
+      const column = await showUnit('pick.column');
+      const quoted = { word, line, para, item, cell, row, column };
+      report(!!layered && JSON.stringify(firstChips) === JSON.stringify([['pick.selection', false], ['pick.word', true], ['pick.line', false], ['pick.paragraph', false]])
+        && cellChips.some(([id]) => id === 'pick.row') && cellChips.some(([id]) => id === 'pick.column')
+        && Object.values(quoted).every((q) => q.mark === '✓|snippet' && !!q.drawn && q.drawn.line === 'Quoted by Ana Admin from their copy of board pack.pdf, p. ' + (q === word || q === line || q === para ? 1 : 3))
+        && word.drawn.unit === 'word' && word.drawn.text === 'agenda' && line.drawn.text === 'This is page 1 of the board pack, about agenda.' && para.drawn.unit === 'paragraph'
+        && item.drawn.unit === 'item' && item.drawn.text === 'Revenue up' && cell.drawn.unit === 'cell' && cell.drawn.focus === '5'
+        && JSON.stringify(row.drawn.table) === JSON.stringify([['Plant', '4', '5']]) && JSON.stringify(column.drawn.table) === JSON.stringify([['Q2'], ['5'], ['2']]),
+        `a tagged PDF: a highlight made first offers the units that hold it, the smallest chosen; a word, a line, a paragraph, an item, a cell, a row and a column each reach the Board's page as a quote, said as Ana's from her copy, ✓ on the console (${JSON.stringify({ firstChips, cellChips, quoted })})`);
+
+      // The quote is drawn from data in the largest type that fits; on a phone a 25 × 10 table scrolls inside its card.
+      const phone = await edge.tab(`${base}/app.html?code=${pkHall}&name=Pip&role=board&invite=${inviteOf(dataDir, pkHall)}`, { alone: true, metrics: PHONE });
+      await phone.until(`typeof joined !== 'undefined' && joined`, 10000);
+      const wide = Array.from({ length: 25 }, (_, r) => Array.from({ length: 10 }, (__, c) => (r === 0 ? 'Quarter ' + (c + 1) : String((r + 1) * (c + 7) * 1000))));
+      const wideTake = await desk.eval(`new Promise((r) => socket.emit('page:push', { code: HALL_KEY, to: 'board', content: { kind: 'snippet', unit: 'range', table: { rows: ${JSON.stringify(wide)}, head: 1, side: 0, ref: 'A1:J25' } } }, r))`);
+      const phoneTable = await phone.until(`(() => { const q = document.querySelector('#layerBox .take-quote[data-unit="range"]'); const s = q && q.querySelector('.take-quote-scroll'); return q && s && JSON.stringify({ px: parseFloat(getComputedStyle(q).fontSize), scrolls: s.scrollWidth > s.clientWidth, page: document.documentElement.scrollWidth <= document.documentElement.clientWidth, num: document.querySelectorAll('#layerBox .take-quote-num').length }); })()`, 10000);
+      const pt = JSON.parse(phoneTable || 'null');
+      report(!!wideTake && wideTake.ok && !!pt && pt.px >= 20 && pt.scrolls && pt.page && pt.num === 240 && cell.drawn.px >= 28,
+        `a 25 × 10 table on a phone: its type 20 px or more, it scrolls sideways inside its card and the page does not, its numbers set to the right; on a tablet a quote's type is 28 px or more (${JSON.stringify({ wideTake: wideTake && wideTake.ok, pt, tablet: cell.drawn.px })})`);
+      phone.close();
+
+      // A right-click on the pick opens exactly the bar's list as a menu, Copy first; a touch's long press keeps the
+      // browser's selection (no menu of AGMessage's).
+      await select('Costs flat', 0, 5, P3);
+      const pickChips = await chipsWith('pick.item');
+      const at = await desk.eval(`(() => { const r = getSelection().getRangeAt(0).getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`);
+      await rightClick(desk, at);
+      const pickMenu = JSON.parse((await desk.until(MENU_IDS, 3000)) || '[]');
+      await press(desk, 'Escape');
+      await desk.until(NO_MENU, 3000);
+      const longPress = await desk.eval(`(() => { const t = document.elementFromPoint(${at.x}, ${at.y}); t.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'touch', bubbles: true, clientX: ${at.x}, clientY: ${at.y} }));
+        const e = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: ${at.x}, clientY: ${at.y} }); t.dispatchEvent(e);
+        return JSON.stringify({ kept: !e.defaultPrevented, menu: !!document.querySelector('.agm-menu'), selected: !getSelection().isCollapsed }); })()`);
+      const wantMenu = ['pick.copy', ...pickChips.map(([id]) => id), 'pick.picture', 'pick.view', 'pick.document', 'pick.person'];
+      report(JSON.stringify(pickMenu) === JSON.stringify(wantMenu) && longPress === JSON.stringify({ kept: true, menu: false, selected: true }),
+        `a right-click on the pick opens exactly the bar's chips as a menu, Copy first, then the picture, what is in view, the document and a person; a touch's long press keeps the browser's selection (${JSON.stringify({ pickMenu, longPress })})`);
+
+      // Picture of this page arrives as a picture, The document at this place as the document at that page (the pick's
+      // menu's acts); What I see at 200 % sends the part of the page in view.
+      const picture = await desk.eval(`(() => { act('pick', 'pick.picture', PickBar.object(), {}); return true; })()`) && await cy.until(`(() => { const i = document.querySelector('#pageLayer[data-kind="image"] #layerBox img'); return i && i.naturalWidth > 0 && JSON.stringify({ line: document.querySelector('#layerBox .take-file-line').textContent, ratio: +(i.naturalWidth / i.naturalHeight).toFixed(2) }); })()`, 20000);
+      const documentAt = await desk.eval(`(() => { act('pick', 'pick.document', PickBar.object(), {}); return true; })()`) && await cy.until(`document.getElementById('pageLayer').dataset.kind === 'doc' && !!document.querySelector('#layerBox canvas:not(.pdf-page-pending)') && (document.querySelector('#layerBox .take-file-line') || {}).textContent`, 20000);
+      for (let i = 0; i < 3; i++) await desk.eval(`document.querySelector('#docDisplay .dv-zoom [aria-label="Zoom in"]').click()`);
+      await sleep(500);
+      await cy.eval(`(() => { for (const i of document.querySelectorAll('#layerBox img')) i.dataset.old = '1'; return true; })()`);
+      await desk.eval(`document.getElementById('showSeen').click()`);
+      const seen = await cy.until(`(() => { const i = document.querySelector('#pageLayer[data-kind="image"] #layerBox img:not([data-old])'); return i && i.naturalWidth > 0 && JSON.stringify({ line: document.querySelector('#layerBox .take-file-line').textContent, ratio: +(i.naturalWidth / i.naturalHeight).toFixed(2) }); })()`, 20000);
+      const pageRatio = JSON.parse(picture || '{}').ratio;
+      const seenRatio = JSON.parse(seen || '{}').ratio;
+      report(!!picture && /picture of their copy of board pack\.pdf, p\. 3$/.test(JSON.parse(picture).line) && documentAt === 'board pack.pdf · p. 3' && !!seen && /^Ana Admin's picture of their copy of board pack\.pdf, p\. \d$/.test(JSON.parse(seen).line) && Math.abs(seenRatio - pageRatio) > 0.2,
+        `Picture of this page arrives as a picture of p. 3, The document at this place as the document at p. 3, and What I see at 200 % as a picture of the part of the page in view, not the page (${JSON.stringify({ picture, documentAt, seen })})`);
+
+      // An untagged PDF offers no cell, and offers the region: its tables cannot be read as cells.
+      await attach(fixture('board-pack-untagged.pdf'), 'plain pack.pdf', 'application/pdf');
+      await desk.until(`document.querySelectorAll('#docDisplay .textLayer span[role="presentation"]').length > 0 && document.getElementById('docTitle').textContent === 'plain pack.pdf'`, 20000);
+      await desk.eval(`docView.goto({ page: 3 })`);
+      await desk.until(`document.querySelectorAll('${P3} span[role="presentation"]').length > 3`, 10000);
+      await desk.eval(`(() => { const s = [...document.querySelectorAll('${P3} span[role="presentation"]')].find((x) => x.textContent.trim() === '5'); const r = document.createRange(); r.selectNodeContents(s.firstChild); getSelection().removeAllRanges(); getSelection().addRange(r); return true; })()`);
+      const untagged = JSON.parse((await desk.until(`(() => { const b = document.getElementById('pickBar'); const c = [...document.querySelectorAll('#pickChips .pick-chip')].map((x) => x.dataset.action); return !b.hidden && c.length && document.getElementById('docTitle').textContent === 'plain pack.pdf' && JSON.stringify({ chips: c, says: document.getElementById('pickSay').textContent, region: !document.getElementById('regionBtn').hidden }); })()`, 8000)) || 'null');
+      report(!!untagged && !untagged.chips.includes('pick.cell') && untagged.says.startsWith('Tables in this PDF cannot be read as cells — send the region as a picture') && untagged.region,
+        `an untagged PDF offers no cell, says its tables cannot be read as cells, and offers the region (${JSON.stringify(untagged)})`);
+
+      // A region of a picture arrives as a new picture, without the original's metadata (its EXIF, its place).
+      const exifJpeg = await desk.eval(`(async () => {
+        const c = document.createElement('canvas'); c.width = 320; c.height = 200; const g = c.getContext('2d'); g.fillStyle = '#204080'; g.fillRect(0, 0, 320, 200); g.fillStyle = '#f0c000'; g.fillRect(80, 50, 160, 100);
+        const b = new Uint8Array(await (await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.9))).arrayBuffer());
+        const payload = new TextEncoder().encode('Exif\\0\\0GPSPLACEHERE-51.5007-0.1246');
+        const seg = new Uint8Array(4 + payload.length); seg[0] = 0xff; seg[1] = 0xe1; seg[2] = (payload.length + 2) >> 8; seg[3] = (payload.length + 2) & 255; seg.set(payload, 4);
+        const out = new Uint8Array(b.length + seg.length); out.set(b.subarray(0, 2)); out.set(seg, 2); out.set(b.subarray(2), 2 + seg.length);
+        attachFile(new File([out], 'stage plan.jpg', { type: 'image/jpeg' })); return out.length;
+      })()`);
+      const imgBox = JSON.parse((await desk.until(`(() => { const i = document.querySelector('#docDisplay img.dv-img'); if (!i || !i.naturalWidth) return ''; const r = i.getBoundingClientRect(); return JSON.stringify({ x: r.left, y: r.top, w: r.width, h: r.height }); })()`, 15000)) || 'null');
+      if (imgBox) {
+        await desk.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: Math.round(imgBox.x + imgBox.w * 0.25), y: Math.round(imgBox.y + imgBox.h * 0.25), button: 'left', buttons: 1, clickCount: 1 });
+        await desk.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: Math.round(imgBox.x + imgBox.w * 0.6), y: Math.round(imgBox.y + imgBox.h * 0.7), button: 'left', buttons: 1 });
+        await desk.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: Math.round(imgBox.x + imgBox.w * 0.6), y: Math.round(imgBox.y + imgBox.h * 0.7), button: 'left', buttons: 0, clickCount: 1 });
+      }
+      const regionSaid = await desk.until(`!document.getElementById('pickBar').hidden && document.getElementById('pickWords').textContent`, 5000);
+      await cy.eval(`(() => { for (const i of document.querySelectorAll('#layerBox img')) i.dataset.old = '1'; return true; })()`);
+      await desk.eval(`document.getElementById('pickShow').click()`);
+      const regionOnCy = await cy.until(`(() => { const i = document.querySelector('#pageLayer[data-kind="image"] #layerBox img:not([data-old])'); return i && i.naturalWidth > 0 && JSON.stringify({ w: i.naturalWidth, h: i.naturalHeight, line: document.querySelector('#layerBox .take-file-line').textContent }); })()`, 20000);
+      const regionUrl = await cy.eval(`(() => { const t = Takes.over(); return t && t.content.kind === 'image' ? t.content.url : ''; })()`);
+      const regionBytes = regionUrl ? await desk.eval(`fetch(${codeLiteral(regionUrl)}, { cache: 'no-store' }).then((r) => r.arrayBuffer()).then((b) => { const t = new TextDecoder('latin1').decode(b); return JSON.stringify({ exif: t.includes('Exif'), place: t.includes('GPSPLACEHERE'), size: b.byteLength }); })`) : '';
+      const rg = JSON.parse(regionOnCy || 'null');
+      report(exifJpeg > 0 && regionSaid === 'A region of the picture, as a picture' && !!rg && rg.w < 320 && rg.h < 200 && rg.line === 'Ana Admin\'s picture of part of their copy of stage plan.jpg' && JSON.parse(regionBytes || '{}').exif === false && JSON.parse(regionBytes || '{}').place === false,
+        `a region of a picture arrives as a new picture of that part alone, without the original's EXIF or its place (${JSON.stringify({ regionSaid, rg, regionBytes })})`);
+
+      // A spreadsheet: a column goes with its label cell, a cell with its row's and its column's labels.
+      await attach(officeZip(sheetParts([['', 'Q1', 'Q2', 'Q3'], ['Revenue', '1', '2', '4.2'], ['Costs', '3', '4', '3.9']], 'Results')), 'q3.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      await desk.until(`!!document.querySelector('#docDisplay table.dv-grid td[data-r="1"][data-c="3"]')`, 15000);
+      await leftClick(desk, await middleOf(desk, `document.querySelector('#docDisplay table.dv-grid th.dv-col[data-c="3"]')`));
+      await chipsWith('pick.column');
+      const sheetColumn = await shows();
+      await leftClick(desk, await middleOf(desk, `document.querySelector('#docDisplay table.dv-grid td[data-r="1"][data-c="3"]')`));
+      await chipsWith('pick.cell');
+      const cellWords = await desk.eval(`document.getElementById('pickWords').textContent`);
+      const sheetCell = await shows();
+      report(JSON.stringify(sheetColumn.drawn && sheetColumn.drawn.table) === JSON.stringify([['Q3'], ['4.2'], ['3.9']]) && sheetColumn.drawn.heads === 1 && sheetColumn.mark === '✓|snippet'
+        && JSON.stringify(sheetCell.drawn && sheetCell.drawn.table) === JSON.stringify([['', 'Q3'], ['Revenue', '4.2']]) && sheetCell.drawn.focus === '4.2' && cellWords === 'D2 · Revenue (row 2) · Q3 (column D)'
+        && sheetCell.drawn.line === 'Quoted by Ana Admin from their copy of q3.xlsx, \'Results\'!D2',
+        `a spreadsheet's column arrives with its label cell, and a cell with its two labels, the bar saying them first (${JSON.stringify({ sheetColumn, sheetCell, cellWords })})`);
+
+      // Hidden rows, columns and sheets are never picked: a hidden column's header, a hidden row's header and cell, and a
+      // hidden sheet's cell pick nothing, and nothing of a hidden sheet is in view to send. A sheet's labels are its frozen
+      // panes by default: the title row above its frozen header is no cell's label.
+      await attach(officeZip(sheetParts([['Results for Q3'], ['', 'Q1', 'Q2', 'Q3'], ['Revenue', '1', 'HIDDENCOL', '4.2'], ['SECRETROW', '9', '9', '9'], ['Costs', '3', '4', '3.9']], 'Board',
+        { frozen: { rows: 2, cols: 1 }, hiddenRows: [3], hiddenCols: [2], hiddenSheet: [['VERYSECRET', '1']] })), 'hidden parts.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      await desk.until(`document.getElementById('docTitle').textContent === 'hidden parts.xlsx' && !!document.querySelector('#docDisplay table.dv-grid td[data-r="2"][data-c="3"]')`, 15000);
+      await leftClick(desk, await middleOf(desk, `document.querySelector('#docDisplay table.dv-grid td[data-r="2"][data-c="3"]')`));
+      await chipsWith('pick.cell');
+      const frozenWords = await desk.eval(`document.getElementById('pickWords').textContent`);
+      const NO_PICK = JSON.stringify({ bar: true, pick: null });
+      const tryHidden = async (el) => {
+        await desk.eval(`docView.clearPick()`);
+        await leftClick(desk, await middleOf(desk, el));
+        await sleep(300);
+        return desk.eval(`JSON.stringify({ bar: document.getElementById('pickBar').hidden, pick: docView.pick() })`);
+      };
+      const hiddenCol = await tryHidden(`document.querySelector('#docDisplay table.dv-grid th.dv-col.dv-hidden[data-c="2"]')`);
+      const hiddenRow = await tryHidden(`document.querySelector('#docDisplay table.dv-grid tr.dv-hidden th.dv-row[data-r="3"]')`);
+      const hiddenCell = await tryHidden(`document.querySelector('#docDisplay table.dv-grid tr.dv-hidden td[data-r="3"][data-c="1"]')`);
+      await desk.eval(`document.querySelectorAll('#docDisplay .sheet-tab')[1].click()`);
+      await desk.until(`!!document.querySelector('#docDisplay table.dv-grid.dv-hidden td[data-r="0"][data-c="0"]')`, 5000);
+      const hiddenSheet = await tryHidden(`document.querySelector('#docDisplay table.dv-grid.dv-hidden td[data-r="0"][data-c="0"]')`);
+      const hiddenSeen = await desk.eval(`JSON.stringify(docView.seen({}))`);
+      report(frozenWords === 'D3 · Revenue (row 3) · Q3 (column D)' && [hiddenCol, hiddenRow, hiddenCell, hiddenSheet].every((x) => x === NO_PICK) && hiddenSeen === 'null',
+        `a hidden column's header, a hidden row's header and cell, and a hidden sheet's cell pick nothing, and nothing of a hidden sheet is in view to send; a cell's labels are the sheet's frozen panes, never the title row above them (${JSON.stringify({ frozenWords, hiddenCol, hiddenRow, hiddenCell, hiddenSheet, hiddenSeen })})`);
+
+      // A CSV's row; a Markdown file's item; a slide.
+      await attach(Buffer.from('Item,Q1,Q2\nPlant,4,5\nStaff,2,2\n'), 'costs.csv', 'text/csv');
+      await desk.until(`!!document.querySelector('#docDisplay table.dv-grid th.dv-row[data-r="1"]')`, 15000);
+      await leftClick(desk, await middleOf(desk, `document.querySelector('#docDisplay table.dv-grid th.dv-row[data-r="1"]')`));
+      await chipsWith('pick.row');
+      const csvRow = await shows();
+      await attach(Buffer.from('# Plan\n\n- First item\n- Second item\n'), 'plan.md', 'text/markdown');
+      await desk.until(`!!document.querySelector('#docDisplay .dv-li-text')`, 15000);
+      await select('Second item', 0, 6);
+      await chipsWith('pick.item');
+      const mdItem = await showUnit('pick.item');
+      await attach(officeZip(deckParts([{ xml: deckSlide(deckShape('Results', { ph: 'title' }) + deckShape(['Revenue up', 'Costs flat'], { ph: 'body', id: 3 })) }])), 'results.pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
+      await desk.until(`!!document.querySelector('#docDisplay .dv-slide .dv-li-text')`, 15000);
+      await select('Costs flat', 0, 5);
+      await chipsWith('pick.slide');
+      const slide = await showUnit('pick.slide');
+      report(JSON.stringify(csvRow.drawn && csvRow.drawn.table) === JSON.stringify([['Item', 'Q1', 'Q2'], ['Plant', '4', '5']]) && csvRow.drawn.line === 'Quoted by Ana Admin from their copy of costs.csv, row 2'
+        && !!mdItem.drawn && mdItem.drawn.unit === 'item' && mdItem.drawn.text === 'Second item' && mdItem.drawn.line === 'Quoted by Ana Admin from their copy of plan.md, line 4'
+        && !!slide.drawn && slide.drawn.unit === 'slide' && slide.drawn.text === 'Results\nRevenue up\nCosts flat' && slide.drawn.line === 'Quoted by Ana Admin from their copy of results.pptx, slide 1'
+        && [csvRow, mdItem, slide].every((x) => x.mark === '✓|snippet'),
+        `a CSV's row (with its label row), a Markdown file's item and a slide (its title and items) each reach the Board's page, ✓ (${JSON.stringify({ csvRow, mdItem, slide })})`);
+
+      // A quote handed back with Back to chat is under Earlier: its Look draws it again on Cy's page alone, from its data,
+      // and says nothing to the server.
+      await cy.eval(`document.querySelector('#layerActs [data-action="take.chat"]').click()`);
+      await cy.until(`document.getElementById('pageLayer').hidden && 'chat'`, 5000);
+      await cy.eval(`(() => { window.__said = []; window.__emitWas = socket.emit; const e = socket.emit; socket.emit = function (ev, ...a) { window.__said.push(ev); return e.call(this, ev, ...a); }; return true; })()`);
+      await cy.eval(`document.getElementById('tabShown') && !document.getElementById('bvTabs').hidden && document.getElementById('tabShown').click()`);
+      await cy.until(`!!document.querySelector('#takeEarlier [data-action="past.look"]')`, 5000);
+      await cy.eval(`document.querySelector('#takeEarlier [data-action="past.look"]').click()`);
+      const quoteLook = await cy.until(`document.getElementById('webPreview').open && (() => { const q = document.querySelector('#webPreviewBox .take-quote'); return q && JSON.stringify({ what: document.getElementById('webPreviewWhat').textContent, show: !document.getElementById('webPreviewShow').hidden, unit: q.dataset.unit, line: q.querySelector('.take-quote-line').textContent }); })()`, 8000);
+      await cy.eval(`document.getElementById('webPreview').close()`);
+      await sleep(300);
+      const lookSaid = await cy.eval(`(() => { const n = window.__said.filter((e) => e === 'page:report').length; socket.emit = window.__emitWas; if (document.getElementById('tabChat') && !document.getElementById('bvTabs').hidden) document.getElementById('tabChat').click(); return n; })()`);
+      report(quoteLook === JSON.stringify({ what: 'Look', show: false, unit: 'slide', line: 'Quoted by Ana Admin from their copy of results.pptx, slide 1' }) && lookSaid === 0,
+        `a quote under Earlier: its Look draws it again on the Board member's page alone, from its data, and says nothing to the server (${JSON.stringify({ quoteLook, lookSaid })})`);
+
+      // A picture in a slide, tapped, goes as a picture of its own, drawn again: nothing else of the deck goes.
+      await attach(officeZip(deckParts([{ xml: deckSlide(deckShape('Chart', { ph: 'title' }) + deckPicture('rId2')), rels: [['rId2', 'image', '../media/chart.png']] }], { 'chart.png': pngOf(40, 30) })), 'chart deck.pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
+      await desk.until(`document.getElementById('docTitle').textContent === 'chart deck.pptx' && (() => { const i = document.querySelector('#docDisplay .dv-slide img'); return !!i && i.naturalWidth > 0; })()`, 15000);
+      await leftClick(desk, await middleOf(desk, `document.querySelector('#docDisplay .dv-slide img')`));
+      const insideSaid = await desk.until(`!document.getElementById('pickBar').hidden && document.getElementById('pickWords').textContent`, 5000);
+      await cy.eval(`(() => { for (const i of document.querySelectorAll('#layerBox img')) i.dataset.old = '1'; return true; })()`);
+      await desk.eval(`document.getElementById('pickShow').click()`);
+      const insideOnCy = await cy.until(`(() => { const i = document.querySelector('#pageLayer[data-kind="image"] #layerBox img:not([data-old])'); return i && i.naturalWidth > 0 && JSON.stringify({ w: i.naturalWidth, h: i.naturalHeight, line: document.querySelector('#layerBox .take-file-line').textContent }); })()`, 20000);
+      report(insideSaid === 'A picture in slide 1, as a picture of its own' && insideOnCy === JSON.stringify({ w: 40, h: 30, line: 'Ana Admin\'s picture of their copy of chart deck.pptx, slide 1' }),
+        `a picture in a slide, tapped, is offered as a picture of its own and reaches the Board's page drawn again, said as the researcher's picture of the deck at its slide (${JSON.stringify({ insideSaid, insideOnCy })})`);
+
+      // A Word document: a paragraph says Word's own page ("p. 3", its rendered breaks) or a guess ("≈ p. 2", its explicit
+      // ones); a table's cell; What I see sends the blocks in view.
+      const W_P = (t) => '<w:p><w:r><w:t>' + t + '</w:t></w:r></w:p>';
+      const BROKE = '<w:r><w:lastRenderedPageBreak/></w:r>';
+      const cellXml = (t) => '<w:tc><w:p><w:r><w:t>' + t + '</w:t></w:r></w:p></w:tc>';
+      await attach(officeZip(wordParts({ body: W_P('One') + '<w:p>' + BROKE + '<w:r><w:t>Two</w:t></w:r></w:p>' + '<w:p>' + BROKE + '<w:r><w:t>Three is on the third page</w:t></w:r></w:p>'
+        + '<w:tbl><w:tr>' + cellXml('Item') + cellXml('Cost') + '</w:tr><w:tr>' + cellXml('Plant') + cellXml('4') + '</w:tr></w:tbl>', pages: 3 })), 'minutes.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+      await desk.until(`!!document.querySelector('#docDisplay table.dv-table td[data-r="1"]') && [...document.querySelectorAll('#docDisplay p')].some((p) => p.textContent === 'Three is on the third page')`, 20000);
+      await select('Three is on', 0, 5);
+      await chipsWith('pick.paragraph');
+      const wordPage = await showUnit('pick.paragraph');
+      await leftClick(desk, await middleOf(desk, `document.querySelector('#docDisplay table.dv-table td[data-r="1"][data-c="1"]')`));
+      await chipsWith('pick.cell');
+      const wordCell = await shows();
+      const wordSeen = await shows(`document.getElementById('showSeen').click()`);
+      await attach(officeZip(wordParts({ body: W_P('First') + '<w:p><w:r><w:br w:type="page"/><w:t>Second on the next page</w:t></w:r></w:p>' })), 'notes.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+      await desk.until(`[...document.querySelectorAll('#docDisplay p')].some((p) => p.textContent === 'Second on the next page')`, 20000);
+      await select('Second on', 0, 6);
+      await chipsWith('pick.paragraph');
+      const wordGuess = await showUnit('pick.paragraph');
+      report(!!wordPage.drawn && wordPage.drawn.line === 'Quoted by Ana Admin from their copy of minutes.docx, p. 3' && !!wordGuess.drawn && wordGuess.drawn.line === 'Quoted by Ana Admin from their copy of notes.docx, ≈ p. 2'
+        && JSON.stringify(wordCell.drawn && wordCell.drawn.table) === JSON.stringify([['Item', 'Cost'], ['Plant', '4']]) && wordCell.drawn.focus === '4'
+        && !!wordSeen.drawn && wordSeen.drawn.unit === 'view' && wordSeen.drawn.text.includes('Three is on the third page') && [wordPage, wordCell, wordSeen, wordGuess].every((x) => x.mark === '✓|snippet'),
+        `a Word document's paragraph reads "p. 3" on the Board from Word's own breaks and "≈ p. 2" from explicit ones; a table's cell with its labels; What I see sends the blocks in view (${JSON.stringify({ wordPage, wordGuess, wordCell, wordSeen })})`);
+
+      // The fresh-push warning: with another pusher's quote up under 15 s, the bar says whose the Board is reading.
+      const other = await connect(base, cookie);
+      // Asked again while the server says this address is busy (the smoke's many pages share one address).
+      let theirs = null;
+      for (let i = 0; i < 40; i++) {
+        theirs = await emit(other, 'page:push', { code: pkHall, to: 'board', content: { kind: 'snippet', unit: 'text', text: 'Revenue Q3: £4.2m' } });
+        if (!(theirs && theirs.busy)) break;
+        await sleep(Math.min(2000, (theirs && theirs.retryMs) || 500));
+      }
+      await desk.eval(`Console.read()`);
+      const picked = await select('Second on', 0, 6);
+      const freshSaid = await desk.until(`(() => { const t = document.getElementById('pickSay').textContent; return /reading .+'s quote \\(\\d+ s\\)/.test(t) && t; })()`, 8000);
+      const barSaid = freshSaid ? '' : await desk.eval(`JSON.stringify({ say: document.getElementById('pickSay').textContent, info: (Console.board() || {}).info || null, now: Date.now() })`);
+      other.close();
+      report(!!theirs && theirs.ok && !!freshSaid && /^The Board is reading .+'s quote \(\d+ s\) — Replace · Show a person instead/.test(freshSaid),
+        `another pusher's quote under 15 s old: the bar says whose the Board is reading, with Replace and Show a person instead, and refuses nothing (${freshSaid || JSON.stringify({ theirs: theirs && (theirs.ok || theirs.error), picked, barSaid })})`);
+
+      // The bar's last choice between a picture and the document is kept across a reload: the one chosen last drawn first.
+      await desk.eval(`(() => { localStorage.removeItem('agm.showAs'); return true; })()`);
+      await attach(fixture('board-pack-tagged.pdf'), 'board pack.pdf', 'application/pdf');
+      await desk.until(`!document.getElementById('previewBar').hidden && document.getElementById('docTitle').textContent === 'board pack.pdf'`, 20000);
+      const firstBefore = await desk.eval(`document.getElementById('showPicture').classList.contains('primary') ? 'picture' : 'document'`);
+      await desk.eval(`document.getElementById('showDocument').click()`);
+      await cy.until(`document.getElementById('pageLayer').dataset.kind === 'doc'`, 15000);
+      await desk.send('Page.reload');
+      await desk.until(`typeof joined !== 'undefined' && joined && F.canPush`, 10000);
+      await attach(fixture('board-pack-tagged.pdf'), 'board pack.pdf', 'application/pdf');
+      const firstAfter = await desk.until(`!document.getElementById('previewBar').hidden && document.getElementById('docTitle').textContent === 'board pack.pdf' && JSON.stringify({ primary: document.getElementById('showDocument').classList.contains('primary'), first: document.querySelector('#previewBar .preview-doc').previousElementSibling === null })`, 20000);
+      report(firstBefore === 'picture' && firstAfter === JSON.stringify({ primary: true, first: true }), `the bar's last choice between a picture and the document is kept across a reload, drawn first (${JSON.stringify({ firstBefore, firstAfter })})`);
+
+      // A fifth quick page picture waits with "Sending in 2 s…" and arrives (the uploads' rate: a burst of 4, then one every 2 s).
+      await sleep(8500);
+      await desk.until(`!!docView && document.querySelectorAll('#docDisplay canvas.pdf-page:not(.pdf-page-pending)').length > 0`, 15000);
+      // Which of the five the rate turns away is the order their uploads reach the server in: that one is shown last, once
+      // it has waited, so the page it is of is read from the order the five were shown in.
+      await desk.eval(`(() => { window.__toasts = []; window.__shownAs = []; const src = Show.sourceOf(previewing); for (let n = 1; n <= 5; n++) Show.picture(src, n, 'board', { view: docView }).then(() => window.__shownAs.push(n)); return true; })()`);
+      const last = Number(await desk.until(`window.__shownAs.length === 5 && String(window.__shownAs[4])`, 40000));
+      const fifth = last ? await cy.until(`(() => { const l = document.querySelector('#pageLayer[data-kind="image"] .take-file-line'); return l && l.textContent.endsWith(', p. ${last}') && l.textContent; })()`, 20000) : null;
+      const waited = await desk.eval(`window.__toasts.some((t) => t === 'Sending in 2 s…')`);
+      report(!!fifth && waited === true, `five quick page pictures: the one the uploads' rate turned away says "Sending in 2 s…" and arrives (${JSON.stringify({ fifth, waited, order: await desk.eval('JSON.stringify(window.__shownAs)') })})`);
+
+      const pickProblems = [['desk', desk], ['cy', cy]].flatMap(([n, t]) => t.problems.map((p) => n + ': ' + p));
+      report(pickProblems.length === 0, `the pick hall's pages: no console error and no CSP violation${pickProblems.length ? ' — ' + pickProblems.slice(0, 4).join(' | ') : ''}`);
+      for (const t of [desk, cy]) { await t.send('Page.navigate', { url: 'about:blank' }); t.close(); }
     }
 
     // The header's countdown chip is its own door (the account's: the speaker's screen and the countdown on its screens).

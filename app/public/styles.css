@@ -50,6 +50,7 @@ html[data-floor="old"] body > .agm-floor { display: block !important; max-width:
   --c-take: #000000;   /* a take on a person's page: drawn on black, as a screen's, in both themes */
   --c-web-page: #ffffff;   /* a web page framed in a take or a Preview: on white, as a browser draws a page with no background of its own */
   --mine-ink: #4863c0; --mine-name: #1c3f9e;   /* one's own message's header and name */
+  --c-pick-glass: #2b57d14d;   /* a pick in the Preview: over a PDF's page or a document's words, which show through it */
   --radius: var(--radius-md);
   --shadow: 0 1px 2px rgba(0,0,0,.06), 0 4px 12px rgba(0,0,0,.04);
 }
@@ -382,6 +383,37 @@ body[data-role="research"] .file.clickable:hover { outline: 2px solid var(--acce
 .dv-pagemark, .dv-slidemark { margin: var(--sp-4) 0 var(--sp-2); padding-top: var(--sp-1); border-top: 1px solid var(--c-border); font-size: var(--fs-xs); color: var(--c-ink-muted); }
 .dv-slide { margin-bottom: var(--sp-4); }
 .dv-hit { outline: 3px solid var(--c-action); outline-offset: 2px; }
+/* A pick in the Preview (the research seat's): words in the CSS Custom Highlight API where the browser has it, else their
+   blocks outlined; cells outlined; a region drawn by hand over a PDF's page or a picture, which the arrow keys nudge. */
+.dv-pick { outline: 2px solid var(--c-action); outline-offset: 1px; background: var(--c-pick-glass); }
+::highlight(agm-pick) { background-color: var(--c-pick-glass); }
+.dv[data-kind="image"] .dv-body { position: relative; }
+.dv-regions .dv-page, .dv-regions .dv-img { cursor: crosshair; }
+.dv-regions .textLayer { pointer-events: none; -webkit-user-select: none; user-select: none; }
+.dv-region { position: absolute; z-index: 2; border: 2px dashed var(--c-action); background: var(--c-pick-glass); pointer-events: none; }
+.dv-region:focus { outline: 2px solid var(--c-action); outline-offset: 2px; }
+.dv-grid:focus, .dv-table:focus { outline: 2px solid var(--c-action); outline-offset: 2px; }
+.dv-grid:focus:not(:focus-visible), .dv-table:focus:not(:focus-visible) { outline: none; }
+/* The text layer over a PDF's page, which a pick on the research seat reads. Copied from pdf.js 4.10.38's
+   web/pdf_viewer.css (its .textLayer rules), under its licence:
+     Copyright 2014 Mozilla Foundation
+     Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
+     the License. You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+     Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
+     an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+     specific language governing permissions and limitations under the License.
+   The physical sides stand before `inset`, which the page floor's Chrome 84 lacks, `overflow: hidden` before `clip`, and
+   a selection is drawn in the pick's own token. */
+.textLayer { position: absolute; text-align: initial; top: 0; right: 0; bottom: 0; left: 0; inset: 0; overflow: hidden; overflow: clip; opacity: 1; line-height: 1;
+  -webkit-text-size-adjust: none; -moz-text-size-adjust: none; text-size-adjust: none; forced-color-adjust: none; transform-origin: 0 0; caret-color: CanvasText; z-index: 0; }
+.textLayer span, .textLayer br { color: transparent; position: absolute; white-space: pre; cursor: text; transform-origin: 0% 0%; }
+.textLayer > :not(.markedContent), .textLayer .markedContent span:not(.markedContent) { z-index: 1; }
+.textLayer span.markedContent { top: 0; height: 0; }
+.textLayer span[role="img"] { -webkit-user-select: none; -moz-user-select: none; user-select: none; cursor: default; }
+.textLayer ::selection { background: var(--c-pick-glass); }
+.textLayer br::selection { background: transparent; }
+.textLayer .endOfContent { display: block; position: absolute; top: 100%; right: 0; bottom: 0; left: 0; inset: 100% 0 0; z-index: 0; cursor: default; -webkit-user-select: none; -moz-user-select: none; user-select: none; }
+.textLayer.selecting .endOfContent { top: 0; }
 
 /* Error message inside the panel */
 .doc-display .error {
@@ -557,6 +589,24 @@ body[data-role="research"] .file.clickable:hover { outline: 2px solid var(--acce
 .preview-bar .preview-doc { display: inline-flex; flex-direction: column; gap: var(--sp-1); }
 .preview-bar .preview-tick { display: inline-flex; align-items: center; gap: var(--sp-1); font-size: var(--fs-sm); }
 .preview-bar .preview-note, .preview-bar small { color: var(--c-ink-muted); font-size: var(--fs-sm); margin: 0; }
+.preview-bar select { font-size: var(--fs-sm); padding: var(--sp-1) var(--sp-2); border: 1px solid var(--c-border); border-radius: var(--radius-sm); background: var(--c-surface-raised); color: var(--c-ink); }
+/* A pick's bar: its units as chips (one chosen, each with its size), what will go drawn as the Board's page draws it (on
+   the take's black, smaller), the refusal or the warnings in words, a line above it, and Show with its ⋯ (44 px). */
+.pick-bar { display: flex; flex-direction: column; gap: var(--sp-1); padding-bottom: var(--sp-2); border-bottom: 1px solid var(--c-border); }
+.pick-bar[hidden] { display: none; }
+.pick-chips { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+.pick-chip { min-height: var(--target-min); padding: var(--sp-1) var(--sp-2); border: 1px solid var(--c-border); border-radius: var(--radius-pill); background: var(--c-surface-raised); color: var(--c-ink); font-size: var(--fs-sm); cursor: pointer; }
+.pick-chip[aria-checked="true"] { border-color: var(--c-action); background: var(--c-action); color: var(--c-on-action); font-weight: 600; }
+.pick-chip:focus-visible { outline: 2px solid var(--c-action); outline-offset: 2px; }
+.pick-words { margin: 0; font-size: var(--fs-sm); color: var(--c-ink-muted); }
+.pick-words:empty { display: none; }
+.pick-preview { max-height: 14rem; overflow: auto; padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-sm); background: var(--c-take); color: var(--stage-ink); font-size: var(--fs-md); }
+.pick-preview:empty { display: none; }
+.pick-say { margin: 0; font-size: var(--fs-sm); }
+.pick-say[hidden] { display: none; }
+.pick-row input[type="text"] { flex: 1 1 10rem; min-width: 0; font-size: var(--fs-sm); padding: var(--sp-1) var(--sp-2); border: 1px solid var(--c-border); border-radius: var(--radius-sm); background: var(--c-surface-raised); color: var(--c-ink); }
+.pick-more { min-width: var(--target-touch); min-height: var(--target-touch); }
+.pick-glance { position: fixed; top: 0; left: -10000px; visibility: hidden; pointer-events: none; }
 
 /* DIRECTOR-MODE: bigger text on stage */
 /* Director overrides use `em` so the message zoom variable on .feed
@@ -673,6 +723,7 @@ html[data-theme="dark"] {
   --brand-dark: #3a6cdf; --card: #1a2032; --accent: #f0a14a; --accent-soft: #2a2010; --research: #38bdf8;
   --stage: #070c18; --c-take: #000000; --c-web-page: #ffffff;
   --mine-ink: #b8c8ff; --mine-name: #b8c8ff;
+  --c-pick-glass: #5b8dff59;
   --shadow: 0 1px 2px rgba(0,0,0,.4), 0 4px 12px rgba(0,0,0,.3);
   color-scheme: dark;
 }
@@ -1984,6 +2035,34 @@ h1[tabindex="-1"]:focus, h3[tabindex="-1"]:focus { outline: none; }
 .take-card-box .take-file-box { min-height: 12rem; }
 .page-layer, .take-cards, .web-preview-box { -webkit-touch-callout: none; }
 body[data-view="simple"] .take-file .dv-bar .btn, body[data-view="simple"] .take-file .dv-n { min-height: var(--target-answer); min-width: var(--target-answer); }
+/* A quote in a take: drawn from its data on the take's black, in the stage's ink, its type the largest that fits (set on
+   .take-quote by pagelayer.mjs fitQuote); its words keep their line breaks; a table wider than the take scrolls sideways
+   inside its card with its label row and column kept in view, numbers to the right, and the cell it is of outlined and
+   bold. A quote longer than the screen scrolls. */
+.layer-box[data-kind="snippet"] { align-items: flex-start; justify-content: flex-start; overflow: auto; text-align: left; }
+.take-quote { width: 100%; max-width: 100%; margin: auto; line-height: 1.3; }
+.take-quote-note { margin: 0 0 .5em; font-size: .6em; font-weight: 600; overflow-wrap: anywhere; }
+.take-quote-title { margin: 0 0 .4em; font-size: .75em; font-weight: 700; overflow-wrap: anywhere; }
+.take-quote-text { margin: 0; padding: 0 0 0 .6em; border-left: .12em solid var(--stage-dim); }
+.take-quote-text p, .take-quote-p { margin: 0 0 .4em; white-space: pre-wrap; overflow-wrap: anywhere; }
+.take-quote-list { margin: 0 0 .4em; padding-left: 1.4em; }
+.take-quote-list li { white-space: pre-wrap; overflow-wrap: anywhere; }
+.take-quote-scroll { max-width: 100%; overflow: auto; margin: 0 0 .4em; }
+.take-quote-table { border-collapse: separate; border-spacing: 0; font-size: .8em; }
+.take-quote-table th, .take-quote-table td { padding: .2em .5em; border-bottom: 1px solid var(--stage-dim); white-space: pre-wrap; text-align: left; vertical-align: top; }
+.take-quote-table th { background: var(--c-take); font-weight: 600; color: var(--stage-dim); }
+.take-quote-head { position: -webkit-sticky; position: sticky; top: 0; z-index: 1; }
+.take-quote-side { position: -webkit-sticky; position: sticky; left: 0; }
+.take-quote-num { text-align: right; font-variant-numeric: tabular-nums; }
+.take-quote-table td.take-quote-num { text-align: right; }
+.take-quote-focus { outline: .12em solid var(--stage-ink); outline-offset: -.12em; font-weight: 700; }
+.take-quote-more { margin: .2em 0 0; font-size: .6em; color: var(--stage-dim); }
+.take-quote-line { margin: .6em 0 0; font-size: .5em; color: var(--stage-dim); overflow-wrap: anywhere; }
+.take-card-box .layer-box, .take-card-box .take-quote { font-size: var(--fs-md); }
+/* A quote longer than its box (pagelayer.mjs fitQuote marks it long): each table scrolls inside its own card, down as well
+   as across, so its label row and column stay in view as it scrolls. */
+.take-quote[data-long] .take-quote-scroll { max-height: 70vh; }
+.take-card-box .take-quote[data-long] .take-quote-scroll { max-height: 30vh; }
 /* The same frame previewed on the operator's own page, in its dialog. */
 .web-preview { width: min(64rem, 96vw); }
 .web-preview-box { display: flex; height: min(60vh, 40rem); margin: var(--sp-3) 0; border: 1px solid var(--c-border); border-radius: var(--radius-md); overflow: hidden; }

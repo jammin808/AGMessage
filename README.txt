@@ -771,6 +771,54 @@ password. AGMessage checks their first bytes and never opens them: their
 card says "download only" and they are only ever downloaded. Open a
 downloaded zip as you would an email attachment. Files are up to 25 MB.
 
+Show the Board a word, a paragraph, a cell, or what you see
+-----------------------------------------------------------
+With a file open in your Preview (backstage, on an account that may show
+the Board):
+1. Highlight first: select some words, or tap a word; tap a cell of a
+   table (Shift and a tap for a range, or the arrow keys); tap a column's
+   letter or a row's number for all of it.
+2. The bar offers what holds your highlight, each with its size:
+   Selection, Word, Sentence, Line, Item, Paragraph, Cell, Row, Column,
+   Range, Slide. The smallest is chosen; tap another to change it. It
+   shows the quote as the Board will see it.
+3. Choose whom it goes to (the Board, or one person) and where (over
+   their chat, or in their side bar), add a line above it if you like,
+   and press Show the Board. Right-click the highlight (or its ... on
+   the bar, or tap it a second time on a tablet) for the same list as a
+   menu, with Copy first.
+- A spreadsheet's cell goes with its row's and its column's labels
+  ("D2 - Revenue (row 2) - Q3 (column D)"): the rows and columns the
+  sheet keeps frozen (its header, not a title above it), else its first
+  row and column, or the ones you mark with Labels...; untick "with
+  labels" to send the cell alone. A column goes with its label cell.
+  Hidden rows, columns and sheets are greyed in your Preview and can
+  never be picked.
+- Tap a picture in a Word document or a slide to show that picture
+  alone (drawn again, without its metadata).
+- A PDF's paragraphs, list items and table cells are read from its
+  structure when it has one (a tagged PDF, as Word and LibreOffice can
+  export). Without one, paragraphs and items are a best guess (marked
+  so) and its tables can only go as a picture: press Region, draw a box
+  over the part of the page, and show it.
+- A Word quote says its page as Word last laid it out ("p. 3"), or
+  "~ p. 2" where Word's own layout is missing.
+- What I see sends what is in view: the part of a PDF's page or a
+  picture you see (zoom in to send less) as a new picture, or the
+  paragraphs or cells in view of the other files as words. A picture of
+  a picture drops its metadata (where it was taken, the camera). If more
+  is in view than the stage takes, it says how much and offers Send what
+  fits; nothing is cut unless you choose it.
+- Too long for the stage (over 1,200 characters, or 25 rows by 10
+  columns) is refused with the reason; the bar offers to send the first
+  1,200 characters, or the first 25 rows by 10 columns, if you choose.
+- If someone else showed the Board something under 15 seconds ago, the
+  bar says whose it is ("The Board is reading Ben's quote (8 s)") before
+  you replace it, whatever you are about to show.
+- The quote shows on the Board's page in large type, saying who quoted it
+  and from where ("Quoted by Ana - Board pack.pdf, p. 12"). AGMessage
+  cannot check the words are in the file: the quote is yours.
+
 Stagewatch (the countdown) for each hall
 ----------------------------------------
 Halls -> a hall's Set up: the address of that hall's Stagewatch and a

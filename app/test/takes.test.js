@@ -11,7 +11,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
-const { startServer, restartServer, stopServer, api, connect, emit, wait, until, pngOf, inviteOf, TOKEN } = require('./helpers');
+const { startServer, restartServer, stopServer, api, connect, emit, wait, until, pngOf, inviteOf, fakeStagewatch, TOKEN } = require('./helpers');
 
 const PASSWORD = 'clipboard and coffee';
 /** The `page.push` rows as the tests read them: the hall, the words, who (an account by its user name). */
@@ -233,7 +233,7 @@ test('a take on the Board\'s pages or one person\'s, numbered and confirmed page
   // What may be shown is the server's: a kind it does not know, Stagewatch where the hall has none, a picture shared in
   // no room of the hall.
   for (const [content, error] of [
-    [{ kind: 'brand' }, 'Choose what to show: back to chat, Stagewatch, the clock, holding, blank, a web page, a document or a picture.'],
+    [{ kind: 'brand' }, 'Choose what to show: back to chat, Stagewatch, the clock, holding, blank, a web page, a document, a picture or a quote.'],
     [{ kind: 'web', url: 'http://vote.example.com/' }, 'A web page is shown by its https address, as a browser shows it.'],
     [{ kind: 'stage' }, 'This hall has no Stagewatch linked — link one in Set up.'],
     [{ kind: 'holding', image: '/uploads/1777424589360-onmqm0a3ew2r-holding.png' }, 'That file is in no room of this hall you can read — share it there first.'],
@@ -1265,4 +1265,123 @@ test('a document and a picture on the stage: by where the file may come from, it
   assert.equal(rows().length, rowsBefore + 1, 'one row');
   assert.deepEqual(await act(tomAfter, 'page:push', asked), once, 'and once it is made, from what it kept');
   for (const [, words] of rows()) assert.ok(!/Board pack|Minutes|Stage plan|p2\.png|legal\.png|\/uploads\//.test(words), words);
+});
+
+test('a quote on the stage: words or cells picked from a file of the hall, carried as data, named by the file and its place and never its address; typed, or from a web page by its host; refused over its bounds; the console\'s words and the row\'s; nothing of it in the context or the Show Bus; the AI told what the Board\'s pages show, a quote\'s words only to who pushed it', { timeout: 120_000 }, async (t) => {
+  const http = require('http');
+  // A stand-in for the AI's endpoint (the SDK's ANTHROPIC_BASE_URL): every request's body kept, a draft answered.
+  const bodies = [];
+  const model = http.createServer((req, res) => {
+    let b = '';
+    req.on('data', (d) => { b += d; });
+    req.on('end', () => {
+      bodies.push(b);
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ id: 'msg_1', type: 'message', role: 'assistant', model: 'x', stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify({ draft: 'Yes.', gaps: [], confidence: 'high' }) }], usage: { input_tokens: 1, output_tokens: 1 } }));
+    });
+  });
+  await new Promise((resolve) => { model.listen(0, '127.0.0.1', resolve); });
+  t.after(() => new Promise((resolve) => { model.close(resolve); }));
+  const srv = await startServer({ ANTHROPIC_API_KEY: 'a-key-for-the-fake-model', ANTHROPIC_BASE_URL: 'http://127.0.0.1:' + model.address().port });
+  t.after(() => stopServer(srv.child));
+  const sockets = [];
+  t.after(() => sockets.forEach((s) => s.close()));
+  const heard = new Map();
+  const page = async (cookie, who) => {
+    const s = await connect(srv.base, cookie);
+    sockets.push(s);
+    heard.set(s, []);
+    s.onAny((ev, ...args) => heard.get(s).push([ev, args[0]]));
+    s.who = who;
+    return s;
+  };
+  const info = (s) => heard.get(s).filter(([ev, v]) => ev === 'page:take' && v.layer === 'info').map(([, v]) => v);
+  const joined = async (s, args) => { const r = await emit(s, 'join', invited(srv.dataDir, args)); assert.equal(r.ok, true, s.who + ': ' + JSON.stringify(r)); return r; };
+  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const hall = (await api(srv.base, 'POST', '/api/rooms', { name: 'Hall 5' }, { cookie: admin })).body.code;
+  const ctl = await page(admin, 'the admin page');
+  await joined(ctl, { roomCode: hall, as: 'account' });
+  const LEGAL = (await act(ctl, 'room:create', { hall, name: 'Legal' })).key;
+  // The hall's own Stagewatch, so the context posted to it is read beside the node's.
+  const sw = await fakeStagewatch({ name: 'Hall 5 timer' });
+  t.after(() => sw.close());
+  assert.equal((await act(ctl, 'hall:configure', { code: hall, stagewatchUrl: sw.url, stagewatchKey: 'swk_hall5_node_key_0001' })).ok, true);   // secret-scan: fixture
+  const posted = () => sw.requests.filter((r) => r.url === '/api/peers/context').map((r) => r.body);
+  await until(() => posted().length > 0, 8000, 'the hall\'s Stagewatch linked, its key accepted');
+  const account = async (username, name, role, extra) => {
+    assert.equal((await api(srv.base, 'POST', '/api/users', { username, name, role, password: PASSWORD, ...extra }, { cookie: admin })).status, 200);
+    return (await api(srv.base, 'POST', '/api/auth/login', { username, password: PASSWORD })).cookie;
+  };
+  const sueCookie = await account('sue', 'Sue Staff', 'staff', { halls: [hall], rooms: [LEGAL] });   // stage.show: shows by a right of its own
+  const tomCookie = await account('tom', 'Tom Tech', 'tech', { halls: [hall] });   // display.control: the operator
+  const sue = await page(sueCookie, 'Sue backstage');
+  const sueJoin = await joined(sue, { roomCode: hall, as: 'account' });
+  const sueLegal = await page(sueCookie, 'Sue in Legal');
+  await joined(sueLegal, { roomCode: LEGAL, as: 'account' });
+  const tom = await page(tomCookie, 'Tom backstage');
+  await joined(tom, { roomCode: hall, as: 'account' });
+  const gil = await page(undefined, 'Gil On stage');
+  await joined(gil, { roomCode: hall, name: 'Gil', role: 'board' });
+  assert.equal(sueJoin.canShow, true);
+
+  // A CSV shared in Main; a cell of it picked and shown, with its labels: the take names the file by its name and the
+  // cell by its place, and no page is told the file's address.
+  const f = new FormData();
+  f.append('file', new Blob(['Item,Q3\nRevenue,4.2\n'], { type: 'text/csv' }), 'Q3 costs.csv');
+  const up = await (await fetch(srv.base + '/api/upload', { method: 'POST', headers: { 'X-AGM-Upload': sueJoin.uploadToken }, body: f })).json();
+  assert.ok(typeof up.url === 'string', JSON.stringify(up));
+  assert.equal((await act(sue, 'message', { type: 'file', url: up.url, filename: 'Q3 costs.csv', mime: 'text/csv' })).ok, true);
+  const cell = { kind: 'snippet', unit: 'cell', table: { rows: [['Item', 'Q3'], ['Revenue', '4.2']], head: 1, side: 1, ref: 'B2', focus: [1, 1] }, from: { url: up.url, at: { line: 2, ref: 'B2' } } };
+  const pushed = await act(sue, 'page:push', { code: hall, to: 'board', content: cell });
+  assert.deepEqual([pushed.ok, pushed.results[0].status.showing, pushed.results[0].status.kind], [true, '❝ a table cell from Q3 costs.csv, B2', 'snippet'], JSON.stringify(pushed));
+  await until(() => info(gil).some((x) => x.seq === pushed.seq), 4000, 'the Board\'s page told the quote');
+  const told = info(gil).find((x) => x.seq === pushed.seq);
+  assert.deepEqual(told.content, { kind: 'snippet', unit: 'cell', table: { rows: [['Item', 'Q3'], ['Revenue', '4.2']], head: 1, side: 1, ref: 'B2', focus: [1, 1] }, from: { name: 'Q3 costs.csv', type: 'csv', at: { line: 2, ref: 'B2' } } });
+  assert.ok(!JSON.stringify(info(gil)).includes(up.url.slice(9)), 'no take tells the Board\'s page the file\'s address');
+  assert.ok((await act(gil, 'page:report', { seq: pushed.seq, state: 'shown' })).ok);
+  assert.deepEqual([(await act(tom, 'page:status', { code: hall })).board.info.mark, (await act(tom, 'page:status', { code: hall })).board.info.showing], ['✓', '❝ a table cell from Q3 costs.csv, B2']);
+  const rows = () => rowsOf(srv.dataDir).filter(([h]) => h === hall);
+  assert.deepEqual(rows().at(-1), [hall, 'the Board (1 page) → a quote (a table cell, 3 characters) from a table', 'sue']);
+  // Kept by the file's name and place, never its address.
+  const onDisk = () => fs.readFileSync(path.join(srv.dataDir, 'pages.json'), 'utf8');
+  await until(() => fs.existsSync(path.join(srv.dataDir, 'pages.json')) && JSON.parse(onDisk()).halls[hall].board.info.seq === pushed.seq, 4000, 'saved');
+  assert.ok(!onDisk().includes(up.url.slice(9)), 'pages.json holds no quote\'s file address');
+
+  // Typed: no source but who typed it. From a web page: its host, its address sealed at rest and told to no page.
+  const typed = await act(sue, 'page:push', { code: hall, to: 'board', content: { kind: 'snippet', unit: 'text', text: 'Revenue Q3: £4.2m' } });
+  assert.equal(typed.results[0].status.showing, '❝ a quote typed by Sue Staff (17 characters)');
+  assert.deepEqual(rows().at(-1), [hall, 'the Board (1 page) → a quote (typed, 17 characters)', 'sue']);
+  // Nothing of a quote on the Board's pages (its words, its cells, its file's name) is in the context, the node's or the
+  // one posted to the hall's Stagewatch, while it is up: two posts made after it are read.
+  const before = posted().length;
+  await until(() => posted().length >= before + 2, 15000, 'the context posted to the hall\'s Stagewatch twice more');
+  const contexts = [...posted(), JSON.stringify((await api(srv.base, 'GET', '/api/context', undefined, { cookie: admin })).body)];
+  for (const body of contexts) for (const words of ['Revenue', '£4.2m', 'Q3 costs', 'costs.csv']) assert.ok(!body.includes(words), 'the context carries no quote: ' + words + ' in ' + body);
+  const web = await act(tom, 'page:push', { code: hall, to: 'board', content: { kind: 'snippet', unit: 'text', text: 'Turnout was 64%', from: { web: 'https://vote.example.com/results?token=s3cr3t#q2' } } });
+  assert.equal(web.ok, true, JSON.stringify(web));
+  await until(() => info(gil).some((x) => x.seq === web.seq), 4000, 'told');
+  assert.deepEqual(info(gil).find((x) => x.seq === web.seq).content.from, { host: 'vote.example.com' });
+  await until(() => JSON.parse(onDisk()).halls[hall].board.info.seq === web.seq, 4000, 'saved');
+  assert.ok(!onDisk().includes('s3cr3t') && JSON.parse(onDisk()).halls[hall].board.info.content.from.host === 'vote.example.com', 'the web page\'s address is kept sealed');
+  assert.deepEqual(rows().at(-1), [hall, 'the Board (1 page) → a quote from a web page on vote.example.com', 'tom']);
+
+  // Over a bound it is refused in words, never cut; nothing is numbered.
+  const seqNow = (await act(tom, 'page:status', { code: hall })).board.info.seq;
+  assert.deepEqual(await act(tom, 'page:push', { code: hall, to: 'board', content: { kind: 'snippet', unit: 'paragraph', text: 'x'.repeat(1201) } }), { ok: false, error: 'Too long for the stage: 1,200 characters at most (this is 1,201)' });
+  assert.deepEqual(await act(tom, 'page:push', { code: hall, to: 'board', content: { kind: 'snippet', unit: 'range', table: { rows: Array.from({ length: 26 }, () => ['1']), head: 0, side: 0 } } }), { ok: false, error: 'Too big for the stage: narrow it to 25 rows × 10 columns' });
+  assert.equal((await act(tom, 'page:status', { code: hall })).board.info.seq, seqNow);
+  // The operator's quote is theirs to take down; a researcher's goes over the show again after it.
+  assert.equal((await act(tom, 'page:push', { code: hall, to: 'board', content: { kind: 'chat', layer: 'info' }, ifSeq: web.seq })).ok, true);
+
+  // The AI is told what the Board's pages show, in the console's words, by who may show there and drafts in Main; the
+  // quote's own words only to who pushed it; a side room's draft is told none of it.
+  const mine = await act(sue, 'page:push', { code: hall, to: 'board', content: { kind: 'snippet', unit: 'text', text: 'Capex rose 8% on plan' } });
+  assert.equal(mine.ok, true);
+  const drafted = async (s) => { const r = await act(s, 'ai:draft', { question: 'What was capex?' }); assert.equal(r.ok, true, s.who + ': ' + JSON.stringify(r)); return JSON.parse(bodies.at(-1)).messages[0].content; };
+  const sueMain = await drafted(sue);
+  const tomMain = await drafted(tom);
+  const sueSide = await drafted(sueLegal);
+  assert.ok(sueMain.includes('On the Board\'s pages now: ❝ a quote typed by Sue Staff (21 characters) — Capex rose 8% on plan'), sueMain);
+  assert.ok(tomMain.includes('On the Board\'s pages now: ❝ a quote typed by Sue Staff (21 characters)') && !tomMain.includes('Capex rose 8%'), 'another pusher\'s words are not in it: ' + tomMain);
+  assert.ok(!sueSide.includes('On the Board\'s pages now') && !sueSide.includes('Capex rose 8%'), 'a side room\'s draft is told none of it: ' + sueSide);
 });

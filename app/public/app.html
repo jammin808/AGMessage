@@ -174,8 +174,30 @@
       </div>
 
       <!-- The Preview's bar (backstage, for a seat that may show the Board): a picture of the page in view, or the document
-           opened there, side by side; Let them download it under the document's button alone. -->
+           opened there, side by side; Let them download it under the document's button alone; what is in view; a region
+           drawn by hand. Over it, a pick's bar: what was highlighted in the file, its units as chips (each with its size),
+           drawn as the Board will see it, then whom it goes to, where it arrives, a line above it, and Show (app.js
+           PickBar; the catalogue's kind `pick`, whose menu its ⋯ and a right-click on the pick open). -->
       <div class="preview-bar" id="previewBar" hidden>
+        <section class="pick-bar" id="pickBar" aria-label="What you picked" hidden>
+          <div class="pick-chips" id="pickChips" role="radiogroup" aria-label="Send it as"></div>
+          <p class="pick-words" id="pickWords"></p>
+          <div class="pick-preview" id="pickPreview" aria-label="As the Board will see it"></div>
+          <p class="pick-say" id="pickSay" role="status" hidden></p>
+          <div class="row pick-row">
+            <label class="preview-tick" id="pickLabelsBox" hidden><input type="checkbox" id="pickLabels" checked /> with labels</label>
+            <button type="button" class="btn ghost small" id="pickMarkLabels" hidden>Labels…</button>
+            <input type="text" id="pickNote" maxlength="200" placeholder="A line above it (optional)" aria-label="A line above it (optional)" />
+            <button type="button" class="btn primary" id="pickShow">📺 Show the Board</button>
+            <button type="button" class="btn ghost obj-more pick-more" id="pickMore" aria-haspopup="menu" aria-label="More for this pick">⋯</button>
+          </div>
+        </section>
+        <div class="row preview-to">
+          <select id="pickTo" aria-label="Whom it goes to"></select>
+          <select id="pickArrive" aria-label="Where it arrives"><option value="over">over their chat</option><option value="side">in their side bar</option></select>
+          <small class="muted" id="pickArriveWhy" hidden></small>
+        </div>
+        <p class="pick-say" id="previewFresh" role="status" hidden></p>
         <p class="preview-note muted" id="previewNote"></p>
         <div class="row">
           <button type="button" class="btn ghost" id="showPicture">📺 Picture of p. 1</button>
@@ -184,6 +206,9 @@
             <label class="preview-tick"><input type="checkbox" id="letDownload" /> Let them download it</label>
             <small class="muted" id="letDownloadWhy" hidden></small>
           </span>
+          <button type="button" class="btn ghost" id="showSeen">🔳 What I see</button>
+          <button type="button" class="btn ghost" id="regionBtn" aria-pressed="false" hidden>▭ Region</button>
+          <label class="preview-tick" id="noMetaBox" hidden><input type="checkbox" id="noMeta" /> without its metadata</label>
         </div>
       </div>
 

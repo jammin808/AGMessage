@@ -79,6 +79,10 @@ Each fallback is the same on every device. "Today" is the tree as 0.6.0 is built
 | `light-dark()`, `@container`, `text-wrap` | Safari 17.5, 16, 17.4; Chrome 123, 105, 114 | not used | a plain declaration of the same property first, or inside `@supports` | held by the fence |
 | pdf.js | its legacy build's targets: Safari 16.4, Chrome 103 (the document floor) | the panel and screens | the stage's stand-in below the document floor, with the stage's devices unit | the legacy build |
 | `DecompressionStream('deflate-raw')` | `api.DecompressionStream`, its `deflate-raw` format: Safari 16.4, Chrome 103, Firefox 113 (the document floor, the same probe as pdf.js's) | the document worker (`docworker.js`), which inflates a Word, Excel or PowerPoint file's parts with it | none on the panel: a device without it reads "this device cannot open documents — ask for a picture" for an Office file (an `.xls`, which is not zipped, still opens); the stage's stand-in, with the stage's devices unit | `app/public/docworker.js` (`inflater`, the answer `device`) |
+| The CSS Custom Highlight API | `api.Highlight`, `CSS.highlights`: Safari 17.2, Chrome 105 | a pick in the researcher's Preview | where it is missing, the pick's blocks are outlined (`.dv-pick`), its cells and a picture always are | `app/public/docview.mjs` |
+| `Intl.Segmenter` | `javascript.builtins.Intl.Segmenter`: Safari 14.1, Chrome 87 | a word and a sentence picked | where it is missing (Chrome 84 to 86), a word is a run of letters and digits and a sentence ends at . ! or ? | `app/public/docmodel.mjs` `segmentOf` |
+| A caret from a point | `api.Document.caretPositionFromPoint`: Chrome 128; `caretRangeFromPoint`: every row | a tap on a word picks it | the one the browser has, the standard one first; with neither, a tap picks nothing and a selection still does | `app/public/docview.mjs` |
+| `createImageBitmap` with a part | `api.createImageBitmap`: Safari 15, Chrome 52 | a region of a picture, a picture in a document drawn again | where it is missing, the part of the element is drawn on a canvas itself; both leave the metadata behind | `app/public/docview.mjs` |
 | Marks and emoji | each device's own fonts | every mark | every mark carries its word, so a glyph a device lacks never takes the meaning away; the walk checks each draws | `AGM.MARKS` (`app/public/common.js`): the thirteen marks ✓ ◐ ◇ ▭ ○ ⊘ ◷ △ ✕ ■ ▶ ● ▲, each with its word beside it (or for a screen reader) and its colour role, drawn by name on every page (the lint refuses a mark a page writes itself) |
 
 ## 4. What every push proves (Chromium)
@@ -225,3 +229,17 @@ row the owner has no device for reads "not measured", as the walk's reads "not w
 
 A picture is held to 100 megapixels at upload (`lib/imagesize.js`) whatever this reads: that bound is the server's, on
 what it keeps, and the one this bench sets is the stage's, on what a Board device is handed.
+
+The quotes' benches (the stage's picks), each read before its number is fixed; on the rig's laptop where they name it:
+
+| Bench | Where | What it sets | Reading |
+|---|---|---|---|
+| The glance budget: a quote's height at the stage's smallest type (28 px) read at a glance on a tablet and a phone | D2, D6 | "Long for the stage — the Board will scroll" on the bar, which never refuses; provisional until read: taller than 700 px at 1,100 px wide | not measured |
+| A whole PDF page's body text read at a glance on a tablet's take | D2 | the Preview's bar suggesting 🔳 What I see where a whole page's body text would stand under 16 px on a tablet's take (the glance box above); provisional until read | not measured |
+| A page picture drawn (2,048 px on its long edge) and uploaded, and paging through pictures against the uploads' rate (four, then one every 2 s) | the rig's laptop | whether the uploads' rate changes for pictures; none changes unless it is measured to matter | not measured |
+| A 25 MB document's parse (its first page drawn) | D2, D4 | the readers' first draw (5,000 rows, 20,000 lines) | not measured |
+| A pusher at the `writes` bucket's 5 a second onto the Board's pages | the rig's laptop | none: the bucket stands unless it is measured to matter | not measured |
+| The `pages` lane's save of 50 halls each holding its 200 person takes and 20 Earlier entries as quotes (about 6 KB each) | the rig's laptop | a further bound on `pages.json`, only if it is measured to matter | not measured |
+
+A quote reaches a phone in at least 20 px type, a table wider than its card scrolling inside it; the walk's rows for a
+quote (a word, a paragraph, a cell with its labels, a 25 × 10 table) are §5.15.1's, on every row, D1 included.

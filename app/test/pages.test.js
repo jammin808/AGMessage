@@ -27,7 +27,7 @@ const CY = 'u:ucyguest00001';
 const PIC = '/uploads/1730000000000-abcdefghijkl-stage.png';
 /** A web take as the store keeps it: its host and its address sealed (lib/secretbox.js's shape). */
 const WEB_KEPT = { kind: 'web', host: 'vote.example.com', urlSealed: 'enc1:c2VhbGVk' };
-const KINDS_WORDS = { error: 'Choose what to show: back to chat, Stagewatch, the clock, holding, blank, a web page, a document or a picture.' };
+const KINDS_WORDS = { error: 'Choose what to show: back to chat, Stagewatch, the clock, holding, blank, a web page, a document, a picture or a quote.' };
 const dirs = [];
 const folder = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-pages-')); dirs.push(d); return d; };
 test.after(() => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); });
@@ -61,8 +61,8 @@ function store({ held = true, file = path.join(folder(), 'pages.json') } = {}) {
 const onDisk = (p) => (p.flush(), JSON.parse(fs.readFileSync(p.file, 'utf8')));
 
 test('cleanPage: an unknown kind, or none, is refused with the kinds in words, never defaulted', () => {
-  // `brand` went (the owner's answer 31: one Holding page with the logo); the quote is a later unit's.
-  for (const kind of ['brand', 'snippet', 'iframe', 'message', 'black', 'CLOCK', 'WEB', 'DOC', 'region', '', ' clock']) assert.deepEqual(cleanPage({ kind }), KINDS_WORDS, kind);
+  // `brand` went (the owner's answer 31: one Holding page with the logo).
+  for (const kind of ['brand', 'quote', 'iframe', 'message', 'black', 'CLOCK', 'WEB', 'DOC', 'region', '', ' clock']) assert.deepEqual(cleanPage({ kind }), KINDS_WORDS, kind);
   for (const c of [undefined, null, 'clock', 5, ['clock'], {}, { kind: 5 }, { kind: ['clock'] }, { kind: { toString: () => 'clock' } }, { kind: null }]) assert.deepEqual(cleanPage(c), KINDS_WORDS, JSON.stringify(c));
   // Only its own kind: one it inherits is not read.
   assert.deepEqual(cleanPage(Object.create({ kind: 'clock' })), KINDS_WORDS);
@@ -81,11 +81,11 @@ test('cleanPage: each kind in its clean shape, a fresh object, with the keys it 
   assert.deepEqual(cleanPage({ kind: 'chat', layer: 'info', seq: 3 }), { kind: 'chat', layer: 'info' });
   for (const layer of ['show', null, 5, '', 'INFO', ['info']]) assert.deepEqual(cleanPage({ kind: 'chat', layer }), KINDS_WORDS, JSON.stringify(layer));
   assert.deepEqual(cleanPage({ kind: 'clock', layer: 'info' }), { kind: 'clock' }, 'a layer is chat\'s word alone: on another kind it is a key not known');
-  assert.deepEqual(KINDS, ['chat', 'stage', 'clock', 'holding', 'blank', 'web', 'doc', 'image']);
+  assert.deepEqual(KINDS, ['chat', 'stage', 'clock', 'holding', 'blank', 'web', 'doc', 'image', 'snippet']);
   // Two layers: the show (the operator's) and the information drawn over it; a hand-back's are its own.
   assert.deepEqual(LAYERS, ['show', 'info']);
   assert.ok(Object.isFrozen(KINDS) && Object.isFrozen(LAYERS));
-  assert.deepEqual(KINDS.map((k) => [k, layerOf(k)]), [['chat', ''], ['stage', 'show'], ['clock', 'show'], ['holding', 'show'], ['blank', 'show'], ['web', 'info'], ['doc', 'info'], ['image', 'info']]);
+  assert.deepEqual(KINDS.map((k) => [k, layerOf(k)]), [['chat', ''], ['stage', 'show'], ['clock', 'show'], ['holding', 'show'], ['blank', 'show'], ['web', 'info'], ['doc', 'info'], ['image', 'info'], ['snippet', 'info']]);
   assert.deepEqual([layersOf({ kind: 'chat' }), layersOf({ kind: 'chat', layer: 'info' }), layersOf({ kind: 'clock' }), layersOf({ kind: 'web' }), layersOf({ kind: 'brand' })], [['show', 'info'], ['info'], ['show'], ['info'], []]);
   assert.deepEqual([SHOW_LAYER, INFO_LAYER, ARRIVALS], [['stage', 'clock', 'holding', 'blank'], ['web', 'doc', 'image', 'snippet'], ['over', 'side']]);
   assert.equal(layerOf('brand'), '');
@@ -132,7 +132,7 @@ test('cleanPage: the holding rules: no picture, or a picture of ours from a plac
 
 test('describePage: the words for each kind; KINDS and the words are one set', () => {
   const words = KINDS.map((kind) => describePage({ kind }, { hallHolding: '/uploads/x.png' }));
-  assert.deepEqual(words, ['back to chat', 'Stagewatch', 'the clock', 'a holding slide', 'blank', 'a web page', 'a document', 'a picture']);
+  assert.deepEqual(words, ['back to chat', 'Stagewatch', 'the clock', 'a holding slide', 'blank', 'a web page', 'a document', 'a picture', 'a quote']);
   assert.equal(new Set(words).size, KINDS.length, 'one kind, one set of words');
   // A holding slide with no picture of its own, in a hall with none, draws the AGMessage mark (owner answer 31).
   assert.equal(describePage({ kind: 'holding' }), 'a holding slide with the AGMessage mark');
@@ -308,7 +308,7 @@ test('a page reports only what a take of its kind can be: back on its chat in vi
   // A web page is never seen into: in view it opened, and nothing else reports opened.
   assert.deepEqual(reportsOf('web'), ['opened', 'hidden', 'failed', 'dismissed', 'minimised']);
   assert.deepEqual(KINDS.filter((k) => reportsOf(k).includes('opened')), ['web'], 'opened is a web page\'s alone');
-  assert.deepEqual(KINDS.map(inViewOf), ['shown', 'shown', 'shown', 'shown', 'shown', 'opened', 'shown', 'shown']);
+  assert.deepEqual(KINDS.map(inViewOf), ['shown', 'shown', 'shown', 'shown', 'shown', 'opened', 'shown', 'shown', 'shown']);
   assert.ok(KINDS.every((k) => reportsOf(k).every((s) => REPORTS.includes(s))));
   const p = store();
   const clock = p.take(HALL, ANA, { kind: 'clock' }, { name: 'Ada' });
@@ -1268,4 +1268,161 @@ test('a document is told a page seated as an observer without its address, under
   fs.writeFileSync(file, JSON.stringify(bad));
   const read = new Pages(file);
   assert.deepEqual(Object.keys(read.halls[HALL].people), [BEN], 'a place of another type, a picture that is no image: dropped');
+});
+
+// ---------------------------------------------------------------- a quote (plan 4-§5.9.4)
+const { snippetText, UNITS, SNIPPET } = require('../lib/pages');
+const Q_XLSX = '/uploads/1730000000000-abcdefghijkl-q3.xlsx';
+const Q_DOCX = '/uploads/1730000000000-abcdefghijkl-minutes.docx';
+/** sourceOk's verdict as a push gathers it: a file of the Main room, its name the server's; a side room's said by its name. */
+const quoteSource = (url) => (url === Q_DOCX ? { name: 'Minutes.docx', room: 'LGQ4MZP8', roomName: 'Legal' } : { name: 'Q3.xlsx', room: '', roomName: '' });
+const quote = (c, facts = { source: quoteSource }) => cleanPage({ kind: 'snippet', ...c }, facts);
+
+test('cleanBlock: line breaks kept and made one, a tab a space, controls, bidi marks and invisible characters dropped, lines\' trailing spaces trimmed, three breaks two; never cut', () => {
+  assert.equal(guard.cleanBlock('a\r\nb\rc\u2028d\u2029e\tf'), 'a\nb\nc\nd\ne f');
+  assert.equal(guard.cleanBlock('N\u0000U\u0007L\u007fL\u0085'), 'NULL', 'controls, C1 included');
+  assert.equal(guard.cleanBlock('x\u202ey\u2066z\u2069\u200e\u200f\u061c'), 'xyz', 'the bidi overrides, isolates and marks, U+061C ARABIC LETTER MARK among them');
+  assert.equal(guard.cleanBlock('zero\u200bwidth\u2060joined\ufeff'), 'zerowidthjoined', 'U+200B, U+2060 and U+FEFF');
+  assert.equal(guard.cleanBlock('क्\u200dष\u200cा'), 'क्\u200dष\u200cा', 'the joiners U+200C and U+200D stay: they shape words');
+  assert.equal(guard.cleanBlock('  one   \n\n\n\n two \n'), 'one\n\n two', 'trailing spaces per line, three breaks or more two, the whole trimmed');
+  assert.equal(guard.cleanBlock('x'.repeat(5000)).length, 5000, 'never cut: a bound is its caller\'s');
+  for (const v of [null, 5, {}, [], { toString: () => 'x' }]) assert.equal(guard.cleanBlock(v), typeof v === 'number' ? '5' : '', JSON.stringify(v));
+  // cleanText drops U+061C too, as it drops the other bidi marks.
+  assert.equal(guard.cleanText('a\u061cb'), 'ab');
+});
+
+test('cleanSnippet: a unit of its list carrying its one body; every field read by its type, nothing defaulted; over a bound refused in words, never cut', () => {
+  assert.deepEqual([...UNITS], ['word', 'sentence', 'line', 'item', 'paragraph', 'cell', 'row', 'column', 'range', 'slide', 'selection', 'view', 'text']);
+  const UNIT = { error: 'Choose what to send: a word, sentence, line, item, paragraph, cell, row, column, range, slide, selection, what you see or text.' };
+  for (const unit of [undefined, 'Word', 'region', 'page', 5, ['word'], { toString: () => 'word' }]) assert.deepEqual(quote({ unit, text: 'x' }), UNIT, JSON.stringify(unit));
+  // The body its unit carries, and no other: a mismatch names what the unit is sent as.
+  assert.deepEqual(quote({ unit: 'row', text: 'x' }), { error: 'A row is sent as a table.' });
+  assert.deepEqual(quote({ unit: 'word', items: ['x'] }), { error: 'A word is sent as text.' });
+  assert.deepEqual(quote({ unit: 'item', text: 'x' }), { error: 'An item is sent as a list.' });
+  assert.deepEqual(quote({ unit: 'slide', table: { rows: [['x']], head: 0, side: 0 } }), { error: 'A slide is sent as a title and a list.' });
+  assert.deepEqual(quote({ unit: 'view', text: 'x' }), { error: 'What you see is sent as the blocks in view.' });
+  assert.deepEqual(quote({ unit: 'word', text: 'x', items: ['y'] }), { error: 'A word is sent as text.' }, 'exactly one body');
+  // A field of the wrong type refuses the whole take; an unknown key is left behind; the result is a fresh object.
+  const READ = { error: 'That quote could not be read.' };
+  for (const c of [{ unit: 'word', text: 5 }, { unit: 'word', text: 'x', title: 5 }, { unit: 'word', text: 'x', note: [] }, { unit: 'item', items: 'x' }, { unit: 'item', items: [5] }, { unit: 'item', items: ['x'], ordered: 'yes' },
+    { unit: 'item', items: ['x'], start: 0 }, { unit: 'cell', table: { rows: [['x']] } }, { unit: 'cell', table: { rows: [['x']], head: 2, side: 0 } }, { unit: 'cell', table: { rows: 'x', head: 0, side: 0 } },
+    { unit: 'cell', table: { rows: [['x']], head: 0, side: 0, focus: [1, 0] } }, { unit: 'cell', table: { rows: [['x']], head: 0, side: 0, ref: 5 } }, { unit: 'view', blocks: [{ kind: 'img', text: 'x' }] },
+    { unit: 'view', blocks: ['x'] }, { unit: 'word', text: 'x', cut: 'yes' }]) assert.deepEqual(quote(c), READ, JSON.stringify(c));
+  const asked = { unit: 'paragraph', text: 'Net revenue rose.', extra: 'left behind', kind: 'snippet' };
+  const clean = quote(asked);
+  assert.deepEqual(clean, { kind: 'snippet', unit: 'paragraph', text: 'Net revenue rose.' });
+  assert.notEqual(clean, asked);
+  // Nothing to show is no quote.
+  for (const c of [{ unit: 'word', text: '  \u200b ' }, { unit: 'item', items: ['', ' '] }, { unit: 'cell', table: { rows: [['', '']], head: 0, side: 0 } }, { unit: 'view', blocks: [{ kind: 'p', text: '' }] }]) {
+    assert.deepEqual(quote(c), { error: 'There is nothing to show in that quote.' }, JSON.stringify(c));
+  }
+  // The bounds, in characters (code points) and counts, refused in words: 1,200 a text, 20 items of 300, 25 rows × 10
+  // columns of 200, 12 blocks, 4,000 in all.
+  assert.equal(quote({ unit: 'paragraph', text: '😀'.repeat(1200) }).text.length, 2400, '1,200 code points: no surrogate pair counted twice');
+  assert.deepEqual(quote({ unit: 'paragraph', text: 'x'.repeat(1201) }), { error: 'Too long for the stage: 1,200 characters at most (this is 1,201)' });
+  assert.deepEqual(quote({ unit: 'item', items: Array(21).fill('x') }), { error: 'Too long for the stage: 20 items at most (this is 21)' });
+  assert.deepEqual(quote({ unit: 'item', items: ['x'.repeat(301)] }), { error: 'Too long for the stage: an item is 300 characters at most (this is 301)' });
+  assert.deepEqual(quote({ unit: 'range', table: { rows: Array(26).fill(['1']), head: 0, side: 0 } }), { error: 'Too big for the stage: narrow it to 25 rows × 10 columns' });
+  assert.deepEqual(quote({ unit: 'range', table: { rows: [Array(11).fill('1')], head: 0, side: 0 } }), { error: 'Too big for the stage: narrow it to 25 rows × 10 columns' });
+  assert.deepEqual(quote({ unit: 'cell', table: { rows: [['x'.repeat(201)]], head: 0, side: 0 } }), { error: 'Too long for the stage: a cell is 200 characters at most (this is 201)' });
+  assert.deepEqual(quote({ unit: 'view', blocks: Array(13).fill({ kind: 'p', text: 'x' }) }), { error: 'Too long for the stage: 12 blocks at most (this is 13)' });
+  assert.deepEqual(quote({ unit: 'view', blocks: Array(4).fill({ kind: 'p', text: 'x'.repeat(1000) }).concat([{ kind: 'p', text: 'y' }]) }), { error: 'Too long for the stage: 4,000 characters at most (this is 4,001)' });
+  assert.deepEqual(SNIPPET.whole, 4000);
+  // A short row padded; labels, a reference and the cell it is of kept.
+  assert.deepEqual(quote({ unit: 'range', table: { rows: [['Item', 'Q1', 'Q2'], ['Plant']], head: 1, side: 1, ref: 'A1:C2', focus: [1, 0] } }).table, { rows: [['Item', 'Q1', 'Q2'], ['Plant', '', '']], head: 1, side: 1, ref: 'A1:C2', focus: [1, 0] });
+  // Cut only as the researcher chose it: text, or a full-sized table (25 rows or 10 columns), `more` with it alone.
+  const full = Array.from({ length: 25 }, () => ['1', '2']);
+  assert.deepEqual(quote({ unit: 'range', table: { rows: full, head: 0, side: 0 }, cut: true, more: { rows: 40, cols: 0 } }).more, { rows: 40, cols: 0 });
+  assert.equal(quote({ unit: 'paragraph', text: 'x', cut: true }).cut, true);
+  const NOT_CUT = { error: 'Only text cut to its first 1,200 characters, or a table cut to 25 rows × 10 columns, is sent as cut.' };
+  assert.deepEqual(quote({ unit: 'range', table: { rows: [['1']], head: 0, side: 0 }, cut: true }), NOT_CUT);
+  assert.deepEqual(quote({ unit: 'item', items: ['x'], cut: true }), NOT_CUT);
+  assert.deepEqual(quote({ unit: 'range', table: { rows: full, head: 0, side: 0 }, more: { rows: 1, cols: 0 } }), NOT_CUT, '`more` needs the cut');
+  assert.deepEqual(quote({ unit: 'range', table: { rows: full, head: 0, side: 0 }, cut: true, more: { rows: -1, cols: 0 } }), NOT_CUT);
+  assert.deepEqual(quote({ unit: 'paragraph', text: 'x', cut: false }), { kind: 'snippet', unit: 'paragraph', text: 'x' }, 'cut true only when sent as true');
+  // A list's own numbering, a slide's title.
+  assert.deepEqual(quote({ unit: 'item', items: ['a', 'b'], ordered: true, start: 3 }), { kind: 'snippet', unit: 'item', items: ['a', 'b'], ordered: true, start: 3 });
+  assert.deepEqual(quote({ unit: 'slide', title: 'Results', items: ['Revenue up'] }), { kind: 'snippet', unit: 'slide', title: 'Results', items: ['Revenue up'] });
+  // Every string cleaned as a block (its lines kept), a title and a note as a line.
+  assert.deepEqual(quote({ unit: 'selection', text: 'one\r\ntwo\u202e', title: 'Cap\nex', note: ' Q3 \u0007' }), { kind: 'snippet', unit: 'selection', title: 'Capex', text: 'one\ntwo', note: 'Q3' });
+});
+
+test('cleanSnippet\'s source: a file of the hall by its name and place (never its address), the researcher\'s own copy said as theirs, a web page by its host; a place of its file\'s type; a picture has no words', () => {
+  // A file of the hall: sourceOk's verdict; kept by its name, type, place and side room, never its address.
+  assert.deepEqual(quote({ unit: 'cell', table: { rows: [['4.2']], head: 0, side: 0 }, from: { url: Q_XLSX, at: { sheet: 1, ref: '\'Q3\'!C4' } } }).from, { name: 'Q3.xlsx', type: 'xlsx', at: { sheet: 1, ref: '\'Q3\'!C4' } });
+  assert.deepEqual(quote({ unit: 'paragraph', text: 'x', from: { url: Q_DOCX, at: { block: 12, page: 3, approx: true, heading: 'Capex' } } }).from, { name: 'Minutes.docx', type: 'docx', at: { block: 12, page: 3, approx: true, heading: 'Capex' }, room: 'LGQ4MZP8', roomName: 'Legal' });
+  assert.deepEqual(quote({ unit: 'paragraph', text: 'x', from: { url: Q_XLSX } }, { source: () => ({ error: 'That file belongs to another room — send it from there.' }) }), { error: 'That file belongs to another room — send it from there.' });
+  assert.deepEqual(quote({ unit: 'paragraph', text: 'x', from: { url: Q_XLSX } }, {}), { error: 'That file is in no room of this hall you can read — share it there first.' }, 'no source facts: refused');
+  // A place of its file's type alone: `approx` with a Word document's page alone; a run of lines a ≤ b.
+  const AT = { error: 'That place cannot be read for this file: a page or a slide (1-9999), a sheet (1-64), a paragraph or a line (1-999999), a run of lines, a cell\'s reference or a heading.' };
+  for (const at of [{ page: 3 }, { sheet: 65 }, { sheet: 1, ref: 'x'.repeat(65) }, 'p. 3', { sheet: 1, approx: true }]) assert.deepEqual(quote({ unit: 'word', text: 'x', from: { url: Q_XLSX, at } }), AT, JSON.stringify(at));
+  assert.deepEqual(quote({ unit: 'word', text: 'x', from: { url: Q_DOCX, at: { block: 1, approx: true } } }), AT, 'approx with a Word page alone');
+  assert.deepEqual(quote({ unit: 'word', text: 'x', from: { local: true, name: 'notes.md', at: { lines: [9, 4] } } }), AT);
+  assert.deepEqual(quote({ unit: 'word', text: 'x', from: { local: true, name: 'notes.md', at: { lines: [4, 9], heading: 'Plan' } } }).from, { local: true, name: 'notes.md', type: 'md', at: { lines: [4, 9], heading: 'Plan' } });
+  // The researcher's own copy: its name the client's, said as theirs (its type a stage type's, never a picture's).
+  assert.deepEqual(quote({ unit: 'word', text: 'x', from: { local: true, name: 'Board pack.pdf', at: { page: 12 } } }).from, { local: true, name: 'Board pack.pdf', type: 'pdf', at: { page: 12 } });
+  assert.deepEqual(quote({ unit: 'word', text: 'x', from: { local: true, name: 'plan.zip' } }), { error: 'AGMessage does not show that kind of file on the stage: share it for download.' });
+  assert.deepEqual(quote({ unit: 'word', text: 'x', from: { local: true, name: 'stage.png' } }), { error: 'A picture has no words to quote: show a picture of it instead.' });
+  assert.deepEqual(quote({ unit: 'word', text: 'x', from: { url: PIC } }), { error: 'A picture has no words to quote: show a picture of it instead.' });
+  // A web page: its address by webUrl's rules, kept with its host.
+  assert.deepEqual(quote({ unit: 'text', text: 'x', from: { web: 'https://vote.example.com/r?t=1#q' } }).from, { web: 'https://vote.example.com/r?t=1#q', host: 'vote.example.com' });
+  assert.deepEqual(quote({ unit: 'text', text: 'x', from: { web: 'http://vote.example.com/' } }), { error: 'A web page is shown by its https address, as a browser shows it.' });
+  // One way of coming, never two, and never a shape of none.
+  const FROM = { error: 'A quote comes from a file of this hall, your own copy of one or a web page, or it is typed.' };
+  for (const from of [{}, 'x', { url: Q_XLSX, web: 'https://vote.example.com/' }, { local: 'yes', name: 'a.pdf' }, { web: 5 }]) assert.deepEqual(quote({ unit: 'word', text: 'x', from }), FROM, JSON.stringify(from));
+});
+
+test('a quote kept and told: its source by name and room, a web page\'s address sealed at rest and told to no page, read back in its clean shape; described in two voices; its words in reading order', () => {
+  const p = new Pages(path.join(folder(), 'pages.json'), { seal: (u) => 'enc1:' + Buffer.from(u).toString('base64'), open: (s) => Buffer.from(s.slice(5), 'base64').toString() });
+  p.hold();
+  const cell = quote({ unit: 'cell', table: { rows: [['', 'Q3'], ['Revenue', '4.2']], head: 1, side: 1, ref: 'C4', focus: [1, 1] }, from: { url: Q_XLSX, at: { sheet: 1, ref: '\'Q3\'!C4' } } });
+  const t1 = p.take(HALL, 'board', cell, { name: 'Ana' });
+  assert.ok(t1, 'kept');
+  assert.deepEqual(p.told(p.current(HALL, '', { board: true, layer: 'info' }).take.content), cell);
+  const legal = quote({ unit: 'paragraph', text: 'Clause 4 is signed.', from: { url: Q_DOCX, at: { block: 4, page: 2 } } });
+  p.take(HALL, 'board', legal, { name: 'Ana' });
+  const toldLegal = p.told(p.current(HALL, '', { board: true, layer: 'info' }).take.content);
+  assert.deepEqual(toldLegal.from, { name: 'Minutes.docx', type: 'docx', at: { block: 4, page: 2 }, roomName: 'Legal' }, 'a side room said by its name, its key kept on this laptop');
+  const web = quote({ unit: 'text', text: 'Turnout 64%', from: { web: 'https://vote.example.com/r?token=s3cr3t' } });
+  const t3 = p.take(HALL, 'board', web, { name: 'Ana' });
+  const kept = p.current(HALL, '', { board: true, layer: 'info' }).take.content;
+  assert.deepEqual(kept.from, { host: 'vote.example.com', urlSealed: 'enc1:' + Buffer.from('https://vote.example.com/r?token=s3cr3t').toString('base64') });
+  assert.deepEqual(p.told(kept).from, { host: 'vote.example.com' }, 'told by its host alone');
+  // A run that cannot seal keeps the host alone, never the address in clear.
+  const bare = new Pages(path.join(folder(), 'pages.json'), { seal: () => { throw new Error('no key'); } });
+  bare.take(HALL, 'board', web, { name: 'Ana' });
+  assert.deepEqual(bare.current(HALL, '', { board: true, layer: 'info' }).take.content.from, { host: 'vote.example.com' });
+  // Read back from the file in its clean shape; a quote of the wrong shape is dropped.
+  p.flush();
+  const back = new Pages(path.join(path.dirname(p.lane.file), 'pages.json'));
+  assert.equal(back.current(HALL, '', { board: true, layer: 'info' }).take.seq, t3.seq);
+  assert.deepEqual(back.earlierOf(HALL, '', { board: true }).map((e) => e.content), [p.told(legal), cell], 'Earlier read back');
+  assert.ok(!fs.readFileSync(path.join(path.dirname(p.lane.file), 'pages.json'), 'utf8').includes('s3cr3t') && !fs.readFileSync(path.join(path.dirname(p.lane.file), 'pages.json'), 'utf8').includes(Q_XLSX.slice(9)), 'no address at rest');
+  const file = path.join(folder(), 'pages.json');
+  const good = { seq: 3, content: cell, by: { name: 'Ana' }, at: 1 };
+  fs.writeFileSync(file, JSON.stringify({ v: 1, views: {}, halls: { [HALL]: { seq: 9, board: { info: { ...good, content: { ...cell, unit: 'region' } } }, people: { [BEN]: { info: good } }, answers: {}, earlier: [{ ...good, seq: 4, to: 'board', content: { ...cell, from: { url: Q_XLSX } } }] } } }));
+  const read = new Pages(file);
+  assert.equal(read.current(HALL, '', { board: true, layer: 'info' }).take, null, 'a unit that is none: dropped');
+  assert.deepEqual(read.current(HALL, BEN, { layer: 'info' }).take.content, cell, 'a quote of its shape: kept');
+  assert.deepEqual(read.earlierOf(HALL, '', { board: true }), [], 'a source with an address: dropped');
+  // Its words: the console's by unit, file and place; the audit's by unit, size and type, never a name or a word of it.
+  assert.equal(describePage(cell), '❝ a table cell from Q3.xlsx, \'Q3\'!C4');
+  assert.equal(describePage(cell, { voice: 'audit' }), 'a quote (a table cell, 3 characters) from a spreadsheet');
+  assert.equal(describePage(legal, { voice: 'audit', sent: 'Legal' }), 'a quote (a paragraph, 19 characters) from a Word document in Legal, sent from Legal');
+  assert.equal(describePage(legal), '❝ a paragraph from Minutes.docx in Legal, p. 2');
+  assert.equal(describePage(quote({ unit: 'column', table: { rows: [['Q3'], ['1'], ['2'], ['3'], ['4'], ['5'], ['6']], head: 1, side: 0 }, from: { url: Q_XLSX, at: { sheet: 1 } } }), { voice: 'audit' }), 'a quote (a table column, 6 cells) from a spreadsheet');
+  assert.equal(describePage(quote({ unit: 'text', text: 'Revenue Q3: £4.2m' }), { by: 'Ana' }), '❝ a quote typed by Ana (17 characters)');
+  assert.equal(describePage(quote({ unit: 'text', text: 'Revenue Q3: £4.2m' }), { voice: 'audit' }), 'a quote (typed, 17 characters)');
+  assert.equal(describePage(web), '❝ a quote from vote.example.com');
+  assert.equal(describePage(kept, { voice: 'audit' }), 'a quote from a web page on vote.example.com');
+  assert.equal(describePage(quote({ unit: 'item', items: ['a', 'b', 'c'], from: { local: true, name: 'Pack.pdf', at: { page: 3 } } })), '❝ 3 list items from their copy of Pack.pdf, p. 3');
+  assert.equal(describePage(quote({ unit: 'paragraph', text: 'x', from: { local: true, name: 'Pack.pdf', at: { page: 3 } } }), { voice: 'audit' }), 'a quote (a paragraph, 1 character) from a PDF, from a local copy');
+  for (const c of [cell, legal, web, kept]) assert.ok(!/Q3\.xlsx|Minutes|4\.2|Clause|Turnout|uploads/.test(describePage(c, { voice: 'audit' })), describePage(c, { voice: 'audit' }));
+  // Its words in reading order: a title, its text, items a line each, a row's cells joined.
+  assert.equal(snippetText(quote({ unit: 'slide', title: 'Results', items: ['Revenue up', 'Costs flat'] })), 'Results\nRevenue up\nCosts flat');
+  assert.equal(snippetText(cell), 'Q3\nRevenue · 4.2');
+  assert.equal(snippetText({ kind: 'clock' }), '');
+  // What a page reports of a quote is what any drawn take reports.
+  assert.deepEqual(reportsOf('snippet'), ['shown', 'hidden', 'failed', 'dismissed', 'minimised']);
+  assert.equal(t1.content.kind, 'snippet');
 });

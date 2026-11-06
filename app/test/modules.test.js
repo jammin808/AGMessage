@@ -1677,8 +1677,10 @@ test('(n) the kinds in step: lib/pages.js\'s KINDS and describePage\'s words are
   assert.deepEqual(boardKinds, ['chat', ...pagesLib.SHOW_LAYER].map((k) => 'board.' + k));
   assert.deepEqual([...C.SHOW_KINDS.map((k) => k[0])], [...pagesLib.KINDS]);
   // A document and a picture are shown from a file, never from the chip, which names none: the page's file kinds are the
-  // store's.
+  // store's. A quote is shown from what a researcher picked in the Preview, never from the chip, which picks nothing: the
+  // store's information kinds that are neither a web page nor a file's.
   assert.deepEqual([...C.FILE_KINDS], [...pagesLib.FILE_KINDS]);
+  assert.deepEqual([...C.PICKED_KINDS], pagesLib.INFO_LAYER.filter((k) => k !== 'web' && !pagesLib.FILE_KINDS.includes(k)));
   assert.deepEqual(kindsCatalogueProblems(C, pagesLib.KINDS), []);
   assert.deepEqual(kindsCatalogueProblems(C, ['chat', 'clock']), ['the store\'s kinds and the Board chip\'s are not one set: board.chat, board.stage, board.clock, board.holding, board.blank, board.web against board.chat, board.clock'], 'a kind the store has not fails it');
 });
@@ -1690,13 +1692,13 @@ function catalogOf() {
   vm.runInContext(read('public/catalog.js'), ctx, { filename: 'catalog.js' });
   return ctx.AGM.catalog;
 }
-/** The Board chip's show kinds against `kinds` (but the kinds shown from a file, FILE_KINDS): one set, in order. */
+/** The Board chip's show kinds against `kinds` (but the kinds shown from a file or a pick, FILE_KINDS and PICKED_KINDS): one set, in order. */
 function kindsCatalogueProblems(C, kinds) {
   // The show's kinds, a radio each (the Board's pages show one at a time), then the information's, an entry each.
   const radio = C.KINDS.board.filter((e) => e.verb === 'page:push' && e.radio).map((e) => e.id);
   const info = C.KINDS.board.filter((e) => e.verb === 'page:push' && !e.radio && C.SHOW_KINDS.some((k) => 'board.' + k[0] === e.id)).map((e) => e.id);
   const ids = [...radio, ...info];
-  const want = kinds.filter((k) => !C.FILE_KINDS.includes(k)).map((k) => 'board.' + k);
+  const want = kinds.filter((k) => !C.FILE_KINDS.includes(k) && !C.PICKED_KINDS.includes(k)).map((k) => 'board.' + k);
   return JSON.stringify(ids) === JSON.stringify(want) ? [] : ['the store\'s kinds and the Board chip\'s are not one set: ' + ids.join(', ') + ' against ' + want.join(', ')];
 }
 

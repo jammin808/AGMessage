@@ -91,7 +91,7 @@ people only to one who may read the hall's Main room.
 ### Two layers: the show, and information over it
 
 A page holds two takes at once. **The show** is the operator's: Stagewatch, the clock, holding, blank. **Information** is
-drawn over it: a web page, a document or a picture (below), and quotes as they land. Each layer is numbered by the hall's one
+drawn over it: a web page, a document, a picture or a quote (below). Each layer is numbered by the hall's one
 counter, answered by the person on its own, and told to the page in its own word (`page:take` names its `layer`); the
 join answers the show (`page`), the information over it (`over`), the page's Earlier (`earlier`) and the information
 beside the operator's in its side bar (`beside`).
@@ -243,6 +243,54 @@ its own on the pusher's page, so a target is never handed the original. A note i
   On stage too, by the take's number (`file:download {seq}`); without the tick: "This was shown without Download."
 - **Never a file for download only** (a transfer type, or a Word, Excel or PowerPoint file protected with a password):
   "That file is for download only: AGMessage does not open it.", as a document, a picture or a holding picture alike.
+
+### A quote
+
+**A quote** (`{kind: 'snippet', unit, title?, text | items | table | blocks, from?, note?, cut?, more?}`, plan 4-§5.9.4)
+is words or cells the backstage team picked in a file in their Preview (a word, a sentence, a line, a list's items, a
+paragraph, a table's cell, row, column or range, a slide, a selection, or the blocks in view), carried as data and drawn
+by the page, never HTML: every string is read by its type and cleaned as a block (its line breaks kept; controls, bidi
+overrides and invisible characters dropped). `unit` carries its one body (a cell, a row, a column and a range a table,
+`{rows, head, side, ref?, focus?}`, its label row and column marked; a slide its title and items; what is in view its
+blocks). It names where it comes from by the file's name and its place (`from`: a page, a slide, a sheet and a cell's
+reference, a paragraph with its Word page, "≈" where approximate, a run of lines), never the file's address; the pusher's
+own copy is said as theirs; a web page by its host, its address sealed at rest; with none, it was typed. Its source is a
+file the stage may show from (`sourceOk`, as a document's); a picture has no words to quote.
+
+- **Its bounds**, refused in words, never cut by the server: 1,200 characters of text ("Too long for the stage: 1,200
+  characters at most (this is 1,860)"), 20 items of 300, 25 rows × 10 columns of 200 ("Too big for the stage: narrow it
+  to 25 rows × 10 columns"), 12 blocks, 4,000 characters in all, counted as code points. The cut is the researcher's own
+  choice, offered by the bar: `cut` on text, or on a table at its full 25 rows or 10 columns, `more` saying what was left
+  out ("… 40 more rows not shown").
+- **Drawn** in a `<blockquote>`, a list or a `<table>`, each paragraph and cell `dir="auto"`, its line breaks kept, in the
+  largest type that fits (between 28 px, 20 px under 600 px wide, and 12vw, in at most 12 steps); numbers to the right,
+  the cell it is of outlined and bold; a table wider than the screen scrolls sideways inside its card, its label row and
+  column kept in view. Its line says who quoted it, in their voice: "Quoted by Ana · Board pack.pdf, p. 12", "Quoted by
+  Ana from their copy of …", "Quoted by Ana · vote.example.com", "Typed by Ana"; a side room's file adds its name. Its
+  card reads its first 40 characters ("❝ Revenue Q3 £4.2m"); one that arrives in the side bar keeps the card's type. It
+  reports `shown` once laid out on a frame in view, with "longer than the screen: it scrolls" where it is ("longer than
+  its card in the side bar" in a card); a table in a quote longer than its box scrolls down inside its own card too, its
+  label row kept in view. Under Earlier its Look draws it again on that page alone.
+- **Its words** in the console: "❝ a table cell from Q3.xlsx, 'Sheet1'!C4", "❝ a quote typed by Ana (42 characters)",
+  "❝ a quote from vote.example.com"; its `page.push` row: "a quote (a table cell, 18 characters) from a spreadsheet",
+  "a quote (typed, 42 characters)", never a word of it, a file's name or an address.
+- **The quote is its pusher's claim**: the server never parses a document, so it cannot check that the words are in the
+  file; the page's `shown` is the fact.
+- **From the Preview**: a highlight made first is a pick, and the Preview's bar offers its units as chips with their
+  sizes, the smallest chosen (the last one used where two are as small), drawing the quote as the Board's page will;
+  📺 Show sends it to the Board or the person chosen there, over their chat or in their side bar. A right-click on the
+  pick, the bar's ⋯ and a second tap on it open the same list as a menu (the catalogue's kind `pick`): Copy, each unit,
+  **Picture of this page** (a PDF's; of the region, for a region; **This picture alone**, for a picture tapped in a Word
+  document or a slide), **What I see** (a PDF's or a picture's part in view as a new picture; a document's blocks or
+  cells in view as a quote, and over the stage's bounds the bound said and **Send what fits** offered, never cut by
+  itself), **The document at this place**, and a person. **▭ Region** draws a part of a PDF's page (a picture's always)
+  to send as a new picture, its metadata never with it. A cell's labels are the sheet's frozen panes by default (its
+  header, never a title row above it), else its first row and column, or those marked; a hidden row, column or sheet is
+  never picked. The bar says whose information the target is reading where another pusher's is under 15 s old ("The
+  Board is reading Ben's quote (8 s) — Replace · Show a person instead"), for every choice on the Preview's bar, and
+  refuses nothing for it; over the operator's information, a seat
+  that may only show sends to their side bar, and the bar says so. A picture uploaded and turned away by the uploads' rate
+  says "Sending in 2 s…" and goes again, three times at most.
 
 ### Showing it: the Board chip and the console
 

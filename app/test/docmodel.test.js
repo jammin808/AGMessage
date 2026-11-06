@@ -8,7 +8,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
-const { ROOT, readSource, officeZip, docWorker, pngOf, OOXML, deckParts, deckShape: sp, deckPicture: pic, deckSlide: slide, workbookParts: bookParts } = require('./helpers');
+const { ROOT, readSource, officeZip, docWorker, pngOf, OOXML, deckParts, deckShape: sp, deckPicture: pic, deckSlide: slide, workbookParts: bookParts, sheetParts, relsOf } = require('./helpers');
 
 let M;
 test.before(async () => { M = await import('../public/docmodel.mjs'); });
@@ -290,6 +290,32 @@ test('the document worker: a sheet is read to its first 256 columns and as many 
   assert.equal((await docWorker('sheet', officeZip(low), { ext: 'xlsx' })).book.sheets[0].truncated, true);
 });
 
+test('the document worker: a sheet\'s frozen panes, its first view\'s, read from the part its relationship names and counted from the first row read; a split that is not frozen is none', async () => {
+  const frozen = await docWorker('sheet', officeZip(sheetParts([['Results for Q3'], ['', 'Q1', 'Q2'], ['Revenue', '1', '2']], 'Results', { frozen: { rows: 2, cols: 1 }, hiddenSheet: [['x']] })), { ext: 'xlsx' });
+  assert.equal(frozen.ok, true, JSON.stringify(frozen));
+  assert.deepEqual(frozen.book.sheets.map((x) => [x.name, x.frozen]), [['Results', { rows: 2, cols: 1 }], ['Hidden', undefined]]);
+  // The sheets found by the workbook's relationships, as SheetJS finds them, never by their parts' names: the first sheet
+  // is the second part here, named from the root; and a sheet whose data begins at row 3 counts its frozen rows from there.
+  const parts = sheetParts([['a']], 'First', { hiddenSheet: [['b']] });
+  parts['xl/_rels/workbook.xml.rels'] = relsOf([['rId1', 'worksheet', '/xl/worksheets/sheet2.xml'], ['rId2', 'worksheet', 'worksheets/sheet1.xml']]);
+  parts['xl/worksheets/sheet2.xml'] = OOXML + '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="4" topLeftCell="A5" state="frozen"/></sheetView></sheetViews>'
+    + '<sheetData><row r="3"><c r="A3" t="inlineStr"><is><t>Title</t></is></c></row><row r="4"><c r="A4" t="inlineStr"><is><t>Head</t></is></c></row></sheetData></worksheet>';
+  parts['xl/worksheets/sheet1.xml'] = OOXML + '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"/><sheetView workbookViewId="1"><pane xSplit="2" state="frozen"/></sheetView></sheetViews>'
+    + '<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>b</t></is></c></row></sheetData></worksheet>';
+  const found = await docWorker('sheet', officeZip(parts), { ext: 'xlsx' });
+  assert.deepEqual(found.book.sheets.map((x) => [x.rows[0][0], x.origin.r, x.frozen]), [['Title', 2, { rows: 2, cols: 0 }], ['b', 0, undefined]], 'the second view\'s pane is not the first view\'s');
+  const split = sheetParts([['a']]);
+  split['xl/worksheets/sheet1.xml'] = split['xl/worksheets/sheet1.xml'].replace('<sheetData>', '<sheetViews><sheetView workbookViewId="0"><pane xSplit="1200" ySplit="900" state="split"/></sheetView></sheetViews><sheetData>');
+  assert.equal((await docWorker('sheet', officeZip(split), { ext: 'xlsx' })).book.sheets[0].frozen, undefined, 'a split is not frozen');
+});
+
+test('picks: a sheet\'s labels default to its frozen panes (the last frozen row and column a pick may read), else to the first row and column a pick may read', () => {
+  assert.deepEqual(M.labelsOf({ rows: 2, cols: 1 }, [0, 1, 2], [0, 1, 2]), { row: 1, col: 0 }, 'a title row above the frozen header is no label');
+  assert.deepEqual(M.labelsOf(null, [0, 1, 2], [0, 1, 2]), { row: 0, col: 0 }, 'none frozen: row 1 and column A');
+  assert.deepEqual(M.labelsOf({ rows: 2, cols: 0 }, [0, 2], [1, 2]), { row: 0, col: 1 }, 'a frozen row that is hidden, and no column frozen: the first a pick may read');
+  assert.deepEqual(M.labelsOf({ rows: 1 }, [], []), { row: -1, col: -1 }, 'nothing a pick may read: no labels');
+});
+
 test('the document worker: an Excel 97-2003 file is read as itself; a file that is neither a workbook\'s archive nor one is refused, and a zip named .xls is held to the archive check', async () => {
   const vm = require('node:vm');
   const ctx = vm.createContext({ TextDecoder, TextEncoder });
@@ -402,4 +428,79 @@ test('readInWorker: a document closed while its worker reads ends the worker at 
   assert.deepEqual(await M.readInWorker(new ArrayBuffer(8), 'word', { make: () => quick, signal: later.signal }), { ok: true, done: 1 });
   later.abort();
   assert.equal(quick.ended, 1);
+});
+
+test('picks: a grid\'s cell with its two labels, its row with the label row, its column with its label cell, a range with the labels beside it; hidden rows and columns never among them; over 25 × 10 refused, or cut as chosen', () => {
+  const g = [['', 'Q1', 'Q2', 'Q3'], ['Revenue', '1', 'HIDDEN', '4.2'], ['Costs', '3', '4', '3.9'], ['SECRET', '9', '9', '9']];
+  const get = (r, c) => g[r][c];
+  // Column C (2) and row 4 (3) are hidden: never among the rows and columns a pick may read.
+  const o = { rows: [0, 1, 2], cols: [0, 1, 3], labels: { row: 0, col: 0 } };
+  assert.deepEqual(M.gridQuote(get, { ...o, unit: 'cell', r: 1, c: 3, name: 'Q3 sheet' }), { unit: 'cell', table: { rows: [['', 'Q3'], ['Revenue', '4.2']], head: 1, side: 1, ref: '\'Q3 sheet\'!D2', focus: [1, 1] }, size: '3 ch' });
+  assert.deepEqual(M.gridQuote(get, { ...o, unit: 'cell', r: 1, c: 3, withLabels: false }).table, { rows: [['4.2']], head: 0, side: 0, ref: 'D2', focus: [0, 0] }, 'with labels off: the cell alone');
+  assert.deepEqual(M.gridQuote(get, { ...o, unit: 'cell', r: 0, c: 3 }).table.rows, [['Q3']], 'a label itself has no labels');
+  assert.deepEqual(M.gridQuote(get, { ...o, unit: 'row', r: 2, c: 1 }).table, { rows: [['', 'Q1', 'Q3'], ['Costs', '3', '3.9']], head: 1, side: 1, ref: 'row 3' });
+  assert.deepEqual(M.gridQuote(get, { ...o, unit: 'column', r: 1, c: 3 }), { unit: 'column', table: { rows: [['Q3'], ['4.2'], ['3.9']], head: 1, side: 0, ref: 'column D' }, size: '2 cells' });
+  assert.deepEqual(M.gridQuote(get, { ...o, unit: 'range', r: 1, c: 1, r1: 2, c1: 3 }).table, { rows: [['', 'Q1', 'Q3'], ['Revenue', '1', '4.2'], ['Costs', '3', '3.9']], head: 1, side: 1, ref: 'B2:D3' });
+  // A label row or column marked elsewhere, or none (-1); a cell with one label goes with that one.
+  assert.deepEqual(M.gridQuote(get, { ...o, labels: { row: -1, col: -1 }, unit: 'cell', r: 1, c: 3 }).table.rows, [['4.2']]);
+  assert.deepEqual(M.gridQuote(get, { ...o, labels: { row: 0, col: -1 }, unit: 'cell', r: 1, c: 3 }).table, { rows: [['Q3'], ['4.2']], head: 1, side: 0, ref: 'D2', focus: [1, 0] }, 'a header row alone: the label over it');
+  assert.deepEqual(M.gridQuote(get, { ...o, labels: { row: -1, col: 0 }, unit: 'cell', r: 1, c: 3 }).table, { rows: [['Revenue', '4.2']], head: 0, side: 1, ref: 'D2', focus: [0, 1] }, 'a label column alone: the name beside it');
+  // A hidden row or column is never quoted, whatever names it: a header's pick, a cell's, a range's end.
+  assert.equal(M.gridQuote(get, { ...o, unit: 'column', r: 0, c: 2 }), null, 'the hidden column C');
+  assert.equal(M.gridQuote(get, { ...o, unit: 'row', r: 3, c: 0 }), null, 'the hidden row 4');
+  assert.equal(M.gridQuote(get, { ...o, unit: 'cell', r: 1, c: 2 }), null, 'a cell of a hidden column');
+  assert.equal(M.gridQuote(get, { ...o, unit: 'cell', r: 3, c: 1 }), null, 'a cell of a hidden row');
+  assert.equal(M.gridQuote(get, { ...o, unit: 'range', r: 1, c: 1, r1: 3, c1: 3 }), null, 'a range ending in a hidden row');
+  assert.equal(M.gridQuote(get, { unit: 'cell', r: 1, c: 1, rows: [], cols: [], labels: { row: 0, col: 0 } }), null, 'a hidden sheet: nothing among its rows');
+  // Over 25 rows × 10 columns: refused with how big it is, or cut to it as the researcher chose, the labels kept.
+  const big = (r, c) => (r === 0 ? 'H' + c : String(r * c));
+  const rows = Array.from({ length: 40 }, (_, i) => i);
+  const cols = Array.from({ length: 12 }, (_, i) => i);
+  assert.deepEqual(M.gridQuote(big, { unit: 'range', r: 0, c: 0, r1: 39, c1: 11, rows, cols, labels: { row: 0, col: -1 } }), { error: 'Too big for the stage: narrow it to 25 rows × 10 columns', over: { rows: 40, cols: 12 } });
+  const cut = M.gridQuote(big, { unit: 'range', r: 0, c: 0, r1: 39, c1: 11, rows, cols, labels: { row: 0, col: -1 }, cut: true });
+  assert.deepEqual([cut.table.rows.length, cut.table.rows[0].length, cut.table.rows[0][0], cut.cut, cut.more], [25, 10, 'H0', true, { rows: 15, cols: 2 }]);
+});
+
+test('picks: a tagged PDF\'s table by its structure: a cell under its header row alone, a column over 25 rows refused with its size, or cut to it as chosen and said cut with what was left out', () => {
+  const roles = Array.from({ length: 40 }, (_, r) => ['TH', 'TD', 'TD'].map((k) => (r === 0 ? 'TH' : k)));
+  const get = (r, c) => (r === 0 ? ['Item', 'Q1', 'Q2'][c] : c === 0 ? 'Line ' + r : String(r * 10 + c));
+  assert.deepEqual(M.structQuote(get, roles, { unit: 'cell', r: 2, c: 1 }), { unit: 'cell', table: { rows: [['Q1'], ['21']], head: 1, side: 0, ref: 'row 3, column 2', focus: [1, 0] } }, 'a header row and no label column: the label over it');
+  assert.deepEqual(M.structQuote(get, roles, { unit: 'column', r: 2, c: 1 }), { error: 'Too big for the stage: narrow it to 25 rows × 10 columns', over: { rows: 40, cols: 1 } });
+  const cut = M.structQuote(get, roles, { unit: 'column', r: 2, c: 1, cut: true });
+  assert.deepEqual([cut.unit, cut.table.rows.length, cut.table.rows[0][0], cut.table.rows[24][0], cut.table.head, cut.cut, cut.more], ['column', 25, 'Q1', '241', 1, true, { rows: 15, cols: 0 }]);
+  assert.equal(M.structQuote(get, roles, { unit: 'paragraph', r: 2, c: 1 }), null, 'a table gives cells, rows and columns alone');
+  assert.equal(M.structQuote(get, roles, { unit: 'cell', r: 2, c: 5 }), null, 'a cell not in it');
+});
+
+test('picks: What I see within the stage\'s bounds goes as it is; over them it is never cut by itself — the bound is said, and what fits (the first 12 blocks, a table\'s first 25 rows × 10 columns) offered', () => {
+  const p = (n) => ({ kind: 'p', text: 'Paragraph ' + n });
+  assert.deepEqual(M.viewQuote([p(1), p(2)]), { blocks: [p(1), p(2)] });
+  const many = M.viewQuote(Array.from({ length: 13 }, (_, i) => p(i + 1)));
+  assert.deepEqual([many.over, many.blocks.length, many.blocks[11].text], ['Too much in view for the stage: 13 blocks (12 at most)', 12, 'Paragraph 12']);
+  const tall = M.viewQuote([p(1), { kind: 'table', table: { rows: Array.from({ length: 30 }, (_, r) => Array.from({ length: 12 }, (__, c) => r + '.' + c)), head: 1, side: 0 } }]);
+  assert.equal(tall.over, 'Too much in view for the stage: a table of 30 rows × 12 columns (25 rows × 10 columns at most)');
+  assert.deepEqual([tall.blocks.length, tall.blocks[1].table.rows.length, tall.blocks[1].table.rows[0].length, tall.blocks[1].table.head], [2, 25, 10, 1]);
+  const long = M.viewQuote([{ kind: 'p', text: 'x'.repeat(3000) }, { kind: 'p', text: 'y'.repeat(1500) }], { note: 'For the vote' });
+  assert.match(long.over, /^Too much in view for the stage: (1,200 characters a block|4,000 characters) at most/);
+  assert.ok(long.blocks.reduce((n, b) => n + M.charsOf(b.text), 0) + M.charsOf('For the vote') <= 4000 && long.blocks.every((b) => M.charsOf(b.text) <= 1200), 'what fits fits');
+});
+
+test('picks: a word and a sentence by Intl.Segmenter (a span crossing two is neither), words cut to 1,200 characters as chosen, a quote\'s size for the bar, a merged cell\'s words in each place it covers', () => {
+  const t = 'Net revenue rose. Costs fell!';
+  assert.deepEqual(M.segmentOf(t, 5, 8, 'word'), { start: 4, end: 11, text: 'revenue' });
+  assert.deepEqual(M.segmentOf(t, 4, 4, 'word'), { start: 4, end: 11, text: 'revenue' }, 'a tap: the word under it');
+  assert.equal(M.segmentOf(t, 2, 6, 'word'), null, 'across two words: no word');
+  assert.equal(M.segmentOf(t, 3, 3, 'word'), null, 'a space is no word');
+  assert.equal(M.segmentOf(t, 0, 5, 'sentence').text, 'Net revenue rose.');
+  assert.equal(M.segmentOf(t, 10, 22, 'sentence'), null, 'across two sentences: no sentence');
+  assert.equal(M.segmentOf('売上は増えた。費用は減った。', 0, 2, 'sentence').text, '売上は増えた。', 'a script with no spaces');
+  assert.deepEqual(M.cutText('😀'.repeat(1201)), { text: '😀'.repeat(1200), cut: true }, 'code points, never half a pair');
+  assert.deepEqual(M.cutText('short'), { text: 'short', cut: false });
+  assert.deepEqual([M.quoteSize({ unit: 'paragraph', text: 'x'.repeat(240) }), M.quoteSize({ unit: 'item', items: ['a', 'b', 'c'] }), M.quoteSize({ unit: 'column', table: { rows: [['Q3'], ['1'], ['2']], head: 1, side: 0 } }), M.quoteSize({ unit: 'cell', table: { rows: [['', 'Q3'], ['Rev', '4.2']], head: 1, side: 1, focus: [1, 1] } })],
+    ['240 ch', '3 items', '2 cells', '3 ch']);
+  assert.deepEqual(M.denseRows([[{ text: 'Wide', c: 0, colspan: 2 }, { text: 'C', c: 2 }], [{ text: 'a', c: 0 }, { text: 'b', c: 1 }, { text: 'c', c: 2 }]], 3), [['Wide', 'Wide', 'C'], ['a', 'b', 'c']]);
+  assert.equal(M.cellRef(13, 2), 'C14');
+  assert.deepEqual(M.QUOTE_BOUNDS, { text: 1200, items: 20, item: 300, rows: 25, cols: 10, cell: 200, blocks: 12, whole: 4000 }, 'the server\'s bounds (lib/pages.js SNIPPET), so the bar refuses what it would');
+  const S = require('../lib/pages').SNIPPET;
+  for (const k of Object.keys(M.QUOTE_BOUNDS)) assert.equal(M.QUOTE_BOUNDS[k], S[k], k);
 });

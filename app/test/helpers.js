@@ -736,6 +736,30 @@ const workbookParts = () => ({
 });
 
 /**
+ * A workbook of one sheet (`name`) holding `rows` (each a list of words) from A1, every cell an inline string. `o.hiddenRows`
+ * and `o.hiddenCols` (counted from 0) are hidden, `o.frozen` ({rows, cols}) are its frozen panes, and `o.hiddenSheet` (rows
+ * of words) is a hidden sheet after it, named "Hidden".
+ */
+const sheetParts = (rows, name = 'Sheet1', o = {}) => {
+  const hr = new Set(o.hiddenRows || []);
+  const hc = [...new Set(o.hiddenCols || [])];
+  const data = (list) => '<sheetData>' + list.map((row, r) => '<row r="' + (r + 1) + '"' + (list === rows && hr.has(r) ? ' hidden="1"' : '') + '>'
+    + row.map((v, c) => (v === '' ? '' : sheetCell(String.fromCharCode(65 + c) + (r + 1), v))).join('') + '</row>').join('') + '</sheetData>';
+  const pane = o.frozen ? '<sheetViews><sheetView workbookViewId="0"><pane' + (o.frozen.cols ? ' xSplit="' + o.frozen.cols + '"' : '') + (o.frozen.rows ? ' ySplit="' + o.frozen.rows + '"' : '')
+    + ' topLeftCell="' + String.fromCharCode(65 + (o.frozen.cols || 0)) + ((o.frozen.rows || 0) + 1) + '" activePane="bottomRight" state="frozen"/></sheetView></sheetViews>' : '';
+  const cols = hc.length ? '<cols>' + hc.map((c) => '<col min="' + (c + 1) + '" max="' + (c + 1) + '" width="9" hidden="1" customWidth="1"/>').join('') + '</cols>' : '';
+  const parts = {
+    '[Content_Types].xml': typesOf([['/xl/workbook.xml', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml']]),
+    '_rels/.rels': relsOf([['rId1', 'officeDocument', 'xl/workbook.xml']]),
+    'xl/workbook.xml': OOXML + '<workbook ' + X_NS + '><sheets><sheet name="' + name + '" sheetId="1" r:id="rId1"/>' + (o.hiddenSheet ? '<sheet name="Hidden" sheetId="2" state="hidden" r:id="rId2"/>' : '') + '</sheets></workbook>',
+    'xl/_rels/workbook.xml.rels': relsOf([['rId1', 'worksheet', 'worksheets/sheet1.xml'], ...(o.hiddenSheet ? [['rId2', 'worksheet', 'worksheets/sheet2.xml']] : [])]),
+    'xl/worksheets/sheet1.xml': OOXML + '<worksheet ' + X_NS + '>' + pane + cols + data(rows) + '</worksheet>',
+  };
+  if (o.hiddenSheet) parts['xl/worksheets/sheet2.xml'] = OOXML + '<worksheet ' + X_NS + '>' + data(o.hiddenSheet) + '</worksheet>';
+  return parts;
+};
+
+/**
  * The page's document worker (public/docworker.js) run as a browser runs a worker: in a context of its own, its
  * importScripts reading AGMessage's own files by their address, handed one task ({task, bytes, opts}, the bytes copied
  * into the worker's own ArrayBuffer) and answering it once. Resolves the answer as plain data (picture bytes as Buffers).
@@ -784,6 +808,6 @@ module.exports = {
   stagewatchQuery, ROOT, REPO, TOKEN, readSource, freePort, freeUdpPort, wait, until, startServer, stopServer, restartServer, api, connect, emit, answer, once, pngOf, fakeStagewatch, fakeNode,
   filesUnder, handlerFiles, pageScripts,
   FIXTURE_KEY, OTHER_KEY, HOST, auditKeys, recordsOf, auditLog, serverKey, serverAudit, chainOf, keyedChainOf, keyedLogWithPoints, auditMeter, acceptAll, brief,
-  readZip, unzipTo, SEED_WORDS,
+  readZip, unzipTo, SEED_WORDS, sheetParts,
   officeZip, wordParts, wordPicture, relsOf, typesOf, OOXML, W_NS, deckParts, deckShape, deckPicture, deckSlide, workbookParts, docWorker,
 };

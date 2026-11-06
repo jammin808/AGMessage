@@ -109,7 +109,11 @@ them as evidence only where they matter to the answer (for example how much time
 nothing, say nothing about them, and never guess a value they don't give.
 ${SEATS}`;
 
-async function draftReply(apiKey, { messages, question, docName, docText, instruction, show, where }, signal) {
+/**
+ * A draft of the backstage team's reply. `board`, where the draft is asked in a hall's Main room by one who may show on
+ * the Board's pages, is one line of what those pages show now (the server's words), placed beside the show network's facts.
+ */
+async function draftReply(apiKey, { messages, question, docName, docText, instruction, show, where, board }, signal) {
   const schema = {
     type: 'object', additionalProperties: false, required: ['draft', 'gaps', 'confidence'],
     properties: {
@@ -124,6 +128,7 @@ async function draftReply(apiKey, { messages, question, docName, docText, instru
     question ? 'The question to answer: ' + question : 'Answer the latest question from the Board.',
     instruction ? 'Backstage team note: ' + instruction : '',
     show ? '\nShow network (live facts; may be a few seconds old):\n' + show : '',
+    typeof board === 'string' && board ? '\n' + board.slice(0, 4200) : '',
     docText ? `\nDocument open in the panel ("${docName || 'document'}"), extracted text:\n` + docText : '',
   ].join('\n');
   const r = await ask(apiKey, REPLY_SYSTEM, user, schema, 'medium', 4000, signal);

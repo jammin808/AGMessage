@@ -61,7 +61,7 @@ const roomVerbs = require('./lib/handlers/rooms');
 const takeVerbs = require('./lib/handlers/takes');
 const { Latest, sendEach } = require('./lib/latest');
 const { Displays, cleanContent, describe: describeContent } = require('./lib/displays');
-const { Pages, personKey, sourceOk, mayDownload: seatMayDownload, FILE_KINDS } = require('./lib/pages');
+const { Pages, personKey, sourceOk, mayDownload: seatMayDownload, describePage, snippetText, FILE_KINDS } = require('./lib/pages');
 const uploadcheck = require('./lib/uploadcheck');
 const downloads = require('./lib/downloads');
 const readings = require('./lib/peaks');
@@ -2723,6 +2723,23 @@ io.on('connection', (socket) => {
   // of it), and, in a side room, which room it is, since nobody on stage reads it (lib/ai.js whereLine). The thread is
   // this room's alone.
   const draftFacts = () => ({ messages: room.messages, show: briefFor(room.hall), where: { main: store.isMain(room), room: room.name || '' } });
+  /**
+   * What the Board's pages show over the show now, for a draft asked in a hall's Main room by one who may push or show
+   * there (plan 4-§5.12): one line in the console's words ("On the Board's pages now: ❝ a table cell from Q3.xlsx, …"),
+   * the information over the show, else what is in their side bar beside the operator's. A quote's own words follow only
+   * where this drafter pushed it: another pusher's source may be one the drafter cannot read. A side room's draft carries
+   * none of it (nobody on stage reads that room).
+   */
+  const boardNow = () => {
+    const hall = room ? store.get(room.hall) : null;
+    if (!hall || !store.isMain(room) || !(canPush(hall) || canShow(hall))) return '';
+    const up = (layer) => { const t = pages.current(hall.code, '', { board: true, layer }).take; return t && t.content.kind !== 'chat' ? t : null; };
+    const t = up('info') || up('beside');
+    if (!t) return '';
+    const a = actor();
+    const said = t.content.kind === 'snippet' && !!t.by.who && t.by.who === a.t + ':' + a.id ? snippetText(t.content) : '';
+    return 'On the Board\'s pages now: ' + describePage(t.content, { by: t.by.name, sent: t.sent ? t.sent.name : '' }) + (said ? ' — ' + said : '');
+  };
 
   socket.on('ai:draft', (args = {}, ack) => {
     if (!need(ack)) return;
@@ -2730,6 +2747,7 @@ io.on('connection', (socket) => {
     const docText = typeof args.docText === 'string' ? args.docText.slice(0, 60_000) : '';
     runAi(ack, (signal) => ai.draftReply(aiKey(), {
       ...draftFacts(),
+      board: boardNow(),
       question: typeof args.question === 'string' ? args.question.slice(0, 2000) : '',
       instruction: typeof args.instruction === 'string' ? args.instruction.slice(0, 500) : '',
       docName: typeof args.docName === 'string' ? args.docName.slice(0, 120) : '', docText,

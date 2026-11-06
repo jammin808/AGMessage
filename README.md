@@ -132,6 +132,24 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   moves to another room only from a seat that may download it. **Files to transfer take more types**: zip, MP4, M4A, MOV,
   MP3, WAV, OpenDocument and password-protected Word, Excel and PowerPoint files, their first bytes checked, download
   only ("📦 … · download only"), never opened, previewed or shown by AGMessage.
+- **From the backstage team: a picked word, line, item, paragraph, cell, row or column, a picture, what they see, or the
+  document.** In the Preview a highlight made first is honoured: select words (or tap one), tap a cell (Shift for a
+  range, a column's or a row's header for all of it), and the bar offers the units that hold it as chips with their sizes
+  ("Selection · Sentence · Paragraph · 240 ch"), the smallest chosen; **📺 Show the Board** (or Show Ana) sends it, over
+  their chat or in their side bar, with a line above it if wanted. A right-click on the pick, the bar's ⋯ and a second tap
+  on it open the same list, Copy first. A PDF is read on its text layer, a tagged PDF's paragraphs, items and table cells
+  by its structure (an untagged PDF's paragraphs and items are "≈ best guess", and its tables are sent as a region, a
+  picture); a spreadsheet's cell goes with its row's and its column's labels (the sheet's frozen panes, else its first
+  row and column, or those marked), a column with its label cell, and a hidden row, column or sheet is never picked; a
+  Word quote says Word's own page ("p. 3", "≈ p. 2" where its layout is missing); a picture in a Word document or a slide,
+  tapped, goes as a picture of its own. **🔳 What I see** sends a PDF's or a picture's part in view as a new picture, and
+  a document's blocks or cells in view as data (more than the stage takes is said, and what fits sent only if chosen);
+  **▭ Region** draws a part of a PDF's page (a picture's, always) to send as a picture, without the picture's metadata. A quote is drawn on the Board's page from data, in the largest type that fits (20 px at least on a
+  phone, a wide table scrolling inside its card), saying who quoted it and from where ("Quoted by Ana · Board pack.pdf,
+  p. 12"); it is refused over its bounds (1,200 characters, 25 rows × 10 columns), with the cut offered as the
+  researcher's own choice. Under Earlier, a quote's Look draws it again. The bar says whose information the Board is
+  reading where another's is under 15 s old. The
+  AI's draft, in the Main room, is told what the Board's pages show now (a quote's words only to whoever pushed it).
 - **Messages that land.** Action prompts with tap-to-answer buttons; documents (PDF, Word, Excel, PowerPoint, CSV,
   Markdown, text, images) shared for download, opened in a person's own panel (👁 Look, 👁 Preview), shown to the Board or
   on screens, PDFs on iPads from iPadOS 16.4 (pdf.js's

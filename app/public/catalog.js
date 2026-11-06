@@ -77,14 +77,35 @@
    * picture are shown from a file (FILE_KINDS).
    */
   const SHOW_KINDS = Object.freeze([['chat', 'Chat', 'chat'], ['stage', 'Stagewatch', 'Stagewatch'], ['clock', 'Clock', 'the clock'], ['holding', 'Holding', 'holding'], ['blank', 'Blank', 'blank'], ['web', 'Web page', 'a web page'],
-    ['doc', 'Document', 'a document'], ['image', 'Picture', 'a picture']].map((x) => Object.freeze(x)));
+    ['doc', 'Document', 'a document'], ['image', 'Picture', 'a picture'], ['snippet', 'Quote', 'a quote']].map((x) => Object.freeze(x)));
   /**
    * The kinds that show a file the hall holds (lib/pages.js FILE_KINDS): shown from that file, never from the Board chip's
    * menu or Show them ▸, which name no file.
    */
   const FILE_KINDS = Object.freeze(['doc', 'image']);
-  /** The kinds Show them ▸ offers a person: the show's (a hand-back, a web page and a file are acts of their own). */
-  const SHOW_THEM = Object.freeze(SHOW_KINDS.filter((x) => x[0] !== 'chat' && x[0] !== 'web' && !FILE_KINDS.includes(x[0])));
+  /** The kinds shown from what a researcher picked in the Preview (a quote), never from the Board chip's menu or Show them ▸, which pick nothing. */
+  const PICKED_KINDS = Object.freeze(['snippet']);
+  /** The kinds Show them ▸ offers a person: the show's (a hand-back, a web page, a file and a quote are acts of their own). */
+  const SHOW_THEM = Object.freeze(SHOW_KINDS.filter((x) => x[0] !== 'chat' && x[0] !== 'web' && !FILE_KINDS.includes(x[0]) && !PICKED_KINDS.includes(x[0])));
+  /**
+   * The units a pick in the Preview may be sent as, in the order the bar and its menu draw them (lib/pages.js UNITS but
+   * `view` and `text`, which are What I see and a typed quote's), each with its word.
+   */
+  const PICK_UNITS = Object.freeze([['selection', 'Selection'], ['word', 'Word'], ['sentence', 'Sentence'], ['line', 'Line'], ['item', 'Item'], ['paragraph', 'Paragraph'],
+    ['cell', 'Cell'], ['row', 'Row'], ['column', 'Column'], ['range', 'Range'], ['slide', 'Slide']].map((x) => Object.freeze(x)));
+  /** A pick's unit as the bar reads it ({unit, size, approx?, over?}), or null where the unit does not hold the pick. */
+  const unitIn = (o, unit) => (o && Array.isArray(o.units) ? o.units.find((u) => u.unit === unit) || null : null);
+  /** Who may show the Board a pick: a backstage seat that may show on people's pages, in the full view (the Preview's). */
+  const picksShow = (f) => (f.canPush || f.canShow) && f.role === 'research' && full(f);
+  /**
+   * A unit a pick is sent as: its word with its size ("Paragraph · 240 ch"; "≈ best guess" for a guess read from an untagged
+   * PDF), shown where the unit holds the pick, and disabled with the bound's words where it is over it (the bar offers the
+   * cut).
+   */
+  const pickUnit = ([unit, word]) => ({
+    id: 'pick.' + unit, label: (f, o) => { const u = unitIn(o, unit); return word + (u && u.approx ? ' (≈ best guess)' : '') + (u && u.size ? ' · ' + u.size : ''); },
+    group: '2_send', verb: 'page:push', mode: 'now', may: picksShow, fits: (f, o) => !!unitIn(o, unit), ready: (f, o) => { const u = unitIn(o, unit); return u && u.over ? u.over : true; },
+  });
   const kindName = (kind) => { const k = SHOW_KINDS.find((x) => x[0] === kind); return k ? k[1] : 'Chat'; };
   /**
    * What a take's target shows now, as its object carries it (`kind`, the console's read): a kind of SHOW_KINDS, chat for
@@ -615,6 +636,28 @@
       { id: 'earlier.show', label: (f, o) => (o.find ? 'Show it' : 'Show earlier'), group: '3_keep', inline: () => 1, verb: 'history:before', mode: 'now',
         may: () => true, fits: (f, o) => o.more === true },
     ],
+    // A pick in the Preview: what a researcher highlighted in a file there (words, cells, a region), and the stage
+    // addendum's previewActions(pick) exactly, in its order, Copy first (plan 5-§16.3: the one kind whose order is not its
+    // groups'): Copy · each unit that holds the pick · a picture of the page · what is in view · the document at this
+    // place · ▸ a person. The bar draws the units as its chips; a right-click on the pick (AGMessage's menu, in place of the
+    // browser's here), the bar's ⋯ and a second tap on the pick open all of them. Each sends to the bar's target (the
+    // Board, or the person chosen there), over their chat or in their side bar as the bar says; ▸ a person sends the unit
+    // chosen to one person, or the region or the picture picked. `units` (the pick's, {unit, size, approx?, over?}), `copy`
+    // (words to copy), `picture` ('page': a PDF's page or a picture is open; 'region': a region of one is picked; 'inside': a
+    // picture in a Word document or a deck is picked), `seen` (What I see can be sent), `doc` (the file may be shown whole),
+    // `people` (those a pick may go to: [{key, name}]).
+    pick: [
+      { id: 'pick.copy', label: 'Copy', icon: '📋', group: '1_respond', verb: 'local', mode: 'local', may: () => true, fits: (f, o) => !!o.copy },
+      ...PICK_UNITS.map(pickUnit),
+      { id: 'pick.picture', label: (f, o) => (o.picture === 'region' ? 'Picture of this region' : o.picture === 'inside' ? 'This picture alone' : 'Picture of this page'), icon: '📷', group: '2_send', verb: 'page:push', mode: 'now',
+        may: picksShow, fits: (f, o) => !!o.picture },
+      { id: 'pick.view', label: 'What I see', icon: '🔳', group: '2_send', verb: 'page:push', mode: 'now', may: picksShow, fits: (f, o) => !!o.seen },
+      { id: 'pick.document', label: 'The document at this place', icon: '📄', group: '2_send', verb: 'page:push', mode: 'now', may: picksShow, fits: (f, o) => !!o.doc },
+      { id: 'pick.person', label: 'Show a person', icon: '🧑', group: '2_send', verb: 'page:push', mode: 'now', may: picksShow,
+        fits: (f, o) => (Array.isArray(o.units) && o.units.length > 0) || o.picture === 'region' || o.picture === 'inside',
+        ready: (f, o) => (Array.isArray(o.people) && o.people.length ? true : 'Nobody is seated On stage now.'),
+        submenu: (f, o) => (Array.isArray(o.people) ? o.people : []).map((p) => ({ value: p.key, label: p.name })) },
+    ],
 
     // ------------------------------------------------------------ the admin page (adminFacts) and Set up's Rooms (boardFacts)
     // A room in the admin page's list, and the room it watches (its header): a hall (its Main room) or one of its side
@@ -1120,6 +1163,6 @@
     return shown(kind, f, o).find((e) => e.key === k) || null;
   }
 
-  const catalog = Object.freeze({ GROUPS, REACTIONS, WORDS, FOLDS, SHOW_KINDS, FILE_KINDS, STAGE_EXT, TRANSFER_EXT, CHAT_VIEWS, ZOOM_MIN, ZOOM_MAX, KINDS, supportWords, stageWhy, downOf, withdrawOf, facts, adminFacts, boardFacts, accountFacts, actorKey, entry, shown, ready, items, ids, inline, submenu, byKey, placeOf, lasted });
+  const catalog = Object.freeze({ GROUPS, REACTIONS, WORDS, FOLDS, SHOW_KINDS, FILE_KINDS, PICKED_KINDS, PICK_UNITS, STAGE_EXT, TRANSFER_EXT, CHAT_VIEWS, ZOOM_MIN, ZOOM_MAX, KINDS, supportWords, stageWhy, downOf, withdrawOf, facts, adminFacts, boardFacts, accountFacts, actorKey, entry, shown, ready, items, ids, inline, submenu, byKey, placeOf, lasted });
   Object.assign(root.AGM = root.AGM || {}, { catalog });
 })(typeof window !== 'undefined' ? window : globalThis);

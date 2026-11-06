@@ -5248,6 +5248,179 @@ and the readings S1, S2, S11 and S15)
   ticket, links withheld, files moved, files to transfer only), `docs/ACCOUNTS.md` (who may download and who may move a
   file, `hall.files`' words), `docs/DISPLAYS.md`, `docs/DESIGN.md`, `docs/ANALYSIS.md`, `CLAUDE.md`.
 
+**The backstage team shows the Board a picked word, sentence, line, item, paragraph, cell, row or column, a picture of a
+page, what they see, or the document** (the plan's Part 4, unit 27, its §5.9.3, §5.9.4, §5.9.6, §5.9.7 and §5.9.8 as
+Part 5 §0 and §16.3 and Part 7 §0.3 amend them, and §5.12's "On the Board's pages now" line; the owner's answer 11,
+"Both as options.", as two buttons side by side)
+- **A quote is a take of its own** (`{kind: 'snippet', unit, title?, text | items | table | blocks, from?, note?, cut?,
+  more?}`; `lib/pages.js` `cleanSnippet`, pure, fail closed): the words or cells a researcher picked, **carried as data
+  and drawn by the page, never HTML**. `unit` is one of a word, sentence, line, item, paragraph, cell, row, column,
+  range, slide, selection, what is in view (`view`) or text, and carries its one body: text, a list's items (a slide its
+  title and items, a numbered list its start), a table `{rows, head, side, ref?, focus?}` (its label row and column
+  marked, the cell it is of), or the blocks in view (a paragraph, a heading, an item, a quotation or a table, 12 at
+  most). It is rebuilt key by key (any other key left behind); a unit with another body, a body of the wrong type or
+  nothing to show is refused in words ("Choose what to send: …", "A row is sent as a table.", "There is nothing to show
+  in that quote."). Every string is read by its type and cleaned as a block (`guard.cleanBlock`: its line breaks kept,
+  CR LF and the Unicode separators made one, a tab a space, controls, bidi marks, overrides and isolates, the Arabic
+  letter mark, zero-width space, word joiner and BOM dropped, ZWJ and ZWNJ kept for the scripts that need them, trailing
+  spaces gone and blank lines in a row made one, never cut); the Arabic letter mark joins the one-line text's unsafe set too
+  (`guard.cleanText`).
+- **Its bounds, refused in words and never cut by the server** (§5.9.4): 1,200 characters of text ("Too long for the
+  stage: 1,200 characters at most (this is 1,860)"), 20 items of 300 characters, 25 rows × 10 columns of 200 characters
+  ("Too big for the stage: narrow it to 25 rows × 10 columns"), 12 blocks, 4,000 characters in all, a title of 120,
+  counted as code points so no count splits a surrogate pair. **The cut is the researcher's own choice**, offered by the
+  bar: `cut` on text at its 1,200 characters, or on a table at its 25 rows or 10 columns, with `more` saying what was
+  left out ("… 40 more rows not shown"); a cut that is not one of those is refused ("Only text cut to its first 1,200
+  characters, or a table cut to 25 rows × 10 columns, is sent as cut.").
+- **Where it comes from, by name and place, never by address** (`from`): a file of this hall by its name, type and
+  place, its source held to `sourceOk` as a document's (a file of a side room says that room's name); **the pusher's own
+  copy** (`local`) said as theirs; a web page by its host, its address sealed at rest beside the hall's web takes and
+  never told; none, typed. Each type's places are its own (a PDF's page; a deck's slide; a sheet and a cell's reference;
+  a Word paragraph with its page and "≈" where the page is a guess, and its heading; a text or Markdown file's line or
+  run of lines; a CSV's line and cell) and any other is refused ("That place cannot be read for this file: …"). **A
+  picture has no words to quote** ("A picture has no words to quote: show a picture of it instead."). The quote is its
+  pusher's claim: the server never parses a document, so it cannot check that the words are in the file; the page's
+  `shown` is the fact.
+- **Drawn on the Board's page** (`pagelayer.mjs` `quote`, `fitQuote`): a `<blockquote>`, a list or a `<table>`, each
+  paragraph and cell `dir="auto"`, its line breaks kept, **in the largest type that fits** between 28 px (20 px under
+  600 px wide) and 12vw, in 12 steps at most, refitted as the screen turns; numbers to the right; the cell it is of
+  outlined and bold with `aria-current`; **a table wider than the screen scrolls sideways inside its card**, its label
+  row and column held in view. Its line says who quoted it: "Quoted by Ana · Board pack.pdf, p. 12", "Quoted by Ana from
+  their copy of costs.csv, row 2", "Quoted by Ana · vote.example.com", "Typed by Ana". It reports `shown` on the frame
+  after it is laid out, saying "longer than the screen: it scrolls" where it does not fit. Its card in the side bar
+  reads its first 40 characters ("❝ Revenue Q3 £4.2m"); one that arrives in the side bar keeps the card's own type and
+  says "longer than its card in the side bar: it scrolls" where it does, and a table in a quote longer than its box
+  scrolls down inside its own card as well as across, its label row and column held in view. It is information (the
+  layer over the show), as a web page, a document and a picture are.
+- **Its words in every reader**: the console and the Board chip "❝ a table cell from Q3 costs.csv, B2", "❝ 3 list items
+  from their copy of Pack.pdf, p. 3", "❝ a quote typed by Ana (17 characters)", "❝ a quote from vote.example.com"; the
+  `page.push` audit row "a quote (a table cell, 18 characters) from a spreadsheet", "a quote (typed, 42 characters)",
+  never a word of it, a file's name or an address; the hall's Earlier list keeps it, its web source as its host alone; a
+  page is told no side room's key (a side room's file is said by its name, "(Legal)") and no web address. **Under
+  Earlier a quote's 👁 Look draws it again** on that page alone, from its data, saying nothing to the server, as a
+  document's and a picture's do.
+- **The AI's "On the Board's pages now" line** (§5.12): a draft asked in a hall's Main room by a seat that may show
+  reads what the Board's pages show over or beside the show as the console words it, and, **for a quote that seat
+  pushed, its words** ("On the Board's pages now: ❝ a quote typed by Sue (21 characters) — Capex rose 8% on plan");
+  another pusher's words never reach a seat's draft.
+- **Picking in the Preview** (`docview.mjs`, for the research seat): **a highlight made first is honoured**, read from
+  the browser's selection, a tap on a word, a click in a grid or a drag across one. A PDF's page has a text layer
+  (pdf.js's `TextLayer`, its rules copied from pdf.js's viewer under its licence, `THIRD-PARTY-NOTICES.md`) and, where
+  the PDF is tagged, **its structure tree** read to find the paragraph, the list item and the table cell, row and column
+  a pick sits in (`getStructTree`, its marked content's ids); **an untagged PDF** offers words, sentences and lines, a
+  paragraph read as a best guess ("≈ best guess"), and no cell: "Tables in this PDF cannot be read as cells — send the
+  region as a picture". A sentence and a word are read by `Intl.Segmenter` where the browser has it (otherwise a word is
+  a run of letters and digits, and a sentence ends at . ! or ?). A sheet's or a CSV's grid picks a **cell, a row, a
+  column or a range** by click, Shift-click, a drag, its headings or the keyboard (arrows, Shift+arrows), with its
+  **labels** (☐ with labels: **the sheet's frozen panes** as Excel saved them, its last frozen row and column, so a title
+  row above a frozen header is never a cell's label; else its first row and column; or the row and column **Labels…**
+  marks; the document worker reads the panes of each sheet's first view from the part the workbook's relationships name);
+  a cell is sent as 2 × 2 with its labels (2 × 1 under its header row, or 1 × 2 beside its name, where it has one label
+  alone, as a tagged PDF's table cell has), a row with its label row, a column with its label cell; a range over 25 × 10
+  is "over" with the bar's cut, and a tagged PDF's row or column cut to 25 × 10 says so on the Board ("… 15 more rows not
+  shown") as a sheet's does. **Nothing hidden is ever picked**: a hidden row's, column's or sheet's header or cell (drawn
+  dimmed and marked "hidden" in the researcher's Preview) picks nothing, a pick that names one is refused when it is read
+  (`docmodel.mjs` `gridQuote` reads only the rows and columns the Board's pages draw), nothing of a hidden sheet is in
+  view to send, and a table on a hidden slide is never read. The outline's picks: a deck's slide (its title and items)
+  and item; a Word document's paragraph, item and table, with **its page** from Word's pages ("p. 3", "≈ p. 2" where the
+  page is reckoned); a text or Markdown file's line, paragraph and item, **a numbered list's items keeping their numbers**
+  (the third item reads "3." on the Board, never "1."). **A picture in a Word document or a slide, tapped**, is a pick of
+  its own: **This picture alone** sends it drawn again as a new picture (its metadata left behind), saying where it is
+  ("Ana's picture of their copy of chart deck.pptx, slide 1"); a picture of a hidden slide or shape is never picked.
+  **The pick is marked** with the CSS Custom Highlight API where the browser has it (let go with the document), its
+  blocks outlined otherwise; cells, a picture and a region are outlined.
+- **The bar, highlight first** (`app.js` `PickBar`, `app.html` `#pickBar`): the units that hold the pick as chips with
+  their sizes ("Word · 6 ch", "Paragraph · 240 ch", "Row · 3 cells"), **the smallest chosen** (the one used last where
+  two are as small); **exactly what will go, drawn as the Board's page will draw it**; a bound's refusal said before
+  anything goes, with **Send the first 1,200 characters** or **Send the first 25 rows × 10 columns** as the researcher's
+  choice; a note; and 📺 Show to the bar's target. **A right-click on the pick, the bar's ⋯ and a second tap on it open
+  the same list as a menu** (the catalogue's kind `pick`, its order the stage addendum's `previewActions(pick)`, Copy
+  first): 📋 Copy, each unit, 📷 **Picture of this page** (of this region, for a region; **This picture alone**, for a
+  picture in a document), 🔳 **What I see**, 📄 **The document at this place**, 🧑 **Show a person ▸** (words, a region
+  and a picture alike; "Nobody is seated On stage now." when there is no one). The bar's quote, its preview and its
+  glance are read again only when what they are of changes (the pick, its unit, the cut, the labels, the note): a scroll
+  of the Preview redraws only the words that follow the place. AGMessage's
+  menu stands in for the browser's there; a touch's long press keeps the browser's own (select, copy, look up), and a
+  selection made keeps it too (`menus.js` door option `picks`).
+- **The Preview's bar** (§5.9.8): **whom it goes to** (the Board, or one person the console lists) and **where it
+  arrives** (over their chat, or in their side bar, the choice kept on this device); 📺 **Picture of p. 12** and 📺
+  **Document at p. 12** side by side, one click each, **the one chosen last on this device drawn first**, its note saying
+  what each sends ("Picture of p. 12: this page only, as a picture (0.8 MB)", the size once the page has been drawn
+  here; "Document: the whole file (2.1 MB), opened at p. 12 — the Board can page through it"), and, where a whole page's
+  body text would stand under 16 px on a tablet's take, that What I see sends the part in view larger (provisional, until
+  the device matrix's D2 is measured); 🔳 **What I see** (a document's blocks or a grid's cells in view as a quote; a
+  PDF's or a picture's part in view as a new picture; **more in view than the stage takes is never cut by itself**: the
+  bar says how much is in view, and **Send what fits** sends the part that fits, the first 12 blocks or a range's first
+  25 rows × 10 columns marked cut, as the researcher's own choice); ▭ **Region** (a part of a PDF's page or of a picture
+  drawn by hand, sent as a new picture, the arrow keys moving it and Shift with them resizing it); ☐ **without its
+  metadata** for a picture (drawn again, so nothing of its EXIF, its place included, goes; on a browser without
+  `createImageBitmap`, Safari before 15, by drawing the part of the element itself). A picture is a new file drawn here,
+  its long edge 2,048 px, saying what it is a picture of ("Ana's picture of part of their copy of stage plan.jpg"). **A
+  picture drawn lately is shown again without a second upload** while the stage keeps its file (the last 50 kept, the
+  oldest and the expired let go), and drawn and uploaded again, once, where a push is refused because the file is gone.
+  **An upload the uploads' rate turns away** (429) says "Sending in 2 s…" and goes again, three times at most, 2 s apart,
+  then says the server's words.
+- **The fresh-push warning** (§5.9.7): where the target is reading information another pusher put up under 15 s ago, the
+  bar says so before it goes ("The Board is reading Ben's quote (8 s) — Replace · Show a person instead"), on the pick's
+  bar and on the Preview's bar for a picture, the document, What I see and a region alike, and refuses nothing; over the operator's information, a seat that may only show sends to their side bar, and the bar says so. A
+  quote taller than a tablet's take at the stage's smallest type says "Long for the stage — the Board will scroll"
+  (provisional, until the device matrix's D2 and D6 are measured).
+- `page:status`'s information row carries whether it is the asker's own, by whom and how long ago (`mine`, `by`, `ago`)
+  for a seat that pushes, so the bar can say whose it is; a push that replaces a quote never hands the quote back to its
+  pusher (information is taken down, never put back).
+- Rolling back: a quote kept in `pages.json` is a kind an earlier build does not know, read there as a take it cannot
+  read and dropped as it loads the store; nothing else of the store changes.
+- Choices where the plan left room: a quote's `from` for a file names it by the server's name and type (or the pusher's
+  copy's), its address never leaving the server; a typed quote (`unit: 'text'`, no `from`) is accepted now for the
+  pasted quote's unit to build on, and draws as "Typed by …"; the units' bounds are one table (`SNIPPET`) the page's bar
+  and the server share by test (`docmodel.mjs` `QUOTE_BOUNDS`); a cell goes as 2 × 2 with its labels and a column with
+  its label cell, so the Board reads what the number is; a pick's default unit is the smallest within the bounds, the
+  bare selection last among equals; the region tool draws on a PDF's page and a picture alone (a document's view goes as
+  blocks, never as a picture of HTML); the fresh-push window is 15 s and the glance budget 1,100 × 700 at 28 px, both
+  provisional and said so; the AI's line names only a quote's words to the seat that pushed it. Bench: no measurement
+  this round (`docs/DEVICES.md`'s quotes' benches: the text layer's draw on a 200-page PDF, a tagged PDF's struct tree,
+  a 25 × 10 table's fit on D2 and D6, the long press on iPadOS 14.5; each "not measured", no device matrix on the
+  bench). Frozen panes are read from a workbook's archive alone: an Excel 97-2003 file's labels default to its first
+  row and column. A picture inside a Word document or a deck goes when tapped; the bar does not estimate a page
+  picture's size before it is drawn (its size is said once drawn, and as it uploads), since a page's encoded size is not
+  known until then.
+- Tests: `test/pages.test.js` (`cleanBlock`'s keeps and drops, as `\u` escapes; `cleanSnippet`'s units and bodies, every
+  field by its type, each bound at and over its edge counted in code points, the cut and `more`; a source of the hall by
+  name and place, the pusher's copy, a web host, typed, each type's places and a picture refused; kept, told, stored and
+  described, the audit's words with no word of it; `snippetText`), `test/takes.test.js` (end to end: a CSV cell's quote
+  to the Board ✓ with its words on the console, the Board chip and the audit row; a typed quote; a web quote whose
+  address is sealed at rest and never told; each bound refused with nothing pushed; a hand-back leaving a quote;
+  take-down; the AI's line with the pusher's own words and without another's; neither `GET /api/context` nor the context
+  posted to the hall's Stagewatch, read twice while a quote is up, holds its words, its cells or its file's name),
+  `test/docmodel.test.js` (the grid's quotes: a cell 2 × 2 with its labels, with one label 2 × 1 or 1 × 2, a row, a
+  column, a range over the bounds and its cut, a hidden row's or column's header, cell or range end and a hidden sheet
+  refused; a tagged PDF's cell under its header row and a column over the bounds refused or cut with `cut` and `more`;
+  What I see over its bounds said and what fits offered; the default labels from frozen panes; the document worker's
+  frozen panes by the workbook's relationships, its first view's, counted from the first row read, a split none;
+  `segmentOf`, `cutText`, `quoteSize`), `test/catalog.test.js` (the kind `pick` in its order, Copy first, each unit's
+  word and size, a unit over its bound disabled with its words, a region's and a picture's acts with Show a person, Show
+  a person with nobody On stage, the seat matrix: the operator and a seat that may only show, no other), `test/modules.test.js` (the picked kinds are never in the Board chip's menu or Show them ▸),
+  `test/inputs.test.js` (a quote's every shape through `page:push`; the drawing's words), `test/helpers.js`
+  (`sheetParts`, a sheet built from rows, with hidden rows, columns and a hidden sheet, and frozen panes). The browser smoke (a hall of its own, the operator backstage on a device of
+  its own signed in as an account, Cy On stage on another): a tagged PDF's word, line and paragraph chips with the word
+  chosen and Cy's page drawing it ✓; a 25-row table on a phone at 20 px or more, scrolling inside its card with its
+  labels in view; the right-click menu on the pick in the catalogue's order and a touch's long press keeping the
+  browser's; Picture of p. 3, Document at p. 3 and What I see; an untagged PDF offering no cell and saying why; a region
+  of a JPEG with EXIF, sent without it or its place; a spreadsheet's column and cell with their labels; a CSV's row, a
+  Markdown item, a slide; a hidden column's header, a hidden row's header and cell and a hidden sheet's cell picking
+  nothing, nothing of the hidden sheet in view to send, and a cell's labels from the sheet's frozen panes, not its title
+  row; a quote under Earlier drawn again by its Look on Cy's page with no report; a picture in a slide, tapped, arriving
+  as a picture of its own at its slide; a Word document's p. 3 and ≈ p. 2, a cell of its table and What I see; the
+  fresh-push warning;
+  the last choice kept across a reload; five quick pictures, the one the uploads' rate turned away (read from the order
+  the five were shown in) saying "Sending in 2 s…" and arriving; no console error or CSP violation; and the picture's
+  Look under Earlier read once its dialog's close event has had its turn, since the event comes as a task of its own
+  after `close()`.
+- The papers: `README.md`, `README.txt` (show the Board a word, a paragraph, a cell, or what you see), `SECURITY.md` (a
+  quote is data; a part is a new picture), `docs/DISPLAYS.md` (A quote), `docs/DESIGN.md`, `docs/ACCOUNTS.md`
+  (`page.push`'s words), `docs/ANALYSIS.md`, `docs/DEVICES.md` (the quotes' benches), `THIRD-PARTY-NOTICES.md` (the text
+  layer's rules), `CLAUDE.md`.
+
 **Fixed**
 - An upload whose stored path is no file (a folder in its place) is refused as one that could not be checked, on every
   platform. The archive's check opened it and, on Windows, read a folder as an empty file, so it was refused in the

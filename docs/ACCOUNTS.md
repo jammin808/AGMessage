@@ -535,7 +535,9 @@ screens (made, renamed, re-linked, removed, and every take: which screen, by who
 (28 characters)", "a PDF at p. 3", "an image" — never the message's words or the file's name), every take on people's
 pages (`page.push`, by the hall's key: whom, "the Board (6 pages)" or the person's name, and what kind of thing, "the
 clock", "a holding slide", "a web page on vote.example.com", a web page by its host alone, "a PDF at p. 12", "a picture
-of a PDF page (p. 12)", "a Word document at ≈ p. 3", a file by its kind alone, never its name, "the information taken
+of a PDF page (p. 12)", "a Word document at ≈ p. 3", a file by its kind alone, never its name, "a quote (a table cell, 18
+characters) from a spreadsheet", "a quote (typed, 42 characters)", "a quote from a web page on vote.example.com", a quote
+by its unit, its size and its file's kind alone, never a word of it, "the information taken
 down", ", in their side bar" for an arrival there, ", sent from Legal" from a side room, ", withdrawn" for a withdrawal,
 one row for each of whom it was for; one row per take, none for its
 repeat or for a person's Back to chat or Minimise, which their own page says to the console), the hall's switch for its

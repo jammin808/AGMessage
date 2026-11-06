@@ -538,6 +538,21 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   file in the folder; a hall removed takes its stage files with it, purged or not. A Main room's reset ends every
   information take of the hall, a side room's what shows its files, a file's message deleted what shows that file, and a
   take shown by mistake is **withdrawn** (from every page and from Earlier) by who showed it, the operator or the admin.
+- **A quote is data, never HTML, and its pusher's claim.** A word, a paragraph, a cell, a row, a column or the blocks in
+  view go as plain strings and tables, each string cleaned on the server (`guard.cleanBlock`: controls, the bidi
+  overrides, isolates and marks, U+200B, U+2060 and U+FEFF dropped; line breaks kept) and held to its bounds (1,200
+  characters, 25 rows × 10 columns of 200, 4,000 in all), refused over them, never cut; a page draws it with the DOM and
+  `textContent` alone. It names its source by a file's name and place, never its address, a web page by its host (its
+  address sealed at rest); it hands the Board no file. The server never parses a document, so it cannot check that the
+  words are in the file: the card says who quoted it. Its words sit in `pages.json` in clear, as a room's messages sit in
+  its file, from the same people; a web address is sealed because it can carry a sign-in token. A pick reads only what
+  the Board's pages would draw: a hidden row, column or sheet, drawn dimmed in the researcher's Preview, is never picked,
+  whatever names it (a header, a cell, a range's end, What I see), nor a hidden slide or shape, nor Word's hidden text.
+- **A part of a page or a picture is a new picture.** A region of a PDF's page or of a picture, what is in view of
+  either, and a picture tapped in a Word document or a slide, is drawn on the pusher's own page into a new picture (at
+  most 2,048 px on its long edge) and uploaded: no original goes, and a picture's metadata (EXIF, its place) is never
+  carried into it. A whole picture shown as it is
+  keeps its metadata, unless shown "without its metadata", drawn again the same way.
 - Pages carry a strict Content-Security-Policy with no inline script. The page lint (`agm/no-unescaped-html`) refuses,
   whatever they are given, a frame's `srcdoc`, `setHTMLUnsafe(`, `createContextualFragment(` and a computed
   `el['innerHTML']`; in the documents' modules (`agm/inert-html`) every parse of HTML outside `parseInert` (`innerHTML`,

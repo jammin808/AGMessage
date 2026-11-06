@@ -35,8 +35,8 @@
  * each page says what it did with the take (`page:report`), and only those reports make the status (lib/pages.js
  * `Pages.status`), which a console reads (`page:status`) whenever it is told the hall's pages changed (`pages:changed`).
  * Two layers (plan 4-§5.9.1): the show (Stagewatch, the clock, holding, blank) and information drawn over it (a web page,
- * a document, a picture); `chat` hands back both, `{chat, layer: 'info'}` the information alone (Take down). A document or
- * a picture shows a file the hall holds, from a place the stage may show it from (lib/pages.js sourceOk), checked off the
+ * a document, a picture, a quote); `chat` hands back both, `{chat, layer: 'info'}` the information alone (Take down). A
+ * document or a picture shows a file the hall holds, from a place the stage may show it from (lib/pages.js sourceOk), checked off the
  * socket's turn at its first take (`stageCheck`), and a fresh upload it shows is kept as the hall's stage file; a take
  * shown by mistake is withdrawn (`page:withdraw`) by who put it up, the operator or the admin. Who may push which kind to
  * whom, over what is up there now, is lib/pages.js `canShow` (pure): the operator (canPush) every kind, an account's
@@ -314,8 +314,8 @@ function register(socket, conn, ctx) {
     // The status of the place it went to: beside the operator's, over the show, or the show.
     const status = pages.status(hall.code, to, target, { name: board ? '' : name, hallHolding: holding, layer: aside || named === 'beside' ? 'beside' : layer === 'info' ? 'info' : 'show' });
     // What was shown before comes back as this pusher could show it: a web page's address to whoever put it up and to the
-    // admin alone; a document's or a picture's never (information is taken down, never put back).
-    const back = was && !FILE_KINDS.includes(was.content.kind) && (was.content.kind !== 'web' || conn.theAdmin() || (!!whoKey && was.by.who === whoKey)) ? cleanPage(pages.told(was.content), facts) : null;
+    // admin alone; a document's, a picture's or a quote's never (information is taken down, never put back).
+    const back = was && !FILE_KINDS.includes(was.content.kind) && was.content.kind !== 'snippet' && (was.content.kind !== 'web' || conn.theAdmin() || (!!whoKey && was.by.who === whoKey)) ? cleanPage(pages.told(was.content), facts) : null;
     const res = {
       ok: true, seq: take.seq, ...(take.arrive === 'side' ? { arrive: 'side' } : {}), ...(aside ? { aside: true } : {}),
       results: [{ key: to, name, ok: true, status }], previous: was && !aside ? { seq: was.seq, content: !back || back.error ? null : back } : null,

@@ -1734,6 +1734,7 @@ function objectNow(kind, o) {
   if (kind === 'file') return fileObject(o.id, o.where);
   if (kind === 'screen') return Screens.of(o.id);
   if (kind === 'person') return personNow(o.uid);
+  if (kind === 'pick') return PickBar.object();
   if (kind === 'compose') return composeObject(o.form);
   if (kind === 'chip') return stageNow;
   if (kind === 'room') return switcherObject(o.key);
@@ -2736,6 +2737,7 @@ async function drawDoc(source, name, mime, at) {
   const n = ++docDrawing;
   docShown = false;
   if (docView) { docView.destroy(); docView = null; }
+  PickBar.reset();
   docForAi.id = null; docForAi.name = ''; docForAi.text = '';
   docDisplay.textContent = '';
   PreviewBar.draw();
@@ -2755,6 +2757,8 @@ async function drawDoc(source, name, mime, at) {
   docDisplay.textContent = '';
   const view = docViewMod.open(docDisplay, source, { at, seat: docSeat(), name, mime });
   docView = view;
+  // On a backstage seat what is highlighted in it is a pick, which the Preview's bar sends (PickBar).
+  if (docSeat() === 'research') PickBar.watch(view);
   const drawn = await view.ready;
   if (n !== docDrawing) return;
   docShown = drawn.state === 'shown';
@@ -2788,6 +2792,7 @@ function dismissDoc() {
   docDrawing++;
   docShown = false;
   if (docView) { docView.destroy(); docView = null; }
+  PickBar.reset();
   drawDocActs();
   docForAi.id = null; docForAi.name = ''; docForAi.text = '';
   docPanel.dataset.state = 'empty';
@@ -4666,7 +4671,7 @@ const Takes = (function () {
           const inner = document.createElement('div');
           inner.className = 'take-card-box';
           li.append(inner);
-          Promise.resolve(m.render(inner, t.content, ctxOf(t))).then((r) => {
+          Promise.resolve(m.render(inner, t.content, { ...ctxOf(t), card: true })).then((r) => {
             if (cardOf[l] !== now) return;
             now.result = r && typeof r === 'object' ? r : { state: 'failed', words: 'it could not be drawn' };
             sayAll();
@@ -4751,11 +4756,11 @@ const Takes = (function () {
   }
   /**
    * A Look at an Earlier entry, on this page alone, with nothing to show from it and no report: a web page framed (Preview),
-   * a document or a picture drawn as the take was (its reader let go as the Look closes).
+   * a document, a picture or a quote drawn as the take was (a reader let go as the Look closes).
    */
   function look(o) {
     const e = pastEntry(o.seq);
-    if (e && (e.content.kind === 'doc' || e.content.kind === 'image')) {
+    if (e && (e.content.kind === 'doc' || e.content.kind === 'image' || e.content.kind === 'snippet')) {
       load().then((m) => Preview.look(m, e, ctxOf(e)), () => AGM.toast('This page could not load what draws a take: reload it.', true));
       return;
     }
@@ -5059,11 +5064,13 @@ const Console = (function () {
   const chip = $('boardChip');
   const list = $('peoplePages');
   /** How a choice is said, by its kind: "The clock on 6 Board pages." */
-  const SAID = { chat: 'Back to chat', stage: 'Stagewatch', clock: 'The clock', holding: 'Holding', blank: 'Blank', web: 'The web page', doc: 'The document', image: 'The picture' };
+  const SAID = { chat: 'Back to chat', stage: 'Stagewatch', clock: 'The clock', holding: 'Holding', blank: 'Blank', web: 'The web page', doc: 'The document', image: 'The picture', snippet: 'The quote' };
   const said = (content) => (content.kind === 'chat' && content.layer === 'info' ? 'Taken down' : SAID[content.kind] || 'It');
   /** The information layer's kinds (lib/pages.js), which a take of draws over the show. */
-  const INFO = ['web', 'doc', 'image'];
+  const INFO = ['web', 'doc', 'image', 'snippet'];
   let status = null;       // page:status's answer: {board, people}
+  let readAt = 0;          // when it was read, by this device's clock: an information take's age is the answer's `ago` and the time since
+  const drawn = new Set(); // who is told each time the read is drawn (the Preview's bar)
   let mine = null;         // this page's own take on the Board: {seq, previous, time}
   let asking = false;
   let again = false;
@@ -5075,7 +5082,7 @@ const Console = (function () {
     asking = true;
     socket.emit('page:status', { code: HALL_KEY }, (r) => {
       asking = false;
-      if (r && r.ok) { status = r; draw(); } else if (r && r.busy) again = true;
+      if (r && r.ok) { status = r; readAt = Date.now(); draw(); } else if (r && r.busy) again = true;
       if (again) { again = false; setTimeout(read, r && r.busy ? 1000 : 0); }
     });
   }
@@ -5090,7 +5097,8 @@ const Console = (function () {
    * (`info`), or in their side bar beside the operator's (`beside`); what Take down hands back, and whether the operator put
    * it up (`op`: a researcher's Take down is only over its own kind).
    */
-  const takeIn = (i) => (i && i.seq && i.kind && i.kind !== 'chat' ? { seq: i.seq, kind: i.kind, mark: i.mark, words: i.words, showing: i.showing, arrive: i.arrive === 'side' ? 'side' : 'over', op: i.op === true, mine: i.mine === true, on: i.on, pages: i.pages } : null);
+  const takeIn = (i) => (i && i.seq && i.kind && i.kind !== 'chat' ? { seq: i.seq, kind: i.kind, mark: i.mark, words: i.words, showing: i.showing, arrive: i.arrive === 'side' ? 'side' : 'over', op: i.op === true, mine: i.mine === true, on: i.on, pages: i.pages,
+    by: typeof i.by === 'string' ? i.by : '', at: readAt - (Number.isFinite(i.ago) ? i.ago : 0) } : null);
   const infoOf = (row) => takeIn(row && row.info);
   const besideOf = (row) => takeIn(row && row.beside);
   /**
@@ -5125,11 +5133,13 @@ const Console = (function () {
    * back over that take alone, never older content put back (which could pop up again what the Board had closed); it is
    * kept beside the operator's (`aside`) where the operator's information is up, said so. A Take down offers nothing.
    */
-  function push(to, content, { ifSeq, undoable = true, name = '', arrive = '' } = {}) {
+  function push(to, content, { ifSeq, undoable = true, name = '', arrive = '', refused = null } = {}) {
     const onBoard = to === 'board';
     const info = INFO.includes(content.kind);
     const handBack = content.kind === 'chat' && content.layer === 'info';
     AGM.outbox.now('page:push', { code: HALL_KEY, to, content, ...(Number.isInteger(ifSeq) ? { ifSeq } : {}), ...(arrive ? { arrive } : {}) }, (r) => {
+      // A refusal its sender can mend (a picture whose file went: drawn and sent again) is its sender's to say.
+      if ((!r || !r.ok) && refused && refused(r)) { read(); return; }
       if (!r || !r.ok) { AGM.toast((r && r.error) || 'Nothing was shown.', true); read(); return; }
       const st = Array.isArray(r.results) && r.results[0] ? r.results[0].status : null;
       // What was shown before in the show layer, as the server gives it back: their chat where nothing was, else its
@@ -5190,11 +5200,13 @@ const Console = (function () {
    * where it is asked to arrive there, or where the operator's information is up there and this page may only show (the
    * server refuses it over that).
    */
-  function showFile(to, content, { name = '', arrive = '' } = {}) {
+  function showFile(to, content, { name = '', arrive = '', refused = null } = {}) {
     const o = to === 'board' ? board() : rowOf(to.uid);
     const side = arrive === 'side' || (!F.canPush && !!o && ((!!o.info && o.info.op) || !!o.opOn));
-    push(to, content, { name, ...(side ? { arrive: 'side' } : {}) });
+    push(to, content, { name, refused, ...(side ? { arrive: 'side' } : {}) });
   }
+  /** The people a page may show something to by name, as the console's read lists them: [{key, name}]. */
+  const people = () => (status && Array.isArray(status.people) ? status.people.map((p) => ({ key: p.uid, name: String(p.name || '') })) : []);
   for (const [kind] of AGM.catalog.SHOW_KINDS) if (AGM.catalog.entry('board', 'board.' + kind)) RUN['board.' + kind] = () => push('board', { kind });
   RUN['board.web'] = (o, c) => web('board', 'board', 'board.web', board, c);
 
@@ -5332,9 +5344,10 @@ const Console = (function () {
     drawPeople();
     drawPeopleActs();
     Screens.tabs();
+    for (const fn of drawn) fn();
     refreshOpenMenu();
   }
-  return { read, draw, board, kindOf, takesOf, chipDoor, showFile };
+  return { read, draw, board, kindOf, takesOf, chipDoor, showFile, people, rowOf, onDraw: (fn) => { drawn.add(fn); } };
 })();
 
 /**
@@ -5359,38 +5372,116 @@ const Show = (() => {
   const atOf = (ext, n) => (PLACE[ext] && n >= 1 ? { [PLACE[ext]]: n } : null);
   /** The words of a step, said in the toast. */
   const say = (words) => AGM.toast(words);
-  /** A file on this device uploaded for this room now: its address, or null with the server's words said. */
+  /** How many times an upload the uploads' rate turned away (429: one file every 2 s past a burst) is sent again, 2 s apart. */
+  const RATE_TRIES = 3;
+  const RATE_MS = 2000;
+  /**
+   * A file on this device uploaded for this room now: its address, or null with the server's words said. Turned away by
+   * the uploads' rate, it says "Sending in 2 s…" and goes again, at most RATE_TRIES times, then says the server's words.
+   */
   async function upload(file, what) {
     say('Uploading ' + what + (sizeWords(file.size) ? ' (' + sizeWords(file.size) + ')' : '') + '…');
-    const up = await uploadFile(file);
-    if (!up || typeof up.url !== 'string') { AGM.toast((up && up.error) || 'Not uploaded.', true); return null; }
-    return up.url;
+    for (let tries = 0; ; tries++) {
+      const up = await uploadFile(file);
+      if (up && typeof up.url === 'string') return up.url;
+      if (!(up && up.status === 429 && tries < RATE_TRIES)) { AGM.toast((up && up.error) || 'Not uploaded.', true); return null; }
+      say('Sending in 2 s…');
+      await new Promise((resolve) => { setTimeout(resolve, RATE_MS); });
+    }
   }
   /**
-   * A picture of page `page` of `src` (a PDF), or the picture itself (an image), shown to `to`: a PDF's page is drawn here
-   * into a new picture and uploaded, saying what it is a picture of; an image of the room is shown by its address, one on
-   * this device uploaded first.
+   * The pictures this page drew and uploaded lately, by what they are of ({source, page, rect} → {url, at}): shown again
+   * without a second upload while the stage keeps its file (the server's wait, an hour; WAIT_MS less a margin), and drawn
+   * and uploaded again where a push is refused because the file is gone.
    */
-  async function picture(src, page, to, { name = '', view = null } = {}) {
+  const drawnPictures = new Map();
+  const PICTURE_KEEP_MS = 55 * 60 * 1000;
+  /** The most pictures kept for showing again: past it, the oldest is let go first. */
+  const PICTURES_KEPT = 50;
+  /** A picture drawn and uploaded kept, the ones past their time let go, and at most PICTURES_KEPT, the oldest dropped. */
+  function keepPicture(key, url, bytes) {
+    const now = Date.now();
+    for (const [k, v] of drawnPictures) if (now - v.at >= PICTURE_KEEP_MS) drawnPictures.delete(k);
+    drawnPictures.delete(key);
+    drawnPictures.set(key, { url, at: now, bytes });
+    while (drawnPictures.size > PICTURES_KEPT) drawnPictures.delete(drawnPictures.keys().next().value);
+  }
+  /** The size of the picture of page `page` of `src` drawn here lately, in bytes, or 0 where none is kept. */
+  function drawnSize(src, page) {
+    const kept = src ? drawnPictures.get(pictureKey(src, page, null)) : null;
+    return kept && Date.now() - kept.at < PICTURE_KEEP_MS ? kept.bytes || 0 : 0;
+  }
+  const pictureKey = (src, page, rect) => (src.url || ('local:' + (src.name || '') + ':' + ((src.file && src.file.size) || 0) + ':' + ((src.file && src.file.lastModified) || 0))) + '|' + page + '|' + (rect ? [rect.x, rect.y, rect.w, rect.h].map((n) => Math.round(n)).join(',') : 'page');
+  /** The words a push is refused in where the file it names is gone from this hall: drawn and uploaded again, once. */
+  const GONE_FILE = /in no room of this hall|could not be read|no longer/i;
+  /**
+   * A picture of page `page` of `src` (a PDF), or of the part `rect` of it (a region, what is in view: in the page's own
+   * units), or the picture itself (an image) or a part of it (`rect`, in its pixels; and `bare`, the whole of it drawn
+   * again, without its metadata), shown to `to`: drawn here into a new picture and uploaded, saying what it is a picture
+   * of; an image of the room shown whole by its address, one on this device uploaded first. Nothing else of the file goes.
+   */
+  async function picture(src, page, to, { name = '', view = null, rect = null, bare = false, arrive = '', fresh = false } = {}) {
     const ext = extOf(src);
-    if (IMAGE.includes(ext)) {
+    const image = IMAGE.includes(ext);
+    if (image && !rect && !bare) {
       const url = src.url || await upload(src.file, 'the picture');
-      if (url) Console.showFile(to, { kind: 'image', url }, { name });
+      if (url) Console.showFile(to, { kind: 'image', url }, { name, arrive });
       return;
     }
-    if (ext !== 'pdf') { AGM.toast('A picture is made of a PDF\'s page or of an image: show this file as the document.', true); return; }
-    say('Drawing p. ' + page + '…');
-    let blob;
-    try {
-      const mod = await docReader();
-      blob = view ? await view.pagePicture(page) : await mod.pagePictureOf(src.url ? { url: src.url } : { file: src.file }, page);
-    } catch { blob = null; }
-    if (!blob) { AGM.toast('p. ' + page + ' could not be drawn.', true); return; }
-    const stem = (src.name || 'page').replace(/\.[A-Za-z0-9]{1,5}$/, '');
-    const url = await upload(new File([blob], stem + ' p' + page + '.png', { type: 'image/png' }), 'the picture');
-    if (!url) return;
-    const from = src.url ? { url: src.url, at: { page } } : { local: true, name: src.name, at: { page } };
-    Console.showFile(to, { kind: 'image', url, from }, { name });
+    if (!image && ext !== 'pdf') { AGM.toast('A picture is made of a PDF\'s page or of an image: show this file as the document.', true); return; }
+    const key = pictureKey(src, image ? 1 : page, rect || (bare ? { x: 0, y: 0, w: 0, h: 0 } : null));
+    const kept = drawnPictures.get(key);
+    let url = !fresh && kept && Date.now() - kept.at < PICTURE_KEEP_MS ? kept.url : '';
+    if (!url) {
+      say(image ? 'Drawing the picture…' : 'Drawing p. ' + page + '…');
+      let blob;
+      try {
+        const mod = await docReader();
+        blob = rect || bare ? (view ? await view.regionPicture(page, rect || { x: 0, y: 0, w: 1e9, h: 1e9 }) : null)
+          : view ? await view.pagePicture(page) : await mod.pagePictureOf(src.url ? { url: src.url } : { file: src.file }, page);
+      } catch { blob = null; }
+      if (!blob) { AGM.toast((image ? 'The picture' : 'p. ' + page) + ' could not be drawn.', true); return; }
+      const stem = (src.name || 'page').replace(/\.[A-Za-z0-9]{1,5}$/, '');
+      const type = blob.type === 'image/jpeg' ? 'jpg' : 'png';
+      url = await upload(new File([blob], stem + (image ? ' part' : ' p' + page) + '.' + type, { type: blob.type || 'image/png' }), 'the picture');
+      if (!url) return;
+      keepPicture(key, url, blob.size);
+    }
+    const at = image ? {} : { at: { page } };
+    const from = src.url ? { url: src.url, ...at } : { local: true, name: src.name, ...at };
+    // A picture kept from before whose file the stage let go is drawn and uploaded again, once.
+    const refused = kept && !fresh ? (r) => { if (!(r && GONE_FILE.test(r.error || ''))) return false; drawnPictures.delete(key); picture(src, page, to, { name, view, rect, bare, arrive, fresh: true }); return true; } : null;
+    Console.showFile(to, { kind: 'image', url, from }, { name, arrive, refused });
+  }
+  /**
+   * A picture inside a document (a Word document's, a deck's: the Preview's pick, `view`), shown to `to` as a picture of
+   * its own: drawn again here, its metadata left behind, and uploaded, saying where in the file it is (`at`). Nothing else
+   * of the file goes.
+   */
+  async function inside(src, to, { view, at = {}, name = '', arrive = '', fresh = false } = {}) {
+    const key = pictureKey(src, 'in:' + (at.block || at.slide || 0), null);
+    const kept = drawnPictures.get(key);
+    let url = !fresh && kept && Date.now() - kept.at < PICTURE_KEEP_MS ? kept.url : '';
+    if (!url) {
+      say('Drawing the picture…');
+      let blob;
+      try { blob = view ? await view.pickPicture() : null; } catch { blob = null; }
+      if (!blob) { AGM.toast('The picture could not be drawn.', true); return; }
+      const stem = (src.name || 'document').replace(/\.[A-Za-z0-9]{1,5}$/, '');
+      url = await upload(new File([blob], stem + ' picture.' + (blob.type === 'image/jpeg' ? 'jpg' : 'png'), { type: blob.type || 'image/png' }), 'the picture');
+      if (!url) return;
+      keepPicture(key, url, blob.size);
+    }
+    const where = Object.keys(at).length ? { at } : {};
+    const from = src.url ? { url: src.url, ...where } : { local: true, name: src.name, ...where };
+    const refused = kept && !fresh ? (r) => { if (!(r && GONE_FILE.test(r.error || ''))) return false; drawnPictures.delete(key); inside(src, to, { view, at, name, arrive, fresh: true }); return true; } : null;
+    Console.showFile(to, { kind: 'image', url, from }, { name, arrive, refused });
+  }
+  /** A quote (a pick's body, docview's quote()) of `src` shown to `to`, its source named as AGMessage holds it: never its address. */
+  function quote(src, q, to, { name = '', arrive = '', note = '' } = {}) {
+    const { at, approx, over, ...body } = q;
+    const from = src.url ? { url: src.url, ...(at && Object.keys(at).length ? { at } : {}) } : { local: true, name: src.name, ...(at && Object.keys(at).length ? { at } : {}) };
+    Console.showFile(to, { kind: 'snippet', ...body, from, ...(note ? { note } : {}) }, { name, arrive });
   }
   /** `src` shown whole to `to`, opened at `at`, with Download when ticked: one of this device's uploaded first. */
   async function whole(src, at, download, to, { name = '', arrive = '' } = {}) {
@@ -5446,14 +5537,287 @@ const Show = (() => {
     }
     if (value === 'doc') docAsk(src, { anchor, opener });
   }
-  return { picture, whole, document: docAsk, fromMenu, sourceOf, atOf, hiddenIn, IMAGE, PLACE, STAGE, HIDDEN_PARTS };
+  return { picture, inside, quote, whole, document: docAsk, fromMenu, sourceOf, atOf, hiddenIn, drawnSize, IMAGE, PLACE, STAGE, HIDDEN_PARTS };
+})();
+
+/** A take's kind as a person reads it: "a quote", "a web page" (the catalogue's words). */
+const kindSaid = (kind) => (AGM.catalog.SHOW_KINDS.find((x) => x[0] === kind) || [0, 0, 'something'])[2];
+
+/**
+ * A pick in the Preview (plan 4-§5.9.7; the catalogue's kind `pick`): what a researcher highlighted in a file there, made
+ * first and honoured. Its bar offers the units that hold it as chips with their sizes, the smallest by default (the last
+ * unit used where two are as small), draws exactly what will go as the Board's page will draw it (pagelayer.mjs quote),
+ * says a bound's refusal before anything goes with the cut as the researcher's own choice, and Show sends it to the
+ * bar's target. A right-click on the pick, the bar's ⋯ and a second tap on it open the same list as a menu, Copy first.
+ * Before it goes it says whose information the target is reading where another's is under 15 s old (informing, refusing
+ * nothing), and where a quote is long for a glance.
+ */
+const PickBar = (() => {
+  const $ = (id) => document.getElementById(id);
+  const bar = $('pickBar');
+  const chips = $('pickChips');
+  const words = $('pickWords');
+  const preview = $('pickPreview');
+  const sayEl = $('pickSay');
+  const labelsBox = $('pickLabelsBox');
+  const labelsTick = $('pickLabels');
+  const markLabels = $('pickMarkLabels');
+  const note = $('pickNote');
+  const showBtn = $('pickShow');
+  const more = $('pickMore');
+  /** Information another pusher put up this long ago or less is fresh: the bar says whose it is before it is replaced. */
+  const FRESH_MS = 15000;
+  /**
+   * Longer than a glance (provisional, until the device matrix's D2 and D6 are measured, docs/DEVICES.md §7): drawn at the
+   * smallest type the stage draws (28 px), a quote taller than a tablet's take (1,180 × 820, its bar out).
+   */
+  const GLANCE = Object.freeze({ width: 1100, height: 700, px: 28 });
+  const LAST_UNIT = 'agm.pickUnit';
+  /** What a pick of a PDF without its structure cannot be, and what it can (plan 4-§5.9.6). */
+  const UNTAGGED = 'Tables in this PDF cannot be read as cells — send the region as a picture';
+  /** A column's letters, as a sheet names it: 0 → A, 27 → AB. */
+  const columnLetters = (c) => { let s = ''; for (let n = c + 1; n > 0; n = Math.floor((n - 1) / 26)) s = String.fromCharCode(65 + ((n - 1) % 26)) + s; return s; };
+  const read = (k) => { try { return localStorage.getItem(k) || ''; } catch { return ''; } };
+  const keep = (k, v) => { try { localStorage.setItem(k, v); } catch { /* this device keeps no choice: the smallest unit stands */ } };
+  const may = () => docSeat() === 'research' && !ADMIN_VIEW && (F.canPush || F.canShow) && F.view !== 'simple';
+  let view = null;     // the Preview's view the pick is of
+  let pick = null;     // its pick now (docview's pick()), or null
+  let unit = '';       // the unit chosen
+  let cut = false;     // the researcher chose to send the first 1,200 characters, or 25 rows × 10 columns
+  let freshTimer = 0;
+  let drawn = 0;       // each drawing numbered: a quote's preview drawn late for an older one is let go
+  let pickNo = 0;      // each pick numbered as it comes (a new pick, its labels marked again)
+  let cached = null;   // {key, q, glance}: the quote of the pick now, its preview's glance, kept while what they are of stands
+  let copied = null;   // {key, words}: what Copy takes of the pick now, kept likewise
+  const src = () => (previewing ? Show.sourceOf(previewing.msg || previewing) : null);
+  /** A unit's measure, to find the smallest: its characters, or its cells as twenty characters each. */
+  const measure = (u) => { const m = /^(\d+) (ch|cells?|items?)$/.exec(u.size || ''); return m ? Number(m[1]) * (m[2] === 'ch' ? 1 : 20) : Infinity; };
+  /** The unit a pick opens with: the smallest that holds it and is within the stage's bounds; of two as small, the one used last, else not the bare selection. */
+  function choose(p) {
+    if (!p || !p.units.length) return '';
+    const last = read(LAST_UNIT);
+    const ok = p.units.filter((u) => !u.over);
+    const list = (ok.length ? ok : p.units).slice().sort((a, b) => measure(a) - measure(b) || (b.unit === last) - (a.unit === last) || (a.unit === 'selection') - (b.unit === 'selection'));
+    return list[0].unit;
+  }
+  /** The Preview's view is watched for picks as it opens a file: each pick, or none, redraws the bar. */
+  function watch(v) {
+    view = v;
+    pick = null;
+    unit = '';
+    v.onPick((p) => { if (view !== v) return; pick = p; pickNo++; cut = false; unit = choose(p); draw(); });
+    v.onMenu((at) => open(at));
+    draw();
+  }
+  function reset() { view = null; pick = null; unit = ''; draw(); }
+  /** The pick as the catalogue reads it (kind `pick`), or null for none. */
+  function object() {
+    if (!pick || !view || view !== docView || !may()) return null;
+    const s = src();
+    const ext = s ? extOfName(s.url || s.name) : '';
+    return {
+      id: 'pick', units: pick.units, copy: copyWords(),
+      picture: pick.type === 'region' ? 'region' : pick.type === 'picture' ? 'inside' : ext === 'pdf' || Show.IMAGE.includes(ext) ? 'page' : '',
+      seen: !!docView, doc: !!s && Show.STAGE.includes(ext) && !Show.IMAGE.includes(ext), people: Console.people(),
+    };
+  }
+  /** The words a Copy takes: the unit chosen's, as a quote's words read in order. */
+  function copyWords() {
+    if (!view || !pick || pick.type === 'region' || pick.type === 'picture') return '';
+    const key = [pickNo, unit, labelsTick.checked].join('|');
+    if (copied && copied.key === key) return copied.words;
+    const q = view.quote(unit || 'selection', { cut: true, labels: labelsTick.checked, copy: true });
+    copied = { key, words: q && !q.error ? quoteWordsOf(q) : '' };
+    return copied.words;
+  }
+  const quoteWordsOf = (q) => [q.title, q.text, ...(q.items || []), ...(q.table ? q.table.rows.map((r) => r.join('\t')) : []), ...((q.blocks || []).map((b) => (b.table ? b.table.rows.map((r) => r.join('\t')).join('\n') : b.text)))].filter(Boolean).join('\n');
+  /** The quote the chosen unit sends now with the bar's note (docview's quote, every bound the server holds said), or {error}. */
+  const quoteNow = (u = unit) => (view && pick ? view.quote(u, { cut, labels: labelsTick.checked, note: note.value.trim() }) : null) || { error: 'Nothing is picked.' };
+  /** The pick sent as `u` to `t` (the bar's target, or a person from its menu): a quote, a region or a picture in the file as a picture. */
+  function send(u = unit, t = PreviewBar.target()) {
+    const s = src();
+    if (!s || !pick) { AGM.toast('Nothing is picked.', true); return; }
+    if (pick.type === 'region') { Show.picture(s, pick.page, t.to, { view, rect: pick.rect, name: t.name, arrive: PreviewBar.arrival(t) }); return; }
+    if (pick.type === 'picture') { Show.inside(s, t.to, { view, at: pick.at || {}, name: t.name, arrive: PreviewBar.arrival(t) }); return; }
+    const q = quoteNow(u);
+    if (q.error) { AGM.toast(q.error, true); return; }
+    keep(LAST_UNIT, u);
+    Show.quote(s, q, t.to, { name: t.name, arrive: PreviewBar.arrival(t), note: note.value.trim() });
+  }
+  /**
+   * What I see: the blocks or the cells in view as a quote, a PDF's or a picture's part in view as a picture. More than
+   * the stage takes is never cut by itself: the researcher is told how much is in view, and Send what fits sends the part
+   * that fits (a range marked cut, its rows and columns left out counted on the Board's card), as their own choice.
+   */
+  function seen(t = PreviewBar.target()) {
+    const s = src();
+    const words = note.value.trim();
+    const v = docView ? docView.seen({ note: words }) : null;
+    if (!s || !v) { AGM.toast('Nothing in view to send.', true); return; }
+    if (v.picture) { Show.picture(s, v.picture.page, t.to, { view: docView, rect: v.picture.rect, name: t.name, arrive: PreviewBar.arrival(t) }); return; }
+    const go = (q) => Show.quote(s, q, t.to, { name: t.name, arrive: PreviewBar.arrival(t), note: words });
+    const q = v.quote;
+    if (q.error && v.fits) { AGM.toast(q.error + '.', { bad: true, undo: () => go(v.fits), undoLabel: 'Send what fits' }); return; }
+    if (q.error) { AGM.toast(q.error + ' — scroll so less is in view, or pick a part.', true); return; }
+    go(q);
+  }
+  function open(at) {
+    const o = object();
+    if (!o) return false;
+    return openObjectMenu('pick', object, { node: docDisplay, more, at: at && Number.isFinite(at.x) ? at : { anchor: more }, opener: more, label: 'What you picked', header: () => 'What you picked' });
+  }
+  const say = (parts) => {
+    sayEl.textContent = '';
+    for (const p of parts) sayEl.append(p);
+    sayEl.hidden = !parts.length;
+  };
+  const button = (label, fn) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'btn ghost small'; b.textContent = label; b.addEventListener('click', fn); return b; };
+  /** Whose information the target reads now, where another pusher put it up under FRESH_MS ago: words, or ''. */
+  function fresh() {
+    const t = PreviewBar.target();
+    const u = PreviewBar.upThere(t).info;
+    if (!u || u.mine || !u.by || !u.at) return null;
+    const age = Date.now() - u.at;
+    if (age >= FRESH_MS) return null;
+    clearTimeout(freshTimer);
+    freshTimer = setTimeout(() => PreviewBar.draw(), FRESH_MS - age + 50);
+    const kind = kindSaid(u.kind).replace(/^an? /, '');
+    return (t.to === 'board' ? 'The Board is' : t.name + ' is') + ' reading ' + u.by + '\'s ' + kind + ' (' + Math.max(1, Math.round(age / 1000)) + ' s)';
+  }
+  /** Whether a quote is longer than a glance on a tablet: drawn off the screen at the stage's smallest type, and measured. */
+  function long(m, content) {
+    const box = document.createElement('div');
+    box.className = 'pick-glance';
+    box.style.width = GLANCE.width + 'px';
+    const el = m.quote(content, { by: pageFacts.name || '' });
+    el.style.fontSize = GLANCE.px + 'px';
+    box.appendChild(el);
+    document.body.appendChild(box);
+    const tall = el.scrollHeight > GLANCE.height;
+    box.remove();
+    return tall;
+  }
+  /**
+   * The bar drawn for the pick now. The quote, its preview and its glance are read again only when what they are of
+   * changes (the pick, its unit, the cut, the labels, the note): a scroll of the Preview redraws only the words that
+   * follow the place and the target.
+   */
+  function draw() {
+    const on = !!pick && !!view && view === docView && may() && !$('previewBar').hidden;
+    bar.hidden = !on;
+    if (!on) { preview.textContent = ''; cached = null; return; }
+    const o = object();
+    // The chips: the units that hold the pick, from the catalogue (kind `pick`), each with its size, one chosen.
+    const units = AGM.catalog.shown('pick', F, o).filter((e) => AGM.catalog.PICK_UNITS.some((x) => 'pick.' + x[0] === e.id));
+    const key = JSON.stringify([units.map((e) => AGM.catalog.items('pick', F, o).find((i) => i.id === e.id) || e.id), unit]);
+    if (chips.dataset.key !== key) {
+      chips.dataset.key = key;
+      chips.textContent = '';
+      for (const e of units) {
+        const u = e.id.slice(5);
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'pick-chip';
+        b.dataset.action = e.id;
+        b.setAttribute('role', 'radio');
+        b.setAttribute('aria-checked', String(u === unit));
+        const it = AGM.catalog.items('pick', F, o).find((i) => i.id === e.id);
+        b.textContent = it ? it.label : u;
+        if (it && it.disabled) b.title = it.disabled;
+        b.addEventListener('click', () => { unit = u; cut = false; draw(); });
+        chips.appendChild(b);
+      }
+    }
+    const t = PreviewBar.target();
+    showBtn.textContent = '📺 Show ' + (t.to === 'board' ? 'the Board' : t.name);
+    const grid = pick.type === 'grid';
+    labelsBox.hidden = !grid;
+    markLabels.hidden = !grid || !view.labels();
+    words.textContent = pick.words || '';
+    const asPicture = pick.type === 'region' || pick.type === 'picture';
+    const qKey = [pickNo, unit, cut, labelsTick.checked, note.value.trim()].join('|');
+    const again = !cached || cached.key !== qKey;
+    if (again) cached = { key: qKey, q: asPicture ? null : quoteNow(), glance: false };
+    const q = cached.q;
+    const parts = [];
+    if (pick.untagged) parts.push(document.createTextNode(UNTAGGED + '. '));
+    if (q && q.error) {
+      parts.push(document.createTextNode(q.error + ' '));
+      if (q.over) parts.push(button(q.over.chars ? 'Send the first 1,200 characters' : 'Send the first 25 rows × 10 columns', () => { cut = true; draw(); }));
+    }
+    const f = fresh();
+    if (f) parts.push(document.createTextNode(f + ' — '), button('Replace', () => send()), document.createTextNode(' · '), button('Show a person instead', () => document.getElementById('pickTo').focus()));
+    if (cached.glance) { const w = document.createElement('span'); w.className = 'pick-glance-words'; w.textContent = ' Long for the stage — the Board will scroll.'; parts.push(w); }
+    showBtn.disabled = !!(q && q.error);
+    say(parts);
+    if (!again) return;
+    preview.textContent = '';
+    if (asPicture) { preview.append(document.createTextNode(pick.type === 'region' ? 'A picture of this region alone: nothing else of the file goes.' : 'This picture alone, drawn again without its metadata: nothing else of the file goes.')); return; }
+    const drawing = ++drawn;
+    if (!q || q.error) return;
+    const mine = cached;
+    Takes.load().then((m) => {
+      if (drawing !== drawn || cached !== mine) return;
+      const content = { kind: 'snippet', ...q, ...(note.value.trim() ? { note: note.value.trim() } : {}) };
+      preview.textContent = '';
+      preview.appendChild(m.quote(content, { by: pageFacts.name || '' }));
+      if (!long(m, content)) return;
+      mine.glance = true;
+      draw();
+    }, () => { preview.textContent = 'This page could not load what draws a quote: reload it.'; });
+  }
+  showBtn.addEventListener('click', () => send());
+  more.addEventListener('click', (e) => { e.preventDefault(); if (openOn && openOn.kind === 'pick') { AGM.menu.close(); return; } open({ anchor: more }); });
+  labelsTick.addEventListener('change', () => { if (view && pick) { pick = view.pick(); pickNo++; draw(); } });
+  note.addEventListener('input', () => { if (!bar.hidden) draw(); });
+  markLabels.addEventListener('click', async () => {
+    const l = view && view.labels();
+    if (!l) return;
+    const r = await AGM.ask(markLabels, { title: 'This sheet\'s labels', words: 'The row of headers and the column of names a cell is sent with (0 for none).', fields: [{ name: 'row', label: 'Label row', value: String(l.row + 1), max: 7 }, { name: 'col', label: 'Label column (A, B, …)', value: l.col >= 0 ? columnLetters(l.col) : '0', max: 3 }], yes: 'Use these', no: 'Cancel' }, { opener: markLabels });
+    if (!r.yes || !view) return;
+    const row = parseInt(r.values.row, 10);
+    const letters = String(r.values.col || '').trim().toUpperCase();
+    const col = /^[A-Z]{1,3}$/.test(letters) ? [...letters].reduce((n, ch) => n * 26 + (ch.charCodeAt(0) - 64), 0) - 1 : -1;
+    view.setLabels(row >= 1 ? row - 1 : -1, col);
+  });
+  // A right-click on the pick, and Shift+F10 or the menu key in the document, open its menu: AGMessage's, Copy first, in
+  // place of the browser's (a touch's long press stays the browser's selection gesture).
+  AGM.menu.door(docDisplay, (t, e) => {
+    if (!object() || !docView) return null;
+    const onIt = e && Number.isFinite(e.clientX) && (e.clientX || e.clientY) ? docView.holds(t, e.clientX, e.clientY) : true;
+    return onIt ? { el: docDisplay, more, open: (at) => open(at) } : null;
+  }, { picks: true });
+  Object.assign(RUN, {
+    'pick.copy': (o, { anchor }) => copyText(o.copy, 'Copied.', anchor),
+    'pick.picture': () => {
+      const s = src();
+      const t = PreviewBar.target();
+      if (!s) return;
+      if (pick && (pick.type === 'region' || pick.type === 'picture')) { send(); return; }
+      Show.picture(s, docView ? Math.max(1, (docView.place() || {}).page || 1) : 1, t.to, { view: docView, name: t.name, arrive: PreviewBar.arrival(t) });
+    },
+    'pick.view': () => seen(),
+    'pick.document': () => {
+      const s = src();
+      const t = PreviewBar.target();
+      if (!s) return;
+      const page = docView ? Math.max(1, (docView.place() || {}).page || 1) : 1;
+      Show.whole(s, Show.atOf(extOfName(s.url || s.name), page), false, t.to, { name: t.name, arrive: PreviewBar.arrival(t) });
+    },
+    'pick.person': (o, { value }) => { const p = Console.people().find((x) => x.key === value); if (p) send(unit || 'selection', { to: { uid: p.key }, name: p.name }); },
+  });
+  for (const [u] of AGM.catalog.PICK_UNITS) RUN['pick.' + u] = () => { unit = u; send(u); };
+  return { watch, reset, draw, object, seen, fresh, shown: () => !bar.hidden, GLANCE };
 })();
 
 /**
- * The Preview's bar (backstage, for a seat that may show the Board): 📺 Picture of p. 12 (a PDF; "Show this picture" for an
- * image) and 📺 Document at p. 12 side by side, neither behind the other (owner answer 11), with ☐ Let them download it
- * under the document's alone, disabled for a file whose reader found hidden parts. The place is the Preview's own, read
- * as it scrolls. One click each, to the Board.
+ * The Preview's bar (backstage, for a seat that may show the Board): whom it goes to (the Board, or one person) and where
+ * it arrives (over their chat, or in their side bar), then 📺 Picture of p. 12 (a PDF; "Show this picture" for an image,
+ * "without its metadata" drawn again) and 📺 Document at p. 12 side by side, neither behind the other (owner answer 11),
+ * the one chosen last on this device drawn first, with ☐ Let them download it under the document's alone, disabled for a
+ * file whose reader found hidden parts; 🔳 What I see; ▭ Region, a part of a PDF's page drawn by hand. The place is the
+ * Preview's own, read as it scrolls. One click each. Over the operator's information on the target's pages, a seat that
+ * may only show sends to their side bar alone, and says so.
  */
 const PreviewBar = (() => {
   const $ = (id) => document.getElementById(id);
@@ -5463,9 +5827,64 @@ const PreviewBar = (() => {
   const tick = $('letDownload');
   const why = $('letDownloadWhy');
   const note = $('previewNote');
+  const seenBtn = $('showSeen');
+  const regionBtn = $('regionBtn');
+  const noMetaBox = $('noMetaBox');
+  const noMeta = $('noMeta');
+  const toSel = $('pickTo');
+  const arriveSel = $('pickArrive');
+  const arriveWhy = $('pickArriveWhy');
+  const freshEl = $('previewFresh');
+  /**
+   * Body text drawn smaller than this on the Board's tablet is hard to read at a glance: the bar suggests What I see for a
+   * whole page whose text would (provisional, until the device matrix's D2 is measured, docs/DEVICES.md §7; a tablet's take
+   * taken as the glance box, PickBar.GLANCE).
+   */
+  const READABLE_PX = 16;
+  /** The choice between a picture and the document made last on this device, drawn first (localStorage; a private window keeps none). */
+  const LAST = 'agm.showAs';
+  const ARRIVE = 'agm.showArrive';
+  const read = (k) => { try { return localStorage.getItem(k) || ''; } catch { return ''; } };
+  const keep = (k, v) => { try { localStorage.setItem(k, v); } catch { /* this device keeps no choice: the bar's default stands */ } };
   const may = () => docSeat() === 'research' && !ADMIN_VIEW && (F.canPush || F.canShow) && F.view !== 'simple';
   const src = () => (previewing ? Show.sourceOf(previewing.msg || previewing) : null);
   const pageNow = () => { const p = docView ? docView.place() : null; return p && p.page >= 1 ? p.page : 1; };
+  /** Whom a push from the bar goes to: the Board, or the person chosen ({to: {uid}, name}). */
+  function target() {
+    const v = toSel.value;
+    if (!v || v === 'board') return { to: 'board', name: '' };
+    const p = Console.people().find((x) => x.key === v);
+    return p ? { to: { uid: p.key }, name: p.name } : { to: 'board', name: '' };
+  }
+  /** The information on the target's pages now ({seq, kind, op, mine, by, at}), over the show or beside it, or null. */
+  function upThere(t = target()) {
+    const o = t.to === 'board' ? Console.board() : Console.rowOf(t.to.uid);
+    return o ? { info: o.info || o.beside || null, opOn: !!o.opOn } : { info: null, opOn: false };
+  }
+  /** Where a push arrives: as chosen, but in their side bar for a seat that may only show over the operator's information there. */
+  function arrival(t = target()) {
+    const u = upThere(t);
+    return !F.canPush && ((u.info && u.info.op) || u.opOn) ? 'side' : arriveSel.value === 'side' ? 'side' : '';
+  }
+  /** The targets: the Board, and the people the console's read lists (those seated On stage, for a seat that may only show). */
+  function drawTargets() {
+    const was = toSel.value || 'board';
+    const list = [{ key: 'board', name: 'the Board' }].concat(Console.people());
+    const keyOf = list.map((p) => p.key + '|' + p.name).join(',');
+    if (toSel.dataset.keys !== keyOf) {
+      toSel.dataset.keys = keyOf;
+      toSel.textContent = '';
+      for (const p of list) { const o = document.createElement('option'); o.value = p.key; o.textContent = 'Show ' + p.name; toSel.appendChild(o); }
+    }
+    toSel.value = list.some((p) => p.key === was) ? was : 'board';
+    const u = upThere();
+    const forced = !F.canPush && ((u.info && u.info.op) || u.opOn);
+    arriveSel.disabled = forced;
+    if (forced) arriveSel.value = 'side';
+    else if (!arriveSel.dataset.chosen) arriveSel.value = read(ARRIVE) === 'side' ? 'side' : 'over';
+    arriveWhy.hidden = !forced;
+    arriveWhy.textContent = forced ? 'The operator is showing ' + kindSaid(u.info ? u.info.kind : 'web') + ' — this goes to their side bar.' : '';
+  }
   // Offered only over a file the reader drew: one it could not read (a password-protected Office file, a broken one) is
   // shown nowhere, and its hidden parts are known only once it is read.
   function draw() {
@@ -5473,19 +5892,61 @@ const PreviewBar = (() => {
     const ext = s ? extOfName(s.url || s.name) : '';
     const show = !!s && may() && docShown && Show.STAGE.includes(ext);
     bar.hidden = !show;
-    if (!show) return;
+    if (!show) { PickBar.draw(); return; }
+    drawTargets();
     const n = pageNow();
     const image = Show.IMAGE.includes(ext);
     pic.hidden = !(image || ext === 'pdf');
     pic.textContent = image ? '📺 Show this picture' : '📺 Picture of p. ' + n;
     const place = Show.PLACE[ext];
     docBtn.textContent = '📺 Document' + (place ? ' at ' + (place === 'page' ? 'p.' : place) + ' ' + n : '');
+    // The choice made last on this device is drawn first, as the bar's primary; the other beside it, one click away.
+    const first = read(LAST) === 'document' ? docBtn : pic;
+    pic.classList.toggle('primary', first === pic && !pic.hidden);
+    pic.classList.toggle('ghost', !(first === pic && !pic.hidden));
+    docBtn.classList.toggle('primary', first === docBtn || pic.hidden);
+    docBtn.classList.toggle('ghost', !(first === docBtn || pic.hidden));
+    const row = docBtn.closest('.row');
+    const docBox = docBtn.closest('.preview-doc');
+    if (first === docBtn && row.firstElementChild !== docBox) row.insertBefore(docBox, pic);
+    if (first === pic && row.firstElementChild !== pic) row.insertBefore(pic, docBox);
     const hidden = !!docView && docView.hiddenParts();
     tick.disabled = hidden;
     if (hidden) tick.checked = false;
     why.hidden = !hidden;
     why.textContent = hidden ? Show.HIDDEN_PARTS : '';
-    note.textContent = 'Show the Board ' + (image ? 'this picture' : ext === 'pdf' ? 'a picture of this page only, or the whole file opened here' : 'the whole file, opened here') + (s.file ? ' — it is uploaded as you show it.' : '.');
+    regionBtn.hidden = ext !== 'pdf';
+    noMetaBox.hidden = !image;
+    const size = s.file ? s.file.size : previewing && previewing.msg ? previewing.msg.size : 0;
+    const t = target();
+    const whom = t.to === 'board' ? 'the Board' : t.name;
+    // A page's picture says its size once it has been drawn here (kept to show again); until then, what it is.
+    const drawnBytes = ext === 'pdf' ? Show.drawnSize(s, n) : 0;
+    const small = ext === 'pdf' ? smallText(n) : 0;
+    note.textContent = (image ? 'Show ' + whom + ' this picture' + (noMeta.checked ? ', drawn again without its metadata' : '')
+      : (ext === 'pdf' ? 'Picture of p. ' + n + ': this page only, as a picture' + (drawnBytes ? ' (' + sizeWords(drawnBytes) + ')' : '') + '. ' : '') + 'Document: the whole file' + (size ? ' (' + sizeWords(size) + ')' : '') + ', opened ' + (place ? 'at ' + (place === 'page' ? 'p.' : place) + ' ' + n : 'here') + ' — ' + (t.to === 'board' ? 'the Board' : whom) + ' can page through it')
+      + (s.file ? '. It is uploaded as you show it.' : '.')
+      + (small ? ' Whole, its text stands about ' + small + ' px tall on a tablet — 🔳 What I see sends the part in view, larger.' : '');
+    PickBar.draw();
+    // Another pusher's information under 15 s old, said for every choice here; with a pick, its bar says it with Replace.
+    const f = PickBar.shown() ? '' : PickBar.fresh();
+    freshEl.textContent = '';
+    if (f) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn ghost small';
+      b.textContent = 'Show a person instead';
+      b.addEventListener('click', () => toSel.focus());
+      freshEl.append(f + ' — what you show replaces it · ', b);
+    }
+    freshEl.hidden = !f;
+  }
+  /** How tall a whole PDF page's body text would stand on a tablet's take, in px, where under READABLE_PX; else 0. */
+  function smallText(n) {
+    const ts = docView && typeof docView.textSize === 'function' ? docView.textSize(n) : null;
+    if (!ts || !(ts.text > 0) || !(ts.width > 0) || !(ts.height > 0)) return 0;
+    const px = ts.text * Math.min(PickBar.GLANCE.width / ts.width, PickBar.GLANCE.height / ts.height);
+    return px < READABLE_PX ? Math.max(1, Math.round(px)) : 0;
   }
   let queued = false;
   docDisplay.addEventListener('scroll', () => {
@@ -5493,21 +5954,42 @@ const PreviewBar = (() => {
     queued = true;
     requestAnimationFrame(() => { queued = false; draw(); });
   }, { passive: true, capture: true });
-  pic.addEventListener('click', () => { const s = src(); if (s) Show.picture(s, pageNow(), 'board', { view: docView }); });
+  pic.addEventListener('click', () => {
+    const s = src();
+    if (!s) return;
+    keep(LAST, 'picture');
+    const t = target();
+    Show.picture(s, pageNow(), t.to, { view: docView, name: t.name, arrive: arrival(t), bare: Show.IMAGE.includes(extOfName(s.url || s.name)) && noMeta.checked });
+    draw();
+  });
   docBtn.addEventListener('click', () => {
     const s = src();
     if (!s) return;
-    Show.whole(s, Show.atOf(extOfName(s.url || s.name), pageNow()), tick.checked && !tick.disabled, 'board');
+    keep(LAST, 'document');
+    const t = target();
+    Show.whole(s, Show.atOf(extOfName(s.url || s.name), pageNow()), tick.checked && !tick.disabled, t.to, { name: t.name, arrive: arrival(t) });
     tick.checked = false;
+    draw();
   });
-  return { draw };
+  seenBtn.addEventListener('click', () => PickBar.seen());
+  regionBtn.addEventListener('click', () => {
+    if (!docView) return;
+    const on = docView.region(regionBtn.getAttribute('aria-pressed') !== 'true');
+    regionBtn.setAttribute('aria-pressed', String(on));
+    AGM.toast(on ? 'Drag over the page to draw the region to send; the arrow keys nudge it, Shift and the arrows resize it.' : 'Region off: a drag selects words again.');
+  });
+  noMeta.addEventListener('change', draw);
+  toSel.addEventListener('change', draw);
+  arriveSel.addEventListener('change', () => { arriveSel.dataset.chosen = '1'; keep(ARRIVE, arriveSel.value); draw(); });
+  Console.onDraw(() => { if (!bar.hidden) draw(); });
+  return { draw, target, arrival, upThere };
 })();
 
 // ---------------- A web page previewed, or what was shown looked at again: on this page alone ----------------
 // A web page's Preview: the address its ask was answered with, framed by the one frame a page makes (pagelayer.mjs
 // framePage), in a dialog of its own; Show it there runs the act with that answer, and closing it takes the frame away. A
-// Look (an Earlier entry's): the same dialog, with nothing to show from it, the web page framed or a document or a picture
-// drawn as its take was (pagelayer.mjs render), its reader let go and its pictures' object URLs revoked as it closes, and
+// Look (an Earlier entry's): the same dialog, with nothing to show from it, the web page framed or a document, a picture or
+// a quote drawn as its take was (pagelayer.mjs render), its reader let go and its pictures' object URLs revoked as it closes, and
 // as the entry leaves Earlier. Neither reports anything: it is this person's own look.
 const Preview = (function () {
   const $ = (id) => document.getElementById(id);
@@ -5534,12 +6016,12 @@ const Preview = (function () {
     box.append(made.frame);
     show(go ? 'Preview' : 'Look', made.host, go ? 'Only you see it here. Show it puts it on their pages; nothing is sent until then.' : LOOK, go);
   }
-  /** A document or a picture an Earlier entry (`e`) showed, drawn again here alone, as the take was. */
+  /** A document, a picture or a quote an Earlier entry (`e`) showed, drawn again here alone, as the take was. */
   function look(m, e, ctx) {
     letBoxGo();
     drawer = m;
     seq = e.seq;
-    show('Look', (e.content && (e.content.name || '')) || 'Shown earlier', LOOK, null);
+    show('Look', (e.content && (e.content.name || (e.content.kind === 'snippet' ? 'A quote' : ''))) || 'Shown earlier', LOOK, null);
     Promise.resolve(m.render(box, e.content, ctx)).then((r) => {
       if (seq === e.seq && r && r.state === 'failed') AGM.toast('This could not be shown again: ' + r.words + '.', true);
     }, () => AGM.toast('This page could not load what draws it: reload it.', true));

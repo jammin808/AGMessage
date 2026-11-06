@@ -60,7 +60,8 @@ const RESERVED_ICONS = { '↩': ['reply'], '↗': ['send', 'sendBack', 'sendTo']
  * halls board; ⚙ sets a link up (a node's, or the default Stagewatch's).
  */
 // 📺 Show the Board ▸ on a file (msg.stage, file.stage) and Show them ▸ on a person are one act: showing on people's pages.
-const ONE_ACT = [['send', 'sendBack', 'sendTo'], ['delete', 'remove'], ['draft', 'minutes'], ['helpRespond', 'respond'], ['helpResolve', 'resolve'], ['setup', 'configure'], ['toggle', 'codeToggle'], ['new', 'newCode'], ['stage', 'show']];
+// 📄 Show them a document… on a person and The document at this place on a pick are one act: a document shown whole.
+const ONE_ACT = [['send', 'sendBack', 'sendTo'], ['delete', 'remove'], ['draft', 'minutes'], ['helpRespond', 'respond'], ['helpResolve', 'resolve'], ['setup', 'configure'], ['toggle', 'codeToggle'], ['new', 'newCode'], ['stage', 'show'], ['doc', 'document']];
 /** Acts that open a dialog of their own (Stagewatch's, the Screens console, a hall's set-up, the show network, the editor, the export, the short document bar) and so end their label with "…" as an ask does. */
 const OPENS_DIALOG = new Set(['msg.speaker', 'msg.screens', 'file.screens', 'chip.speaker', 'header.screens', 'board.screens', 'compose.attach', 'hall.setup', 'hall.network', 'room.setup', 'account.edit', 'audit.export', 'adminRoom.members', 'adminRoom.sendFrom', 'person.doc']);
 /** The keys a single key may be: a letter or a digit that needs no Shift (shown upper case), or one of these named keys. */
@@ -219,7 +220,21 @@ const SHEET_FULL = { ...SHEET, zoom: 2.2, full: true };
 const EARLIER = { id: 'earlier', more: true, find: '' };
 const EARLIER_NONE = { ...EARLIER, more: false };
 const QUOTE_EARLIER = { id: 'earlier:m8', more: true, find: 'm8' };
-const HALL_OBJECTS = { compose: Object.values(COMPOSE), chip: [STAGE], header: [HEADER, HEADER_OFF, HEADER_UNTOLD, HEADER_ACCOUNT], take: [TAKE, TAKE_HOT, TAKE_FULL, TAKE_WEB, TAKE_HELD, TAKE_DOC, TAKE_DOC_PLAIN], card: [CARD, CARD_SIDE, CARD_DOC], past: [PAST, PAST_DOC], sheet: [SHEET, SHEET_SMALLEST, SHEET_FULL], board: [BOARD_CHAT, BOARD_MINE, BOARD_THEIRS, BOARD_EMPTY, BOARD_INFO, BOARD_OPERATOR, BOARD_BESIDE, BOARD_BESIDE_ONLY, BOARD_OP_ON], earlier: [EARLIER, EARLIER_NONE, QUOTE_EARLIER] };
+// A pick in the Preview: words of a PDF's page (a selection holding a word, its line and its paragraph, the people On stage
+// to send it to), a paragraph over the stage's bound, a guess of an untagged PDF's (≈), a cell of a sheet, a region of a
+// picture, a picture in a Word document, and a pick with nobody On stage.
+const PEOPLE = [{ key: 'u:u-cy', name: 'Cy' }];
+const PICK_WORDS = { id: 'pick', units: [{ unit: 'selection', size: '6 ch' }, { unit: 'word', size: '6 ch' }, { unit: 'line', size: '47 ch' }, { unit: 'paragraph', size: '47 ch' }], copy: 'agenda', picture: 'page', seen: true, doc: true, people: PEOPLE };
+const PICK_LONG = { ...PICK_WORDS, units: [{ unit: 'selection', size: '6 ch' }, { unit: 'paragraph', size: '', over: 'Too long for the stage: 1,200 characters at most (this is 1,860)' }] };
+const PICK_GUESS = { ...PICK_WORDS, units: [{ unit: 'selection', size: '1 ch' }, { unit: 'paragraph', size: '30 ch', approx: true }] };
+const PICK_CELL = { id: 'pick', units: [{ unit: 'cell', size: '3 ch' }, { unit: 'row', size: '3 cells' }, { unit: 'column', size: '2 cells' }], copy: '4.2', picture: '', seen: true, doc: true, people: PEOPLE };
+const PICK_REGION = { id: 'pick', units: [], copy: '', picture: 'region', seen: true, doc: false, people: PEOPLE };
+const PICK_INSIDE = { id: 'pick', units: [], copy: '', picture: 'inside', seen: true, doc: true, people: PEOPLE };
+const PICK_ALONE = { ...PICK_WORDS, people: [] };
+// Every other unit: a sentence and items of a document's blocks, a range of a sheet's cells, and a slide.
+const PICK_MORE = { ...PICK_WORDS, units: [{ unit: 'sentence', size: '40 ch' }, { unit: 'item', size: '2 items' }, { unit: 'range', size: '4 cells' }, { unit: 'slide', size: '30 ch' }] };
+const HALL_OBJECTS = { compose: Object.values(COMPOSE), chip: [STAGE], header: [HEADER, HEADER_OFF, HEADER_UNTOLD, HEADER_ACCOUNT], take: [TAKE, TAKE_HOT, TAKE_FULL, TAKE_WEB, TAKE_HELD, TAKE_DOC, TAKE_DOC_PLAIN], card: [CARD, CARD_SIDE, CARD_DOC], past: [PAST, PAST_DOC], sheet: [SHEET, SHEET_SMALLEST, SHEET_FULL], board: [BOARD_CHAT, BOARD_MINE, BOARD_THEIRS, BOARD_EMPTY, BOARD_INFO, BOARD_OPERATOR, BOARD_BESIDE, BOARD_BESIDE_ONLY, BOARD_OP_ON], earlier: [EARLIER, EARLIER_NONE, QUOTE_EARLIER],
+  pick: [PICK_WORDS, PICK_LONG, PICK_GUESS, PICK_CELL, PICK_REGION, PICK_INSIDE, PICK_ALONE, PICK_MORE] };
 
 // ---------------------------------------------------------------- the other pages' seats and objects, as their answers make them
 const HALLS = [{ code: 'K7P2QX', name: 'Hall 2' }, { code: 'M3N4PQ', name: 'Legal' }];
@@ -338,7 +353,7 @@ const KIND_SEATS = {
   msg: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple, SEATS.researchSends], file: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple], screen: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple],
   compose: [SEATS.admin, SEATS.researchNoDesk, SEATS.board, SEATS.boardSimple, SEATS.researchSends], chip: [SEATS.admin, SEATS.researchNoDesk], header: [SEATS.admin, SEATS.board, SEATS.research],
   take: [SEATS.board, SEATS.boardSimple, SEATS.boardFull, SEATS.research], card: [SEATS.board, SEATS.boardSimple, SEATS.observer], past: [SEATS.board, SEATS.boardSimple, SEATS.observer], sheet: [SEATS.boardSimple, SEATS.boardSimpleFull, SEATS.supportBoard], board: [SEATS.adminPush, SEATS.pushNoStagewatch, SEATS.adminWeb, SEATS.staffShow],
-  earlier: [SEATS.research, SEATS.boardSimple, SEATS.observer],
+  earlier: [SEATS.research, SEATS.boardSimple, SEATS.observer], pick: [SEATS.adminPush, SEATS.staffShow],
   adminRoom: [PAGE.admin, PAGE.adminNoAi, PAGE.adminUsers, PAGE.boardAdmin], person: [PAGE.admin, SEATS.research, SEATS.board, SEATS.techPush, SEATS.guestWeb], adminMsg: [PAGE.admin], link: [PAGE.admin], tunnel: [PAGE.admin], laptop: [PAGE.admin],
   hall: [PAGE.board], room: [PAGE.board, SEATS.research], help: [PAGE.board], account: [PAGE.accountsAdmin], audit: [PAGE.accountsAdmin, PAGE.filtered],
 };
@@ -367,7 +382,7 @@ test('the file types: the pages\' one copy of the types the stage shows and of t
 });
 
 test('the entries: kind.verb ids, known groups in order with danger last, labels, keys, icons that are no marks', () => {
-  assert.deepEqual(KINDS, ['msg', 'file', 'screen', 'compose', 'chip', 'header', 'take', 'card', 'past', 'sheet', 'board', 'earlier', 'adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop', 'hall', 'room', 'help', 'account', 'audit'], 'the kinds landed so far');
+  assert.deepEqual(KINDS, ['msg', 'file', 'screen', 'compose', 'chip', 'header', 'take', 'card', 'past', 'sheet', 'board', 'earlier', 'pick', 'adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop', 'hall', 'room', 'help', 'account', 'audit'], 'the kinds landed so far');
   const seen = new Set();
   for (const kind of KINDS) {
     const list = C.KINDS[kind];
@@ -462,8 +477,10 @@ test('one word for one act: "…" for an act that asks first or opens a dialog, 
       // "Full screen" is the device's own mode, which a take enters only by the person's gesture: no screen of the hall's.
       if (/screen/i.test(label) && !/^(Leave )?[Ff]ull screen$/.test(label)) assert.ok(e.verb.startsWith('display:') || (e.verb.startsWith('stage:') && /speaker's screen/i.test(label)), e.id + ': "' + label + '" says screen and acts on one');
       // What puts something on people's pages says Show (Show the clock, Show them); what takes it off says the words that
-      // undo it (Back to chat, Back to Stagewatch (undo your …), Take down), and nothing else does.
-      if (e.verb === 'page:push') assert.match(label, /^Show\b|^Back to\b|^Take down\b/, e.id + ': an act on people\'s pages says Show, or Back to (Take down) where it undoes one');
+      // undo it (Back to chat, Back to Stagewatch (undo your …), Take down), and nothing else does. A pick's list names what
+      // is shown (a paragraph, a picture of this page, what I see): the stage addendum's previewActions exactly, whose
+      // Show is its bar's button.
+      if (e.verb === 'page:push' && kind !== 'pick') assert.match(label, /^Show\b|^Back to\b|^Take down\b/, e.id + ': an act on people\'s pages says Show, or Back to (Take down) where it undoes one');
       if (e.verb === 'page:push' && /^Back to\b/.test(label)) assert.ok(/\.(chat|back)$/.test(e.id), e.id + ': Back to is a hand-back (chat) or an undo (back)');
       if (e.short) assert.ok(e.fold, e.id + ': a short label is a fold\'s');
     }
@@ -1387,6 +1404,39 @@ test('a take minimised, as a card in the side bar: Show again, and Remove with U
   // Information that arrived in the side bar: Show over the chat, by the person's choice, and Remove; Look in the simple view.
   assert.deepEqual(plain(C.inline('card', SEATS.board, CARD_SIDE)).map((i) => [i.id, i.label]), [['card.show', 'Show over the chat'], ['card.remove', 'Remove']]);
   assert.deepEqual(plain(C.inline('card', SEATS.boardSimple, CARD_SIDE, Infinity)).map((i) => [i.id, i.label]), [['card.show', 'Look']]);
+});
+
+test('a pick in the Preview: previewActions exactly, in its order, Copy first, then each unit that holds it with its size, a picture, what is in view, the document and a person; for a backstage seat that may show the Board, in the full view', () => {
+  const ids = (f, o) => plain(C.ids('pick', f, o));
+  // The operator (canPush) and a researcher by a right of their own (canShow) alike: the one list, Copy first.
+  for (const f of [SEATS.adminPush, SEATS.staffShow]) {
+    assert.deepEqual(ids(f, PICK_WORDS), ['pick.copy', 'pick.selection', 'pick.word', 'pick.line', 'pick.paragraph', 'pick.picture', 'pick.view', 'pick.document', 'pick.person']);
+    assert.deepEqual(ids(f, PICK_CELL), ['pick.copy', 'pick.cell', 'pick.row', 'pick.column', 'pick.view', 'pick.document', 'pick.person'], 'a sheet\'s cell: no picture of a page');
+    assert.deepEqual(ids(f, PICK_REGION), ['pick.picture', 'pick.view', 'pick.person'], 'a region: its picture, what is in view and a person, nothing to copy or send as words');
+    assert.deepEqual(ids(f, PICK_INSIDE), ['pick.picture', 'pick.view', 'pick.document', 'pick.person'], 'a picture in a document: that picture alone, what is in view, the document and a person');
+  }
+  // Each unit says its size; a guess read from an untagged PDF says so; a unit over the stage's bound is shown, disabled
+  // with the bound's words (the bar offers the cut); the region's picture says it is of the region.
+  const label = (o, id) => plain(C.items('pick', SEATS.adminPush, o)).find((i) => i.id === id);
+  assert.deepEqual([label(PICK_WORDS, 'pick.word').label, label(PICK_WORDS, 'pick.paragraph').label, label(PICK_GUESS, 'pick.paragraph').label, label(PICK_CELL, 'pick.row').label],
+    ['Word · 6 ch', 'Paragraph · 47 ch', 'Paragraph (≈ best guess) · 30 ch', 'Row · 3 cells']);
+  assert.deepEqual([label(PICK_LONG, 'pick.paragraph').disabled, label(PICK_LONG, 'pick.selection').disabled], ['Too long for the stage: 1,200 characters at most (this is 1,860)', '']);
+  assert.deepEqual([label(PICK_WORDS, 'pick.picture').label, label(PICK_REGION, 'pick.picture').label, label(PICK_INSIDE, 'pick.picture').label], ['Picture of this page', 'Picture of this region', 'This picture alone']);
+  // ▸ a person: those it may go to, one level down, for words, a region and a picture alike; with nobody On stage, disabled
+  // with why.
+  for (const o of [PICK_WORDS, PICK_REGION, PICK_INSIDE]) assert.deepEqual(plain(C.submenu('pick', 'pick.person', SEATS.adminPush, o)), [{ value: 'u:u-cy', label: 'Cy' }]);
+  assert.equal(label(PICK_ALONE, 'pick.person').disabled, 'Nobody is seated On stage now.');
+  // Copy is the page's own; every other entry is a take on people's pages (page:push), now.
+  assert.deepEqual(plain(C.KINDS.pick.map((e) => [e.id, e.verb, e.mode])), [['pick.copy', 'local', 'local'], ...C.PICK_UNITS.map(([u]) => ['pick.' + u, 'page:push', 'now']),
+    ['pick.picture', 'page:push', 'now'], ['pick.view', 'page:push', 'now'], ['pick.document', 'page:push', 'now'], ['pick.person', 'page:push', 'now']]);
+  // A seat that may not show the Board (a Board seat, an observer, a backstage seat without the right) is shown Copy
+  // alone; the simple view has no menu at all; the support view draws the list, every act disabled.
+  for (const f of [SEATS.board, SEATS.observer, SEATS.research]) assert.deepEqual(ids(f, PICK_WORDS), ['pick.copy'], f.role);
+  assert.deepEqual(plain(C.items('pick', { ...SEATS.adminPush, view: 'simple' }, PICK_WORDS)), []);
+  assert.ok(plain(C.items('pick', SEATS.supportPush, PICK_WORDS)).filter((i) => !i.sep).every((i) => i.disabled === C.supportWords('Kim')));
+  // The units the bar offers are the store's (lib/pages.js UNITS) but What I see and a typed quote, which are acts of
+  // their own.
+  assert.deepEqual([...C.PICK_UNITS.map((x) => x[0])].sort(), [...require('../lib/pages').UNITS].filter((u) => u !== 'view' && u !== 'text').sort());
 });
 
 test('Earlier: the information taken off this page lately, each a Look on this page alone, for every seat, and ⬇ on a document shown with Download ticked; the support view acts on none', () => {

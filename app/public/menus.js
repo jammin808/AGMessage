@@ -516,22 +516,29 @@
    * door alike: a link inside an object (a room button on a hall's row) never opens the object's menu by a key either.
    * Shift+right-click keeps the browser's menu, but on what is shown on the stage (`stage`: a take, its cards, a Look),
    * whose browser's menu would offer to save a picture: there AGMessage's menu opens for it too, and a selection keeps the
-   * browser's menu (Copy) only off a picture.
+   * browser's menu (Copy) only off a picture. In the Preview (`picks`) a selection is a pick, whose menu holds Copy: there
+   * AGMessage's menu opens on it, and a touch's long press is left to the browser (it selects).
    */
   const KEEPS_BROWSERS = FIELD + ', a[href]:not([data-object-link])';
   menu.door = function door(container, find, opts) {
     // `stage`: true, or a function asked at each right-click (a seat that sits On stage now).
     const onStage = opts && typeof opts.stage === 'function' ? opts.stage : () => !!(opts && opts.stage);
+    // `picks`: the Preview, where a selection is a pick and its menu (the catalogue's kind `pick`, Copy first) stands in
+    // for the browser's; a menu a touch's long press would open is the browser's selection gesture there, never ours.
+    const picks = !!(opts && opts.picks);
+    let touched = 0;
+    if (picks) container.addEventListener('pointerdown', (e) => { touched = e.pointerType === 'touch' ? Date.now() : 0; }, true);
     container.addEventListener('contextmenu', (e) => {
       const stage = !!onStage();
       if (e.shiftKey && !stage) return;   // Shift+right-click: the browser's own menu, but on the stage
+      if (picks && touched && Date.now() - touched < 2000) return;   // a long press: the selection's own gesture
       const t = e.target;
       if (!t || !t.closest || t.closest(KEEPS_BROWSERS)) return;
-      const obj = find(t);
+      const obj = find(t, e);
       if (!obj) return;
       const sel = window.getSelection ? window.getSelection() : null;
       const picture = stage && !!t.closest('img, canvas');
-      if (sel && !sel.isCollapsed && sel.anchorNode && obj.el.contains(sel.anchorNode) && !picture) return;   // Copy: the browser's
+      if (!picks && sel && !sel.isCollapsed && sel.anchorNode && obj.el.contains(sel.anchorNode) && !picture) return;   // Copy: the browser's
       const byKey = e.pointerType === '' || (e.button === 0 && e.clientX === 0 && e.clientY === 0);
       if (!obj.open(byKey ? { anchor: obj.more || obj.el } : { x: e.clientX, y: e.clientY })) return;
       e.preventDefault();

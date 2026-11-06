@@ -46,6 +46,12 @@ OpenJPEG decodes the JPEG 2000 images in a PDF. It is compiled to WebAssembly by
 Copyright (c) 2024, Mozilla Foundation, `licenses/openjpeg/pdf.js.openjpeg-LICENSE`) at the OpenJPEG revision pdf.js
 4.10.38's build pinned; the compiled decoder records no version. OpenJPEG's licence names its other copyright holders.
 
+Not a vendored file, and so in no table: the rules that lay pdf.js's text layer over a PDF's page in the Preview (where
+a researcher picks words from it) are copied from pdf.js 4.10.38's `web/pdf_viewer.css` into `app/public/styles.css`,
+under pdf.js's licence (Apache-2.0, Copyright 2014 Mozilla Foundation, `licenses/pdfjs-dist/`), with pdf.js's notice
+beside them; the physical sides stand before `inset`, `overflow: hidden` before `clip`, and a selection's colour is the
+stylesheet's own token.
+
 ## mammoth 1.13.0
 
 Word documents (`.docx`) become HTML in the page's document worker (`app/public/docworker.js`), which the page ends at its

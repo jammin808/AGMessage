@@ -1,8 +1,10 @@
 // What a person's page is shown over its chat (a take), drawn: Stagewatch's countdown, AGMessage's clock, a holding slide,
 // black, a web page, a document (the whole file, opened at its place, paged and zoomed: docview.mjs, the drawing the page's
-// seat draws) and a picture (with zoom). The hall page (app.js) loads this module with import() 2 s after a Board page's
+// seat draws), a picture (with zoom) and a quote (words or cells a researcher picked, drawn from data in the largest type
+// that fits). The hall page (app.js) loads this module with import() 2 s after a Board page's
 // join, or at its first take, hands it a box and plain values (Stagewatch's frame, AGMessage's clock offset and zone, the
-// hall's name and holding picture, who put the take up, the page's seat, whether the page is connected) and reads back
+// hall's name and holding picture, who put the take up, the page's seat, whether the page is connected, and `card` where the
+// box is a card in the side bar) and reads back
 // what it drew; the page alone says so to the server (page:report), so what was drawn is said in one place, from the
 // drawing. Nothing here holds a socket, and every node is built with the DOM and textContent.
 //
@@ -16,6 +18,11 @@
 //   prepare()                 → Promise                    the document reader imported ahead of a first document
 //   webAddress(url)           → {url, host} | {error}      a web page's address as a frame may be given it
 //   framePage(url)            → {frame, url, host} | {error}  the one frame a page makes, for a web page (a take, a Preview)
+//   quote(content, ctx)       → element                   a quote as the stage draws it, unfitted (the researcher's bar
+//                                                          shows it so before it goes)
+//   fitQuote(box, el, o)      → {fits}                    a quote's type set to the largest that fits its box (`keep`: its
+//                                                          own type kept, a card's), its tables marked long where it is not
+//   quoteWords(content)       → string                    a quote's words in reading order, one line each
 //
 // Invariants for a file a take shows (a document, a picture):
 //   - Checked again here: its address is an upload of AGMessage's (/uploads/<name>) of a type the stage shows (a
@@ -27,6 +34,17 @@
 //     holds the box's menus (AGMessage's, Shift+right-click included) and hides it from print.
 //   - docview.mjs is imported with import() only, never statically, so a device that cannot load it loses documents and
 //     pictures alone, and says so.
+//
+// Invariants for a quote:
+//   - Drawn from its data with the DOM and textContent alone, never as HTML: a paragraph in a <blockquote>, items in a list,
+//     cells in a <table>, each paragraph and cell `dir="auto"`, its line breaks kept (white-space: pre-wrap).
+//   - The largest type that fits, found in at most QUOTE_STEPS steps between QUOTE_MIN px (QUOTE_PHONE px under 600 px
+//     wide, a phone) and 12vw; a quote longer than the screen at the smallest scrolls, and its take says so when shown. In a
+//     side bar's card it keeps the card's type.
+//   - A table wider than its card scrolls sideways inside it, and one in a quote longer than its box scrolls down inside it
+//     too, its label row and column kept in view either way; numbers read to the
+//     right; the cell it is of is outlined and bold, never marked by colour alone; a table cut short says how much is left.
+//   - Its source line says who quoted it and from where, in their voice: the quote is their claim, never AGMessage's.
 
 /** Each kind's card: its icon (no status mark: each mark has one meaning, common.js AGM.MARKS) and its name. */
 const KINDS = Object.freeze({
@@ -37,6 +55,7 @@ const KINDS = Object.freeze({
   web: Object.freeze({ icon: '🌍', name: 'Web page' }),
   doc: Object.freeze({ icon: '📄', name: 'Document' }),
   image: Object.freeze({ icon: '🖼', name: 'Picture' }),
+  snippet: Object.freeze({ icon: '❝', name: 'Quote' }),
 });
 /** An upload's address as AGMessage makes one (lib/guard.js validUploadUrl), and the file types the stage shows. */
 const UPLOAD = /^\/uploads\/[0-9]{10,16}-[a-z0-9]{12}-[A-Za-z0-9._-]{1,60}$/;
@@ -271,6 +290,168 @@ async function drawFile(box, content, ctx) {
   return r && r.state === 'shown' ? { state: 'shown', words: '' } : { state: 'failed', words: failedSaid(content.kind, r && r.words) };
 }
 
+// ---------------------------------------------------------------- a quote
+/** A quote's type: at least QUOTE_MIN px (QUOTE_PHONE under PHONE_WIDTH px wide), at most 12vw, found in QUOTE_STEPS steps. */
+const QUOTE_MIN = 28;
+const QUOTE_PHONE = 20;
+const PHONE_WIDTH = 600;
+const QUOTE_STEPS = 12;
+/** Whether words read as a number (in brackets or not, a sign, a currency, digits with their separators, a percentage or a scale): set to the right. */
+function numeric(words) {
+  const t = words.trim().replace(/^\((.*)\)$/, '$1').replace(/^[-+−]/, '').replace(/^[£$€¥]\s?/, '').replace(/(?:%|[kKmMbB]n?)$/, '');
+  return /^\d[\d,. ]*$/.test(t);
+}
+const withDir = (el) => { el.dir = 'auto'; return el; };
+/** Where a quote was picked, in words: a cell's reference, a run of lines ("rows" in a CSV), or a place as placeSaid has it. */
+function quotePlace(at, type) {
+  if (!at || typeof at !== 'object') return '';
+  if (text(at.ref)) return at.ref;
+  if (Array.isArray(at.lines) && at.lines.length === 2) return (type === 'csv' ? 'rows ' : 'lines ') + at.lines[0] + '-' + at.lines[1];
+  return placeSaid(at, type);
+}
+/**
+ * A quote's source line, in its pusher's voice: "Quoted by Ana · Board pack.pdf, p. 12", "… · Minutes.docx (Legal), ≈ p.
+ * 3", "Quoted by Ana from their copy of Board pack.pdf", "Quoted by Ana · vote.example.com", "Typed by Ana".
+ */
+function quoteSource(content, by) {
+  const from = content.from && typeof content.from === 'object' ? content.from : null;
+  const who = by || 'someone';
+  if (!from) return 'Typed by ' + who;
+  if (text(from.host)) return 'Quoted by ' + who + ' · ' + from.host;
+  const room = text(from.roomName) ? ' (' + from.roomName + ')' : '';
+  const place = quotePlace(from.at, text(from.type));
+  const of = text(from.name) + room + (place ? ', ' + place : '');
+  return from.local === true ? 'Quoted by ' + who + ' from their copy of ' + of : 'Quoted by ' + who + ' · ' + of;
+}
+const rowsOf = (t) => (t && Array.isArray(t.rows) ? t.rows.filter(Array.isArray) : []);
+/** A quote's words in reading order, one line each: its title, its text, its items, its table's rows (cells joined by " · "). */
+export function quoteWords(content) {
+  const c = content && typeof content === 'object' ? content : {};
+  const lines = [];
+  const table = (t) => { for (const r of rowsOf(t)) { const l = r.map(text).filter(Boolean).join(' · '); if (l) lines.push(l); } };
+  if (text(c.title)) lines.push(c.title);
+  if (text(c.text)) lines.push(c.text);
+  if (Array.isArray(c.items)) lines.push(...c.items.map(text).filter(Boolean));
+  table(c.table);
+  for (const b of Array.isArray(c.blocks) ? c.blocks : []) { if (b && b.table) table(b.table); else if (b && text(b.text)) lines.push(b.text); }
+  return lines.join('\n');
+}
+/** A quote's table: its label row and column as headers kept in view, numbers to the right, its cell outlined and bold. */
+function quoteTable(t, content) {
+  const wrap = make('div', 'take-quote-scroll');
+  const table = make('table', 'take-quote-table');
+  const head = t.head === 1 ? 1 : 0;
+  const side = t.side === 1 ? 1 : 0;
+  const focus = Array.isArray(t.focus) ? t.focus : null;
+  rowsOf(t).forEach((row, r) => {
+    const tr = make('tr');
+    row.forEach((cell, c) => {
+      const words = text(cell);
+      const label = r < head || c < side;
+      const td = withDir(make(label ? 'th' : 'td', '', words));
+      if (r < head) { td.classList.add('take-quote-head'); td.scope = 'col'; } else if (c < side) { td.classList.add('take-quote-side'); td.scope = 'row'; }
+      if (!label && numeric(words)) td.classList.add('take-quote-num');
+      if (focus && focus[0] === r && focus[1] === c) { td.classList.add('take-quote-focus'); td.setAttribute('aria-current', 'true'); }
+      tr.append(td);
+    });
+    table.append(tr);
+  });
+  wrap.append(table);
+  const more = content && content.cut === true && content.more && typeof content.more === 'object' ? content.more : null;
+  const left = more ? [more.rows > 0 ? more.rows + (more.rows === 1 ? ' more row' : ' more rows') : '', more.cols > 0 ? more.cols + (more.cols === 1 ? ' more column' : ' more columns') : ''].filter(Boolean) : [];
+  if (left.length) wrap.append(make('p', 'take-quote-more', '… ' + left.join(' and ') + ' not shown'));
+  return wrap;
+}
+/** A list of a quote's items: numbered from its start where it was a numbered list. */
+function quoteList(items, ordered, start) {
+  const l = make(ordered ? 'ol' : 'ul', 'take-quote-list');
+  if (ordered && Number.isInteger(start) && start > 1) l.start = start;
+  for (const it of items) l.append(withDir(make('li', '', text(it))));
+  return l;
+}
+/** A quote's paragraphs: its blank lines part them, its other line breaks are kept. */
+function quoteText(words) {
+  const q = make('blockquote', 'take-quote-text');
+  for (const para of text(words).split(/\n{2,}/)) q.append(withDir(make('p', '', para)));
+  return q;
+}
+/**
+ * A quote as the stage draws it (not yet fitted): its note above it, its title, its body (a paragraph, a list, a table or
+ * the blocks in view), and its source line in its pusher's voice (`ctx.by`). Every node built with the DOM and textContent.
+ */
+export function quote(content, ctx) {
+  const c = content && typeof content === 'object' ? content : {};
+  const q = make('div', 'take-quote');
+  q.dataset.unit = text(c.unit);
+  if (text(c.note)) q.append(withDir(make('p', 'take-quote-note', c.note)));
+  const body = make('div', 'take-quote-body');
+  if (text(c.title)) body.append(withDir(make('p', 'take-quote-title', c.title)));
+  if (typeof c.text === 'string') body.append(quoteText(c.text));
+  if (Array.isArray(c.items)) body.append(quoteList(c.items, c.ordered === true, c.start));
+  if (c.table && typeof c.table === 'object') body.append(quoteTable(c.table, c));
+  const blocks = Array.isArray(c.blocks) ? c.blocks : [];
+  for (let i = 0; i < blocks.length; i++) {
+    const b = blocks[i] || {};
+    if (b.kind === 'table') { body.append(quoteTable(b.table || {}, null)); continue; }
+    if (b.kind === 'li') {
+      const run = [];
+      for (; i < blocks.length && blocks[i] && blocks[i].kind === 'li'; i++) run.push(blocks[i].text);
+      i--;
+      body.append(quoteList(run, false, 1));
+      continue;
+    }
+    if (b.kind === 'quote') { body.append(quoteText(b.text)); continue; }
+    body.append(withDir(make('p', b.kind === 'h' ? 'take-quote-title' : 'take-quote-p', text(b.text))));
+  }
+  q.append(body, make('p', 'take-quote-line', quoteSource(c, (ctx && ctx.by) || '')));
+  return q;
+}
+/**
+ * A quote's type set to the largest that fits `box` (its height: a table's width scrolls inside its card): between
+ * QUOTE_MIN px (QUOTE_PHONE px on a screen under PHONE_WIDTH px wide) and 12vw, in at most QUOTE_STEPS steps. {fits: false}
+ * where even the smallest is longer than the box: it scrolls, and its tables are marked long (`data-long`), so each scrolls
+ * inside its own card with its label row and column kept in view. `keep` leaves the quote at the type it has (the
+ * stylesheet's, in a side bar's card) and only reads whether it fits. It is measured whole: a mark from before is let go first.
+ */
+export function fitQuote(box, el, { keep = false } = {}) {
+  el.removeAttribute('data-long');
+  const cs = window.getComputedStyle(box);
+  const room = Math.max(1, box.clientHeight - (parseFloat(cs.paddingTop) || 0) - (parseFloat(cs.paddingBottom) || 0));
+  const done = (r) => { if (!r.fits) el.setAttribute('data-long', ''); return r; };
+  if (keep) return done({ fits: el.scrollHeight <= room + 1, px: 0 });
+  const w = window.innerWidth || box.clientWidth || 1024;
+  const min = w < PHONE_WIDTH ? QUOTE_PHONE : QUOTE_MIN;
+  const max = Math.max(min, Math.floor(w * 0.12));
+  const fits = (px) => { el.style.fontSize = px + 'px'; return el.scrollHeight <= room + 1; };
+  if (fits(max)) return done({ fits: true, px: max });
+  if (!fits(min)) return done({ fits: false, px: min });
+  let lo = min, hi = max;
+  for (let step = 0; step < QUOTE_STEPS && hi - lo > 1; step++) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (fits(mid)) lo = mid; else hi = mid;
+  }
+  fits(lo);
+  return done({ fits: true, px: lo });
+}
+/**
+ * A quote drawn into `box` and fitted, fitted again as the box changes size: 'shown' on the next frame once laid out (a
+ * frame is drawn only while the page is in view), with "longer than the screen: it scrolls" where it does not fit. In a
+ * side bar's card (`ctx.card`) it keeps the card's type, and says it scrolls there.
+ */
+function drawQuote(box, content, ctx) {
+  const el = quote(content, ctx);
+  box.append(el);
+  const card = !!(ctx && ctx.card === true);
+  const fit = () => fitQuote(box, el, { keep: card });
+  let r = fit();
+  const sized = typeof ResizeObserver === 'function' ? new ResizeObserver(() => { if (box.contains(el)) r = fit(); }) : null;
+  if (sized) sized.observe(box);
+  views.set(box, { destroy: () => { if (sized) sized.disconnect(); } });
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => resolve(r.fits ? { state: 'shown', words: '' } : { state: 'shown', words: card ? 'longer than its card in the side bar: it scrolls' : 'longer than the screen: it scrolls' }));
+  });
+}
+
 /** What `box` holds let go: a document's or a picture's reader destroyed (its object URLs revoked), the box emptied. */
 export function clear(box) {
   if (!box) return;
@@ -345,11 +526,18 @@ export function render(box, content, ctx) {
     case 'doc':
     case 'image':
       return drawFile(box, content, ctx);
+    case 'snippet':
+      return drawQuote(box, content, ctx);
     default:
       return Promise.resolve({ state: 'failed', words: 'this page cannot show that' });
   }
 }
 
+/** The first `n` characters of words, on one line, "…" after where they were cut: a quote's card ("❝ Revenue Q3 £4.2m"). */
+function firstWords(words, n) {
+  const all = Array.from(text(words).replace(/\s+/g, ' ').trim());
+  return all.length > n ? all.slice(0, n).join('').trimEnd() + '…' : all.join('');
+}
 /** The take as a card in the side bar: its icon and name, and what is live in it (the countdown's time, the clock's). */
 export function card(content, ctx) {
   const k = kindOf(content) || { icon: '📺', name: 'Shown to you' };
@@ -362,6 +550,7 @@ export function card(content, ctx) {
   const from = kind === 'image' && content.from && typeof content.from === 'object' ? content.from : null;
   const fromPlace = from && !IMAGES.includes(text(from.type)) ? placeSaid(from.at, text(from.type)) : '';
   const name = kind === 'web' && text(content.host) ? content.host
+    : kind === 'snippet' ? firstWords(quoteWords(content), 40) || k.name
     : kind === 'doc' ? fileSaid(content, ctx)
     : kind === 'image' ? (from ? ((ctx && ctx.by) ? ctx.by + '\'s picture' : 'A picture') + (fromPlace ? ' · ' + fromPlace : '') : text(content.name) || k.name)
     : k.name;

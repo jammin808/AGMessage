@@ -37,13 +37,29 @@ function mac(secret, text, len = 24) {
 }
 
 /**
- * Text a person typed, made safe to show anywhere: control characters (C0, DEL, C1) and the bidirectional overrides and
- * isolates that let a name or file name read differently from what it is (Trojan Source) are dropped, then it is trimmed
- * and cut to `max` characters.
+ * Text a person typed, made safe to show anywhere: control characters (C0, DEL, C1) and the bidirectional marks,
+ * overrides and isolates that let a name or file name read differently from what it is (Trojan Source; U+061C ARABIC
+ * LETTER MARK among them) are dropped, then it is trimmed and cut to `max` characters.
  */
-const UNSAFE_TEXT = /[\p{Cc}\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu;
+const UNSAFE_TEXT = /[\p{Cc}\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu;
 function cleanText(s, max = 200) {
   return str(s).replace(UNSAFE_TEXT, '').trim().slice(0, max);
+}
+/**
+ * What a block of text drops (cleanBlock): every control character but the line break, the bidirectional marks,
+ * overrides and isolates of UNSAFE_TEXT, and the invisible U+200B ZERO WIDTH SPACE, U+2060 WORD JOINER and U+FEFF. The
+ * joiners U+200C and U+200D stay: they shape the words of several scripts.
+ */
+const UNSAFE_BLOCK = /(?!\n)[\p{Cc}\u061c\u200b\u200e\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]/gu;
+/**
+ * A block of text a person picked or typed (a paragraph, a list's item, a table's cell), made safe to show anywhere and
+ * its lines kept, as cleanText keeps none: every line ending (CR LF, CR, U+2028, U+2029) one line break, a tab a space,
+ * UNSAFE_BLOCK dropped, the spaces that end each line trimmed, three line breaks or more two, then the whole trimmed. It
+ * never cuts: a bound is its caller's to refuse with words.
+ */
+function cleanBlock(s) {
+  return str(s).replace(/\r\n|[\r\u2028\u2029]/g, '\n').replace(/\t/g, ' ').replace(UNSAFE_BLOCK, '')
+    .replace(/[^\S\n]+$/gm, '').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 /**
@@ -424,7 +440,7 @@ function validUploadUrl(url) {
 }
 
 module.exports = {
-  readSecret, makeSecret, mac, safeEqual, cleanText, readCookie, newIdentity, checkIdentity, makeInvite, checkInvite,
+  readSecret, makeSecret, mac, safeEqual, cleanText, cleanBlock, readCookie, newIdentity, checkIdentity, makeInvite, checkInvite,
   Bucket, Buckets, Places, Lockout, limitKey, laneOf, clientIp, isHostMachine, loopbackHost, pageHeaders, CSP, CSP_HALL, CSP_PDF_WORKER, PDF_WORKERS, str,
   UPLOAD_TYPES, TRANSFER_TYPES, PROTECTED_OFFICE, uploadType, uploadable, isCompoundFile, validUploadUrl, extOf,
 };

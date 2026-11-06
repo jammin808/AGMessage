@@ -60,11 +60,11 @@ const { clockOf } = require('./tunnelend');
  * The kinds a take may be: back to the chat; Stagewatch's countdown; AGMessage's clock; a holding slide (the picture given,
  * the hall's holding picture, or the AGMessage mark and the hall's name on black); black; a web page (an https address,
  * framed by the page); a document (a file shared in AGMessage, the whole of it, opened at a place, which its target pages
- * through); a picture (an image shared in AGMessage, or one drawn of a page or a part of one). Anything else is refused,
- * never defaulted.
+ * through); a picture (an image shared in AGMessage, or one drawn of a page or a part of one); a quote (words or cells a
+ * researcher picked, carried as data, never HTML: cleanSnippet). Anything else is refused, never defaulted.
  */
-const KINDS = Object.freeze(['chat', 'stage', 'clock', 'holding', 'blank', 'web', 'doc', 'image']);
-const KINDS_WORDS = 'Choose what to show: back to chat, Stagewatch, the clock, holding, blank, a web page, a document or a picture.';
+const KINDS = Object.freeze(['chat', 'stage', 'clock', 'holding', 'blank', 'web', 'doc', 'image', 'snippet']);
+const KINDS_WORDS = 'Choose what to show: back to chat, Stagewatch, the clock, holding, blank, a web page, a document, a picture or a quote.';
 /** The layers a page holds, each with its own take and its own answer: the show, and information drawn over it. */
 const LAYERS = Object.freeze(['show', 'info']);
 /**
@@ -76,10 +76,7 @@ const LAYERS = Object.freeze(['show', 'info']);
 const SLOTS = Object.freeze(['show', 'info', 'beside']);
 /** The show layer's kinds: the operator's (canPush's alone). */
 const SHOW_LAYER = Object.freeze(['stage', 'clock', 'holding', 'blank']);
-/**
- * The information layer's kinds, by name: a web page, a document, a picture, and the quote kind whose rights `canShow`
- * reads already (refused by cleanPage, as an unknown kind, until it lands).
- */
+/** The information layer's kinds, by name: a web page, a document, a picture and a quote. */
 const INFO_LAYER = Object.freeze(['web', 'doc', 'image', 'snippet']);
 /** The kinds that show a file the hall holds (a document, a picture): each names its upload, and the stage keeps it while it does. */
 const FILE_KINDS = Object.freeze(['doc', 'image']);
@@ -415,6 +412,7 @@ function fromOf(from, source) {
  * url, name, from?, note?, room?, roomName?}: an image shared in AGMessage, and what it is a picture of (fromOf). There
  * is no region: a part of a page or a picture is drawn into a picture of its own on the pusher's page. `name`, `room` (a
  * side room's key the file belongs to, kept on this laptop alone) and `roomName` are the server's, from the file's source.
+ * A quote is cleanSnippet's.
  */
 function cleanPage(c, facts = {}) {
   const kind = isRecord(c) ? own(c, 'kind') : undefined;
@@ -439,6 +437,7 @@ function cleanPage(c, facts = {}) {
     }
     case 'doc':
     case 'image': return cleanFile(kind, c, facts);
+    case 'snippet': return cleanSnippet(c, facts);
     case 'web': {
       const may = facts ? facts.web : undefined;
       if (may !== true) return { error: typeof may === 'string' && may ? may : 'Web pages on the stage need their own right — ask an admin.' };
@@ -477,6 +476,308 @@ function cleanFile(kind, c, facts) {
   const from = fromOf(own(c, 'from'), f.source);
   if (from.error) return from;
   return { kind, url, name: src.name, ...(from.from ? { from: from.from } : {}), ...said, ...room };
+}
+
+// ---------------------------------------------------------------- a quote (plan 4-§5.9.4)
+/**
+ * The units a quote is picked by, each with the one body it carries: words as `text`; list items as `items`; a slide as its
+ * `title` and `items`; cells as a `table`; what a reader shows (`view`) as its `blocks`.
+ */
+const UNITS = Object.freeze(['word', 'sentence', 'line', 'item', 'paragraph', 'cell', 'row', 'column', 'range', 'slide', 'selection', 'view', 'text']);
+const UNIT_BODY = Object.freeze({
+  word: 'text', sentence: 'text', line: 'text', paragraph: 'text', selection: 'text', text: 'text', item: 'items', slide: 'items',
+  cell: 'table', row: 'table', column: 'table', range: 'table', view: 'blocks',
+});
+const BODIES = Object.freeze(['text', 'items', 'table', 'blocks']);
+/** What a block of what a reader shows may be: a paragraph, a heading, a list's item, a quotation, or a table. */
+const VIEW_BLOCKS = Object.freeze(['p', 'h', 'li', 'quote', 'table']);
+/**
+ * A quote's bounds: characters (code points, so no count splits a surrogate pair) and counts. Read at a glance, so never
+ * cut: a quote over one is refused in words, and the cut is the researcher's own choice (`cut`).
+ */
+const SNIPPET = Object.freeze({ text: 1200, items: 20, item: 300, rows: 25, cols: 10, cell: 200, blocks: 12, whole: 4000, title: 120, ref: 64, heading: 120, start: 9999, more: 1048576 });
+const UNIT_WORDS = 'Choose what to send: a word, sentence, line, item, paragraph, cell, row, column, range, slide, selection, what you see or text.';
+/** A unit as a refusal names it ("A row"), and a body as a unit is sent ("as a table"). */
+const UNIT_SAID = Object.freeze({
+  word: 'A word', sentence: 'A sentence', line: 'A line', item: 'An item', paragraph: 'A paragraph', cell: 'A cell', row: 'A row', column: 'A column', range: 'A range',
+  slide: 'A slide', selection: 'A selection', view: 'What you see', text: 'Text',
+});
+const BODY_SAID = Object.freeze({ text: 'as text', items: 'as a list', table: 'as a table', blocks: 'as the blocks in view' });
+const SNIPPET_WORDS = 'That quote could not be read.';
+const EMPTY_WORDS = 'There is nothing to show in that quote.';
+const TOO_BIG = 'Too big for the stage: narrow it to 25 rows × 10 columns';
+const NOT_CUT = 'Only text cut to its first 1,200 characters, or a table cut to 25 rows × 10 columns, is sent as cut.';
+const FROM_WORDS = 'A quote comes from a file of this hall, your own copy of one or a web page, or it is typed.';
+const IMAGE_QUOTE = 'A picture has no words to quote: show a picture of it instead.';
+const SNIPPET_AT = 'That place cannot be read for this file: a page or a slide (1-9999), a sheet (1-64), a paragraph or a line (1-999999), a run of lines, a cell\'s reference or a heading.';
+const TEXT_IS = 'Too long for the stage:';
+const ITEM_IS = 'Too long for the stage: an item is';
+const CELL_IS = 'Too long for the stage: a cell is';
+/** A count as the words write it: 1860 → "1,860". */
+function grouped(n) {
+  const digits = String(n);
+  let out = '';
+  for (let i = 0; i < digits.length; i++) out += (i > 0 && (digits.length - i) % 3 === 0 ? ',' : '') + digits[i];
+  return out;
+}
+/** A string's length in characters (code points). */
+const chars = (s) => Array.from(s).length;
+const tooLong = (max, n, what = 'characters') => 'Too long for the stage: ' + grouped(max) + ' ' + what + ' at most (this is ' + grouped(n) + ')';
+/** Where a quote was picked, by its file's type: the keys a place of each type may hold (a picture has no words). */
+const SNIPPET_PLACES = Object.freeze({
+  pdf: ['page'], pptx: ['slide'], xlsx: ['sheet', 'ref'], xls: ['sheet', 'ref'], docx: ['block', 'page', 'approx', 'heading'],
+  txt: ['line', 'lines'], md: ['line', 'lines', 'heading'], csv: ['line', 'lines', 'ref'],
+});
+const SNIPPET_PLACE_KEYS = Object.freeze(['page', 'slide', 'sheet', 'block', 'line', 'lines', 'ref', 'heading', 'approx']);
+
+/**
+ * Where in its file a quote was picked, made safe for the file's type `ext` (pure): {at} (a fresh object of the keys that
+ * type reads: a page, a slide, a sheet, a paragraph or a line, each a whole number in its range; a run of lines `[a, b]`,
+ * a ≤ b; a cell's reference and a heading, each words within its bound; `approx` kept only as true, with a Word document's
+ * page), {} for none asked, or {error}. A key of another type's place, or one out of its range, refuses it.
+ */
+function snippetPlace(at, ext) {
+  if (at === undefined) return {};
+  if (!isRecord(at)) return { error: SNIPPET_AT };
+  const keys = Object.hasOwn(SNIPPET_PLACES, ext) ? SNIPPET_PLACES[ext] : [];
+  if (SNIPPET_PLACE_KEYS.some((k) => Object.hasOwn(at, k) && !keys.includes(k))) return { error: SNIPPET_AT };
+  const out = {};
+  for (const k of keys) {
+    if (!Object.hasOwn(at, k)) continue;
+    const v = at[k];
+    if (k === 'approx') { if (typeof v !== 'boolean') return { error: SNIPPET_AT }; continue; }
+    if (k === 'ref' || k === 'heading') {
+      if (typeof v !== 'string') return { error: SNIPPET_AT };
+      const t = guard.cleanText(v, v.length);
+      if (chars(t) > SNIPPET[k]) return { error: SNIPPET_AT };
+      if (t) out[k] = t;
+      continue;
+    }
+    if (k === 'lines') {
+      if (!Array.isArray(v) || v.length !== 2 || !v.every((n) => whole(n) && n <= PLACE_MAX.line) || v[0] > v[1]) return { error: SNIPPET_AT };
+      out.lines = [v[0], v[1]];
+      continue;
+    }
+    if (!whole(v) || v > PLACE_MAX[k]) return { error: SNIPPET_AT };
+    out[k] = v;
+  }
+  if (Object.hasOwn(at, 'approx') && !Object.hasOwn(out, 'page')) return { error: SNIPPET_AT };
+  if (at.approx === true) out.approx = true;
+  return Object.keys(out).length ? { at: out } : {};
+}
+
+/**
+ * Where a quote comes from, made safe (pure): `from` as the pusher sent it, one of {url, at} (a file of the hall, read
+ * through `f.source`, sourceOk's verdict, and kept by its name and room, never its address), {local: true, name, at} (the
+ * researcher's own copy, said as theirs) or {web} (a web page's address, webUrl's rules: kept by its host, its address
+ * sealed at rest); {from}, {} for none (typed), or {error}. A picture has no words to quote.
+ */
+function snippetFrom(from, f) {
+  if (from === undefined) return {};
+  if (!isRecord(from)) return { error: FROM_WORDS };
+  const ways = ['url', 'local', 'web'].filter((k) => own(from, k) !== undefined);
+  if (ways.length !== 1) return { error: FROM_WORDS };
+  if (ways[0] === 'web') {
+    if (typeof from.web !== 'string') return { error: FROM_WORDS };
+    const w = webUrl(from.web, f.selfHosts);
+    return w.error ? { error: w.error } : { from: { web: w.url, host: w.host } };
+  }
+  if (ways[0] === 'local') {
+    if (own(from, 'local') !== true || typeof own(from, 'name') !== 'string') return { error: FROM_WORDS };
+    const name = guard.cleanText(from.name, 120);
+    const type = guard.extOf(name);
+    if (!name || !STAGE_TYPES.includes(type)) return { error: NOT_STAGE };
+    if (IMAGE_EXT.includes(type)) return { error: IMAGE_QUOTE };
+    const p = snippetPlace(own(from, 'at'), type);
+    return p.error ? p : { from: { local: true, name, type, ...(p.at ? { at: p.at } : {}) } };
+  }
+  const url = own(from, 'url');
+  if (typeof url !== 'string' || !guard.validUploadUrl(url)) return { error: FILE_WORDS };
+  const type = guard.extOf(url);
+  if (IMAGE_EXT.includes(type)) return { error: IMAGE_QUOTE };
+  const src = typeof f.source === 'function' ? f.source(url) : null;
+  if (!isRecord(src) || src.error) return { error: isRecord(src) && src.error ? src.error : NOT_HELD };
+  const p = snippetPlace(own(from, 'at'), type);
+  if (p.error) return p;
+  return { from: { name: src.name, type, ...(p.at ? { at: p.at } : {}), ...(src.room ? { room: src.room, roomName: src.roomName } : {}) } };
+}
+
+/** A string of a quote's body cleaned as a block (guard.cleanBlock) within `max` characters: {t}, or {error} in words. */
+function blockOf(v, max, what) {
+  if (typeof v !== 'string') return { error: SNIPPET_WORDS };
+  const t = guard.cleanBlock(v);
+  const n = chars(t);
+  return n > max ? { error: what + ' ' + grouped(max) + ' characters at most (this is ' + grouped(n) + ')' } : { t };
+}
+
+/**
+ * A quote's table, made safe (pure): {rows, head, side, ref?, focus?} with its rows at most SNIPPET.rows of at most
+ * SNIPPET.cols cells (each a block of at most SNIPPET.cell characters), a short row padded with '', `head` and `side` 0 or 1
+ * (whether its first row or column holds labels), `ref` words of where it is (cleanText(64)) and `focus` the cell [r, c]
+ * the quote is of, inside the table. {table, empty} (`empty`: no cell holds words), or {error}. A list's length is read
+ * before it is walked.
+ */
+function snippetTable(t) {
+  if (!isRecord(t) || !Array.isArray(own(t, 'rows'))) return { error: SNIPPET_WORDS };
+  const rows = t.rows;
+  if (rows.length > SNIPPET.rows) return { error: TOO_BIG };
+  if (!rows.length || !rows.every(Array.isArray)) return { error: rows.length ? SNIPPET_WORDS : EMPTY_WORDS };
+  const width = rows.reduce((w, r) => Math.max(w, r.length), 0);
+  if (width > SNIPPET.cols) return { error: TOO_BIG };
+  if (!width) return { error: EMPTY_WORDS };
+  const out = [];
+  for (const r of rows) {
+    const cells = [];
+    for (const c of r) {
+      const b = blockOf(c, SNIPPET.cell, CELL_IS);
+      if (b.error) return b;
+      cells.push(b.t);
+    }
+    while (cells.length < width) cells.push('');
+    out.push(cells);
+  }
+  const head = own(t, 'head');
+  const side = own(t, 'side');
+  if (!(head === 0 || head === 1) || !(side === 0 || side === 1)) return { error: SNIPPET_WORDS };
+  const ref = own(t, 'ref');
+  if (ref !== undefined && typeof ref !== 'string') return { error: SNIPPET_WORDS };
+  const said = ref === undefined ? '' : guard.cleanText(ref, SNIPPET.ref);
+  const focus = own(t, 'focus');
+  if (focus !== undefined && !(Array.isArray(focus) && focus.length === 2 && focus.every((n) => Number.isInteger(n) && n >= 0) && focus[0] < out.length && focus[1] < width)) return { error: SNIPPET_WORDS };
+  return { table: { rows: out, head, side, ...(said ? { ref: said } : {}), ...(focus ? { focus: [focus[0], focus[1]] } : {}) }, empty: out.every((r) => r.every((c) => !c)) };
+}
+
+/** Every string of a quote that the stage draws: its title, note and body, a table's reference among them. */
+function snippetStrings(q) {
+  const out = [];
+  if (q.title) out.push(q.title);
+  if (q.note) out.push(q.note);
+  if (typeof q.text === 'string') out.push(q.text);
+  if (Array.isArray(q.items)) out.push(...q.items);
+  const cells = (t) => { if (t.ref) out.push(t.ref); for (const r of t.rows) out.push(...r); };
+  if (q.table) cells(q.table);
+  for (const b of q.blocks || []) { if (b.table) cells(b.table); else out.push(b.text); }
+  return out;
+}
+
+/**
+ * A quote a pusher asked for, made safe, or {error} (pure; plan 4-§5.9.4): {kind: 'snippet', unit, title?, text | items
+ * (ordered?, start?) | table | blocks, from?, note?, cut?, more?}, a fresh object. `unit` is one of UNITS and carries its
+ * one body (UNIT_BODY) and no other; every string is read as a string (a field of the wrong type refuses the whole take)
+ * and cleaned as a block (guard.cleanBlock); nothing is defaulted. Over a bound it is refused in words, never cut: the cut
+ * is the researcher's own (`cut`, true only as sent, on text or on a table cut to its full 25 rows or 10 columns; `more`,
+ * with a cut table alone, the rows and columns left out). `from` is snippetFrom's. The quote is its pusher's claim: the
+ * server never parses a document, so it cannot check that the words are in the file.
+ */
+function cleanSnippet(c, facts = {}) {
+  const f = isRecord(facts) ? facts : {};
+  if (!isRecord(c)) return { error: SNIPPET_WORDS };
+  const unit = own(c, 'unit');
+  if (typeof unit !== 'string' || !UNITS.includes(unit)) return { error: UNIT_WORDS };
+  const body = UNIT_BODY[unit];
+  const given = BODIES.filter((b) => own(c, b) !== undefined);
+  if (given.length !== 1 || given[0] !== body) return { error: UNIT_SAID[unit] + ' is sent ' + (unit === 'slide' ? 'as a title and a list' : BODY_SAID[body]) + '.' };
+  const out = { kind: 'snippet', unit };
+  const title = own(c, 'title');
+  if (title !== undefined && typeof title !== 'string') return { error: SNIPPET_WORDS };
+  if (title !== undefined && guard.cleanText(title, SNIPPET.title)) out.title = guard.cleanText(title, SNIPPET.title);
+  let full = false;
+  if (body === 'text') {
+    const b = blockOf(c.text, SNIPPET.text, TEXT_IS);
+    if (b.error) return b;
+    if (!b.t) return { error: EMPTY_WORDS };
+    out.text = b.t;
+  } else if (body === 'items') {
+    const items = c.items;
+    if (!Array.isArray(items)) return { error: SNIPPET_WORDS };
+    if (items.length > SNIPPET.items) return { error: tooLong(SNIPPET.items, items.length, 'items') };
+    const list = [];
+    for (const v of items) {
+      const b = blockOf(v, SNIPPET.item, ITEM_IS);
+      if (b.error) return b;
+      if (b.t) list.push(b.t);
+    }
+    if (!list.length && !out.title) return { error: EMPTY_WORDS };
+    out.items = list;
+    const ordered = own(c, 'ordered');
+    const start = own(c, 'start');
+    if ((ordered !== undefined && typeof ordered !== 'boolean') || (start !== undefined && !(whole(start) && start <= SNIPPET.start))) return { error: SNIPPET_WORDS };
+    if (ordered === true) out.ordered = true;
+    if (start !== undefined) out.start = start;
+  } else if (body === 'table') {
+    const t = snippetTable(c.table);
+    if (t.error) return { error: t.error };
+    if (t.empty) return { error: EMPTY_WORDS };
+    out.table = t.table;
+    full = t.table.rows.length === SNIPPET.rows || t.table.rows[0].length === SNIPPET.cols;
+  } else {
+    const blocks = c.blocks;
+    if (!Array.isArray(blocks)) return { error: SNIPPET_WORDS };
+    if (blocks.length > SNIPPET.blocks) return { error: tooLong(SNIPPET.blocks, blocks.length, 'blocks') };
+    const list = [];
+    for (const b of blocks) {
+      if (!isRecord(b) || !VIEW_BLOCKS.includes(own(b, 'kind'))) return { error: SNIPPET_WORDS };
+      if (b.kind === 'table') {
+        const t = snippetTable(own(b, 'table'));
+        if (t.error) return { error: t.error };
+        if (!t.empty) list.push({ kind: 'table', table: t.table });
+        continue;
+      }
+      const x = blockOf(own(b, 'text'), SNIPPET.text, TEXT_IS);
+      if (x.error) return x;
+      if (x.t) list.push({ kind: b.kind, text: x.t });
+    }
+    if (!list.length) return { error: EMPTY_WORDS };
+    out.blocks = list;
+  }
+  const from = snippetFrom(own(c, 'from'), f);
+  if (from.error) return from;
+  if (from.from) out.from = from.from;
+  const note = own(c, 'note');
+  if (note !== undefined && typeof note !== 'string') return { error: SNIPPET_WORDS };
+  if (note !== undefined && guard.cleanText(note, 200)) out.note = guard.cleanText(note, 200);
+  const cut = own(c, 'cut');
+  const more = own(c, 'more');
+  if (cut !== undefined && typeof cut !== 'boolean') return { error: SNIPPET_WORDS };
+  if (cut === true && !(body === 'text' || (body === 'table' && full))) return { error: NOT_CUT };
+  if (more !== undefined) {
+    const n = (v) => Number.isInteger(v) && v >= 0 && v <= SNIPPET.more;
+    if (cut !== true || body !== 'table' || !isRecord(more) || !n(own(more, 'rows')) || !n(own(more, 'cols'))) return { error: NOT_CUT };
+    out.more = { rows: more.rows, cols: more.cols };
+  }
+  if (cut === true) out.cut = true;
+  const all = snippetStrings(out).reduce((n, s) => n + chars(s), 0);
+  if (all > SNIPPET.whole) return { error: tooLong(SNIPPET.whole, all) };
+  return out;
+}
+
+/**
+ * A quote's source read back as the store keeps it: a file's ({name, type, at?, room?, roomName?}), the pusher's own
+ * copy's ({local: true, name, type, at?}) or a web page's ({host, urlSealed?}, its address sealed); null for any other.
+ */
+function storedSnippetFrom(from) {
+  if (!isRecord(from)) return null;
+  if (own(from, 'host') !== undefined) {
+    const sealed = own(from, 'urlSealed');
+    if (!isHost(from.host) || (sealed !== undefined && !(typeof sealed === 'string' && sealed.length <= 4 * WEB_MAX && SEALED.test(sealed)))) return null;
+    return { host: from.host, ...(sealed !== undefined ? { urlSealed: sealed } : {}) };
+  }
+  const local = own(from, 'local');
+  if (typeof own(from, 'name') !== 'string' || from.name.length > 120 || !STAGE_TYPES.includes(own(from, 'type')) || IMAGE_EXT.includes(from.type) || (local !== undefined && local !== true)) return null;
+  const p = snippetPlace(own(from, 'at'), from.type);
+  const room = local ? {} : storedRoom(from);
+  if (p.error || !room || (local && own(from, 'room') !== undefined)) return null;
+  return { ...(local ? { local: true } : {}), name: from.name, type: from.type, ...(p.at ? { at: p.at } : {}), ...room };
+}
+/** A quote read back in its clean shape (its body as cleanSnippet reads it, its source as the store keeps it), or null. */
+function storedSnippet(c) {
+  const rest = {};
+  for (const [k, v] of Object.entries(c)) if (k !== 'from') rest[k] = v;
+  const body = cleanSnippet(rest, {});
+  if (body.error) return null;
+  if (own(c, 'from') === undefined) return body;
+  const from = storedSnippetFrom(c.from);
+  return from ? { ...body, from } : null;
 }
 
 /** A stored place for a file of type `ext`, read back: {at} or {} (none), or null for one that is not its type's. */
@@ -531,6 +832,7 @@ function storedPage(c) {
     return isHost(host) && typeof urlSealed === 'string' && urlSealed.length <= 4 * WEB_MAX && SEALED.test(urlSealed) ? { kind, host, urlSealed } : null;
   }
   if (FILE_KINDS.includes(kind)) return storedFile(c);
+  if (kind === 'snippet') return storedSnippet(c);
   if (kind !== 'holding') return { kind };
   const image = own(c, 'image');
   if (image === undefined) return { kind };
@@ -576,6 +878,74 @@ function imageSaid(c, voice, by) {
 }
 
 /**
+ * A quote's words in reading order, as one text (pure): its title, then its body (a list's items and a table's rows one a
+ * line, a row's cells joined by " · ", the blocks in view one a line), at most SNIPPET.whole characters as the quote is.
+ */
+function snippetText(c) {
+  if (!isRecord(c) || c.kind !== 'snippet') return '';
+  const rows = (t) => (isRecord(t) && Array.isArray(t.rows) ? t.rows.map((r) => r.filter(Boolean).join(' · ')).filter(Boolean) : []);
+  const lines = [];
+  if (typeof c.title === 'string' && c.title) lines.push(c.title);
+  if (typeof c.text === 'string') lines.push(c.text);
+  if (Array.isArray(c.items)) lines.push(...c.items);
+  lines.push(...rows(c.table));
+  for (const b of Array.isArray(c.blocks) ? c.blocks : []) lines.push(...(b.kind === 'table' ? rows(b.table) : [b.text]));
+  return lines.join('\n');
+}
+/** A quote's unit in words: "a table cell", "a paragraph", "3 list items", "what they see". */
+const UNIT_NOUN = Object.freeze({
+  word: 'a word', sentence: 'a sentence', line: 'a line', item: 'a list item', paragraph: 'a paragraph', cell: 'a table cell', row: 'a table row',
+  column: 'a table column', range: 'a table range', slide: 'a slide', selection: 'a selection', view: 'what they see', text: 'a quote',
+});
+const unitNoun = (c) => (c.unit === 'item' && Array.isArray(c.items) && c.items.length > 1 ? c.items.length + ' list items' : Object.hasOwn(UNIT_NOUN, c.unit) ? UNIT_NOUN[c.unit] : 'a quote');
+/**
+ * A quote's size in the audit's words: a table's cells but a single cell's ("6 cells"), else its characters ("18
+ * characters"), a table cell's its value's (the cell in `focus`).
+ */
+function snippetSize(c) {
+  const t = isRecord(c.table) ? c.table : null;
+  if (t && c.unit !== 'cell') {
+    const n = Math.max(0, t.rows.length - (t.head || 0)) * Math.max(0, (t.rows[0] || []).length - (t.side || 0));
+    return n + (n === 1 ? ' cell' : ' cells');
+  }
+  const words = t && Array.isArray(t.focus) ? [t.rows[t.focus[0]][t.focus[1]]] : snippetStrings({ ...c, title: '', note: '' });
+  const n = words.reduce((k, x) => k + chars(String(x)), 0);
+  return grouped(n) + (n === 1 ? ' character' : ' characters');
+}
+/** Where in its file a quote was picked, in words: a cell's reference ("'Sheet1'!C4"), "lines 4-9" ("rows" in a CSV), or placeWords'. */
+function snippetPlaceWords(at, type) {
+  if (!isRecord(at)) return '';
+  if (typeof at.ref === 'string' && at.ref) return at.ref;
+  if (Array.isArray(at.lines)) return (type === 'csv' ? 'rows ' : 'lines ') + at.lines[0] + '-' + at.lines[1];
+  return placeWords(at, type);
+}
+/**
+ * A quote in a few words: in the console's voice by its unit, file and place ("❝ a table cell from Q3.xlsx, 'Sheet1'!C4",
+ * "❝ a paragraph from their copy of Minutes.docx, ≈ p. 3", "❝ a quote from vote.example.com", "❝ a quote typed by Ana (42
+ * characters)"); in the audit's by its unit, size and file's type alone ("a quote (a table cell, 18 characters) from a
+ * spreadsheet", "a quote (typed, 42 characters)", "a quote from a web page on vote.example.com"). A side room's file adds
+ * its room ("… in Legal").
+ */
+function snippetSaid(c, voice, by) {
+  if (!UNITS.includes(own(c, 'unit'))) return 'a quote';
+  const from = isRecord(own(c, 'from')) ? c.from : null;
+  const audit = voice === 'audit';
+  const noun = unitNoun(c);
+  if (!from) {
+    const n = snippetStrings({ ...c, note: '' }).reduce((k, x) => k + chars(x), 0);
+    const size = grouped(n) + (n === 1 ? ' character' : ' characters');
+    return audit ? 'a quote (typed, ' + size + ')' : '❝ a quote typed' + (by ? ' by ' + by : '') + ' (' + size + ')';
+  }
+  if (typeof own(from, 'host') === 'string') return audit ? 'a quote from a web page on ' + from.host : '❝ ' + noun + ' from ' + from.host;
+  const type = guard.str(own(from, 'type'));
+  const inRoom = typeof own(from, 'roomName') === 'string' && from.roomName ? ' in ' + from.roomName : '';
+  const local = own(from, 'local') === true;
+  if (audit) return 'a quote (' + noun + ', ' + snippetSize(c) + ') from ' + (Object.hasOwn(TYPE_SAID, type) ? TYPE_SAID[type] : 'a file') + inRoom + (local ? ', from a local copy' : '');
+  const place = snippetPlaceWords(own(from, 'at'), type);
+  return '❝ ' + noun + ' from ' + (local ? 'their copy of ' : '') + guard.str(own(from, 'name')) + inRoom + (place ? ', ' + place : '');
+}
+
+/**
  * What a take shows, in a few words (pure), in one of two voices (`voice`): the console's ('console', what a pusher reads:
  * a document or a picture by its file's name and place) and the audit's ('audit', which never names a file, quotes a text
  * or carries a path: a file by its type). A web page is named by its host in both. A holding slide with no picture of its
@@ -595,6 +965,7 @@ function describePage(c, { hallHolding = '', voice = 'console', by = '', sent = 
     case 'web': words = typeof own(c, 'host') === 'string' && own(c, 'host') ? 'a web page on ' + own(c, 'host') : 'a web page'; break;
     case 'doc': words = docSaid(c, voice); break;
     case 'image': words = imageSaid(c, voice, guard.cleanText(by, 60)); break;
+    case 'snippet': words = snippetSaid(c, voice, guard.cleanText(by, 60)); break;
     default: return '';
   }
   return sent ? words + ', sent from ' + guard.cleanText(sent, 60) : words;
@@ -906,12 +1277,25 @@ class Pages {
    * urlSealed}; null where this run cannot seal it), every other kind as it is.
    */
   _kept(content) {
+    if (isRecord(content) && content.kind === 'snippet') return this._keptQuote(content);
     if (!isRecord(content) || content.kind !== 'web') return content;
     const w = webUrl(content.url);
     if (w.error) return null;
     let urlSealed;
     try { urlSealed = this.seal(w.url); } catch { return null; }   // this run has no machine key: nothing is kept in clear
     return { kind: 'web', host: w.host, urlSealed };
+  }
+
+  /**
+   * A quote as the store keeps it: one from a web page by its host, its address sealed beside it ({host, urlSealed}), or by
+   * its host alone where this run cannot seal; every other as it is.
+   */
+  _keptQuote(content) {
+    const from = content.from;
+    if (!isRecord(from) || typeof from.web !== 'string') return content;
+    let urlSealed;
+    try { urlSealed = guard.str(this.seal(from.web)); } catch { urlSealed = ''; }   // this run has no machine key: the host alone is kept
+    return { ...content, from: { host: from.host, ...(urlSealed ? { urlSealed } : {}) } };
   }
 
   /**
@@ -924,6 +1308,14 @@ class Pages {
   told(content, { observer = false } = {}) {
     if (!isRecord(content)) return content;
     if (content.kind === 'web') return { kind: 'web', url: guard.str(this.open(content.urlSealed)), host: content.host };
+    // A quote names where it comes from by a file's name and its room's name, or a web page's host: never an address, a
+    // file's or a web page's, nor a side room's key.
+    if (content.kind === 'snippet') {
+      if (!isRecord(content.from)) return content;
+      const { from, ...rest } = content;
+      const told = typeof from.host === 'string' ? { host: from.host } : Object.fromEntries(Object.entries(from).filter(([k]) => k !== 'room'));
+      return { ...rest, from: told };
+    }
     if (!FILE_KINDS.includes(content.kind)) return content;
     const { room, roomName, from, ...rest } = content;
     const named = room ? { roomName } : {};
@@ -1304,10 +1696,11 @@ class Pages {
    * information layer, nothing over the show (no take, or the layer handed back) is said so, and a take there says how it
    * arrived (`arrive`) and whether the operator put it up (`op`): a researcher's Take down is only over its own kind.
    * Beside it (`beside`), a take put there is read as any other, from the reports on it ("In the side bar on …"); with
-   * none, nothing is beside it (number 0). An information take says too whether the asker (`who`, an actor's kind and
-   * id) put it up (`mine`): its pusher may withdraw it.
+   * none, nothing is beside it (number 0). An information take says too, to an asker (`who`, an actor's kind and id),
+   * whether it put it up (`mine`): its pusher may withdraw it; and who put it up (`by`, their name) and how long ago (`ago`,
+   * ms at `now`), so a researcher about to replace it is told whose it is and how fresh.
    */
-  status(hall, to, pages = [], { name = '', hallHolding = '', layer = 'show', who = '' } = {}) {
+  status(hall, to, pages = [], { name = '', hallHolding = '', layer = 'show', who = '', now = Date.now() } = {}) {
     const list = Array.isArray(pages) ? pages : [];
     const states = list.map((p) => ({ ...this.pageState(hall, p, layer), name: p.name }));
     let take = null;
@@ -1316,7 +1709,7 @@ class Pages {
     const seq = take ? take.seq : 0;
     if (layer !== 'show' && (!take || take.content.kind === 'chat')) return { ...Pages.nothingOver(take, list.length, { board: to === 'board', name, beside: layer === 'beside' }), arrive: layer === 'beside' ? 'side' : 'over', op: false };
     const st = Pages.status(take, states.map((s) => (s.seq === seq ? s : { ...s, state: 'other' })), { board: to === 'board', name, hallHolding });
-    return layer !== 'show' ? { ...st, arrive: take.arrive === 'side' ? 'side' : 'over', op: take.by.op === true, ...(who ? { mine: take.by.who === who } : {}) } : st;
+    return layer !== 'show' ? { ...st, arrive: take.arrive === 'side' ? 'side' : 'over', op: take.by.op === true, ...(who ? { mine: take.by.who === who, by: take.by.name, ago: Number.isFinite(now) ? Math.max(0, now - take.at) : 0 } : {}) } : st;
   }
 
   /**
@@ -1477,6 +1870,6 @@ class Pages {
 }
 
 module.exports = {
-  Pages, cleanPage, askedOf, canShow, describePage, sourceOk, mayDownload, FOR_DOWNLOAD, placeOf, placeWords, webUrl, personKey, layerOf, layersOf, reportsOf, inViewOf, KINDS, LAYERS, SLOTS, SHOW_LAYER, INFO_LAYER,
-  FILE_KINDS, fileOf, ARRIVALS, EARLIER_TOLD, IMAGE_EXT, STAGE_TYPES, TRANSFER_ONLY, PLACES, REPORTS, ANSWERS, AGAIN_MS, VIEWS, MARKS, BOUNDS, WEB_MAX, STAGE_FULL,
+  Pages, cleanPage, cleanSnippet, snippetText, askedOf, canShow, describePage, sourceOk, mayDownload, FOR_DOWNLOAD, placeOf, placeWords, webUrl, personKey, layerOf, layersOf, reportsOf, inViewOf, KINDS, LAYERS, SLOTS, SHOW_LAYER, INFO_LAYER,
+  FILE_KINDS, fileOf, ARRIVALS, EARLIER_TOLD, IMAGE_EXT, STAGE_TYPES, TRANSFER_ONLY, PLACES, UNITS, SNIPPET, REPORTS, ANSWERS, AGAIN_MS, VIEWS, MARKS, BOUNDS, WEB_MAX, STAGE_FULL,
 };

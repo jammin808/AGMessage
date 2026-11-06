@@ -4,7 +4,7 @@
  * when its clock runs out or when the page closes the document (docmodel.mjs readInWorker). It parses Office files (the
  * CSV and text a page reads itself) and answers plain data; it holds no socket and draws nothing.
  *
- *   {task: 'sheet', bytes, opts: {ext}}   → {ok, book: {kind: 'book', sheets: [{name, hidden, rows, hiddenRows, hiddenCols, noValue, merges, origin, truncated, shown, cutCols}]}}
+ *   {task: 'sheet', bytes, opts: {ext}}   → {ok, book: {kind: 'book', sheets: [{name, hidden, rows, hiddenRows, hiddenCols, noValue, merges, origin, truncated, shown, cutCols, frozen?}]}}
  *   {task: 'word', bytes}                 → {ok, html, scan, pictures: [{n, type, bytes, why}]}   (the pictures' bytes transferred;
  *                                           a picture the page may not draw has none, and `why`: 'type', 'unreadable', 'pixels')
  *   {task: 'deck', bytes}                 → {ok, parts: {name: xml}, pictures: [{name, type, bytes, why}]}
@@ -29,6 +29,9 @@
  *     it. External pictures and links are never fetched.
  *   - Formulas are never computed: a cell's saved value is read, and a formula with none is marked. A sheet is read to
  *     its first ROWS rows, its first COLS columns, and as many rows as CELLS allow at that width, each cut said.
+ *   - A sheet's frozen panes (its first view's, as Excel saves them) are read from its own part, found by the workbook's
+ *     relationships as SheetJS finds it, and answered as `frozen`: the rows and columns frozen from the top and the left
+ *     of what was read. A pick's labels default to them (docmodel.mjs labelsOf). An Excel 97-2003 file's are not read.
  *   - A device without `DecompressionStream('deflate-raw')` reads no zipped Office file: the answer says so ('device').
  *   - The libraries load only for the task that needs them: SheetJS for a sheet, mammoth for a Word file.
  */
@@ -221,9 +224,78 @@ function markNoValue(xml) {
   return out;
 }
 
+/**
+ * Each tag of `xml` in order, handed to `fn(tag, closes, local)` (its text, whether it closes an element, its name without
+ * its prefix) until `fn` answers true. Comments, declarations and processing instructions are passed over.
+ */
+function eachTag(xml, fn) {
+  const s = String(xml);
+  for (let i = s.indexOf('<'); i >= 0; i = s.indexOf('<', i + 1)) {
+    const close = s.indexOf('>', i);
+    if (close < 0) return;
+    const tag = s.slice(i, close + 1);
+    const m = /^<(\/?)([A-Za-z_][\w.:-]*)/.exec(tag);
+    if (m && fn(tag, m[1] === '/', m[2].slice(m[2].indexOf(':') + 1)) === true) return;
+    i = close;
+  }
+}
+/** The start tags of the elements of local name `name` in `xml`, in order. */
+function tagsOf(xml, name) {
+  const out = [];
+  eachTag(xml, (tag, closes, local) => { if (!closes && local === name) out.push(tag); });
+  return out;
+}
+/** An attribute's value in a start tag, by its local name (whatever its prefix): '' where it has none. */
+function attrOf(tag, name) {
+  const re = /\s([A-Za-z_][\w.:-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
+  for (let m = re.exec(tag); m; m = re.exec(tag)) if (m[1].slice(m[1].indexOf(':') + 1) === name) return m[2] !== undefined ? m[2] : m[3];
+  return '';
+}
+/** A relationship's target as a part's name: from the folder of the part that names it, or from the root where it begins with `/`. */
+function partAt(folder, target) {
+  const out = [];
+  for (const p of (target.startsWith('/') ? target.slice(1) : folder + target).split('/')) {
+    if (p === '..') out.pop();
+    else if (p && p !== '.') out.push(p);
+  }
+  return out.join('/');
+}
+/** A workbook's sheets' parts, in its order (the order SheetJS lists them in), found by its relationships: '' for one not found. */
+async function sheetPartsOf(file) {
+  const office = tagsOf(await file.read('_rels/.rels'), 'Relationship').find((t) => attrOf(t, 'Type').endsWith('/officeDocument'));
+  const book = office ? partAt('', attrOf(office, 'Target')) : 'xl/workbook.xml';
+  const folder = book.slice(0, book.lastIndexOf('/') + 1);
+  const rels = new Map(tagsOf(await file.read(folder + '_rels/' + book.slice(folder.length) + '.rels'), 'Relationship').map((t) => [attrOf(t, 'Id'), partAt(folder, attrOf(t, 'Target'))]));
+  return tagsOf(await file.read(book), 'sheet').map((t) => rels.get(attrOf(t, 'id')) || '');
+}
+/**
+ * A worksheet's frozen panes, as its first view saves them (`<pane state="frozen" xSplit ySplit>`): {rows, cols}, the rows
+ * frozen from its top and the columns from its left, or null where it freezes none (a split that is not frozen is none).
+ * Its views come before its cells: the cells are never read for it.
+ */
+function frozenOf(xml) {
+  let pane = '';
+  let inView = false;
+  eachTag(xml, (tag, closes, local) => {
+    if (local === 'sheetData') return true;
+    if (!inView) {
+      if (!closes && local === 'sheetView') { if (tag.endsWith('/>')) return true; inView = true; }
+      return false;
+    }
+    if (local === 'sheetView') return true;
+    if (!closes && local === 'pane') { pane = tag; return true; }
+    return false;
+  });
+  if (!pane || !attrOf(pane, 'state').startsWith('frozen')) return null;
+  const count = (v) => { const n = Number(v); return Number.isInteger(n) && n > 0 && n <= 1048576 ? n : 0; };
+  const rows = count(attrOf(pane, 'ySplit')), cols = count(attrOf(pane, 'xSplit'));
+  return rows || cols ? { rows, cols } : null;
+}
+
 async function sheet(bytes) {
   const head = new Uint8Array(bytes, 0, Math.min(8, bytes.byteLength));
   let read = new Uint8Array(bytes);
+  const panes = [];
   if (begins(head, ZIP)) {
     // A zipped workbook: checked, scanned, and its formula cells with no saved value written so that SheetJS keeps them so.
     const file = await open(bytes);
@@ -241,6 +313,7 @@ async function sheet(bytes) {
       if (copy.ok === false) throw new Refusal('packed');
       read = copy.bytes;
     }
+    for (const part of await sheetPartsOf(file)) panes.push(part ? frozenOf(await file.read(part)) : null);
   } else if (!begins(head, COMPOUND)) throw new Refusal('shape');   // neither a workbook's archive nor an Excel 97-2003 file
   importScripts('/vendor/xlsx.full.min.js');
   const wb = XLSX.read(read, { type: 'array', dense: true, sheetRows: ROWS + 1, cellFormula: true, cellStyles: true, cellHTML: false, cellNF: false, bookVBA: false, bookFiles: false });
@@ -274,8 +347,12 @@ async function sheet(bytes) {
     const merges = (ws['!merges'] || []).filter((m) => m.s.r <= last && m.s.c <= lastCol)
       .map((m) => ({ r0: m.s.r - range.s.r, c0: m.s.c - range.s.c, r1: Math.min(m.e.r, last) - range.s.r, c1: Math.min(m.e.c, lastCol) - range.s.c }));
     const hidden = meta[i] && (meta[i].Hidden === 1 || meta[i].Hidden === 2) ? meta[i].Hidden : 0;
+    // Its frozen rows and columns counted from the first row and column read (the sheet's range may begin below row 1).
+    const pane = panes[i];
+    const frozen = pane ? { rows: Math.max(0, pane.rows - range.s.r), cols: Math.max(0, pane.cols - range.s.c) } : null;
     return { name: String(name), hidden, rows, hiddenRows, hiddenCols, noValue, merges, origin: { r: range.s.r, c: range.s.c },
-      truncated: Math.max(range.e.r, full.e.r) > last, shown: last + 1, cutCols: range.e.c - range.s.c + 1 > COLS };
+      truncated: Math.max(range.e.r, full.e.r) > last, shown: last + 1, cutCols: range.e.c - range.s.c + 1 > COLS,
+      ...(frozen && (frozen.rows || frozen.cols) ? { frozen } : {}) };
   });
   return { ok: true, book: { kind: 'book', sheets } };
 }
