@@ -331,6 +331,21 @@ may show from (`sourceOk`, as a document's); a picture has no words to quote.
   or in their side bar. A file pasted or dropped on it is no quote and attaches nothing. The tab, like the Preview's bar,
   is drawn only for a seat whose pushes may show quotes (`stage.show`, the console's read): `stage.web` alone shows web
   pages and nothing else.
+- **＋ the speaker's screen**, on the Preview's bar and the ❝ Quote tab, for a seat that may reach the hall's Stagewatch
+  (`stage.send`, and a way open): one line of plain text sent with the push to Stagewatch's speaker screen, for a
+  presenter who reads only that screen, off on every push until ticked and disabled, with why, until there is something
+  to send. The line is the push's own words: a quote's in one line with its labels ("Revenue Q3: £4.2m", "Q3: Revenue
+  £4.2m · Costs £3.9m"), or for a document or a picture the line above it; never a file's name, an address or a page
+  unless typed. The bar shows it and counts it (500 sent now, about 377 through the desk, a glance about 60) before it
+  goes; ticked, **📝 Ask the operator** and **🖥 Send now**, each greyed with its reason where its way is closed, the last
+  chosen on the device preset ("Replaces what the speaker's screen shows now, the operator's message included, and
+  cancels its waiting acknowledgement" under 🖥). The server builds the line again from the take it stored, only for its
+  pusher within the minute, and refuses one that differs ("The line must be the push's own words."); the room's line
+  names its length alone, and the toast says the step ("📝 waiting for the operator", "🖥 on the speaker's screen", the
+  answer and the acknowledgement following on the room's line). The page's line is the server's: it reads each string as
+  the server's cleaner keeps it. On the Preview's bar, ＋ says the push it goes with (the picked words' Show, or a
+  picture or the document with the line above it), and a push whose words are another line sends none and says why, as
+  a push made once its way has closed does. Every Stagewatch output, NDI and its viewer page show it ([NODES.md](NODES.md)).
 
 ### Showing it: the Board chip and the console
 

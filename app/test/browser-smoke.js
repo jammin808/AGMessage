@@ -4197,6 +4197,183 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       for (const t of [desk, cy, qia]) { await t.send('Page.navigate', { url: 'about:blank' }); t.close(); }
     }
 
+    // ---------------- A push carries one line to the speaker's screen, through the operator or at once (unit 29) ----------------
+    // In a hall of its own: the admin account's page backstage (the operator, who holds stage.send), and later Pia, a Staff
+    // account who may show quotes but not send to the speaker's screen. ＋ the speaker's screen is in the ❝ Quote tab and the
+    // Preview's bar only while the hall has a Stagewatch this seat can reach, off on every push until ticked; ticked, it
+    // offers 📝 Ask the operator and 🖥 Send now, each disabled with its reason where its way is closed, preset to the way
+    // chosen last on this device. The line is the push's own words: what the mock Stagewatch receives, and the room's line
+    // names its length alone.
+    {
+      const slHall = (await (await fetch(base + '/api/rooms', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ name: 'Lectern hall' }) })).json()).code;
+      const slSw = await fakeStagewatch({ name: 'Lectern timer' });
+      const noDesk = await fakeStagewatch({ name: 'Lectern timer', desk: false });
+      const signIn = async (t, username, password) => {
+        await t.until(`document.readyState === 'complete'`);
+        return t.eval(`(async () => { for (let i = 0; i < 5; i++) { const r = await fetch('/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: ${codeLiteral(username)}, password: ${codeLiteral(password)} }) }); if (r.status !== 429) return r.status; await new Promise((ok) => setTimeout(ok, 2100)); } return 429; })()`);
+      };
+      const desk = await edge.tab(`${base}/`, { alone: true });
+      if (await signIn(desk, 'ana', 'the green room kettle') !== 200) throw new Error('the lectern hall\'s operator could not sign in');
+      await desk.eval(`(() => { try { localStorage.removeItem('agm.speakerWay'); } catch { /* a page without storage keeps no choice */ } location.href = ${codeLiteral(`/app.html?code=${slHall}&as=account&role=research`)}; return true; })()`);
+      await desk.until(`typeof joined !== 'undefined' && joined && F.canPush && !document.getElementById('quoteTab').hidden`, 10000);
+      await desk.eval(`document.getElementById('quoteTab').click()`);
+      const typed = (words) => desk.eval(`(() => { const box = document.getElementById('quoteInput'); box.value = ${codeLiteral(words)}; box.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+      // ＋ as it stands in a bar (`id`): shown, ticked, enabled, why not, its two ways, the way chosen, what a send now does, the line said.
+      const plus = (id) => desk.eval(`(() => { const r = document.getElementById(${codeLiteral(id)}); const on = r.querySelector('[data-line-on]'); const ways = r.querySelector('[data-line-ways]');
+        const way = (v) => { const i = r.querySelector('input[value="' + v + '"]'); const why = r.querySelector('[data-line-closed="' + v + '"]'); return { disabled: i.disabled, checked: i.checked, why: why.hidden ? '' : why.textContent }; };
+        return JSON.stringify({ shown: !r.hidden && r.offsetParent !== null, ticked: on.checked, enabled: !on.disabled, why: r.querySelector('[data-line-why]').hidden ? '' : r.querySelector('[data-line-why]').textContent,
+          ways: !ways.hidden, propose: way('propose'), send: way('send'), now: r.querySelector('[data-line-now]').hidden ? '' : r.querySelector('[data-line-now]').textContent,
+          said: r.querySelector('[data-line-said]').hidden ? '' : r.querySelector('[data-line-said]').textContent }); })()`).then(JSON.parse);
+      const tick = (id) => desk.eval(`(() => { const on = document.querySelector('#${id} [data-line-on]'); on.click(); return on.checked; })()`);
+      const choose = (id, way) => desk.eval(`(() => { const i = document.querySelector('#${id} input[value="${way}"]'); i.click(); return i.checked; })()`);
+      const roomLines = () => desk.eval(`JSON.stringify(allMessages.filter((m) => m.type === 'system').map((m) => m.text))`).then(JSON.parse);
+
+      // No Stagewatch linked: ＋ is not drawn.
+      await typed('Revenue Q3: £4.2m');
+      await desk.until(`!document.getElementById('quoteShow').disabled && 'ready'`, 8000);
+      const unlinked = await plus('quoteLine');
+      // The hall's Stagewatch, its key accepted and its desk found: ＋ is drawn, off.
+      await desk.eval(`new Promise((r) => socket.emit('hall:configure', { code: HALL_KEY, stagewatchUrl: ${codeLiteral(slSw.url)}, stagewatchKey: ${codeLiteral(KEY)} }, r))`);
+      await desk.until(`F.canSendToStage && F.canPropose && !F.stageWhy && !document.getElementById('quoteLine').hidden && 'linked'`, 20000);
+      const offFirst = await plus('quoteLine');
+      await tick('quoteLine');
+      const ticked = await plus('quoteLine');
+      report(unlinked.shown === false && offFirst.shown && !offFirst.ticked && offFirst.enabled && !offFirst.ways
+        && ticked.ways && !ticked.propose.disabled && !ticked.send.disabled && ticked.propose.checked && !ticked.send.checked
+        && ticked.now === 'Replaces what the speaker\'s screen shows now, the operator\'s message included, and cancels its waiting acknowledgement.'
+        && ticked.said === '“Revenue Q3: £4.2m” — 17 characters: 500 sent now, about 377 through the desk; it reads at a glance up to about 60.',
+        `＋ the speaker's screen: not drawn without a Stagewatch; off by default; ticked, 📝 Ask the operator and 🖥 Send now, the first time Ask the operator, 🖥's words saying it replaces the operator's message, and the line with its count (${JSON.stringify({ unlinked, offFirst, ticked })})`);
+
+      // 📝 Ask the operator: the desk is asked for the quote's own words; the room's line names its length; ＋ is off again.
+      await desk.eval(`document.getElementById('quoteShow').click()`);
+      const askedLine = await desk.until(`(() => { const t = (document.getElementById('agmToast') || {}).textContent || ''; return t.includes('📝 waiting for the operator') && t; })()`, 10000);
+      const proposed = [...slSw.proposals.values()].map((p) => p.line);
+      const afterAsk = await plus('quoteLine');
+      const askLines = await desk.until(`allMessages.some((m) => m.type === 'system' && m.text === 'Ana Admin asked the operator for a line (17 characters) on the speaker\\'s screen with a push — waiting for the show desk') && 'said'`, 8000);
+      report(JSON.stringify(proposed) === JSON.stringify(['message "Revenue Q3: £4.2m" info off ack']) && !afterAsk.ticked && askLines === 'said' && !(await roomLines()).some((l) => l.includes('4.2m')),
+        `📝 Ask the operator proposes message "Revenue Q3: £4.2m" info off ack to the desk; the room's line names its length, no quote; ＋ is off again after the push (${JSON.stringify({ askedLine, proposed, afterAsk: afterAsk.ticked })})`);
+
+      // 🖥 Send now: Stagewatch is sent the line at once, and this device keeps the choice.
+      await typed('Revenue Q3: £4.2m');
+      await desk.until(`!document.getElementById('quoteShow').disabled && 'ready'`, 8000);
+      await tick('quoteLine');
+      await choose('quoteLine', 'send');
+      const sendsBefore = slSw.requests.filter((r) => r.url.startsWith('/api/message/')).length;
+      await desk.eval(`document.getElementById('quoteShow').click()`);
+      const sentToast = await desk.until(`(() => { const t = (document.getElementById('agmToast') || {}).textContent || ''; return t.includes('🖥 on the speaker\\'s screen') && t; })()`, 10000);
+      const sentNow = slSw.requests.filter((r) => r.url.startsWith('/api/message/')).slice(sendsBefore).map((r) => decodeURIComponent(r.url.split('/')[3]));
+      const kept = await desk.eval(`localStorage.getItem('agm.speakerWay')`);
+      const sendLine = await desk.until(`allMessages.some((m) => m.type === 'system' && m.text === 'Ana Admin sent a line (17 characters) to the speaker\\'s screen with a push') && 'said'`, 8000);
+      report(JSON.stringify(sentNow) === JSON.stringify(['Revenue Q3: £4.2m']) && kept === 'send' && sendLine === 'said',
+        `🖥 Send now sends the line at once with the push, the room's line reads "… a line (17 characters) to the speaker's screen with a push", and the choice is kept on this device (${JSON.stringify({ sentToast, sentNow, kept })})`);
+
+      // Preset to the last way on this device, after a reload.
+      await desk.eval(`location.reload()`);
+      await desk.until(`typeof joined !== 'undefined' && joined && F.canSendToStage && F.canPropose && !document.getElementById('quoteTab').hidden`, 15000);
+      await desk.eval(`document.getElementById('quoteTab').click()`);
+      await typed('Turnout was 64%');
+      await desk.until(`!document.getElementById('quoteShow').disabled && 'ready'`, 8000);
+      await tick('quoteLine');
+      const preset = await plus('quoteLine');
+      report(preset.send.checked && !preset.propose.checked, `＋ is preset to the way chosen last on this device (${JSON.stringify(preset)})`);
+      await tick('quoteLine');
+
+      // The Preview's bar: a document's line is the line typed above it, never its name; with none, ＋ is disabled with why.
+      await desk.eval(`(() => { attachFile(new File([Uint8Array.from(atob('${fixture('board-pack-tagged.pdf').toString('base64')}'), (c) => c.charCodeAt(0))], 'board pack.pdf', { type: 'application/pdf' })); return true; })()`);
+      await desk.until(`!document.getElementById('previewBar').hidden && document.getElementById('docTitle').textContent === 'board pack.pdf' && !document.getElementById('pickLine').hidden && 'open'`, 20000);
+      const noNote = await plus('pickLine');
+      await desk.eval(`(() => { const n = document.getElementById('pickNote'); n.value = 'Look at the second table'; n.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+      await tick('pickLine');
+      const noted = await plus('pickLine');
+      const docSendsBefore = slSw.requests.filter((r) => r.url.startsWith('/api/message/')).length;
+      await desk.eval(`document.getElementById('showDocument').click()`);
+      await desk.until(`(() => { const t = (document.getElementById('agmToast') || {}).textContent || ''; return t.startsWith('The document') && t.includes('🖥') && t; })()`, 20000);
+      const docLine = slSw.requests.filter((r) => r.url.startsWith('/api/message/')).slice(docSendsBefore).map((r) => decodeURIComponent(r.url.split('/')[3]));
+      report(noNote.shown && !noNote.enabled && noNote.why === 'Pick words in the file, or type a line above it, to put one on the speaker\'s screen.'
+        && noted.enabled && noted.ticked && noted.said.startsWith('“Look at the second table” — 24 characters') && noted.said.endsWith('It goes with a picture or the document.') && !noted.said.includes('board pack')
+        && JSON.stringify(docLine) === JSON.stringify(['Look at the second table']),
+        `＋ is disabled for a document with no line above it, and its line is that line alone, never the file's name (${JSON.stringify({ noNote, noted: noted.said, docLine })})`);
+
+      // Words picked as well: ＋ shows the picked words and the push they go with. The document and what is in view (a picture
+      // of the part of the page in view) each carry the line above them, which ＋ did not show: no line goes, and their toast
+      // says why. The pick's own Show sends exactly the line ＋ drew.
+      const messagesNow = () => slSw.requests.filter((r) => r.url.startsWith('/api/message/'));
+      const toastWith = (start, words) => desk.until(`(() => { const t = (document.getElementById('agmToast') || {}).textContent || ''; return t.startsWith(${codeLiteral(start)}) && t.includes(${codeLiteral(words)}) && t; })()`, 20000);
+      await desk.until(`document.querySelectorAll('#docDisplay .textLayer span[role="presentation"]').length > 0 && 'drawn'`, 20000);
+      const picked = await desk.eval(`(() => { const w = document.createTreeWalker(document.getElementById('docDisplay'), NodeFilter.SHOW_TEXT);
+        for (let n = w.nextNode(); n; n = w.nextNode()) { const i = n.nodeValue.indexOf('about agenda'); if (i < 0) continue;
+          const r = document.createRange(); r.setStart(n, i + 6); r.setEnd(n, i + 12); const s = getSelection(); s.removeAllRanges(); s.addRange(r); return 'selected'; }
+        return 'not found'; })()`);
+      await desk.until(`!document.getElementById('pickBar').hidden && !!PickBar.lineContent() && 'picked'`, 8000);
+      await tick('pickLine');
+      const withPick = await plus('pickLine');
+      const NOT_SHOWN = 'No line went to the speaker\'s screen: this push\'s words are not the line ＋ showed';
+      const beforeOthers = messagesNow().length;
+      await desk.eval(`document.getElementById('showDocument').click()`);
+      const docToast = await toastWith('The document', NOT_SHOWN);
+      await tick('pickLine');
+      await desk.eval(`document.getElementById('showSeen').click()`);
+      const seenToast = await toastWith('The picture', NOT_SHOWN);
+      const othersSent = messagesNow().length - beforeOthers;
+      await tick('pickLine');
+      const pickShown = await plus('pickLine');
+      await desk.eval(`document.getElementById('pickShow').click()`);
+      const pickToast = await toastWith('The quote', '🖥');
+      const pickSent = messagesNow().slice(beforeOthers).map((r) => decodeURIComponent(r.url.split('/')[3]));
+      const drawnLine = (/^“(.*)” — /.exec(pickShown.said) || [])[1];
+      report(picked === 'selected' && withPick.said.startsWith('“agenda” — 6 characters') && withPick.said.endsWith('It goes with the picked words, by their 📺 Show.')
+        && !!docToast && !!seenToast && othersSent === 0 && drawnLine === 'agenda' && JSON.stringify(pickSent) === JSON.stringify([drawnLine]),
+        `with words picked, ＋ shows them and the push they go with; the document and what is in view send no line and say why; the pick's Show sends exactly the line drawn (${JSON.stringify({ withPick: withPick.said, docToast, seenToast, othersSent, pickToast, pickSent })})`);
+      await desk.eval(`(() => { getSelection().removeAllRanges(); const n = document.getElementById('pickNote'); n.value = ''; n.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+
+      // ＋ ticked with its way chosen, and the link down by the time of the push: the take goes, and its toast says why no
+      // line went, in the link's own words.
+      const gone = await fakeStagewatch({ name: 'Lectern timer' });
+      const goneUrl = gone.url;
+      await gone.close();
+      await desk.eval(`document.getElementById('quoteTab').click()`);
+      await typed('Turnout was 64%');
+      await desk.until(`!document.getElementById('quoteShow').disabled && 'ready'`, 8000);
+      await tick('quoteLine');
+      const wayBefore = await plus('quoteLine');
+      await desk.eval(`new Promise((r) => socket.emit('hall:configure', { code: HALL_KEY, stagewatchUrl: ${codeLiteral(goneUrl)}, stagewatchKey: ${codeLiteral(KEY)} }, r))`);
+      // The link's words: checking its key, then not connected (catalog.js stageWhy), each beginning "Stagewatch".
+      const downWhy = await desk.until(`F.stageWhy`, 20000);
+      await desk.eval(`document.getElementById('quoteShow').click()`);
+      const downToast = await toastWith('The quote', 'No line went to the speaker\'s screen: Stagewatch ');
+      report(wayBefore.ticked && wayBefore.send.checked && !!downWhy && !!downToast && !slSw.requests.slice(-1).some((r) => r.url.includes('Turnout')),
+        `＋ ticked, its way closed by the time of the push: the take goes, and its toast says why no line went, in the link's words (${JSON.stringify({ downWhy, downToast })})`);
+
+      // A Stagewatch without a show desk: 📝 Ask the operator is disabled with its reason, 🖥 Send now chosen.
+      await desk.eval(`new Promise((r) => socket.emit('hall:configure', { code: HALL_KEY, stagewatchUrl: ${codeLiteral(noDesk.url)}, stagewatchKey: ${codeLiteral(KEY)} }, r))`);
+      await desk.until(`F.canSendToStage && !F.canPropose && !F.stageWhy && 'linked'`, 20000);
+      await desk.eval(`document.getElementById('quoteTab').click()`);
+      await typed('Revenue Q3: £4.2m');
+      await desk.until(`!document.getElementById('quoteShow').disabled && 'ready'`, 8000);
+      await tick('quoteLine');
+      const oneWay = await plus('quoteLine');
+      report(oneWay.propose.disabled && oneWay.propose.why === 'The show desk is not connected.' && !oneWay.send.disabled && oneWay.send.checked,
+        `a way that is closed is shown disabled with its reason: no show desk (${JSON.stringify(oneWay)})`);
+      await tick('quoteLine');
+
+      // Pia (Staff: stage.show without stage.send) is drawn the ❝ Quote tab and no ＋.
+      const piaMade = await desk.eval(`fetch('/api/users', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'pia', name: 'Pia Staff', role: 'staff', halls: [${codeLiteral(slHall)}], password: 'quotes without a lectern' }) }).then((r) => r.status)`);
+      const pia = await edge.tab(`${base}/build.js`, { alone: true });
+      if (piaMade !== 200 || await signIn(pia, 'pia', 'quotes without a lectern') !== 200) throw new Error('Pia could not sign in: ' + piaMade);
+      await pia.send('Page.navigate', { url: `${base}/app.html?code=${slHall}&as=account&role=research` });
+      await pia.until(`typeof joined !== 'undefined' && joined && F.canShow && !document.getElementById('quoteTab').hidden`, 10000);
+      await pia.eval(`document.getElementById('quoteTab').click()`);
+      await pia.eval(`(() => { const box = document.getElementById('quoteInput'); box.value = 'Capex rose 8%'; box.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+      const piaPlus = await pia.until(`!document.getElementById('quoteShow').disabled && JSON.stringify({ send: F.canSendToStage, propose: F.canPropose, shown: !document.getElementById('quoteLine').hidden })`, 8000);
+      report(piaPlus === JSON.stringify({ send: false, propose: false, shown: false }), `＋ is absent for a seat without stage.send (${piaPlus})`);
+
+      const lineProblems = [['desk', desk], ['pia', pia]].flatMap(([n, t]) => t.problems.map((p) => n + ': ' + p));
+      report(lineProblems.length === 0, `the lectern hall's pages: no console error and no CSP violation${lineProblems.length ? ' — ' + lineProblems.slice(0, 4).join(' | ') : ''}`);
+      for (const t of [desk, pia]) { await t.send('Page.navigate', { url: 'about:blank' }); t.close(); }
+      await slSw.close();
+      await noDesk.close();
+    }
+
     // ---------------- The Board's devices (unit T): every stage feature on the device legs, and the floor leg ----------------
     // A hall of its own: the operator from a socket (its files uploaded fresh), the admin account's page backstage as the
     // pusher whose page makes a document's stand-in, and the Board on three device legs (a mobile viewport with touch, at

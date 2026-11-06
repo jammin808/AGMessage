@@ -140,19 +140,20 @@ export default [
   // above: pdf.js's legacy build sets the document floor, docs/DEVICES.md).
   {
     files: ['app/public/**/*.js'],
-    languageOptions: { ecmaVersion: 2020, sourceType: 'script', globals: { ...globals.browser, io: 'readonly', pdfjsLib: 'readonly', mammoth: 'readonly', XLSX: 'readonly', AGM: 'writable' } },
+    languageOptions: { ecmaVersion: 2020, sourceType: 'script', globals: { ...globals.browser, io: 'readonly', pdfjsLib: 'readonly', mammoth: 'readonly', XLSX: 'readonly', AGM: 'writable', AGMLine: 'readonly' } },
     rules: { 'agm/no-unescaped-html': 'error', 'no-alert': 'error', ...pageFloor },
   },
   { files: ['app/public/**/*.mjs'], languageOptions: { ecmaVersion: 2020, sourceType: 'module', globals: { ...globals.browser } }, rules: { 'agm/no-unescaped-html': 'error', 'no-alert': 'error', ...pageFloor } },
   { files: ['app/public/**/*.js', 'app/public/**/*.mjs'], ignores: ['app/public/common.js', 'app/public/display.js'], rules: marksFromTable },
   // The pure cores the page's document worker loads as classic scripts, also loadable by require: the archive check's
   // (zipcore.js, the server's too, through lib/zipcheck.js), a picture's size from its header (imagecore.js, the
-  // server's too, through lib/imagesize.js) and Word's pages and hidden text (wordpages.js). Pure over
+  // server's too, through lib/imagesize.js) and Word's pages and hidden text (wordpages.js); and the speaker's line of a
+  // push (linecore.js, which the hall page loads as a script and the server through lib/stagelines.js). Pure over
   // what they are handed, so no global of Node's or of a page's but the language's own (the pages' own names and
   // libraries' included), `module` there only to be exported where there is one, and nothing loaded.
   {
-    files: ['app/public/zipcore.js', 'app/public/imagecore.js', 'app/public/wordpages.js'],
-    languageOptions: { globals: { ...Object.fromEntries([...Object.keys(globals.node), ...Object.keys(globals.browser), 'io', 'pdfjsLib', 'mammoth', 'XLSX', 'AGM'].map((name) => [name, 'off'])), module: 'writable' } },
+    files: ['app/public/zipcore.js', 'app/public/imagecore.js', 'app/public/wordpages.js', 'app/public/linecore.js'],
+    languageOptions: { globals: { ...Object.fromEntries([...Object.keys(globals.node), ...Object.keys(globals.browser), 'io', 'pdfjsLib', 'mammoth', 'XLSX', 'AGM', 'AGMLine'].map((name) => [name, 'off'])), module: 'writable' } },
     rules: {
       'no-restricted-syntax': ['error', ...marksFromTable['no-restricted-syntax'].slice(1),
         { selector: "MemberExpression[object.name='module'][property.name!='exports']", message: 'a pure core: `module` is there only to export it' },

@@ -16,12 +16,12 @@ const EVENTS = [...new Set(handlerFiles().flatMap((f) => [...readSource(path.joi
 const ADMIN_SKIP = new Set(['admin:tunnelStart', 'admin:tunnelStop', 'admin:renewCertificate']);
 const NULLS = { roomCode: null, code: null, id: null, messageId: null, text: null, content: null, seq: null, targetRoom: null, socketId: null, line: null, state: null, hall: null, cid: null, on: null, heldMs: null, until: null, codeOn: null, newCode: null, keepGuests: null, sendFrom: null, sendBack: null, to: null, replyTo: null, uid: null, kind: null, url: null, again: null, ifSeq: null, view: null, beforeSeq: null, layer: null, arrive: null, role: null, at: null, from: null, note: null, download: null, takeDown: null,
   unit: null, items: null, table: null, rows: null, blocks: null, title: null, cut: null, more: null, ordered: null, start: null, head: null, side: null, ref: null, focus: null, lines: null, web: null,
-  standin: null, docs: null };
+  standin: null, docs: null, withTake: null };
 // An object whose toString is not a function: String() throws on it, so a handler must never call String() on input.
 const U = { toString: 1 };
 const UNCONVERTIBLE = { roomCode: U, code: U, id: U, messageId: U, name: U, text: U, caption: U, options: [U], content: { kind: 'message', text: U }, seq: U, targetRoom: U, line: U, state: U, hall: U, words: U, destination: U, urgency: U, image: U, token: U, url: U, cid: U, heldMs: U, until: U, sendFrom: [U], sendBack: [U], to: U, replyTo: U, uid: U, kind: U, again: U, ifSeq: U, view: U, beforeSeq: U, layer: U, arrive: U, role: U, at: { page: U, approx: U }, from: { url: U }, note: U, download: U, takeDown: U,
   unit: U, items: [U], table: { rows: [[U]] }, blocks: [U], title: U, cut: U, more: { rows: U }, ordered: U, start: U, ref: U, focus: [U], lines: [U], web: U,
-  standin: { url: U, snippet: U }, docs: U };
+  standin: { url: U, snippet: U }, docs: U, withTake: U };
 const SHAPES = [null, 7, 'x', true, [], {}, NULLS, { code: {}, id: [], roomCode: 5, messageId: {}, content: 'x', text: {} }, UNCONVERTIBLE];
 
 // Each send: with an answer callback (the server may answer it) or without; either way at most 400 ms is waited.
@@ -84,6 +84,12 @@ test('client values are read by their type: a value String() cannot convert reac
   const legal = (await emit(ctl, 'room:create', { hall, name: 'Legal' })).key;
   assert.ok((await emit(ctl, 'room:update', { code: legal, sendFrom: [hall] })).ok);
   const ref = (await emit(guest, 'room:sendTargets', {})).targets[0].ref;
+  // A locked hall's backstage guest, seated before its code went off and kept: it may still push, and send to its
+  // Stagewatch, so a line with a push it names is read by type.
+  const locked = (await api(base, 'POST', '/api/rooms', { name: 'Hall 4' }, { cookie: admin })).body.code;
+  const lockedGuest = await connect(base); sockets.push(lockedGuest);
+  assert.ok((await emit(lockedGuest, 'join', { roomCode: locked, name: 'Lee', role: 'research' })).ok);
+  assert.ok((await emit(ctl, 'room:update', { code: locked, codeOn: false, keepGuests: true })).ok, 'the hall is locked, its guests kept');
   const cases = [
     [anon, 'join', { roomCode: U }], [anon, 'join', { roomCode: hall, name: U, role: 'research' }], [anon, 'join', { roomCode: hall, name: 'Dee', role: 'observer', docs: U }],
     [anon, 'display:list', { code: U }], [anon, 'display:take', { id: U }], [anon, 'help:respond', { code: U }],
@@ -148,6 +154,10 @@ test('client values are read by their type: a value String() cannot convert reac
     // none here): no ticket given.
     [guest, 'file:download', { messageId: U, seq: U }], [guest, 'file:download', { messageId: U }], [guest, 'file:download', { seq: U }],
     [guest, 'file:download', U], [ctl, 'file:download', { messageId: U }],
+    // A line with a push, its push's number and its words by type, from a backstage seat that may send to the speaker's
+    // screen (a locked hall's guest, and an open hall's): the push named is read before anything is looked up or sent.
+    [lockedGuest, 'stage:propose', { text: U, withTake: U }],
+    [guest, 'stage:propose', { text: U, withTake: U }], [guest, 'stage:send', { withTake: U }], [guest, 'stage:send', { text: U, withTake: U, messageId: U }],
   ];
   // What each is answered: the field it could not read named, and nothing shown, numbered or reported.
   const KINDS = 'Choose what to show: back to chat, Stagewatch, the clock, holding, blank, a web page, a document, a picture or a quote.';
@@ -217,6 +227,11 @@ test('client values are read by their type: a value String() cannot convert reac
       assert.deepEqual(r, { ok: false, error: s === ctl ? 'Not joined' : words }, ev + ' ' + JSON.stringify(arg));
       continue;
     }
+    if (ev === 'stage:send' || ev === 'stage:propose') {
+      assert.deepEqual(r, { ok: false, error: 'That line\'s push could not be read.' }, ev + ' ' + JSON.stringify(arg));
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      continue;
+    }
     if (ev.startsWith('page:')) {
       assert.deepEqual(r, { ok: false, error: pageWords(ev, arg) }, ev + ' ' + JSON.stringify(arg));
       await new Promise((resolve) => setTimeout(resolve, 250));
@@ -244,12 +259,13 @@ test('client values are read by their type: a value String() cannot convert reac
   assert.equal(health.body.handlerFaults, 0, 'every handler read its input by type; the guard had nothing to catch');
   const audit = await api(base, 'GET', '/api/audit?limit=50', undefined, { cookie: admin });
   assert.ok(!audit.body.entries.some((e) => e.action === 'settings'), 'settings in the wrong type are not taken, and so not audited');
-  assert.ok(!audit.body.entries.some((e) => e.action === 'room.code'), 'a code act in the wrong type switches nothing, and so is not audited');
+  assert.deepEqual(audit.body.entries.filter((e) => e.action === 'room.code').map((e) => e.target), [locked], 'a code act in the wrong type switches nothing, and so is not audited: the one row is Hall 4\'s lock');
   assert.deepEqual(audit.body.entries.filter((e) => e.action === 'room.sendFrom').map((e) => e.target), [legal], 'a list in the wrong type sets nothing, and so is not audited: the one row is Legal\'s, set above');
   assert.ok(!audit.body.entries.some((e) => e.action === 'room.send'), 'a send in the wrong type sends nothing, and so is not audited');
   assert.ok(!audit.body.entries.some((e) => e.action === 'room.withdraw'), 'a withdrawal in the wrong type takes nothing back, and so is not audited');
   assert.ok(!audit.body.entries.some((e) => e.action === 'page.push'), 'a take in the wrong type shows nothing, and so is not audited');
   assert.ok(!audit.body.entries.some((e) => e.action === 'room.guestWeb'), 'a switch in the wrong type switches nothing, and so is not audited');
+  assert.ok(!audit.body.entries.some((e) => e.action === 'stagewatch.send' || e.action === 'stagewatch.propose'), 'a line with a push in the wrong type sends nothing, and so is not audited');
   assert.equal((await send(ctl, 'page:status', { code: hall })).board.seq, 0, 'and nothing was numbered');
   assert.deepEqual((await send(ctl, 'room:settings', { code: hall })).sendFrom, [], 'and no room may send into the hall');
 });

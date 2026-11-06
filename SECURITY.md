@@ -566,6 +566,16 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   and only where its words are the words the browser says were selected (its `text/plain` flavour): where they disagree
   (a part hidden by a style sheet AGMessage cannot see), the plain words alone are used. What a person pasted is still
   theirs to check: the tab draws it as the Board will see it before it goes.
+- **A line sent with a push is the push's own words, built by the server.** ＋ the speaker's screen sends one line with a
+  take (`withTake`), and the server builds it from the take it stored (`stagelines.flatten`: a quote's words in one line,
+  or a document's or a picture's note; never a file's name, an address or a page), only for an information take its own
+  sender put up in that hall in the last minute, and refuses a `text` that differs, so no line can ride a push to every
+  Stagewatch output with no record of its words anywhere. Those words are kept where what was shown is kept (the take),
+  never in the room: the room's line names its length ("… a line (17 characters) to the speaker's screen with a push"),
+  which observers and the transcript read, and a proposal's record keeps a MAC of the line under the machine's secret
+  (`lineMac`), not the line, matched against the desk's copy. A line on the speaker's screen is seen on every Stagewatch
+  output, NDI and its viewer page, and Stagewatch publishes it in its public frame, keeps it and passes it to its
+  triggers: the bar says so before it goes, and it is off on every push until ticked.
 - **A part of a page or a picture is a new picture.** A region of a PDF's page or of a picture, what is in view of
   either, and a picture tapped in a Word document or a slide, is drawn on the pusher's own page into a new picture (at
   most 2,048 px on its long edge) and uploaded: no original goes, and a picture's metadata (EXIF, its place) is never

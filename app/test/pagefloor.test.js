@@ -243,6 +243,7 @@ const DEFINE_ONLY = {
   'menus.js': 'AGM.menu and AGM.ask: draw what a page gives them, and send nothing',
   'members.js': 'AGM.members.open: asks only when a person opens Members…',
   'sendfrom.js': 'AGM.sendFrom.open: asks only when the admin opens May send in…',
+  'linecore.js': 'AGMLine: a pure core, the speaker\'s line of a push, with no socket',
 };
 /** The first place a page script asks the server anything or opens a socket. */
 const firstAsk = (src) => src.search(/\bfetch\(|\bAGM\.api\(|\bio\(|\bnew WebSocket\(|\bXMLHttpRequest\b|\bsendBeacon\(/);

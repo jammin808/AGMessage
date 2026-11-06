@@ -867,6 +867,33 @@ of the composer (backstage, on a seat that may show the Board).
   right to show files, pages and quotes to the people on stage); a seat
   given the Web pages right alone has none.
 
+One line on the speaker's screen with a push
+--------------------------------------------
+For a presenter who reads only Stagewatch's speaker screen: in the
+Preview's bar or the Quote tab, tick "+ Also on the speaker's screen"
+before you press Show (it is there when the hall has a Stagewatch and you
+may send to it; it is off again after every push).
+- The line is the push's own words in one line: a quote's words with its
+  labels ("Revenue Q3: 4.2m"), or for a document or a picture the line you
+  typed above it. Never a file's name, address or page unless you typed
+  them. The bar shows the line and counts it before it goes: 500
+  characters sent now, about 377 through the operator; a line reads at a
+  glance up to about 60.
+- In the Preview's bar the line goes with the push the bar names: the
+  picked words with their Show, or the line above it with a picture or
+  the document. Any other push goes without a line, and its message
+  says why; so does a push made when Stagewatch can no longer be reached.
+- Ask the operator: the show caller approves it in Stagewatch. Send now:
+  it goes at once and REPLACES what the speaker's screen shows, the
+  operator's message included, and cancels that message's waiting
+  acknowledgement. A way that cannot be used now is greyed with the
+  reason. Your last choice is kept on this device.
+- Every Stagewatch output, NDI and Stagewatch's viewer page show the line.
+- AGMessage builds the line again from what you showed and refuses one
+  that differs. The room's line says "Ana sent a line (17 characters) to
+  the speaker's screen with a push", never the words; the audit log says
+  how long, never the words.
+
 Stagewatch (the countdown) for each hall
 ----------------------------------------
 Halls -> a hall's Set up: the address of that hall's Stagewatch and a

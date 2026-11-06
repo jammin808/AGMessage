@@ -1049,3 +1049,131 @@ test('uploads are served no-store and inline for every type, never as attachment
     }
   }
 });
+
+// A push can carry one line to the speaker's screen (plan 4-§5.9.10): through the operator (stage:propose) or at once
+// (stage:send), with `withTake`, a take its pusher put up in the last minute. The line is the push's own words, built by the
+// server from the take it stored: the mock Stagewatch receives that line, a `text` that differs is refused, and the room's
+// record, its row and the proposal's record carry no quote of it (a MAC follows the proposal instead, across a restart).
+test('a push can carry one line to the speaker\'s screen, through the operator or at once: the server\'s line from the stored take, no quote in the room\'s record, one row with counts, the proposal followed by its MAC across a restart', { timeout: 120_000 }, async (t) => {
+  const WINDOW = 8000;   // AGM_PUSH_LINE_MS: a line goes with a push only this long after it
+  const sw = await helpers.fakeStagewatch({ name: 'Hall 7 timer' });
+  let srv = await helpers.startServer({ AGM_PUSH_LINE_MS: String(WINDOW) });
+  const sockets = [];
+  t.after(async () => { sockets.forEach((s) => s.close()); await helpers.stopServer(srv.child); await sw.close(); });
+  const open = async (cookie) => { const s = await helpers.connect(srv.base, cookie); sockets.push(s); return s; };
+  // An act asked again while its socket's bucket says slow down: the answer the verb gives, not the rate's.
+  const act = async (s, ev, arg) => {
+    for (let i = 0; i < 20; i++) { const r = await helpers.emit(s, ev, arg); if (!(r && r.busy)) return r; await helpers.wait(300); }
+    throw new Error(ev + ' was refused for the rate twenty times');
+  };
+  const PASSWORD = 'lines for the lectern';
+  const admin = (await helpers.api(srv.base, 'POST', '/api/setup', { token: helpers.TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const hall = (await helpers.api(srv.base, 'POST', '/api/rooms', { name: 'Hall 7' }, { cookie: admin })).body.code;
+  const account = async (username, name, role, extra = {}) => {
+    assert.equal((await helpers.api(srv.base, 'POST', '/api/users', { username, name, role, password: PASSWORD, halls: [hall], ...extra }, { cookie: admin })).status, 200);
+    return (await helpers.api(srv.base, 'POST', '/api/auth/login', { username, password: PASSWORD })).cookie;
+  };
+  const tomCookie = await account('tom', 'Tom Tech', 'tech');   // display.control, stage.send: the operator
+  const sueCookie = await account('sue', 'Sue Staff', 'staff', { grant: ['stage.send'] });   // stage.show by a right of her own, and stage.send
+  let ctl = await open(admin);
+  assert.equal((await act(ctl, 'hall:configure', { code: hall, stagewatchUrl: sw.url, stagewatchKey: 'swk_hall7_node_key_0001' })).ok, true);   // secret-scan: fixture
+  let tom = await open(tomCookie);
+  assert.equal((await act(tom, 'join', { roomCode: hall, as: 'account' })).ok, true);
+  const sue = await open(sueCookie);
+  assert.equal((await act(sue, 'join', { roomCode: hall, as: 'account' })).ok, true);
+  await helpers.until(async () => { const r = await helpers.emit(tom, 'stage:targets', {}); return r.ok && r.canSend && r.canPropose; }, 15000, 'the hall\'s Stagewatch linked, its key accepted and its desk found');
+  const messages = async () => (await act(ctl, 'admin:watchRoom', { roomCode: hall })).messages;
+  const rows = (action) => fs.readFileSync(path.join(srv.dataDir, 'audit.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((e) => e.action === action);
+  const sent = () => sw.requests.filter((r) => r.method === 'POST' && r.url.startsWith('/api/message/'));
+  const push = async (s, content, arrive) => { const r = await act(s, 'page:push', { code: hall, to: 'board', content, ...(arrive ? { arrive } : {}) }); assert.equal(r.ok, true, JSON.stringify(r)); return r.seq; };
+  const CELL = { kind: 'snippet', unit: 'cell', table: { rows: [['', 'Q3'], ['Revenue', '£4.2m']], head: 1, side: 1, ref: 'D2', focus: [1, 1] } };
+  const LINE = 'Revenue Q3: £4.2m';
+  // A take put up now, kept until its minute is over (`WINDOW` here).
+  const old = await push(tom, { kind: 'snippet', unit: 'text', text: 'Asked too late' });
+  const oldAt = Date.now();
+
+  // Through the operator: the desk is asked for the server's line of the take, the room's record names its length alone.
+  const cell = await push(tom, CELL);
+  const differs = await act(tom, 'stage:propose', { withTake: cell, text: 'Revenue Q3: £5.0m', destination: 'speaker' });
+  assert.deepEqual(differs, { ok: false, error: 'The line must be the push\'s own words.' });
+  assert.equal(sw.proposals.size, 0, 'nothing was asked of the desk');
+  const asked = await act(tom, 'stage:propose', { withTake: cell, text: LINE, destination: 'speaker' });
+  assert.equal(asked.ok, true, JSON.stringify(asked));
+  assert.equal(sw.proposals.get(asked.proposal.id).line, 'message "Revenue Q3: £4.2m" info off ack', 'the desk is asked for the take\'s own words');
+  assert.ok(typeof asked.proposal.lineMac === 'string' && asked.proposal.lineMac.length === 24 && !Object.hasOwn(asked.proposal, 'line'), JSON.stringify(asked.proposal));
+  let room = await messages();
+  const askedLine = room.find((m) => m.proposal && m.proposal.id === asked.proposal.id);
+  assert.equal(askedLine.text, 'Tom Tech asked the operator for a line (17 characters) on the speaker\'s screen with a push — waiting for the show desk');
+  assert.ok(!Object.hasOwn(askedLine.proposal, 'line') && askedLine.proposal.lineMac === asked.proposal.lineMac, JSON.stringify(askedLine.proposal));
+  assert.ok(!room.some((m) => JSON.stringify(m).includes('4.2m')), 'no record of the room quotes the line, its proposal\'s included');
+  assert.deepEqual(rows('stagewatch.propose').map((e) => e.words), ['asked the operator: a message (17 characters) for the speaker\'s screen, with a push — proposal ' + asked.proposal.id]);
+  // The line goes to the speaker's screen alone.
+  assert.deepEqual(await act(tom, 'stage:propose', { withTake: cell, destination: 'operator' }), { ok: false, error: 'A line with a push goes to the speaker\'s screen.' });
+
+  // At once: Stagewatch is sent the server's line, with no `text` from the page at all.
+  const before = sent().length;
+  const now = await act(tom, 'stage:send', { withTake: cell });
+  assert.equal(now.ok, true, JSON.stringify(now));
+  assert.equal(sent().length, before + 1);
+  assert.equal(decodeURIComponent(sent().at(-1).url.split('/')[3]), LINE, 'Stagewatch is sent the take\'s own words');
+  room = await messages();
+  assert.ok(room.some((m) => m.type === 'system' && m.text === 'Tom Tech sent a line (17 characters) to the speaker\'s screen with a push' && m.stage && m.stage.receipt === 'applied'), JSON.stringify(room.map((m) => m.text)));
+  assert.ok(!room.some((m) => (m.text || '').includes('4.2m')), 'no line of the room quotes it');
+  assert.deepEqual(rows('stagewatch.send').map((e) => e.words), ['a line (17 characters) on the speaker\'s screen, sent now, with a push']);
+  // A send of a line of its own is quoted in the room as before.
+  assert.equal((await act(tom, 'stage:send', { text: 'Two minutes' })).ok, true);
+  assert.ok((await messages()).some((m) => m.type === 'system' && m.text === 'Tom Tech sent to the speaker\'s screen: “Two minutes”'));
+  // The line the page showed (linecore's flatten of what it pushed) is the server's line of the take it stored, though the
+  // cleaner drops invisible characters and cuts a long title: sent with the push, it is accepted, and Stagewatch is sent it.
+  const core = require('../public/linecore.js');
+  for (const content of [
+    { kind: 'snippet', unit: 'paragraph', text: 'Revenue\u200b rose by \u200f4%\u200e \u2066in Q3\u2069' },
+    { kind: 'snippet', unit: 'slide', title: 'Q'.repeat(130), items: ['Revenue up', 'Costs flat'] },
+  ]) {
+    const seq = await push(tom, content);
+    const shown = core.flatten(content);
+    const r = await act(tom, 'stage:send', { withTake: seq, text: shown });
+    assert.equal(r.ok, true, JSON.stringify(r));
+    assert.equal(decodeURIComponent(sent().at(-1).url.split('/')[3]), shown, 'Stagewatch is sent the line the page showed');
+  }
+  assert.equal(decodeURIComponent(sent().at(-2).url.split('/')[3]), 'Revenue rose by 4% in Q3');
+  assert.equal(decodeURIComponent(sent().at(-1).url.split('/')[3]), 'Q'.repeat(120) + ': Revenue up · Costs flat');
+
+  // Only its pusher's, in this hall, of the information layer, with words to send.
+  const hers = await push(sue, { kind: 'snippet', unit: 'text', text: 'Capex rose 8%' }, 'side');   // beside the operator's
+  const NOT_YOURS = { ok: false, error: 'The line goes with a push of yours from the last minute — send it as a line of its own instead.' };
+  assert.deepEqual(await act(tom, 'stage:send', { withTake: hers }), NOT_YOURS, 'another person\'s take');
+  assert.deepEqual(await act(sue, 'stage:propose', { withTake: cell }), NOT_YOURS, 'another person\'s take, asked of the desk');
+  assert.deepEqual(await act(tom, 'stage:send', { withTake: 9999 }), NOT_YOURS, 'no such take');
+  const clock = await push(tom, { kind: 'clock' });
+  assert.deepEqual(await act(tom, 'stage:send', { withTake: clock }), NOT_YOURS, 'a take of the show layer carries no line');
+  const web = await push(tom, { kind: 'web', url: 'https://vote.example.com/results' });
+  assert.deepEqual(await act(tom, 'stage:send', { withTake: web }), { ok: false, error: 'That push has no words for the speaker\'s screen — a document or a picture needs a line above it.' }, 'an address is never a line');
+  for (const withTake of ['1', 1.5, 0, true, { seq: cell }]) assert.deepEqual(await act(tom, 'stage:send', { withTake }), { ok: false, error: 'That line\'s push could not be read.' }, JSON.stringify(withTake));
+  assert.deepEqual(await act(tom, 'stage:send', { withTake: cell, text: 5 }), { ok: false, error: 'The line must be the push\'s own words.' }, 'a text that is no line');
+  const hersAsked = await act(sue, 'stage:propose', { withTake: hers, text: 'Capex  rose 8%' });
+  assert.equal(hersAsked.ok, true, 'a line read as the screen shows it is the same line: ' + JSON.stringify(hersAsked));
+  assert.equal(sw.proposals.get(hersAsked.proposal.id).line, 'message "Capex rose 8%" info off ack');
+  // A take older than its minute: refused, and nothing more reaches Stagewatch.
+  await helpers.wait(Math.max(0, oldAt + WINDOW + 300 - Date.now()));
+  const late = sent().length;
+  assert.deepEqual(await act(tom, 'stage:send', { withTake: old }), NOT_YOURS, 'an old take');
+  assert.equal(sent().length, late);
+  assert.equal(rows('stagewatch.send').length, 4, 'one row for each line that went, none for a refusal');
+
+  // A restart: each proposal is followed by its MAC, the desk's copy read back and matched. One whose line the desk no
+  // longer holds as asked is no longer ours (lost); the other is followed to its approval.
+  sockets.forEach((s) => s.close());
+  srv = await helpers.restartServer(srv, { AGM_PUSH_LINE_MS: String(WINDOW) });
+  ctl = await open(admin);
+  tom = await open(tomCookie);
+  assert.equal((await act(tom, 'join', { roomCode: hall, as: 'account' })).ok, true);
+  sw.proposals.get(hersAsked.proposal.id).line = 'message "Capex fell 8%" info off ack';
+  sw.approve(asked.proposal.id, 'Show caller');
+  await helpers.until(async () => {
+    const r = await messages();
+    const a = r.find((m) => m.proposal && m.proposal.id === asked.proposal.id);
+    const b = r.find((m) => m.proposal && m.proposal.id === hersAsked.proposal.id);
+    return a && b && a.proposal.state === 'approved' && a.proposal.by === 'Show caller' && b.proposal.state === 'lost';
+  }, 20000, 'after the restart, ours approved by its MAC, and the one the desk holds other words for lost');
+});

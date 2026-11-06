@@ -604,9 +604,18 @@ body[data-role="research"] .file.clickable:hover { outline: 2px solid var(--acce
 .pick-preview:empty { display: none; }
 .pick-say { margin: 0; font-size: var(--fs-sm); }
 .pick-say[hidden] { display: none; }
-.pick-row input[type="text"] { flex: 1 1 10rem; min-width: 0; font-size: var(--fs-sm); padding: var(--sp-1) var(--sp-2); border: 1px solid var(--c-border); border-radius: var(--radius-sm); background: var(--c-surface-raised); color: var(--c-ink); }
+.pick-row input[type="text"], .preview-to input[type="text"] { flex: 1 1 10rem; min-width: 0; font-size: var(--fs-sm); padding: var(--sp-1) var(--sp-2); border: 1px solid var(--c-border); border-radius: var(--radius-sm); background: var(--c-surface-raised); color: var(--c-ink); }
 .pick-more { min-width: var(--target-touch); min-height: var(--target-touch); }
 .pick-glance { position: fixed; top: 0; left: -10000px; visibility: hidden; pointer-events: none; }
+/* ＋ the speaker's screen (the Preview's bar, the ❝ Quote tab): the tick, its two ways with why one is closed, what a send
+   now does, and the line with its count. */
+.speaker-line { display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--fs-sm); }
+.speaker-line[hidden], .speaker-line [hidden] { display: none; }
+.speaker-line .speaker-plus { display: inline-flex; align-items: center; gap: var(--sp-1); font-size: var(--fs-sm); }
+.speaker-ways { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); align-items: center; padding-left: var(--sp-3); }
+.speaker-way { display: inline-flex; align-items: center; gap: var(--sp-1); min-height: var(--target-min); }
+.speaker-ways small { flex-basis: 100%; color: var(--c-ink-muted); font-size: var(--fs-sm); }
+.speaker-said { margin: 0; padding-left: var(--sp-3); overflow-wrap: anywhere; }
 /* ❝ Quote: the box words are pasted or typed in, where they are from, what will go drawn as the Board will see it (the
    pick bar's preview), whom it goes to and where it arrives, a line above it, and Show. */
 .quote-pane .field { margin-bottom: 0; }

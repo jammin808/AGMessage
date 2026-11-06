@@ -547,7 +547,8 @@ guests may no longer show web pages (1 shown now stays until taken down)"; an un
 (`room.invite`, by the room's key: "a new On stage link (the old one no longer admits)", never the link), settings (which ones,
 never their values), every proposal Stagewatch's show desk takes (who asked, for which screen, how many characters and
 the desk's number, never the words), every line Stagewatch takes for the speaker's screen sent straight to it
-(`stagewatch.send`: who sent it and how many characters, never the words; an emoji counts as one character in both),
+(`stagewatch.send`: who sent it and how many characters, never the words; an emoji counts as one character in both; a
+line that went with a push says so, "…, sent now, with a push", and its proposal "…, with a push — proposal p3"),
 commands to Patterns and PlayMap, the internet link (`tunnel.on`: who turned it on and its end, once cloudflared gave
 its address; `tunnel.until`: its end moved; `tunnel.off`: who turned it off, or kept it off with only its end left; and
 system rows, `tunnel.again`: turned on again by a start inside its end, and `tunnel.ended`: turned off at its end; never

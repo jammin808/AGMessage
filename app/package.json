@@ -8,7 +8,7 @@
     "start": "node supervise.js",
     "dev": "node server.js",
     "test": "node test/run-tests.js --test \"test/*.test.js\"",
-    "coverage": "node test/run-tests.js --test --experimental-test-coverage --test-coverage-include=server.js --test-coverage-include=supervise.js --test-coverage-include=launch.js --test-coverage-include=\"lib/**\" --test-coverage-include=\"verify/**\" --test-coverage-include=public/zipcore.js --test-coverage-include=public/imagecore.js --test-coverage-include=public/wordpages.js --test-coverage-include=public/docmodel.mjs --test-coverage-lines=95 --test-coverage-branches=84 --test-coverage-functions=91 \"test/*.test.js\"",
+    "coverage": "node test/run-tests.js --test --experimental-test-coverage --test-coverage-include=server.js --test-coverage-include=supervise.js --test-coverage-include=launch.js --test-coverage-include=\"lib/**\" --test-coverage-include=\"verify/**\" --test-coverage-include=public/zipcore.js --test-coverage-include=public/imagecore.js --test-coverage-include=public/linecore.js --test-coverage-include=public/wordpages.js --test-coverage-include=public/docmodel.mjs --test-coverage-lines=95 --test-coverage-branches=84 --test-coverage-functions=91 \"test/*.test.js\"",
     "lint": "cd .. && eslint .",
     "secrets": "node ../tools/scan-secrets.js",
     "audit": "npm audit --omit=dev --audit-level=high && npm audit signatures && node ../tools/vendor-audit.js",

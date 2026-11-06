@@ -159,6 +159,14 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   ("Look for: ❝ net revenue rose … in Q3"); a page in the full view opens it in a tab of its own (Open in a new tab, in the
   layer's ⋯), where the browser highlights it. Over the bar a long quote is said "Long for the stage — the Board will
   scroll", another sender's fresh information offers Replace, and a file dropped or pasted on the box is never a quote.
+  **＋ the speaker's screen**, in the Preview's bar and the ❝ Quote tab, sends one line with the push for a presenter who
+  reads only Stagewatch's speaker screen: the push's own words (a quote's words with its labels, "Revenue Q3: £4.2m", or
+  the line above a document or a picture), shown and counted before it goes with the push it names (a push that would
+  carry other words sends none and says why), never a file's name or address unless typed.
+  It is off on every push until ticked, and goes **📝 through the operator** or **🖥 at once**, chosen per send (the last
+  choice kept on the device); Send now replaces what the speaker's screen shows, the operator's message included, and
+  every Stagewatch output, NDI and its viewer page show it. The server builds the line from the take it stored and
+  refuses one that differs; the room's line names its length, never its words.
 - **Messages that land.** Action prompts with tap-to-answer buttons; documents (PDF, Word, Excel, PowerPoint, CSV,
   Markdown, text, images) shared for download, opened in a person's own panel (👁 Look, 👁 Preview), shown to the Board or
   on screens, PDFs on iPads from iPadOS 16.4 (pdf.js's

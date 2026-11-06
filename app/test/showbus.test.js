@@ -243,6 +243,104 @@ test('stagelines: every line means the same after the show desk keeps 400 charac
   ] }), ['Lighting', 'Sound']);
 });
 
+test('stagelines.flatten: a push\'s line is its quote\'s words in one line with the marked labels, or a document\'s or a picture\'s note — never a file\'s name, an address or a place; one core with the hall page', () => {
+  const core = require('../public/linecore.js');
+  assert.equal(sl.flatten, core.flatten, 'the server builds the line with the core the hall page shows it with');
+  // A quote's words: a cell with its two labels, a row by its label, a column by its label, a range row by row.
+  const cell = { kind: 'snippet', unit: 'cell', table: { rows: [['', 'Q3'], ['Revenue', '£4.2m']], head: 1, side: 1, ref: '\'Results\'!D2', focus: [1, 1] }, from: { url: '/uploads/1730000000000-abcdefghijkl-q3.xlsx', at: { sheet: 1, ref: 'D2' } } };
+  assert.equal(sl.flatten(cell), 'Revenue Q3: £4.2m');
+  const row = { kind: 'snippet', unit: 'row', table: { rows: [['', 'Revenue', 'Costs'], ['Q3', '£4.2m', '£3.9m']], head: 1, side: 1, ref: 'row 4' } };
+  assert.equal(sl.flatten(row), 'Q3: Revenue £4.2m · Costs £3.9m', 'a table snippet flattens with its labels');
+  assert.equal(sl.flatten({ kind: 'snippet', unit: 'column', table: { rows: [['Q3'], ['4.2'], [''], ['3.9']], head: 1, side: 0, ref: 'column D' } }), 'Q3: 4.2 · 3.9', 'a column by its label, an empty value saying nothing');
+  assert.equal(sl.flatten({ kind: 'snippet', unit: 'range', table: { rows: [['', 'Q1', 'Q2'], ['Revenue', '1', '2'], ['Costs', '3', '4']], head: 1, side: 1 } }), 'Revenue: Q1 1 · Q2 2; Costs: Q1 3 · Q2 4');
+  assert.equal(sl.flatten({ kind: 'snippet', unit: 'cell', table: { rows: [['4.2']], head: 0, side: 0, ref: 'D2' } }), '4.2', 'a cell without labels is its value alone, never its reference');
+  assert.equal(sl.flatten({ kind: 'snippet', unit: 'range', table: { rows: [['a', 'b'], ['c', 'd']], head: 0, side: 0 }, cut: true, more: { rows: 40, cols: 0 } }), 'a · b; c · d', 'no cut is counted in the line');
+  // Text in one line; items and the blocks in view joined; a slide's title before its items; a quote's note is no part of it.
+  assert.equal(sl.flatten({ kind: 'snippet', unit: 'paragraph', text: 'Revenue rose\n\nin  Q3\t{TIME}', note: 'Look here', from: { local: true, name: 'Board pack.pdf', type: 'pdf', at: { page: 12 } } }), 'Revenue rose in Q3 (TIME)');
+  assert.equal(sl.flatten({ kind: 'snippet', unit: 'slide', title: 'Results', items: ['Revenue up', 'Costs flat'] }), 'Results: Revenue up · Costs flat');
+  assert.equal(sl.flatten({ kind: 'snippet', unit: 'view', blocks: [{ kind: 'h', text: 'Q3' }, { kind: 'p', text: 'Up 8%' }, { kind: 'table', table: { rows: [['A', '1']], head: 0, side: 0 } }] }), 'Q3 · Up 8% · A · 1');
+  assert.equal(sl.flatten({ kind: 'snippet', unit: 'text', text: 'Turnout was 64%', from: { host: 'vote.example.com', urlSealed: 'enc1:AAAA' } }), 'Turnout was 64%', 'a web quote\'s host and address are no part of it');
+  // A document or a picture: its note alone, never its name, address or place; without one, nothing to send.
+  const doc = { kind: 'doc', url: '/uploads/1730000000000-abcdefghijkl-board-pack.pdf', name: 'Board pack.pdf', at: { page: 12 }, download: false };
+  assert.equal(sl.flatten(doc), '', 'a document with no note has no line');
+  assert.equal(sl.flatten({ ...doc, note: 'See p. 12, the second table' }), 'See p. 12, the second table', 'a page only where it was typed');
+  assert.equal(sl.flatten({ kind: 'image', url: '/uploads/1730000000000-abcdefghijkl-p12.png', name: 'p12.png', from: { url: doc.url, at: { page: 12 } }, note: 'Revenue\u0007 chart' }), 'Revenue chart');
+  for (const c of [{ kind: 'web', url: 'https://vote.example.com/', host: 'vote.example.com' }, { kind: 'clock' }, { kind: 'chat', layer: 'info' }, null, 'snippet', { kind: 'snippet' }]) assert.equal(sl.flatten(c), '', JSON.stringify(c));
+  // The line the page showed is read as one line of the screen: its spaces and braces as they will show.
+  assert.equal(sl.oneLine('  Revenue {Q3}:\n £4.2m '), 'Revenue (Q3): £4.2m');
+  // The bounds the bar says are Stagewatch's: sent now, and through the desk the most a line keeps its urgency and ack.
+  assert.equal(core.SENT_MAX, sl.MESSAGE_MAX);
+  for (const u of ['info', 'warn', 'crit']) {
+    assert.equal(sl.lineFor('speaker', 'x'.repeat(core.DESK_MAX), u).error, undefined, u);
+    assert.match(sl.lineFor('speaker', 'x'.repeat(core.DESK_MAX + 1), u).error, /at most 377 characters/, u);
+  }
+  const asked = sl.lineFor('speaker', sl.flatten(cell));
+  assert.equal(asked.line, 'message "Revenue Q3: £4.2m" info off ack');
+  assert.deepEqual(sl.parse(asked.line), { verb: 'message', text: 'Revenue Q3: £4.2m', urgency: 'info', flash: 'off', ack: true });
+});
+
+// The line the hall page shows before a push goes is the line the server builds from the take it stores: each string read as
+// the server's cleaner keeps it (lib/pages.js through guard.cleanBlock and guard.cleanText), so a line the page showed is
+// never refused as "not the push's own words" because the cleaner dropped or cut something the page still drew.
+test('stagelines.flatten: the page\'s line of a push is the line of the take the server stores, over every character of the BMP and at the cleaner\'s cuts', () => {
+  const pages = require('../lib/pages');
+  const core = require('../public/linecore.js');
+  const source = () => ({ name: 'p12.png' });
+  const IMAGE = '/uploads/1730000000000-abcdefghijkl-p12.png';
+  const same = (c, why) => {
+    const stored = c.kind === 'snippet' ? pages.cleanSnippet(c, {}) : pages.cleanPage(c, { source });
+    assert.equal(stored.error, undefined, why + ' ' + JSON.stringify(c));
+    const shown = core.flatten(c);
+    assert.equal(shown, core.flatten(stored), why);
+    // What the page sends as the line it showed is read by the server as that line.
+    assert.equal(sl.oneLine(shown), shown, why);
+  };
+  // Each character of the BMP in a title, a list's items, a paragraph of the blocks in view, a table's labels and value, and a
+  // picture's note: kept, dropped or made a space alike on both sides.
+  let differ = 0;
+  for (let cp = 0; cp <= 0xffff; cp++) {
+    const ch = String.fromCharCode(cp);
+    const contents = [
+      { kind: 'snippet', unit: 'slide', title: 'T' + ch + ' t' + ch, items: ['a' + ch + 'b', ch, ch + 'c'] },
+      { kind: 'snippet', unit: 'view', blocks: [{ kind: 'p', text: ch + 'x' + ch + 'y' }, { kind: 'table', table: { rows: [[ch, 'Q' + ch], ['R' + ch, 'v' + ch + 'w']], head: 1, side: 1 } }] },
+      { kind: 'image', url: IMAGE, note: 'n' + ch + 'o' + ch },
+    ];
+    for (const c of contents) {
+      const stored = c.kind === 'snippet' ? pages.cleanSnippet(c, {}) : pages.cleanPage(c, { source });
+      if (stored.error || core.flatten(c) !== core.flatten(stored)) { differ++; same(c, 'U+' + cp.toString(16).padStart(4, '0')); }
+    }
+  }
+  assert.equal(differ, 0);
+  // The invisible characters a quote pasted from Word or a web page carries (Thai's and Khmer's word breaks, the marks
+  // around a number in Hebrew and Arabic, an isolate, a word joiner, a byte-order mark), and every way a line ends.
+  same({ kind: 'snippet', unit: 'paragraph', text: 'Revenue\u200b rose by \u200f4%\u200e \u2066Q3\u2069\u2060\ufeff' }, 'invisible characters');
+  same({ kind: 'snippet', unit: 'paragraph', text: 'One\r\ntwo\rthree\u2028four\u2029five\n\n\n\nsix\tseven\vend\f.' }, 'line ends, tabs and feeds');
+  // A title past the server's 120, cut where the server cuts it (a pair of a character cut in two included), and a note
+  // past its 200.
+  const long = 'Q'.repeat(130);
+  same({ kind: 'snippet', unit: 'slide', title: long, items: ['Revenue up'] }, 'a title of 130 characters');
+  assert.equal(core.flatten({ kind: 'snippet', unit: 'slide', title: long, items: ['Revenue up'] }), 'Q'.repeat(core.TITLE_MAX) + ': Revenue up');
+  same({ kind: 'snippet', unit: 'slide', title: 'Q'.repeat(119) + '😀 after', items: ['Up'] }, 'a title cut inside a pair');
+  same({ kind: 'snippet', unit: 'slide', title: '  ' + 'Q'.repeat(119) + ' tail', items: ['Up'] }, 'a title trimmed, then cut');
+  same({ kind: 'image', url: IMAGE, note: 'N'.repeat(210) }, 'a note of 210 characters');
+  same({ kind: 'doc', url: '/uploads/1730000000000-abcdefghijkl-board-pack.pdf', at: { page: 12 }, note: '\u200fSee\u00a0p.\u200b 12\u2029' }, 'a document\'s note');
+  assert.equal(core.TITLE_MAX, pages.SNIPPET.title, 'a title is cut where the server cuts it');
+});
+
+// The plan's lines (4-§5.9.10) are what the picks the bar makes carry: a cell with its two labels, and a range one column wide
+// with its label column; a column alone carries no row label, as the Board's card draws none.
+test('stagelines.flatten: a picked cell and a range one column wide read as the plan\'s lines with their marked labels', async () => {
+  const M = await import('../public/docmodel.mjs');
+  const sheet = [['', 'Q3'], ['Revenue', '£4.2m'], ['Costs', '£3.9m']];
+  const get = (r, c) => sheet[r][c];
+  const at = { rows: [0, 1, 2], cols: [0, 1], labels: { row: 0, col: 0 } };
+  const quote = (q) => ({ kind: 'snippet', ...q });
+  assert.equal(sl.flatten(quote(M.gridQuote(get, { unit: 'cell', r: 1, c: 1, ...at }))), 'Revenue Q3: £4.2m');
+  assert.equal(sl.flatten(quote(M.gridQuote(get, { unit: 'range', r: 1, c: 1, r1: 2, c1: 1, ...at }))), 'Q3: Revenue £4.2m · Costs £3.9m');
+  assert.equal(sl.flatten(quote(M.gridQuote(get, { unit: 'column', r: 1, c: 1, ...at }))), 'Q3: £4.2m · £3.9m');
+  assert.equal(sl.flatten(quote(M.gridQuote(get, { unit: 'cell', r: 1, c: 1, ...at, withLabels: false }))), '£4.2m', 'without its labels, the value alone');
+});
+
 test('stagelines: each line is cut on a code point within Stagewatch\'s UTF-16 limit, its braces are parentheses, a department is named as Stagewatch names it', () => {
   // Stagewatch's limits are UTF-16 units (C# strings): a message 500, a signal's body 200, a note 300, a target 32.
   const textOf = (dest, t, u) => sl.parse(sl.lineFor(dest, t, u).line).text;

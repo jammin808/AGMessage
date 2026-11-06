@@ -5627,6 +5627,113 @@ backstage composer)
   Look for), `docs/ACCOUNTS.md` (`stage.web` and a web quote's link), `docs/DESIGN.md`, `docs/ANALYSIS.md` (`parseInert`'s
   callers), `docs/DEVICES.md` (Open the source and Look for below the floor), `CLAUDE.md`.
 
+**A push can carry one line to the speaker's screen, through the operator or at once** (the plan's Part 4, unit 29, its
+§5.9.10 with §5.9.7's bar and step words; the owner's answer 16, "options for both", the path chosen per send; the
+confidential line's rule, §5.9.10's three steps and S6, is the confidential mark's unit, 31)
+- **＋ Also on the speaker's screen — every Stagewatch output, NDI and its viewer page show it**, in the Preview's bar
+  and the ❝ Quote tab, for a presenter who reads only Stagewatch's speaker screen: one line of plain text sent with the
+  push. It is drawn only where this seat can reach the hall's Stagewatch (`stage.send`, and a way open: the join's
+  `canSendToStage` or `canPropose`), **off on every push until ticked** (a push turns it off again), and **disabled until
+  there is something to send**, with why ("Pick words in the file, or type a line above it, to put one on the speaker's
+  screen.", "Paste or type what to show first."). Ticked, it offers **📝 Ask the operator** (`stage:propose`) and **🖥
+  Send now** (`stage:send`), each disabled with its reason where its way is closed ("The show desk is not connected",
+  "Sending at once needs Stagewatch's key", the link's own words while it is down; through the desk, a line over 377
+  characters too), **preset to the way this device chose last** (`localStorage`, in try/catch) and the first time to Ask
+  the operator where the desk can take it. Under 🖥 the words say what it does, which the researcher cannot otherwise see:
+  "Replaces what the speaker's screen shows now, the operator's message included, and cancels its waiting
+  acknowledgement." Before it goes the bar shows the line and counts it: "“Revenue Q3: £4.2m” — 17 characters: 500 sent
+  now, about 377 through the desk; it reads at a glance up to about 60." (an estimate from Stagewatch's layout, not
+  measured). The Preview's bar, which has several pushes, also says which one carries that line: "It goes with the picked
+  words, by their 📺 Show." where words are picked, else "It goes with a picture or the document." (the line above it).
+  **The line goes only with a push whose own line is the one ＋ showed**, and the page sends that line as it showed it: a
+  push of the bar whose words are another line (What I see's words, a picture or the document while words are picked, a
+  unit chosen from the pick's menu that the bar did not draw) goes without one, its toast saying "No line went to the
+  speaker's screen: this push's words are not the line ＋ showed — send that line with the push it names, or as a line of
+  its own." (or that a picture or the document carries only the line typed above it); and ＋ ticked with its way closed by
+  the time of the push (the link down) says why in the link's own words. After the push the one toast says the take,
+  then the line's step, "📝 waiting for the operator — their answer follows on its line in the chat" or "🖥 on the
+  speaker's screen — the speaker's acknowledgement follows on its line in the chat" (only where Stagewatch says it applied
+  it; "🖥 Stagewatch took the line" otherwise), or why no line went; the receipt, the operator's answer and the speaker's
+  acknowledgement follow on the room's line (`renderStageLine`, `renderProposalLine`), as every send's do.
+- **The line is the push's own words** (`stagelines.flatten`, one core with the hall page, `public/linecore.js`): a
+  quote's words in one line with its marked labels (a cell "Revenue Q3: £4.2m", a row or a column by its label "Q3:
+  Revenue £4.2m · Costs £3.9m", a range row by row joined by "; ", a slide's title before its items, the blocks in view
+  joined by " · "), or a document's or a picture's line above it; never a file's name, an address, a page or a cell's
+  reference unless typed, and no line for a web page or a show take. Line breaks and runs of spaces are one space, no
+  control or invisible character, braces as parentheses: the line the speaker's screen shows. **The page's line is the
+  server's**: each string is read first as the server's cleaner keeps it (a quote's words as `guard.cleanBlock`, a title
+  and a note as `guard.cleanText`, a title cut at 120 and a note at 200, where the cleaner cuts them), so a line drawn
+  from words carrying a character the cleaner drops (a zero-width space in Thai or Khmer, the marks Word puts around a
+  number in Hebrew and Arabic, an isolate, a word joiner, a byte-order mark) or from a long slide title is the line the
+  server builds, never one it refuses as not the push's own.
+- **The server builds it from the take it stored** (`withTake: <seq>` on `stage:send` and `stage:propose`): the take must
+  be of the information layer, this person's (`by.who`), in this hall, put up in the last minute (`AGM_PUSH_LINE_MS`, 60 s)
+  and not withdrawn; else "The line goes with a push of yours from the last minute — send it as a line of its own
+  instead.". A `text` sent with it is the line the page showed, read as one line of the screen, and **one that differs is
+  refused: "The line must be the push's own words."**; a take with nothing to send, "That push has no words for the
+  speaker's screen — a document or a picture needs a line above it."; a `withTake` that is no whole number, "That line's
+  push could not be read."; a destination other than the speaker's screen, "A line with a push goes to the speaker's
+  screen." A line of a person's own words goes without `withTake`, as before, from a message's 🖥 and 📝.
+- **The room's record carries no quote of it.** The room's line reads "Ana sent a line (17 characters) to the speaker's
+  screen with a push" or "Ana asked the operator for a line (17 characters) on the speaker's screen with a push — waiting
+  for the show desk" (a line of a person's own still quotes its first 120 characters), so observers and the transcript
+  read none of its words; the proposal on it keeps **`lineMac`** (`guard.mac` of the line under the machine's secret) in
+  place of `line`, and the follower compares the MAC of the line the desk holds with it, after a restart too, so it still
+  knows its own proposal and drops one whose line the desk no longer holds as asked ("lost"). One `stagewatch.send` or
+  `stagewatch.propose` row, counts only: "a line (17 characters) on the speaker's screen, sent now, with a push", "asked
+  the operator: a message (17 characters) for the speaker's screen, with a push — proposal p3". The words stay where what
+  was shown is kept: the take itself, and its Earlier entry. Until unit 30 records the line in the stage record (its
+  `line`), that is their only copy in AGMessage: a take withdrawn after its line went leaves none of words Stagewatch may
+  still show.
+- **The Preview's bar has one line above it for every choice**: the box moved out of the pick's bar to sit beside whom
+  it goes to and where it arrives, and a picture of a page, a region, a picture in the file, the document and What I see
+  each carry it now (a document's and a picture's note were `cleanPage`'s already; the bar sent none).
+- Choices where the plan left room: a range's rows are joined by "; " and a cell is its labels then its value (the row's
+  label before the column's), as the plan's two examples read (a picked cell, and a range one column wide with its label
+  column; a column picked alone carries no row label, as the Board's card draws none); the line shown before a push from
+  the Preview's bar is the pick's words where there is a pick, else the line above it, and a push of the bar that carries
+  another line sends none and says so (the page cannot draw What I see's words before they go, so What I see carries a
+  line only where it is a picture, with the line above it); the bar's
+  ＋ is not offered in the short document bar (⋯ ▸ The document…, the People tab), which has no line above it; a line
+  sent with its take is checked against the window from the take's own time, so a take put up and taken down within the
+  minute may still carry its line; Send now asks Stagewatch's "Got it", as a message's 🖥 does.
+- Rolling back: 0.5.1 reads a proposal without `line` as one it compares by number, address and time alone, and a room's
+  line as text; nothing else is kept.
+- Tests: `test/showbus.test.js` (`flatten`: a cell with its two labels, a row and a column by their label, a range row by
+  row, a cell without labels its value alone, no cut counted, text in one line with braces as parentheses, a slide's title
+  before its items, the blocks in view, a web quote's host and address left out, a document's and a picture's note alone,
+  no line for a document without one, a web page, a show take or no take; the server's `flatten` the page's core; the
+  bar's bounds Stagewatch's, 377 through the desk at every urgency; the page's line of every content the line of what
+  `cleanSnippet` and `cleanPage` store, over every character of the BMP in a title, items, a paragraph, a table's labels
+  and value and a picture's note, with invisible characters, every line end, a 130-character title, one cut inside a
+  surrogate pair and a 210-character note; a picked cell and a range one column wide from `docmodel.gridQuote` reading
+  "Revenue Q3: £4.2m" and "Q3: Revenue £4.2m · Costs £3.9m"), `test/server.test.js` (end to end, with the mock
+  Stagewatch: a `text` that differs refused and nothing asked of the desk; Ask the operator proposing `message "Revenue Q3:
+  £4.2m" info off ack`, the room's line naming 17 characters and no record of the room quoting it, the proposal holding
+  `lineMac` and no `line`, one `stagewatch.propose` row; Send now with no `text` sending the take's own words, its line and
+  its one row; another person's take, no take, a show take and an old take refused with the words, a web page's with no
+  words, a `withTake` of the wrong type and a `text` that is no line refused; a line read as the screen shows it accepted;
+  a paragraph with U+200B, U+200E, U+200F and an isolate, and a slide with a 130-character title, each sent with the
+  page's own line of it as `text`, accepted and sent to Stagewatch as the page showed it; after a restart a proposal
+  followed to its approval by its MAC, and one whose line the desk changed lost), `test/inputs.test.js` (`withTake` in
+  every shape; a line with a push whose number is no number refused before anything is looked up, from an open hall's
+  backstage guest and a locked hall's, and nothing audited), `test/modules.test.js` (`lib/stagelines.js` →
+  `public/linecore.js`, a page core a pure module may require), `test/pagefloor.test.js` (`linecore.js` defines only).
+  The browser smoke (a hall of its own): ＋ not drawn without a Stagewatch, off by default once linked; ticked, 📝 and
+  🖥 both offered, Ask the operator chosen the first time, 🖥's words and the line's count said; Ask the operator
+  proposing the desk's line with the room's line naming its length, ＋ off again after the push; Send now sending the
+  line at once and the choice kept on this device, preset to it after a reload; a document with no line above it disabling ＋ with its words, and with one sending that line
+  alone, never the file's name, ＋ saying it goes with a picture or the document; with words picked as well, ＋ showing
+  them and saying they go with their 📺 Show, the document and What I see each sending no line and saying why, the pick's
+  Show sending exactly the line drawn; ＋ ticked and the link down by the time of the push, the take going and its toast
+  saying why no line went in the link's words; a Stagewatch without a show desk disabling 📝 with "The show desk is not
+  connected." and 🖥 chosen; no ＋ for a Staff account without `stage.send`; no console error or CSP violation. Bench:
+  no measurement this round.
+- The papers: `README.md`, `README.txt`, `docs/NODES.md` (a line with a push on the speaker's screen and the show desk),
+  `docs/ACCOUNTS.md` (the rows' words), `docs/DISPLAYS.md`, `SECURITY.md` (the line built by the server; no quote in the
+  room's record), `docs/ANALYSIS.md` (the page core and the fences that hold it), `app/README.md` (`AGM_PUSH_LINE_MS`),
+  `CLAUDE.md`.
+
 **Fixed**
 - An upload whose stored path is no file (a folder in its place) is refused as one that could not be checked, on every
   platform. The archive's check opened it and, on Windows, read a folder as an empty file, so it was refused in the

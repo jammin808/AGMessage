@@ -5106,6 +5106,118 @@ const Takes = (function () {
   };
 })();
 
+// ---------------- ＋ the speaker's screen: one line with a push ----------------
+/**
+ * ＋ the speaker's screen (plan 4-§5.9.10): one line of plain text a push from a bar (the Preview's, the ❝ Quote tab's)
+ * carries to Stagewatch's speaker screen, for a presenter who reads only that screen. The line is the push's own words,
+ * built by one core with the server (linecore.js): a quote's words with its marked labels, or a document's or a picture's
+ * line above it, never a file's name, address or page unless typed; the server builds it again from the take it stored
+ * and refuses a line that differs. Shown where this hall's Stagewatch can be reached by this seat (stage.send, and a way
+ * open: the facts' canSendToStage or canPropose), off on every push until ticked, and disabled, with why, until there is
+ * something to send. Ticked, it offers 📝 Ask the operator and 🖥 Send now, each disabled with its reason where its way
+ * is closed, preset to the way chosen last on this device and the first time to Ask the operator where the desk can take
+ * it; under 🖥 the words say what a send now does to the operator's message, which the researcher cannot otherwise see.
+ * Before it goes, the bar shows the line, its count against Stagewatch's bounds, and the push it goes with; the line goes
+ * only with a push whose own line is the one shown, and a push asked with ＋ that carries none says why in its toast.
+ */
+const SpeakerLine = (() => {
+  const LAST = 'agm.speakerWay';
+  const NONE_WENT = 'No line went to the speaker\'s screen: ';
+  const read = () => { try { return localStorage.getItem(LAST) || ''; } catch { return ''; } };
+  const keep = (v) => { try { localStorage.setItem(LAST, v); } catch { /* this device keeps no choice: the first-time preset stands */ } };
+  /** Words said as a sentence: a full stop added where they end without one. */
+  const sentence = (s) => (/[.!?]$/.test(s) ? s : s + '.');
+  /** Why a way is closed, by the facts: Stagewatch's link down closes both; the desk, or a send now, each its own. */
+  const closed = (way) => (F.stageWhy ? F.stageWhy
+    : way === 'propose' ? (F.canPropose ? '' : 'The show desk is not connected')
+    : F.canSendToStage ? '' : 'Sending at once needs Stagewatch\'s key');
+  const count = (line) => Array.from(line).length;
+  /**
+   * The ＋ of one bar (`root`, its block in app.html): draw(content, none, goes) draws it for the take the bar would push
+   * now (`none`: why there is nothing to send yet; `goes`: which of the bar's pushes carries that line, where it has
+   * several); take() is what a push asks with it now: null where ＋ is off, {way, shown} (the way, and the line the bar
+   * showed), or {why} where no way it may go is open; reset() turns it off.
+   */
+  function control(root) {
+    const on = root.querySelector('[data-line-on]');
+    const why = root.querySelector('[data-line-why]');
+    const ways = root.querySelector('[data-line-ways]');
+    const now = root.querySelector('[data-line-now]');
+    const said = root.querySelector('[data-line-said]');
+    const radios = [...root.querySelectorAll('input[type="radio"]')];
+    let line = '';
+    let chosen = '';
+    let last = { content: null, none: '', goes: '' };
+    /** Why a way is closed for this line ('' where it is open): its way's own reason, and through the desk a line longer than it keeps. */
+    const shut = (w) => closed(w) || (w === 'propose' && line.length > AGMLine.DESK_MAX ? 'Through the show desk a line is at most ' + AGMLine.DESK_MAX + ' characters — use Send now, or a shorter quote' : '');
+    function draw(content = last.content, none = last.none, goes = last.goes) {
+      last = { content, none, goes };
+      root.hidden = !(F.canSendToStage || F.canPropose);
+      line = AGMLine.flatten(content);
+      on.disabled = !line;
+      if (!line) on.checked = false;
+      why.hidden = !!line;
+      why.textContent = line ? '' : none || 'Nothing to put on the speaker\'s screen yet.';
+      const ticked = on.checked && !on.disabled;
+      ways.hidden = !ticked;
+      said.hidden = !ticked;
+      if (!ticked) { chosen = ''; return; }
+      // The way: the one chosen in this bar, else the one chosen last on this device, else Ask the operator where the desk
+      // can take it; a way that is closed now is never the one chosen.
+      const open = (w) => !!w && !shut(w);
+      const stored = read();
+      chosen = open(chosen) ? chosen : open(stored) ? stored : open('propose') ? 'propose' : open('send') ? 'send' : '';
+      for (const r of radios) {
+        const w = r.value;
+        const shutWhy = shut(w);
+        r.disabled = !!shutWhy;
+        r.checked = w === chosen;
+        const small = root.querySelector('[data-line-closed="' + w + '"]');
+        small.textContent = shutWhy ? sentence(shutWhy) : '';
+        small.hidden = !shutWhy;
+      }
+      now.hidden = false;
+      const n = count(line);
+      const over = line.length > AGMLine.SENT_MAX ? ' Sent now, its first ' + AGMLine.SENT_MAX + ' characters show.' : '';
+      said.textContent = '“' + (line.length > AGMLine.SENT_MAX ? line.slice(0, AGMLine.SENT_MAX) + '…' : line) + '” — ' + n + (n === 1 ? ' character' : ' characters')
+        + ': ' + AGMLine.SENT_MAX + ' sent now, about ' + AGMLine.DESK_MAX + ' through the desk; it reads at a glance up to about ' + AGMLine.GLANCE + '.' + over + (goes ? ' ' + goes : '');
+    }
+    on.addEventListener('change', () => draw());
+    for (const r of radios) r.addEventListener('change', () => { if (r.checked) { chosen = r.value; keep(r.value); draw(); } });
+    /** What a push asks with ＋ now: nothing while it is off; the way chosen and the line shown; or why no way is open now. */
+    function take() {
+      if (!on.checked || on.disabled) return null;
+      if (chosen && !shut(chosen)) return { way: chosen, shown: line };
+      return { why: NONE_WENT + sentence((chosen && shut(chosen)) || shut('propose') || shut('send') || 'no way to Stagewatch is open') };
+    }
+    return { draw, take, reset: () => { on.checked = false; chosen = ''; draw(); } };
+  }
+  /**
+   * The line asked with a take (`content`, numbered `seq`; `asked`, its bar's take()), sent with its number the way chosen:
+   * the line the bar showed, and only where it is this take's own line (the server builds it again from the take it stored
+   * and refuses one that differs), so a push other than the one ＋ showed its line for sends none, and says so. Its step in
+   * words ("📝 waiting for the operator", "🖥 on the speaker's screen", with where the operator's answer and the speaker's
+   * acknowledgement follow: its line in the chat), or why no line went, as a promise of {ok, words}.
+   */
+  function send(seq, content, asked) {
+    if (asked.why) return Promise.resolve({ ok: false, words: asked.why });
+    const own = AGMLine.flatten(content);
+    if (!own) return Promise.resolve({ ok: false, words: NONE_WENT + 'this push has no words for it — a picture or the document carries only the line typed above it.' });
+    if (own !== asked.shown) return Promise.resolve({ ok: false, words: NONE_WENT + 'this push\'s words are not the line ＋ showed — send that line with the push it names, or as a line of its own.' });
+    const way = asked.way;
+    return new Promise((resolve) => {
+      const after = (r) => {
+        if (!r || !r.ok) { resolve({ ok: false, words: 'The line did not go to the speaker\'s screen: ' + sentence((r && r.error) || 'not sent') }); return; }
+        resolve({ ok: true, words: way === 'send' ? (r.stage === 'applied' ? '🖥 on the speaker\'s screen' : '🖥 Stagewatch took the line') + ' — the speaker\'s acknowledgement follows on its line in the chat'
+          : '📝 waiting for the operator — their answer follows on its line in the chat' });
+      };
+      if (way === 'send') AGM.outbox.now('stage:send', { withTake: seq, text: asked.shown }, after);
+      else AGM.outbox.now('stage:propose', { withTake: seq, text: asked.shown, destination: 'speaker' }, after);
+    });
+  }
+  return { control, send };
+})();
+
 // ---------------- What people's pages show: the console's People's pages, and the Board chip ----------------
 // For a page that may change what its hall's people's pages show (canPush), or show information on its Board's pages by a
 // right of its own (canShow): it reads where they stand (page:status) as it joins, as the console opens and whenever it
@@ -5202,7 +5314,7 @@ const Console = (function () {
    * back over that take alone, never older content put back (which could pop up again what the Board had closed); it is
    * kept beside the operator's (`aside`) where the operator's information is up, said so. A Take down offers nothing.
    */
-  function push(to, content, { ifSeq, undoable = true, name = '', arrive = '', refused = null, taken = null } = {}) {
+  function push(to, content, { ifSeq, undoable = true, name = '', arrive = '', refused = null, taken = null, line = null } = {}) {
     const onBoard = to === 'board';
     const info = INFO.includes(content.kind);
     const handBack = content.kind === 'chat' && content.layer === 'info';
@@ -5224,7 +5336,11 @@ const Console = (function () {
       const where = r.aside ? ' — in their side bar, beside what the operator is showing' : r.arrive === 'side' ? ' — in their side bar' : '';
       // Information offers Take down, and beside it Withdraw (a take shown by mistake: from Earlier too), for 10 s.
       const down = info && undoable ? { undoLabel: 'Take down', undo: () => push(to, { kind: 'chat', layer: 'info' }, { ifSeq: r.seq, undoable: false, name }), also: { label: 'Withdraw', act: () => withdraw(r.seq) } } : undefined;
-      AGM.toast(said(content) + whom + where + '.', undo ? { undo: () => push(to, was, { ifSeq: r.seq, undoable: false, name }) } : down);
+      const words = said(content) + whom + where + '.';
+      // A line asked with it (＋ the speaker's screen, `line`: its bar's take()) goes once the take is the server's, by its
+      // number, and the one toast says both: the take, then the line's step or why no line went.
+      if (line && info) SpeakerLine.send(r.seq, content, line).then((l) => AGM.toast(words + ' ' + l.words + (l.ok ? '.' : ''), { ...(down || {}), bad: !l.ok }));
+      else AGM.toast(words, undo ? { undo: () => push(to, was, { ifSeq: r.seq, undoable: false, name }) } : down);
       read();
     });
   }
@@ -5271,10 +5387,10 @@ const Console = (function () {
    * where it is asked to arrive there, or where the operator's information is up there and this page may only show (the
    * server refuses it over that).
    */
-  function showFile(to, content, { name = '', arrive = '', refused = null, taken = null } = {}) {
+  function showFile(to, content, { name = '', arrive = '', refused = null, taken = null, line = null } = {}) {
     const o = to === 'board' ? board() : rowOf(to.uid);
     const side = arrive === 'side' || (!F.canPush && !!o && ((!!o.info && o.info.op) || !!o.opOn));
-    push(to, content, { name, refused, taken, ...(side ? { arrive: 'side' } : {}) });
+    push(to, content, { name, refused, taken, line, ...(side ? { arrive: 'side' } : {}) });
   }
   /** The people a page may show something to by name, as the console's read lists them: [{key, name}]. */
   const people = () => (status && Array.isArray(status.people) ? status.people.map((p) => ({ key: p.uid, name: String(p.name || '') })) : []);
@@ -5522,12 +5638,13 @@ const Show = (() => {
    * again, without its metadata), shown to `to`: drawn here into a new picture and uploaded, saying what it is a picture
    * of; an image of the room shown whole by its address, one on this device uploaded first. Nothing else of the file goes.
    */
-  async function picture(src, page, to, { name = '', view = null, rect = null, bare = false, arrive = '', fresh = false } = {}) {
+  async function picture(src, page, to, { name = '', view = null, rect = null, bare = false, arrive = '', fresh = false, note = '', line = null } = {}) {
     const ext = extOf(src);
     const image = IMAGE.includes(ext);
+    const noted = note ? { note } : {};
     if (image && !rect && !bare) {
       const url = src.url || await upload(src.file, 'the picture');
-      if (url) Console.showFile(to, { kind: 'image', url }, { name, arrive });
+      if (url) Console.showFile(to, { kind: 'image', url, ...noted }, { name, arrive, line });
       return;
     }
     if (!image && ext !== 'pdf') { AGM.toast('A picture is made of a PDF\'s page or of an image: show this file as the document.', true); return; }
@@ -5552,15 +5669,15 @@ const Show = (() => {
     const at = image ? {} : { at: { page } };
     const from = src.url ? { url: src.url, ...at } : { local: true, name: src.name, ...at };
     // A picture kept from before whose file the stage let go is drawn and uploaded again, once.
-    const refused = kept && !fresh ? (r) => { if (!(r && GONE_FILE.test(r.error || ''))) return false; drawnPictures.delete(key); picture(src, page, to, { name, view, rect, bare, arrive, fresh: true }); return true; } : null;
-    Console.showFile(to, { kind: 'image', url, from }, { name, arrive, refused });
+    const refused = kept && !fresh ? (r) => { if (!(r && GONE_FILE.test(r.error || ''))) return false; drawnPictures.delete(key); picture(src, page, to, { name, view, rect, bare, arrive, fresh: true, note, line }); return true; } : null;
+    Console.showFile(to, { kind: 'image', url, from, ...noted }, { name, arrive, refused, line });
   }
   /**
    * A picture inside a document (a Word document's, a deck's: the Preview's pick, `view`), shown to `to` as a picture of
    * its own: drawn again here, its metadata left behind, and uploaded, saying where in the file it is (`at`). Nothing else
    * of the file goes.
    */
-  async function inside(src, to, { view, at = {}, name = '', arrive = '', fresh = false } = {}) {
+  async function inside(src, to, { view, at = {}, name = '', arrive = '', fresh = false, note = '', line = null } = {}) {
     const key = pictureKey(src, 'in:' + (at.block || at.slide || 0), null);
     const kept = drawnPictures.get(key);
     let url = !fresh && kept && Date.now() - kept.at < PICTURE_KEEP_MS ? kept.url : '';
@@ -5576,14 +5693,14 @@ const Show = (() => {
     }
     const where = Object.keys(at).length ? { at } : {};
     const from = src.url ? { url: src.url, ...where } : { local: true, name: src.name, ...where };
-    const refused = kept && !fresh ? (r) => { if (!(r && GONE_FILE.test(r.error || ''))) return false; drawnPictures.delete(key); inside(src, to, { view, at, name, arrive, fresh: true }); return true; } : null;
-    Console.showFile(to, { kind: 'image', url, from }, { name, arrive, refused });
+    const refused = kept && !fresh ? (r) => { if (!(r && GONE_FILE.test(r.error || ''))) return false; drawnPictures.delete(key); inside(src, to, { view, at, name, arrive, fresh: true, note, line }); return true; } : null;
+    Console.showFile(to, { kind: 'image', url, from, ...(note ? { note } : {}) }, { name, arrive, refused, line });
   }
   /** A quote (a pick's body, docview's quote()) of `src` shown to `to`, its source named as AGMessage holds it: never its address. */
-  function quote(src, q, to, { name = '', arrive = '', note = '' } = {}) {
+  function quote(src, q, to, { name = '', arrive = '', note = '', line = null } = {}) {
     const { at, approx, over, ...body } = q;
     const from = src.url ? { url: src.url, ...(at && Object.keys(at).length ? { at } : {}) } : { local: true, name: src.name, ...(at && Object.keys(at).length ? { at } : {}) };
-    Console.showFile(to, { kind: 'snippet', ...body, from, ...(note ? { note } : {}) }, { name, arrive });
+    Console.showFile(to, { kind: 'snippet', ...body, from, ...(note ? { note } : {}) }, { name, arrive, line });
   }
   /**
    * `src` shown whole to `to`, opened at `at`, with Download when ticked: one of this device's uploaded first. Where the
@@ -5592,14 +5709,14 @@ const Show = (() => {
    * for nothing. A stand-in picture kept from before whose file the stage let go is drawn and uploaded again, once. The
    * document is kept by its take's number, for Show them a picture.
    */
-  async function whole(src, at, download, to, { name = '', arrive = '' } = {}) {
+  async function whole(src, at, download, to, { name = '', arrive = '', note = '', line = null } = {}) {
     const url = src.url || await upload(src.file, 'the document');
     if (!url) return;
     const doc = { url, name: src.name || '', file: src.file || null };
     const send = async (fresh) => {
       const made = Console.olderOf(to).n > 0 && STANDIN_TYPES.includes(extOf(src)) ? await standinFor(doc, at, fresh) : null;
       const refused = made && made.kept && !fresh ? (r) => { if (!(r && GONE_FILE.test(r.error || ''))) return false; send(true); return true; } : null;
-      Console.showFile(to, { kind: 'doc', url, ...(at ? { at } : {}), download: download === true, ...(made ? { standin: made.standin } : {}) }, { name, arrive, refused, taken: (r) => keepDoc(r.seq, doc, at) });
+      Console.showFile(to, { kind: 'doc', url, ...(at ? { at } : {}), download: download === true, ...(note ? { note } : {}), ...(made ? { standin: made.standin } : {}) }, { name, arrive, refused, line, taken: (r) => keepDoc(r.seq, doc, at) });
     };
     await send(false);
   }
@@ -5898,12 +6015,12 @@ const PickBar = (() => {
   function send(u = unit, t = PreviewBar.target()) {
     const s = src();
     if (!s || !pick) { AGM.toast('Nothing is picked.', true); return; }
-    if (pick.type === 'region') { Show.picture(s, pick.page, t.to, { view, rect: pick.rect, name: t.name, arrive: PreviewBar.arrival(t) }); return; }
-    if (pick.type === 'picture') { Show.inside(s, t.to, { view, at: pick.at || {}, name: t.name, arrive: PreviewBar.arrival(t) }); return; }
+    if (pick.type === 'region') { Show.picture(s, pick.page, t.to, { view, rect: pick.rect, name: t.name, arrive: PreviewBar.arrival(t), ...PreviewBar.withPush() }); return; }
+    if (pick.type === 'picture') { Show.inside(s, t.to, { view, at: pick.at || {}, name: t.name, arrive: PreviewBar.arrival(t), ...PreviewBar.withPush() }); return; }
     const q = quoteNow(u);
     if (q.error) { AGM.toast(q.error, true); return; }
     keep(LAST_UNIT, u);
-    Show.quote(s, q, t.to, { name: t.name, arrive: PreviewBar.arrival(t), note: note.value.trim() });
+    Show.quote(s, q, t.to, { name: t.name, arrive: PreviewBar.arrival(t), ...PreviewBar.withPush() });
   }
   /**
    * What I see: the blocks or the cells in view as a quote, a PDF's or a picture's part in view as a picture. More than
@@ -5915,8 +6032,8 @@ const PickBar = (() => {
     const words = note.value.trim();
     const v = docView ? docView.seen({ note: words }) : null;
     if (!s || !v) { AGM.toast('Nothing in view to send.', true); return; }
-    if (v.picture) { Show.picture(s, v.picture.page, t.to, { view: docView, rect: v.picture.rect, name: t.name, arrive: PreviewBar.arrival(t) }); return; }
-    const go = (q) => Show.quote(s, q, t.to, { name: t.name, arrive: PreviewBar.arrival(t), note: words });
+    if (v.picture) { Show.picture(s, v.picture.page, t.to, { view: docView, rect: v.picture.rect, name: t.name, arrive: PreviewBar.arrival(t), ...PreviewBar.withPush() }); return; }
+    const go = (q) => Show.quote(s, q, t.to, { name: t.name, arrive: PreviewBar.arrival(t), ...PreviewBar.withPush() });
     const q = v.quote;
     if (q.error && v.fits) { AGM.toast(q.error + '.', { bad: true, undo: () => go(v.fits), undoLabel: 'Send what fits' }); return; }
     if (q.error) { AGM.toast(q.error + ' — scroll so less is in view, or pick a part.', true); return; }
@@ -5960,12 +6077,25 @@ const PickBar = (() => {
     box.remove();
     return tall;
   }
-  /**
-   * The bar drawn for the pick now. The quote, its preview and its glance are read again only when what they are of
-   * changes (the pick, its unit, the cut, the labels, the note): a scroll of the Preview redraws only the words that
-   * follow the place and the target.
-   */
+  /** The bar drawn for the pick now, then the Preview bar's ＋ the speaker's screen for what it would send. */
   function draw() {
+    drawBar();
+    PreviewBar.drawLine();
+  }
+  /**
+   * What a push of the pick now would show, as the speaker's line reads it: the quote of the unit chosen, or null where
+   * nothing is picked or the pick goes as a picture (its line is the line above it).
+   */
+  function lineContent() {
+    if (bar.hidden || !pick || pick.type === 'region' || pick.type === 'picture' || !cached || !cached.q || cached.q.error) return null;
+    return { kind: 'snippet', ...cached.q };
+  }
+  /**
+   * The pick's bar drawn. The quote, its preview and its glance are read again only when what they are of changes (the
+   * pick, its unit, the cut, the labels, the note): a scroll of the Preview redraws only the words that follow the place
+   * and the target.
+   */
+  function drawBar() {
     const on = !!pick && !!view && view === docView && may() && !$('previewBar').hidden;
     bar.hidden = !on;
     if (!on) { preview.textContent = ''; cached = null; return; }
@@ -6057,7 +6187,7 @@ const PickBar = (() => {
       const t = PreviewBar.target();
       if (!s) return;
       if (pick && (pick.type === 'region' || pick.type === 'picture')) { send(); return; }
-      Show.picture(s, docView ? Math.max(1, (docView.place() || {}).page || 1) : 1, t.to, { view: docView, name: t.name, arrive: PreviewBar.arrival(t) });
+      Show.picture(s, docView ? Math.max(1, (docView.place() || {}).page || 1) : 1, t.to, { view: docView, name: t.name, arrive: PreviewBar.arrival(t), ...PreviewBar.withPush() });
     },
     'pick.view': () => seen(),
     'pick.document': () => {
@@ -6065,12 +6195,12 @@ const PickBar = (() => {
       const t = PreviewBar.target();
       if (!s) return;
       const page = docView ? Math.max(1, (docView.place() || {}).page || 1) : 1;
-      Show.whole(s, Show.atOf(extOfName(s.url || s.name), page), false, t.to, { name: t.name, arrive: PreviewBar.arrival(t) });
+      Show.whole(s, Show.atOf(extOfName(s.url || s.name), page), false, t.to, { name: t.name, arrive: PreviewBar.arrival(t), ...PreviewBar.withPush() });
     },
     'pick.person': (o, { value }) => { const p = Console.people().find((x) => x.key === value); if (p) send(unit || 'selection', { to: { uid: p.key }, name: p.name }); },
   });
   for (const [u] of AGM.catalog.PICK_UNITS) RUN['pick.' + u] = () => { unit = u; send(u); };
-  return { watch, reset, draw, object, seen, fresh, long, shown: () => !bar.hidden, GLANCE };
+  return { watch, reset, draw, object, seen, fresh, long, lineContent, shown: () => !bar.hidden, GLANCE };
 })();
 
 /**
@@ -6098,6 +6228,10 @@ const PreviewBar = (() => {
   const arriveSel = $('pickArrive');
   const arriveWhy = $('pickArriveWhy');
   const freshEl = $('previewFresh');
+  // The line above what goes, for every choice here (a pick, a picture, the document, what is in view), and ＋ the
+  // speaker's screen, whose line is the pick's words, else that line.
+  const lineNote = $('pickNote');
+  const speaker = SpeakerLine.control($('pickLine'));
   /**
    * Body text drawn smaller than this on the Board's tablet is hard to read at a glance: the bar suggests What I see for a
    * whole page whose text would (provisional, until the device matrix's D2 is measured, docs/DEVICES.md §7; a tablet's take
@@ -6215,6 +6349,23 @@ const PreviewBar = (() => {
     }
     freshEl.hidden = !f;
   }
+  /**
+   * ＋ the speaker's screen drawn for what the bar would push now, and which of its pushes carries that line: the picked
+   * words, with the pick's own Show (and its unit from the pick's menu); else the line above it, with a picture (of the page,
+   * a region or what is in view) or the document. Any other push of the bar carries its own line, which ＋ never showed, so
+   * it goes without one and its toast says why.
+   */
+  function drawLine() {
+    const picked = PickBar.lineContent();
+    speaker.draw(picked || { kind: 'doc', note: lineNote.value.trim() }, 'Pick words in the file, or type a line above it, to put one on the speaker\'s screen.',
+      picked ? 'It goes with the picked words, by their 📺 Show.' : 'It goes with a picture or the document.');
+  }
+  /** What a push from the bar carries besides itself: the line above it, and what ＋ asks with it (SpeakerLine take()); ＋ is off again after it. */
+  function withPush() {
+    const out = { note: lineNote.value.trim(), line: speaker.take() };
+    speaker.reset();
+    return out;
+  }
   /** How tall a whole PDF page's body text would stand on a tablet's take, in px, where under READABLE_PX; else 0. */
   function smallText(n) {
     const ts = docView && typeof docView.textSize === 'function' ? docView.textSize(n) : null;
@@ -6233,7 +6384,7 @@ const PreviewBar = (() => {
     if (!s) return;
     keep(LAST, 'picture');
     const t = target();
-    Show.picture(s, pageNow(), t.to, { view: docView, name: t.name, arrive: arrival(t), bare: Show.IMAGE.includes(extOfName(s.url || s.name)) && noMeta.checked });
+    Show.picture(s, pageNow(), t.to, { view: docView, name: t.name, arrive: arrival(t), bare: Show.IMAGE.includes(extOfName(s.url || s.name)) && noMeta.checked, ...withPush() });
     draw();
   });
   docBtn.addEventListener('click', () => {
@@ -6241,7 +6392,7 @@ const PreviewBar = (() => {
     if (!s) return;
     keep(LAST, 'document');
     const t = target();
-    Show.whole(s, Show.atOf(extOfName(s.url || s.name), pageNow()), tick.checked && !tick.disabled, t.to, { name: t.name, arrive: arrival(t) });
+    Show.whole(s, Show.atOf(extOfName(s.url || s.name), pageNow()), tick.checked && !tick.disabled, t.to, { name: t.name, arrive: arrival(t), ...withPush() });
     tick.checked = false;
     draw();
   });
@@ -6253,11 +6404,12 @@ const PreviewBar = (() => {
     AGM.toast(on ? 'Drag over the page to draw the region to send; the arrow keys nudge it, Shift and the arrows resize it.' : 'Region off: a drag selects words again.');
   });
   noMeta.addEventListener('change', draw);
+  lineNote.addEventListener('input', () => { if (!bar.hidden) drawLine(); });
   toSel.addEventListener('change', draw);
   arriveSel.addEventListener('change', () => { chosen(arriveSel); draw(); });
   // Each read of the console draws the bar again: where the target stands, and whether this seat may show at all.
   Console.onDraw(() => { if (!bar.hidden || (src() && docShown)) draw(); });
-  return { draw, target, arrival, upThere, fillTargets, chosen };
+  return { draw, drawLine, withPush, target, arrival, upThere, fillTargets, chosen };
 })();
 
 // ---------------- ❝ Quote: words pasted or typed, shown on people's pages as a quote ----------------
@@ -6292,6 +6444,9 @@ const QuoteTab = (() => {
   const arriveWhy = $('quoteArriveWhy');
   const note = $('quoteNote');
   const showBtn = $('quoteShow');
+  // ＋ the speaker's screen: the quote's words in one line, with the push.
+  const speaker = SpeakerLine.control($('quoteLine'));
+  const NONE = 'Paste or type what to show first.';
   let pasted = null;   // the last paste as read ({words, quote}), while the box still holds its words
   let cut = false;     // the researcher chose the cut
   let model = null;    // docmodel.mjs, once imported
@@ -6366,6 +6521,8 @@ const QuoteTab = (() => {
     if (!on) { if (open()) selectTab('text'); return; }
     if (!open()) return;
     drawFrom();
+    // Until the quote is read below, the ＋ is drawn for the words in the box read as plain words.
+    speaker.draw(model ? { kind: 'snippet', ...(quoteNow() || {}) } : null, NONE);
     PreviewBar.fillTargets(toSel, arriveSel, arriveWhy);
     const t = PreviewBar.target(toSel);
     showBtn.textContent = '📺 Show ' + (t.to === 'board' ? 'the Board' : t.name);
@@ -6399,6 +6556,7 @@ const QuoteTab = (() => {
     if (content && glanced.long) { const w = document.createElement('span'); w.className = 'pick-glance-words'; w.textContent = 'Long for the stage — the Board will scroll.'; parts.push(w); }
     say(parts);
     showBtn.disabled = !q || !!over || !!told.error;
+    speaker.draw(content, over ? over.error : told.error || NONE);
     preview.textContent = '';
     if (content) preview.appendChild(m.quote(content, { by: pageFacts.name || '' }));
   }
@@ -6461,7 +6619,9 @@ const QuoteTab = (() => {
     const t = PreviewBar.target(toSel);
     const words = note.value.trim();
     const sent = box.value;
-    Console.showFile(t.to, { kind: 'snippet', ...q, ...(from ? { from } : {}), ...(words ? { note: words } : {}) }, { name: t.name, arrive: PreviewBar.arrival(t, arriveSel), taken: () => { if (box.value === sent) clear(); } });
+    const line = speaker.take();
+    speaker.reset();
+    Console.showFile(t.to, { kind: 'snippet', ...q, ...(from ? { from } : {}), ...(words ? { note: words } : {}) }, { name: t.name, arrive: PreviewBar.arrival(t, arriveSel), line, taken: () => { if (box.value === sent) clear(); } });
   }
   showBtn.addEventListener('click', show);
   tab.addEventListener('click', () => { draw(); box.focus(); });

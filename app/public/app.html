@@ -150,8 +150,8 @@
         <!-- ❝ Quote (backstage, for a seat that may show the Board): words pasted or typed, shown on the Board's pages as a
              quote. A paste is read for its structure alone (a table's rows and cells, a list's items, tab-separated cells),
              only where it agrees with the words the page showed; then where it is from (nothing: typed; a file of this room;
-             a web page), drawn as the Board will see it, whom it goes to, where it arrives, a line above it, and Show
-             (app.js QuoteTab). -->
+             a web page), drawn as the Board will see it, whom it goes to, where it arrives, a line above it, Show, and ＋ the
+             speaker's screen (app.js QuoteTab, SpeakerLine). -->
         <form class="pane hidden quote-pane" id="quotePane" data-pane="quote">
           <label class="field">
             <span>Paste or type what to show</span>
@@ -169,6 +169,19 @@
             <select id="quoteTo" aria-label="Whom it goes to"></select>
             <select id="quoteArrive" aria-label="Where it arrives"><option value="over">over their chat</option><option value="side">in their side bar</option></select>
             <small class="muted" id="quoteArriveWhy" hidden></small>
+          </div>
+          <!-- ＋ the speaker's screen: one line of the quote's words with the push, through the operator or at once (app.js SpeakerLine). -->
+          <div class="speaker-line" id="quoteLine" hidden>
+            <label class="preview-tick speaker-plus"><input type="checkbox" data-line-on /> ＋ Also on the speaker's screen — every Stagewatch output, NDI and its viewer page show it</label>
+            <small class="muted" data-line-why hidden></small>
+            <div class="speaker-ways" role="radiogroup" aria-label="How the line goes to the speaker's screen" data-line-ways hidden>
+              <label class="speaker-way"><input type="radio" name="quoteLineWay" value="propose" /> 📝 Ask the operator</label>
+              <small class="muted" data-line-closed="propose" hidden></small>
+              <label class="speaker-way"><input type="radio" name="quoteLineWay" value="send" /> 🖥 Send now</label>
+              <small class="muted" data-line-closed="send" hidden></small>
+              <small class="muted speaker-now" data-line-now hidden>Replaces what the speaker's screen shows now, the operator's message included, and cancels its waiting acknowledgement.</small>
+            </div>
+            <p class="speaker-said" data-line-said hidden></p>
           </div>
           <div class="row quote-row">
             <input type="text" id="quoteNote" maxlength="200" placeholder="A line above it (optional)" aria-label="A line above it (optional)" />
@@ -206,8 +219,9 @@
       <!-- The Preview's bar (backstage, for a seat that may show the Board): a picture of the page in view, or the document
            opened there, side by side; Let them download it under the document's button alone; what is in view; a region
            drawn by hand. Over it, a pick's bar: what was highlighted in the file, its units as chips (each with its size),
-           drawn as the Board will see it, then whom it goes to, where it arrives, a line above it, and Show (app.js
-           PickBar; the catalogue's kind `pick`, whose menu its ⋯ and a right-click on the pick open). -->
+           drawn as the Board will see it, and Show (app.js PickBar; the catalogue's kind `pick`, whose menu its ⋯ and a
+           right-click on the pick open). For every choice: whom it goes to, where it arrives, a line above it, and ＋ the
+           speaker's screen (app.js PreviewBar, SpeakerLine). -->
       <div class="preview-bar" id="previewBar" hidden>
         <section class="pick-bar" id="pickBar" aria-label="What you picked" hidden>
           <div class="pick-chips" id="pickChips" role="radiogroup" aria-label="Send it as"></div>
@@ -217,7 +231,6 @@
           <div class="row pick-row">
             <label class="preview-tick" id="pickLabelsBox" hidden><input type="checkbox" id="pickLabels" checked /> with labels</label>
             <button type="button" class="btn ghost small" id="pickMarkLabels" hidden>Labels…</button>
-            <input type="text" id="pickNote" maxlength="200" placeholder="A line above it (optional)" aria-label="A line above it (optional)" />
             <button type="button" class="btn primary" id="pickShow">📺 Show the Board</button>
             <button type="button" class="btn ghost obj-more pick-more" id="pickMore" aria-haspopup="menu" aria-label="More for this pick">⋯</button>
           </div>
@@ -226,7 +239,21 @@
           <select id="pickTo" aria-label="Whom it goes to"></select>
           <select id="pickArrive" aria-label="Where it arrives"><option value="over">over their chat</option><option value="side">in their side bar</option></select>
           <small class="muted" id="pickArriveWhy" hidden></small>
+          <input type="text" id="pickNote" maxlength="200" placeholder="A line above it (optional)" aria-label="A line above it (optional)" />
         </div>
+        <!-- ＋ the speaker's screen: one line with the push, the pick's words or the line above it, through the operator or at once (app.js SpeakerLine). -->
+        <div class="speaker-line" id="pickLine" hidden>
+            <label class="preview-tick speaker-plus"><input type="checkbox" data-line-on /> ＋ Also on the speaker's screen — every Stagewatch output, NDI and its viewer page show it</label>
+            <small class="muted" data-line-why hidden></small>
+            <div class="speaker-ways" role="radiogroup" aria-label="How the line goes to the speaker's screen" data-line-ways hidden>
+              <label class="speaker-way"><input type="radio" name="pickLineWay" value="propose" /> 📝 Ask the operator</label>
+              <small class="muted" data-line-closed="propose" hidden></small>
+              <label class="speaker-way"><input type="radio" name="pickLineWay" value="send" /> 🖥 Send now</label>
+              <small class="muted" data-line-closed="send" hidden></small>
+              <small class="muted speaker-now" data-line-now hidden>Replaces what the speaker's screen shows now, the operator's message included, and cancels its waiting acknowledgement.</small>
+            </div>
+            <p class="speaker-said" data-line-said hidden></p>
+          </div>
         <p class="pick-say" id="previewFresh" role="status" hidden></p>
         <p class="preview-note muted" id="previewNote"></p>
         <div class="row">
@@ -397,6 +424,7 @@
   <script src="/outbox.js" defer></script>
   <script src="/reconnect.js" defer></script>
   <script src="/catalog.js" defer></script>
+  <script src="/linecore.js" defer></script>
   <script src="/menus.js" defer></script>
   <script src="/app.js" defer></script>
 </body>

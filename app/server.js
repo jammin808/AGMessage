@@ -97,6 +97,8 @@ const envNumber = (name, dflt) => { const v = Number(process.env[name]); return 
 const UPLOAD_MIN_FREE = envNumber('AGM_UPLOAD_MIN_FREE', 1024 ** 3);
 // A file uploaded but not posted within this long is removed (the page posts it when its sender presses Send).
 const UPLOAD_ORPHAN_MS = envNumber('AGM_UPLOAD_ORPHAN_MS', 60 * 60_000);
+// A line for the speaker's screen goes with a push (`withTake`) only this long after its pusher put it up (plan 4-§5.9.10).
+const PUSH_LINE_MS = envNumber('AGM_PUSH_LINE_MS', 60_000);
 // The tunnel's places: at most this many sockets through it at once, half of them at most from one network. The cause is
 // Cloudflare's 200 in-flight requests per Quick Tunnel, past which it answers 429 and AGMessage never hears of it: on the
 // cautious reading that an open page holds one for as long as it lives (not measured: reading 0's tunnel row says), 150
@@ -2765,14 +2767,42 @@ io.on('connection', (socket) => {
     runAi(ack, (signal) => ai.suggestOptions(aiKey(), { prompt, ...draftFacts() }, signal));
   });
 
+  /**
+   * The line a push carries to the speaker's screen (plan 4-§5.9.10), where `withTake` names the push: a take of the
+   * information layer this person put up in this hall in the last minute (PUSH_LINE_MS), withdrawn ones never. The line is
+   * built here from the take as it was stored (stagelines.flatten: a quote's words, a document's or a picture's note),
+   * never taken from the page: a `text` sent with it is the line the page showed, and one that differs is refused, so no
+   * line reaches the speaker's screen that the take does not hold. {line} with one, {error} where it cannot go, null for
+   * a send of its own (no `withTake`).
+   */
+  const pushLine = (args, hall) => {
+    const seq = args.withTake;
+    if (seq === undefined || seq === null) return null;
+    if (!Number.isInteger(seq) || seq < 1) return { error: 'That line\'s push could not be read.' };
+    const found = pages.find(hall, seq);
+    const a = actor();
+    const take = found ? found.take : null;
+    if (!take || take.by.who !== a.t + ':' + a.id || !(Date.now() - take.at <= PUSH_LINE_MS)) return { error: 'The line goes with a push of yours from the last minute — send it as a line of its own instead.' };
+    const line = stagelines.flatten(take.content);
+    if (!line) return { error: 'That push has no words for the speaker\'s screen — a document or a picture needs a line above it.' };
+    // The line the page showed, read as one line of the speaker's screen (its spaces and braces as they will show).
+    const shown = args.text;
+    if (shown !== undefined && shown !== null && shown !== '' && (typeof shown !== 'string' || stagelines.oneLine(shown) !== line)) return { error: 'The line must be the push\'s own words.' };
+    return { line };
+  };
+
   // ----- Stagewatch: put an answer on the speaker's confidence monitor (research or admin)
   socket.on('stage:send', async (args = {}, ack) => {
     ack = ok(ack);
     if (!need(ack)) return;
     if (!allowed('stage.send')) return ack({ ok: false, error: 'The speaker\'s screen is for the backstage team.' });
     if (!writes.take()) return limited(ack);
-    let text = typeof args.text === 'string' ? args.text : '';
-    const source = typeof args.messageId === 'string' ? room.byId.get(args.messageId) : null;
+    // A line sent with a push is the push's own words, and the room's record carries none of them; any other line is
+    // the words sent, or a message's own.
+    const push = pushLine(args, room.hall);
+    if (push && push.error) return ack({ ok: false, error: push.error });
+    let text = push ? push.line : typeof args.text === 'string' ? args.text : '';
+    const source = !push && typeof args.messageId === 'string' ? room.byId.get(args.messageId) : null;
     if (!text && source) text = source.text || '';
     // The room and the person who sent are read before Stagewatch answers: this socket may join another room meanwhile,
     // and the send's line, its row and the acknowledgement it follows stay with the room it was sent from. Every room of
@@ -2784,7 +2814,8 @@ io.on('connection', (socket) => {
       // What reached the speaker's screen: the line's words as sendToStage built them (cut on a code point, braces as
       // parentheses). The row says how many characters, never the words.
       const said = stagelines.words(text, stagelines.MESSAGE_MAX);
-      audit.write(who, 'stagewatch.send', from.code, 'a line (' + plural(Array.from(said).length, 'character') + ') on the speaker\'s screen, sent now', socket.data.ip);
+      const count = plural(Array.from(said).length, 'character');
+      audit.write(who, 'stagewatch.send', from.code, 'a line (' + count + ') on the speaker\'s screen, sent now' + (push ? ', with a push' : ''), socket.data.ip);
       // A room closed while Stagewatch answered keeps nothing of the send: no line is written into a room that is no
       // longer kept (its files are gone), nor into another room made since under the same key.
       if (store.room(from.code) === from) {
@@ -2793,7 +2824,7 @@ io.on('connection', (socket) => {
         // keeps following it only where it went, and only while that Stagewatch has not restarted since.
         const stage = { ref: r.messageId || 0, receipt: r.stage, ack: r.messageId ? 'sent' : '', by: '', at: Date.now(), link: link.id, sw: link.tag, seq: link.lastSeq ?? 0 };
         // Followed on the records that took it: a line or a source the op table refused carries no receipt to follow.
-        const sys = apply(from, { o: 'add', m: { id: makeMessageId(), type: 'system', text: `${sender} sent to the speaker's screen: “${stagelines.cut(said, 120)}”`, at: Date.now(), stage } });
+        const sys = apply(from, { o: 'add', m: { id: makeMessageId(), type: 'system', text: push ? `${sender} sent a line (${count}) to the speaker's screen with a push` : `${sender} sent to the speaker's screen: “${stagelines.cut(said, 120)}”`, at: Date.now(), stage } });
         const onSource = !!source && !!apply(from, { o: 'upd', id: source.id, f: { stage } });
         const held = (sys ? [sys.m.id] : []).concat(onSource ? [source.id] : []);
         if (r.messageId && held.length) trackStageSend(link, r.messageId, from.code, held, { at: stage.at, seq: stage.seq });
@@ -2822,13 +2853,19 @@ io.on('connection', (socket) => {
     if (!need(ack)) return;
     if (!allowed('stage.send')) return ack({ ok: false, error: 'Proposing to the stage is for the backstage team.' });
     if (!writes.take()) return limited(ack);
-    let text = typeof args.text === 'string' ? args.text : '';
-    const source = typeof args.messageId === 'string' ? room.byId.get(args.messageId) : null;
+    // A line asked with a push is the push's own words, for the speaker's screen alone, and the room's record and the
+    // proposal's carry none of them (a MAC of the line follows it instead); any other line is the words sent, or a
+    // message's own.
+    const push = pushLine(args, room.hall);
+    if (push && push.error) return ack({ ok: false, error: push.error });
+    let text = push ? push.line : typeof args.text === 'string' ? args.text : '';
+    const source = !push && typeof args.messageId === 'string' ? room.byId.get(args.messageId) : null;
     if (!text && source) text = source.text || '';
     // Where in Stagewatch it goes (lib/stagelines.js): the speaker's screen, a role screen, a department this hall's
     // Stagewatch has named, or the operator alone — only a destination it offers, and only a line its parser takes.
     const link = linkFor(room.hall);
     const dest = typeof args.destination === 'string' && args.destination ? args.destination : 'speaker';
+    if (push && dest !== 'speaker') return ack({ ok: false, error: 'A line with a push goes to the speaker\'s screen.' });
     if (!stagelines.destinations(link.departments).some((d) => d.id === dest)) return ack({ ok: false, error: 'This hall\'s Stagewatch offers no such destination.' });
     const built = stagelines.lineFor(dest, text, args.urgency);
     if (built.error) return ack({ ok: false, error: built.error });
@@ -2847,14 +2884,17 @@ io.on('connection', (socket) => {
     if (!r.ok) return ack(r);
     // One row for each proposal the desk took: who asked, for where, and how long (in characters, an emoji one) — never
     // the words themselves.
-    audit.write(who, 'stagewatch.propose', from.code, 'asked the operator: a message (' + plural(Array.from(parsed.text).length, 'character') + ') for ' + built.words + ' — proposal ' + r.proposal.id, socket.data.ip);
-    // The desk's id is its own (it numbers from p1 again after a restart): the line and the Stagewatch's address tag
-    // travel with it, so a proposal of the same number that is not this one is never taken for it.
-    const proposal = { id: r.proposal.id, link: link.id, state: r.proposal.state, ok: null, words: '', to: built.words, at: Date.now(), sw: link.tag, line: built.line };
+    const count = plural(Array.from(parsed.text).length, 'character');
+    audit.write(who, 'stagewatch.propose', from.code, 'asked the operator: a message (' + count + ') for ' + built.words + (push ? ', with a push' : '') + ' — proposal ' + r.proposal.id, socket.data.ip);
+    // The desk's id is its own (it numbers from p1 again after a restart): the line (or, for a push's, its MAC) and the
+    // Stagewatch's address tag travel with it, so a proposal of the same number that is not this one is never taken for it.
+    const proposal = { id: r.proposal.id, link: link.id, state: r.proposal.state, ok: null, words: '', to: built.words, at: Date.now(), sw: link.tag, ...(push ? { lineMac: lineMacOf(built.line) } : { line: built.line }) };
     // A room closed while the desk answered keeps nothing of the proposal, as for a send above.
     if (store.room(from.code) === from) {
       // Followed on the records that took it, as for a send above.
-      const sys = apply(from, { o: 'add', m: { id: makeMessageId(), type: 'system', text: `${asker} asked Stagewatch's operator to put this on ${built.words}: “${stagelines.cut(parsed.text, 120)}” — waiting for the show desk`, at: Date.now(), proposal } });
+      const said = push ? `${asker} asked the operator for a line (${count}) on the speaker's screen with a push — waiting for the show desk`
+        : `${asker} asked Stagewatch's operator to put this on ${built.words}: “${stagelines.cut(parsed.text, 120)}” — waiting for the show desk`;
+      const sys = apply(from, { o: 'add', m: { id: makeMessageId(), type: 'system', text: said, at: Date.now(), proposal } });
       const onSource = !!source && !!apply(from, { o: 'upd', id: source.id, f: { proposal } });
       const held = (sys ? [sys.m.id] : []).concat(onSource ? [source.id] : []);
       if (held.length) trackProposal(link.id, proposal.id, from.code, held, proposal.state, proposal);
@@ -4562,14 +4602,17 @@ const FINAL = new Set(['rejected', 'done', 'failed', 'undelivered', 'lost']);
 // Keyed "<link>:<desk id>": each Stagewatch numbers its own proposals; `sw`, `line` and the link's generation (the
 // Stagewatch as it was then) say which one of that number is ours.
 const proposals = new Map();
-function trackProposal(linkId, id, code, ids, state, { sw = '', line = '' } = {}) {
+// A line a push asked for is kept by its MAC alone, on the message and in the follower: the desk's copy of it, read back,
+// is matched by the same MAC, so no record of the room holds the push's words.
+const lineMacOf = (line) => guard.mac(SECRET, 'stage-line:' + line);
+function trackProposal(linkId, id, code, ids, state, { sw = '', line = '', lineMac = '' } = {}) {
   if (FINAL.has(state)) return;
   const key = linkId + ':' + id;
   // The desk handed out a number it had handed out before (it restarted): the proposal followed under it is gone.
   const was = proposals.get(key);
   if (was && !ids.some((x) => was.ids.includes(x))) loseProposal(key, was, 'it restarted');
   const link = allLinks().find((l) => l.id === linkId);
-  proposals.set(key, { link: linkId, id, code, ids, state, sw, line, created: 0, gen: link ? link.generation : 0 });
+  proposals.set(key, { link: linkId, id, code, ids, state, sw, line, lineMac, created: 0, gen: link ? link.generation : 0 });
   if (proposals.size > 200) proposals.delete(proposals.keys().next().value);
 }
 // After a restart, keep following the ones still open, from every room of every hall (their state, and the link they
@@ -4585,7 +4628,8 @@ for (const room of store.allRooms()) {
 function notOurs(t, p, link) {
   if (t.sw && t.sw !== link.tag) return 'the hall moved to another Stagewatch';
   if (p.gone || (t.gen && t.gen !== link.generation)) return 'it restarted';
-  if ((p.from && p.from.id && p.from.id !== settings.nodeId) || (t.line && p.line && p.line !== t.line) || (t.created && p.created && p.created !== t.created)) return 'it restarted';
+  if ((p.from && p.from.id && p.from.id !== settings.nodeId) || (t.line && p.line && p.line !== t.line) || (t.lineMac && p.line && !guard.safeEqual(lineMacOf(p.line), t.lineMac))
+    || (t.created && p.created && p.created !== t.created)) return 'it restarted';
   return '';
 }
 function loseProposal(key, t, why) {

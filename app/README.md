@@ -15,7 +15,8 @@ npm run smoke        # the browser smoke (AGM_BROWSER=<path to Chrome, Edge or C
 
 `AGM_DATA_DIR` moves the data folder (the tests use a throwaway one; one server per folder, a second is refused) and
 `AGM_UPLOAD_DIR` the uploads; `AGM_UPLOAD_MIN_FREE` (bytes, default 1 GiB) is the free disk below which files pause;
-`AGM_UPLOAD_ORPHAN_MS` (default an hour) how long an upload nobody posted is kept; `AGM_TLS=0` turns HTTPS off;
+`AGM_UPLOAD_ORPHAN_MS` (default an hour) how long an upload nobody posted is kept; `AGM_PUSH_LINE_MS` (default a minute)
+how long after a push its line may go to the speaker's screen with it; `AGM_TLS=0` turns HTTPS off;
 `ANTHROPIC_API_KEY` turns AI drafts on without the admin page; `AGM_OPEN=1` (set by `start-agmessage.bat`) opens the
 browser on Windows once the first start serves, in the portable channel only (`AGM_RUNS` unset or `portable`), on
 `/admin` when the audit log asks the person at the laptop. `AGM_KEY_DIR` moves the key folder (the machine key, the

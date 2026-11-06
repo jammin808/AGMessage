@@ -23,7 +23,11 @@
  * last code-point boundary within it, so no line carries half an emoji; a lone surrogate becomes U+FFFD, so every line
  * can be put in a URL. Stagewatch reads `{…}` in a message as its own placeholder ({TIME}, {REMAINING}…, filled in on
  * every frame): the words a line carries have `(` and `)` for `{` and `}`, so the speaker reads what was typed.
+ *
+ * The line a push carries to the speaker's screen is built from the stored take by `flatten`, the core the hall page shows
+ * it with (public/linecore.js): a quote's words in one line with its marked labels, or a document's or a picture's note.
  */
+const { flatten, one: oneLine } = require('../public/linecore.js');
 
 const ROLES = ['moderator', 'backstage', 'interpreter'];
 const URGENCY = Object.freeze({ info: 'info', warn: 'warn', crit: 'crit', urgent: 'crit', warning: 'warn' });
@@ -185,4 +189,4 @@ function parse(line) {
   }
 }
 
-module.exports = { destinations, departmentsOf, lineFor, urgencyOf, tokenize, parse, clean, words, cut, department, ROLES, LINE_MAX, MESSAGE_MAX };
+module.exports = { destinations, departmentsOf, lineFor, urgencyOf, tokenize, parse, clean, words, cut, department, flatten, oneLine, ROLES, LINE_MAX, MESSAGE_MAX };

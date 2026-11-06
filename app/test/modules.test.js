@@ -22,18 +22,24 @@ const sourcesOf = (files) => new Map(files.map((f) => [f, read(f)]));
 const serverCode = () => ['server.js', 'supervise.js', ...filesUnder('lib', /\.[cm]?js$/), ...filesUnder('verify', /\.[cm]?js$/)];
 
 // ---------------------------------------------------------------- (a)-(c) the server's layers
-/** The pure core: functions of what they are given, their clocks default arguments. They require only each other. */
+/**
+ * The pure core: functions of what they are given, their clocks default arguments. They require only each other and the
+ * page cores (PAGE_CORES), which are held pure too.
+ */
 const PURE = ['lib/board.js', 'lib/busy.js', 'lib/context.js', 'lib/deskresults.js', 'lib/gate.js', 'lib/latest.js', 'lib/ops.js', 'lib/rbac.js', 'lib/stagelines.js', 'lib/tunnelend.js'];
 /** What reaches a disk, a network, the machine or another process: a pure module names none of them. */
 const IO_BUILTINS = ['fs', 'net', 'http', 'https', 'dgram', 'tls', 'os', 'dns', 'child_process', 'ws'];
 /**
- * The page scripts a server file requires, each with why: a core the server and a page's worker share, so the two cannot
+ * The page scripts a server file requires, each with why: a core the server and a page (or its worker) share, so the two cannot
  * answer differently. Each is pure: it requires nothing and reads no `process`.
  */
 const PAGE_CORES = Object.freeze({
   'lib/zipcheck.js → public/zipcore.js': 'the archive check: one core for the upload and the page\'s document worker',
   'lib/imagesize.js → public/imagecore.js': 'a picture\'s size from its header: one reader for the upload, the take, the page and its document worker',
+  'lib/stagelines.js → public/linecore.js': 'the speaker\'s line of a push: one core for the server that builds it from the take and the page that shows it before it goes',
 });
+/** The page cores a server file may require (PAGE_CORES' targets): each held pure below, so a pure module may require one. */
+const CORES = new Set(Object.keys(PAGE_CORES).map((row) => row.split(' → ')[1]));
 /** Only the composition root, server.js, requires these: the HTTP domain and the handler modules. */
 const ROOT_ONLY = (f) => f === 'lib/http-accounts.js' || /^lib\/handlers\/[^/]+\.js$/.test(f);
 
@@ -87,7 +93,7 @@ function layerProblems(sources, pure = PURE, opts = {}) {
     for (const { spec, to } of edges) {
       const bare = spec.replace(/^node:/, '');
       if (IO_BUILTINS.includes(bare)) problems.push(file + ' (pure) names the I/O built-in ' + spec);
-      else if (!to || !pureSet.has(to)) problems.push(file + ' (pure) requires ' + spec + (to ? ' (' + to + ')' : '') + ', outside the pure set');
+      else if (!to || !(pureSet.has(to) || CORES.has(to))) problems.push(file + ' (pure) requires ' + spec + (to ? ' (' + to + ')' : '') + ', outside the pure set');
     }
     if (/\bprocess\s*\./.test(src)) problems.push(file + ' (pure) reads process.');
     if (/\bimport\s*\(/.test(src)) problems.push(file + ' (pure) imports at run time');
