@@ -72,6 +72,13 @@
         <div id="pinnedList"></div>
       </section>
 
+      <!-- The simple view's pinned bar (app.js, PinBar): the room's pins first, then this person's own; its line goes to the
+           message and then shows the next pin; a pinned question is drawn whole under it, with its answers, and only here. -->
+      <section class="bv-pins" id="bvPins" hidden>
+        <div class="bv-pin-head" id="bvPinHead"></div>
+        <div class="bv-pin-q" id="bvPinQ"></div>
+      </section>
+
       <p class="moved-line" id="movedLine" hidden>
         <span>Delete, Ask the operator and Show on screens are now in ⋯ — or right-click, or Shift+F10.</span>
         <button class="btn ghost small" type="button" id="movedOk">Got it</button>
@@ -417,7 +424,7 @@
         <span class="role-tag"></span>
         <span class="priority-badge">🔥 HIGH</span>
         <span class="ask-word">Question</span>
-        <span class="pinned-mark" hidden><span aria-hidden="true">📌</span> Pinned</span>
+        <span class="pinned-mark" hidden><span aria-hidden="true">📌</span> <span class="pin-words"></span></span>
         <time></time>
         <span class="bv-said"></span>
         <span class="msg-acts"></span>

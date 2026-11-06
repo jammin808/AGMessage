@@ -855,7 +855,7 @@ test('a first open carries the newest 200 messages, what a page keeps in view fr
     assert.deepEqual(j.files, [{ id: picture, filename: 'stage.png', mime: 'image/png' }], 'every file of the room, its message held or not, and no link for an observer');
     assert.ok(!j.history.some((m) => m.id === quoted) && j.history.at(-1).id === reply && j.history.at(-1).replyTo.id === quoted && !j.history.at(-1).replyTo.gone, 'a reply whose quoted message is earlier than the window');
     assert.deepEqual(j.history.find((m) => m.id === toDoomed).replyTo, { id: doomed, name: 'Chair', snippet: 'Is the lectern mic on?', gone: true }, 'a reply whose quoted message has gone says so');
-    assert.deepEqual(Object.keys(j).slice(-5), ['more', 'older', 'files', 'theAdmin', 'clock'], 'appended at the end of the answer, before the clock or countdown\'s');
+    assert.deepEqual(Object.keys(j).slice(-6), ['more', 'older', 'files', 'theAdmin', 'clock', 'pins'], 'appended at the end of the answer, before the clock or countdown\'s and the person\'s pins');
     assert.equal(j.seq, now.at(-1).seq);
 
     // Read back from the window's oldest, a page at a time, until nothing is left: every message once, in order. A change
@@ -896,6 +896,46 @@ test('a first open carries the newest 200 messages, what a page keeps in view fr
     const words = 'That message is not in this room any more.';
     assert.deepEqual([await helpers.emit(reader, 'history:message', { messageId: doomed }), await helpers.emit(reader, 'history:message', { messageId: 'nope' })], [{ ok: false, error: words }, { ok: false, error: words }], 'one removed, and an id the room holds none by');
     assert.ok((await helpers.emit(ana, 'pin', { messageId: answered, pinned: false })).ok);
+  });
+
+  await t.test('a page\'s own pins older than the window are carried with its first open, every one, as the room\'s pins are (plan 7-§17.5)', async () => {
+    const pinner = await open();
+    const j = await helpers.emit(pinner, 'join', { roomCode: code, name: 'Pinner', role: 'observer' });
+    assert.ok(j.ok, JSON.stringify(j));
+    // More than a page's chatter bucket would read back one by one (20 at once): 45 of the day's first notes, pinned for
+    // itself under the rate (a busy answer asked again).
+    const room = await watch();
+    const old = room.slice(0, room.length - 250).filter((m) => m.type === 'text' && m.id !== agenda && /^note /.test(m.text)).slice(0, 45).map((m) => m.id);
+    assert.equal(old.length, 45);
+    for (const id of old) {
+      let r = await helpers.emit(pinner, 'pin:mine', { messageId: id, on: true });
+      while (r.busy) { await helpers.wait(300); r = await helpers.emit(pinner, 'pin:mine', { messageId: id, on: true }); }
+      assert.equal(r.ok, true, JSON.stringify(r));
+    }
+    // A reload: its pins, and every message they name in `older`, in the room's order beside what every page keeps in view.
+    const again = await open();
+    const k = await helpers.emit(again, 'join', { roomCode: code, name: 'Pinner', role: 'observer', uid: j.identity });
+    assert.ok(k.ok && !k.history.some((m) => old.includes(m.id)), 'none of them in the window');
+    assert.deepEqual(k.pins, old, 'its pins, in the order pinned');
+    assert.deepEqual(ids(k.older), ids(room.filter((m) => [agenda, asked, help].includes(m.id) || old.includes(m.id))), 'every one carried, in the room\'s order');
+    // Another page carries none of them.
+    const other = await open();
+    const o = await helpers.emit(other, 'join', { roomCode: code, name: 'Other', role: 'observer' });
+    assert.deepEqual([o.pins, ids(o.older)], [[], [agenda, asked, help]]);
+    // Read back to the start, each page gets the same messages: what it carried is read back again when asked for.
+    const readBack = async (s, from) => {
+      const got = [];
+      for (let before = from, more = true; more;) {
+        let r = await helpers.emit(s, 'history:before', { beforeSeq: before });
+        while (r.busy) { await helpers.wait(300); r = await helpers.emit(s, 'history:before', { beforeSeq: before }); }
+        assert.ok(r.ok && r.history.length > 0, JSON.stringify(r).slice(0, 200));
+        got.unshift(...r.history);
+        before = r.history[0].seq;
+        more = r.more;
+      }
+      return ids(got);
+    };
+    assert.deepEqual(await readBack(again, k.history[0].seq), await readBack(other, o.history[0].seq));
   });
 
   await t.test('history:before and history:message are read by type, behind the gate: joined, one chatter token per ask', async () => {

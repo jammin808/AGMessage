@@ -2589,7 +2589,10 @@ io.on('connection', (socket) => {
     // and the room's files. Each as a page is sent it (lib/ops.js forPage): a stage send's and a proposal's record without
     // the link it went to, which names the hall's key.
     const missed = Number.isInteger(since) ? store.opsSince(r, since) : null;
-    const opened = missed ? null : store.firstOpen(r);
+    // The messages this page's person pinned for themselves here (the support view's, the person's it shows), carried with
+    // a first open however old, as the room's pins are, so its pinned place is drawn whole at once.
+    const pinnedMine = ownPins(socket);
+    const opened = missed ? null : store.firstOpen(r, undefined, pinnedMine);
     // What a page given no file's link reads of a message: a file message without its address (lib/ops.js linkless).
     const seen = linklessPage() ? ops.linkless : (m) => m;
     // Every room of a hall follows its hall's Stagewatch: its countdown, and its sends and proposals by this seat's rights
@@ -2672,6 +2675,10 @@ io.on('connection', (socket) => {
       // support view, the person's it shows), told again live (`clock`). The page draws what wins over it with the
       // device's own choice (AGM.clockFor), which the server never reads.
       clock: chosenClock(isAdminView ? (socket.data.viewOf ? socket.data.viewOf.key : '') : personKey(id, !!acct)),
+      // The messages this person pinned for themselves in this room that it still holds (plan 7-§17.5: ids, in the order
+      // pinned; the support view, the person's it shows), told again live (`pins`). Never the room's pins, which each
+      // message carries.
+      pins: pinnedMine,
     });
 
     if (!isAdminView) {
@@ -2770,9 +2777,12 @@ io.on('connection', (socket) => {
     ok(ack)({ ok: true });
   });
 
+  // A pin for the room changes what everyone in it sees: never from On stage, the admin seated there included (plan
+  // 7-§17.5: a seat On stage pins for itself, pin:mine), then only from a seat that may post.
   socket.on('pin', ({ messageId, pinned } = {}, ack) => {
     if (!need(ack)) return;
     if (!writes.take()) return limited(ack);
+    if (onStage()) return ok(ack)({ ok: false, error: 'Pinning for everyone is for the backstage team.' });
     if (!mayPost(ack)) return;
     if (!room.byId.has(messageId)) return ok(ack)({ ok: false, error: 'Message not found' });
     if (!apply(room, { o: 'upd', id: messageId, f: { pinned: !!pinned } })) return ok(ack)(OP_REFUSED);
@@ -3621,6 +3631,8 @@ io.on('connection', (socket) => {
     const records = fileRecordsOf(r.messages, r.code);
     if (!apply(r, { o: 'reset' })) return ok(ack)(OP_REFUSED);
     systemMessage(r, '— Messages cleared by the admin —');
+    // Every person's pins for themselves in it go with its messages (plan 7-§17.5), and their pages there are told.
+    for (const key of pages.forgetPinsIn([r.code])) pinsChanged(key, r.code);
     // What its people's pages are shown of it ends too (lib/pages.js endTakes), the show left as it is: a Main room's reset
     // ends every information take of the hall and empties its Earlier; a side room's, those showing what it holds or sent.
     // The stage record goes too (lib/stagerecord.js): a Main room's reset clears its hall's, a side room's drops the entries
@@ -3684,6 +3696,8 @@ io.on('connection', (socket) => {
       const gone = said(removed);
       const pruned = removed.back.includes(r.code) ? [] : accounts.prune({ rooms: [r.code] });
       if (!removed.back.includes(r.code)) forgetRoomSends([r.code]);
+      // Every person's pins for themselves in it go with it, unless it comes back at the next start.
+      if (!removed.back.includes(r.code)) pages.forgetPinsIn([r.code]);
       // What the hall's people's pages are shown of it ends with it (a file of it, a picture of one, a push sent from it).
       if (!removed.back.includes(r.code)) endTakesWhere(r.hall, sourcedFrom(r.code));
       audit.write(by, 'room.remove', r.code, (r.name || '(no name)') + ' (' + hallWords(r.hall) + ')' + gone.row + updated(pruned.length), socket.data.ip);
@@ -3704,6 +3718,8 @@ io.on('connection', (socket) => {
     }
     if (!removed.back.includes(r.code)) for (const id of accounts.prune({ halls: [r.code] })) touched.add(id);
     forgetRoomSends(rooms.map((x) => x.code).filter((k) => !removed.back.includes(k)));
+    // Every person's pins for themselves in its rooms go with them, but in a room that comes back at the next start.
+    pages.forgetPinsIn(rooms.map((x) => x.code).filter((k) => !removed.back.includes(k)));
     if (hallStagewatch(r.code)) { delete settings.hallStagewatch[r.code]; saveSettings(); }
     for (const d of displays.ofHall(r.code)) revokeDisplaySockets(d.id, 'This screen\'s hall was closed.');
     displays.removeHall(r.code);
@@ -4462,6 +4478,8 @@ const SIGNED_OUT = 'Signed out — sign in again to carry on.';
 const NO_RIGHTS = ['view', 'clock'];
 function accountChanged(id, what) {
   const fields = String(what).split(',');
+  // A removed account's pins for itself go with it (plan 7-§17.5): nobody else's page ever reads them.
+  if (fields.includes('removed')) pages.forgetPinsOf(personKey(id, true));
   if (fields.every((f) => NO_RIGHTS.includes(f))) {
     if (fields.includes('view')) viewChanged(personKey(id, true));
     if (fields.includes('clock')) clockChanged(personKey(id, true));
@@ -4539,6 +4557,38 @@ function clockChanged(key) {
     else if (s.data.adminView && s.data.viewOf && s.data.viewOf.key === key) { s.emit('clock', clock); told++; }
   }
   for (const code of rooms) usersChanged(code);
+  return told;
+}
+
+/**
+ * The messages the person a page shows pinned for themselves in the room it sits in (plan 7-§17.5), those the room still
+ * holds, in the order pinned: the page's own person (an account's, on every device of it; a guest's by its uid), or, for
+ * the admin's support view, the person's it shows; [] for a page seated nowhere or a support view showing nobody.
+ */
+function ownPins(socket) {
+  const d = socket.data || {};
+  const r = typeof d.userRoom === 'string' && d.userRoom ? store.room(d.userRoom) : null;
+  if (!r) return [];
+  const key = d.adminView ? (d.viewOf ? d.viewOf.key : '') : personKey(d.uid, !!d.accountId);
+  return key ? pages.pinsOf(key, r.code).filter((id) => r.byId.has(id)) : [];
+}
+
+/**
+ * A person's pins for themselves in a room changed (`key`, as viewChanged's; `room`, the room's key; plan 7-§17.5): each of
+ * their pages seated in that room, and the admin's view of that person there, is told their pins now (`pins {ids}`), so an
+ * account's tablet and phone redraw together; no other page is told, and nothing else is: a pin for oneself is no room's
+ * op. The number of pages told.
+ */
+function pinsChanged(key, room) {
+  const ids = pages.pinsOf(key, room);
+  const account = key.startsWith('a:');
+  const id = key.slice(2);
+  let told = 0;
+  for (const [, s] of io.sockets.sockets) {
+    if (!s.data || s.data.userRoom !== room) continue;
+    const theirs = account ? s.data.accountId === id : !s.data.accountId && s.data.uid === id;
+    if ((theirs && !s.data.adminView) || (s.data.adminView && s.data.viewOf && s.data.viewOf.key === key)) { s.emit('pins', { ids }); told++; }
+  }
   return told;
 }
 
@@ -6058,6 +6108,9 @@ function firstWrites() {
   }
   if (settingsDue) saveSettings();
   pages.hold();
+  // Each person's pins in a room no longer here go (plan 7-§17.5): one removed whose files stayed on disk, or one that
+  // could not be read at this start, is still here, and keeps them for the start it loads.
+  pages.forgetPinsIn(pages.pinnedRooms().filter((key) => !store.hasRoom(key) && !store.roomsOnDisk.has(key)));
   // The boot sweep: the stage files past their wait at the stop before (nothing on people's pages named them), by the names
   // the stage recorded alone, removed unless something else holds them.
   const staleStage = pages.stageGone(Date.now());
@@ -6098,7 +6151,7 @@ function firstWrites() {
 // room's op or a room's broadcast.
 const { ctx, takesCtx } = contexts({
   store, apply, systemMessage, readSend, messageOf, uploadOnDisk, fileCopy, tickets, makeMessageId, removeUnused, fileNamesOf, audit, accounts, boardDirty, newSideRoom, renameRoom, roomNameRefused, newGuestCode, guestPagesOf, sendGuestsOut, codeChanged, invitesFor, settings, sendersOf, sendsInto, setRoomSends, linkFor, stagePayload,
-  pages, stageRecord, hallPages, takeSends, holdingOf, pagesChanged, pageHidden, selfHosts, tellWebRights, viewChanged, clockChanged, stageSource, stageCheck, freshUpload, stageDropped, io,
+  pages, stageRecord, hallPages, takeSends, holdingOf, pagesChanged, pageHidden, selfHosts, tellWebRights, viewChanged, clockChanged, pinsChanged, ownPins, stageSource, stageCheck, freshUpload, stageDropped, io,
   marked, fileMarked, inUseRooms, markShared, markFresh, markRefusal, markedTakes, screensShowing, madeUrls,
 });
 

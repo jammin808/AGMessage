@@ -139,6 +139,16 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   names a room, so neither is a way into another, and a page seated nowhere is refused before anything is read. Each
   ask takes a token of the connection's chatter bucket first, so reading a long day back is paced, and is answered with
   at most 200 messages. What they read is what a first open sent whole before 0.6.0.
+- A pin for the room (`pin`) changes what everyone in the room sees: it is made only from a seat that may post and is not
+  On stage (the admin seated there included), its refusal read before anything else of the request. A pin for oneself
+  (`pin:mine`) changes nothing anyone else reads: every seat that reads the room has it, kept under the person's own key
+  (their account, or their browser's uid) and told to their own pages and the admin's view of them alone, never as a
+  room's op. The admin's support view, which joins under the admin browser's uid, is refused it ("Pins are the person's
+  own."), so nothing is ever kept under the wrong person. At most 50 a room and 5,000 persons are kept, a bound of its
+  own beside the admin's chat-view and clock choices, so no guest's pins, under however many browser identities, push
+  those out; a room reset or removed, a room no longer there at a start and an account removed take theirs with them.
+  Neither kind is an audit row (a pin for oneself is a person's act on their own page), and a pin for oneself is in no
+  transcript, context, hello or AI brief.
 - A take on people's pages (`page:push`) is the admin's, an account's with `display.control` in the hall, or a code
   guest's seated backstage in the hall's Main room while its seats are locked (the seat came from an invite, or was one
   the admin kept by locking the room, who sees and may move each seat kept): never a page seated On stage, the admin's

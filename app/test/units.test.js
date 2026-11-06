@@ -387,6 +387,15 @@ test('store: a first open carries the newest WINDOW messages, the older ones a p
   assert.deepEqual([pinsOpen.more, ids(pinsOpen.older), page1.history.length, page1.history[0].id, page1.more], [true, ['p1', 'p2'], 200, 'q0', false], 'what is left before the page is what a first open carried');
   const page2 = a.before(pins, page1.history[0].seq);
   assert.deepEqual([ids(page2.history), page2.more], [['p1', 'p2'], false], 'and is still read back when asked for');
+  // A person's own pins (their ids, plan 7-§17.5) carried with their first open however old, as the room's pins are, in the
+  // room's order (an id the room holds no message by, or no id at all, carries nothing); read back, they count as carried.
+  const own = a.create('QRS234', 'Own');
+  for (let i = 0; i < 400; i++) a.commit(own, { o: 'add', m: { id: 'o' + i, type: 'text', text: 'x', at: 1 } });
+  const ownOpen = a.firstOpen(own, undefined, ['o7', 'o1', 'gone', 7, 'o390']);
+  assert.deepEqual([ownOpen.history.length, ids(ownOpen.older), ownOpen.more], [200, ['o1', 'o7'], true], 'its own pins before the window carried, those in it carried once');
+  assert.deepEqual(ids(a.firstOpen(own).older), [], 'nobody\'s pins: none carried');
+  const ownBack = a.before(own, ownOpen.history[0].seq, 198, ['o0', 'o1']);
+  assert.deepEqual([ids(ownBack.history)[0], ownBack.more, a.before(own, ownOpen.history[0].seq, 198).more, a.before(own, ownOpen.history[0].seq, 198, ['o1']).more], ['o2', false, true, true], 'what is left before the page is its own pins, which it holds');
   // A reply whose quoted message has gone from the room: a copy whose quote says so, in a first open, a read back and a
   // message read by its id; a quote of a message still there, and one withdrawn (which says so already), as they are.
   const q = a.create('JKL234', 'Quotes');
@@ -1418,8 +1427,11 @@ test('the gate: joined, its room still here, its bucket, the admin, its rights, 
   assert.equal(t.tokens(), 3, 'bucket: null takes no token');
   // Today's words, the ones server.js's own need, limited and admin said, and the rights' words.
   assert.deepStrictEqual({ ...gate.WORDS }, { joined: 'Not joined', gone: 'Room gone', slow: 'Slow down a little.', admin: 'Not admin' });
-  assert.deepStrictEqual(Object.keys(gate.RIGHTS), ['hall.post', 'hall.files']);
-  assert.ok(Object.isFrozen(gate.WORDS) && Object.isFrozen(gate.RIGHTS) && Object.isFrozen(gate.RIGHTS['hall.files']) && Object.isFrozen(gate.OPTIONS));
+  // hall.view: pin:mine reads it (a pin for oneself needs only to read the room, plan 7-§17.5).
+  assert.deepStrictEqual(Object.keys(gate.RIGHTS), ['hall.view', 'hall.post', 'hall.files']);
+  assert.ok(Object.isFrozen(gate.WORDS) && Object.isFrozen(gate.RIGHTS) && Object.isFrozen(gate.RIGHTS['hall.files']) && Object.isFrozen(gate.RIGHTS['hall.view']) && Object.isFrozen(gate.OPTIONS));
+  t = gateRig({ admin: true, rights: [] });
+  assert.deepStrictEqual(t.ask({ bucket: t.bucket, may: 'hall.view' }).answers, [{ ok: false, error: 'Your account may not read this room — ask an admin.' }], 'a room this socket may no longer read: its own words');
 });
 
 test('the gate: a request refused after its bucket has spent its token, so nothing a client names is looked up for free', () => {
@@ -1452,7 +1464,7 @@ test('the gate: options it does not take, a bucket not named and a right it has 
   throws({ bucket: 'writes' }, /one it can take a token from/);
   throws({ bucket: t.bucket, joined: 'yes' }, /joined and admin are true or false/);
   throws({ bucket: t.bucket, admin: 1 }, /true or false/);
-  throws({ bucket: t.bucket, may: 'hall.view' }, /no words for the right hall\.view: it reads hall\.post, hall\.files/);
+  throws({ bucket: t.bucket, may: 'stage.send' }, /no words for the right stage\.send: it reads hall\.view, hall\.post, hall\.files/);
   throws({ bucket: t.bucket, may: ['hall.post', 7] }, /no words for the right given as a number/);
   throws({ bucket: t.bucket, may: { 'hall.post': true } }, /a right, or a list of rights/);
   // A throw reaches no answer: the socket's guard (server.js guardHandlers) answers the request as refused.

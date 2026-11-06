@@ -43,6 +43,8 @@ const WORDS = Object.freeze({
  * its row, with its words.
  */
 const RIGHTS = Object.freeze({
+  // Every seat in a room reads it; only an account whose rights there have changed since it joined may not.
+  'hall.view': Object.freeze({ words: 'Your account may not read this room — ask an admin.' }),
   'hall.post': Object.freeze({ words: 'Observers can read but not post.' }),
   'hall.files': Object.freeze({ words: 'Your account may not share files here.', onStage: 'On stage seats send messages, not files.' }),
 });

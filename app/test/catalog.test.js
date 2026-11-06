@@ -59,9 +59,10 @@ const RESERVED_ICONS = { '↩': ['reply'], '↗': ['send', 'sendBack', 'sendTo']
  * composer's To ▸); ▷ and 🏁 answer a help request, on a message or on the
  * halls board; ⚙ sets a link up (a node's, or the default Stagewatch's).
  */
+// 📌 Pin for the room and Pin for me are one act, a pin, of two kinds (plan 7-§17.5), drawn as one fold.
 // 📺 Show the Board ▸ on a file (msg.stage, file.stage) and Show them ▸ on a person are one act: showing on people's pages.
 // 📄 Show them a document… on a person and The document at this place on a pick are one act: a document shown whole.
-const ONE_ACT = [['send', 'sendBack', 'sendTo'], ['delete', 'remove'], ['draft', 'minutes'], ['helpRespond', 'respond'], ['helpResolve', 'resolve'], ['setup', 'configure'], ['toggle', 'codeToggle'], ['new', 'newCode'], ['stage', 'show'], ['doc', 'document']];
+const ONE_ACT = [['pin', 'pinMine'], ['send', 'sendBack', 'sendTo'], ['delete', 'remove'], ['draft', 'minutes'], ['helpRespond', 'respond'], ['helpResolve', 'resolve'], ['setup', 'configure'], ['toggle', 'codeToggle'], ['new', 'newCode'], ['stage', 'show'], ['doc', 'document']];
 /** Acts that open a dialog of their own (Stagewatch's, the Screens console, a hall's set-up, the show network, the editor, the export, the short document bar) and so end their label with "…" as an ask does. */
 const OPENS_DIALOG = new Set(['msg.speaker', 'msg.screens', 'file.screens', 'chip.speaker', 'header.screens', 'board.screens', 'compose.attach', 'hall.setup', 'hall.network', 'room.setup', 'account.edit', 'audit.export', 'adminRoom.members', 'adminRoom.sendFrom', 'person.doc']);
 /** The keys a single key may be: a letter or a digit that needs no Shift (shown upper case), or one of these named keys. */
@@ -130,6 +131,8 @@ const SEATS = {
   boardSimpleTappedGot: seat({ role: 'board', uid: CHAIR, uploadToken: null, forwardable: false, view: 'simple', waiting: { plain: ['m8', 'm9'], priority: ['m10'] }, tapped: 'm2' }),
   boardSimpleChanging: seat({ role: 'board', uid: CHAIR, uploadToken: null, forwardable: false, view: 'simple', waiting: { plain: ['m8', 'm9'], priority: ['m10'] }, changing: 'm11' }),
   supportBoard: seat({ role: 'board', uid: 'a-root', uploadToken: null, forwardable: false, adminView: true, name: 'Kim' }),
+  // The simple view with a question pinned for this person (the join's `pins`), and one answered.
+  boardSimplePinned: seat({ role: 'board', uid: CHAIR, uploadToken: null, forwardable: false, view: 'simple', waiting: { plain: ['m8', 'm9'], priority: ['m10'] }, pins: ['m4', 'm11'] }),
 };
 const from = (uid, role, name) => ({ uid, role, name });
 const OBJECTS = {
@@ -504,7 +507,12 @@ test('one word for one act: "…" for an act that asks first or opens a dialog, 
 
 test('the facts: read from the server\'s answers, the link\'s words by its state, and nothing a page could name for itself', () => {
   const f = plain(C.facts({ role: 'director', uid: 'u1', uploadToken: '', canSendToStage: 1, stage: { status: 'connected' }, forwardable: 'yes', screens: { manage: true, displays: [{}, {}] }, connected: true }));
-  assert.deepEqual(f, { page: 'hall', role: 'board', view: 'full', uid: 'u1', post: true, viewer: false, pin: true, ask: false, respondHelp: false, waiting: { plain: [], priority: [] }, tapped: '', changing: '', files: false, canSendToStage: true, canPropose: false, stageWhy: '', ai: false, download: false, takeDownloads: true, canScreens: true, screensManage: true, screens: 2, forwardable: true, sends: false, targets: [], mayKnowCode: false, setsCode: false, admin: false, connected: true, support: '', canPush: false, stagewatch: true, fullscreen: false, canWeb: false, canShow: false, docs: true, theAdmin: false });
+  assert.deepEqual(f, { page: 'hall', role: 'board', view: 'full', uid: 'u1', post: true, viewer: false, pin: false, pinMine: true, ask: false, respondHelp: false, waiting: { plain: [], priority: [] }, tapped: '', changing: '', files: false, canSendToStage: true, canPropose: false, stageWhy: '', ai: false, download: false, takeDownloads: true, canScreens: true, screensManage: true, screens: 2, forwardable: true, sends: false, targets: [], mayKnowCode: false, setsCode: false, admin: false, connected: true, support: '', canPush: false, stagewatch: true, fullscreen: false, canWeb: false, canShow: false, docs: true, theAdmin: false, pins: [] });
+  // The room's pin from a seat that posts and is not On stage; a pin for oneself from every seat (plan 7-§17.5); the
+  // person's own pins as the join's `pins` lists them, ids only.
+  assert.deepEqual(['observer', 'board', 'research'].map((role) => { const x = C.facts({ role }); return [x.pin, x.pinMine]; }), [[false, true], [false, true], [true, true]]);
+  assert.deepEqual(plain(C.facts({ pins: ['m1', 5, '', 'm2', null] }).pins), ['m1', 'm2']);
+  assert.deepEqual([plain(C.facts({ pins: 'm1' }).pins), plain(C.facts({}).pins)], [[], []]);
   // Whether this page is "the admin" (the join's theAdmin), whose alone is the clock or countdown's lock: true alone says so.
   assert.deepEqual([C.facts({ theAdmin: true }).theAdmin, C.facts({ theAdmin: 'yes' }).theAdmin, C.facts({ theAdmin: 1 }).theAdmin, C.facts({}).theAdmin], [true, false, false, false]);
   // Whether this device opens documents (its own probe at load, plan 4-§5.15.2): only its probe's false says it cannot.
@@ -545,31 +553,31 @@ test('the facts: read from the server\'s answers, the link\'s words by its state
 test('the seat matrix: what each seat is shown on each message', () => {
   const M = {
     research: {
-      boardText: ['msg.reply', 'msg.react', 'msg.draft', 'msg.speaker', 'msg.sendNow', 'msg.send', 'msg.pin', 'msg.copy'],
-      anaText: ['msg.reply', 'msg.react', 'msg.speaker', 'msg.sendNow', 'msg.send', 'msg.pin', 'msg.copy', 'msg.delete'],
-      anaFile: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.look', 'msg.download', 'msg.confidential', 'msg.delete'],
-      anaQuestion: ['msg.reply', 'msg.react', 'msg.answer', 'msg.answerWords', 'msg.speaker', 'msg.sendNow', 'msg.send', 'msg.pin', 'msg.copy', 'msg.delete'],
-      chairHelp: ['msg.reply', 'msg.react', 'msg.helpRespond', 'msg.helpResolve', 'msg.pin', 'msg.copy'],
-      cyHelp: ['msg.reply', 'msg.react', 'msg.helpResolve', 'msg.pin', 'msg.copy'],
+      boardText: ['msg.reply', 'msg.react', 'msg.draft', 'msg.speaker', 'msg.sendNow', 'msg.send', 'msg.pin', 'msg.pinMine', 'msg.copy'],
+      anaText: ['msg.reply', 'msg.react', 'msg.speaker', 'msg.sendNow', 'msg.send', 'msg.pin', 'msg.pinMine', 'msg.copy', 'msg.delete'],
+      anaFile: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.pinMine', 'msg.look', 'msg.download', 'msg.confidential', 'msg.delete'],
+      anaQuestion: ['msg.reply', 'msg.react', 'msg.answer', 'msg.answerWords', 'msg.speaker', 'msg.sendNow', 'msg.send', 'msg.pin', 'msg.pinMine', 'msg.copy', 'msg.delete'],
+      chairHelp: ['msg.reply', 'msg.react', 'msg.helpRespond', 'msg.helpResolve', 'msg.pin', 'msg.pinMine', 'msg.copy'],
+      cyHelp: ['msg.reply', 'msg.react', 'msg.helpResolve', 'msg.pin', 'msg.pinMine', 'msg.copy'],
       system: [],
     },
     // Alone in this hall with AI off: no Send to; the draft is there, saying why it cannot be made (the laptop's state).
-    researchAlone: { boardText: ['msg.reply', 'msg.react', 'msg.draft', 'msg.speaker', 'msg.sendNow', 'msg.pin', 'msg.copy'] },
+    researchAlone: { boardText: ['msg.reply', 'msg.react', 'msg.draft', 'msg.speaker', 'msg.sendNow', 'msg.pin', 'msg.pinMine', 'msg.copy'] },
     // A Stagewatch that keeps no show desk: the line box is still there to edit the line before it goes, beside Send now.
-    researchNoDesk: { boardText: ['msg.reply', 'msg.react', 'msg.draft', 'msg.speaker', 'msg.sendNow', 'msg.send', 'msg.pin', 'msg.copy'] },
-    // On stage (the full view): it answers, reacts, pins and copies; it sends nothing elsewhere, shows nothing, downloads
-    // nothing, asks the speaker's screen nothing, and answers only its own help request.
+    researchNoDesk: { boardText: ['msg.reply', 'msg.react', 'msg.draft', 'msg.speaker', 'msg.sendNow', 'msg.send', 'msg.pin', 'msg.pinMine', 'msg.copy'] },
+    // On stage (the full view): it answers, reacts, pins for itself (never for the room) and copies; it sends nothing
+    // elsewhere, shows nothing, downloads nothing, asks the speaker's screen nothing, and answers only its own help request.
     board: {
-      boardText: ['msg.reply', 'msg.react', 'msg.pin', 'msg.copy', 'msg.delete'],
-      anaText: ['msg.reply', 'msg.react', 'msg.pin', 'msg.copy'],
-      anaFile: ['msg.reply', 'msg.react', 'msg.pin', 'msg.look'],
+      boardText: ['msg.reply', 'msg.react', 'msg.pinMine', 'msg.copy', 'msg.delete'],
+      anaText: ['msg.reply', 'msg.react', 'msg.pinMine', 'msg.copy'],
+      anaFile: ['msg.reply', 'msg.react', 'msg.pinMine', 'msg.look'],
       // On stage a file for download only is a card alone: no Look (AGMessage never opens it), no Download.
-      anaZip: ['msg.reply', 'msg.react', 'msg.pin'],
-      anaQuestion: ['msg.reply', 'msg.react', 'msg.answer', 'msg.answerWords', 'msg.pin', 'msg.copy'],
-      chairHelp: ['msg.reply', 'msg.react', 'msg.helpResolve', 'msg.pin', 'msg.copy', 'msg.delete'],
-      cyHelp: ['msg.reply', 'msg.react', 'msg.pin', 'msg.copy'],
-      anaNote: ['msg.reply', 'msg.react', 'msg.pin', 'msg.copy'],
-      anaAnswered: ['msg.reply', 'msg.react', 'msg.answer', 'msg.answerWords', 'msg.pin', 'msg.copy'],
+      anaZip: ['msg.reply', 'msg.react', 'msg.pinMine'],
+      anaQuestion: ['msg.reply', 'msg.react', 'msg.answer', 'msg.answerWords', 'msg.pinMine', 'msg.copy'],
+      chairHelp: ['msg.reply', 'msg.react', 'msg.helpResolve', 'msg.pinMine', 'msg.copy', 'msg.delete'],
+      cyHelp: ['msg.reply', 'msg.react', 'msg.pinMine', 'msg.copy'],
+      anaNote: ['msg.reply', 'msg.react', 'msg.pinMine', 'msg.copy'],
+      anaAnswered: ['msg.reply', 'msg.react', 'msg.answer', 'msg.answerWords', 'msg.pinMine', 'msg.copy'],
     },
     // On stage, the simple view: no menu, its acts are its buttons. The newest plain message waiting and each 🔥 one
     // waiting carry Got it and Reply; an older one waiting, one's own message and the help requests carry none; a
@@ -580,50 +588,54 @@ test('the seat matrix: what each seat is shown on each message', () => {
       // A question answered: its line and Change, the answers gone until Change brings them back.
       anaAnswered: ['msg.change'],
     },
-    // A tap brings a message's own row back: Got it where it waits (Got it, never Got all), Reply; on one answered, Reply.
-    boardSimpleTapped: { anaOld: ['msg.ack', 'msg.reply'], anaNote: ['msg.ack', 'msg.reply'], anaText: [] },
-    boardSimpleTappedGot: { anaText: ['msg.reply'], anaOld: [] },
+    // A tap brings a message's own row back: Got it where it waits (Got it, never Got all), Reply and 📌 Pin for me; on one
+    // answered, Reply and 📌.
+    boardSimpleTapped: { anaOld: ['msg.ack', 'msg.reply', 'msg.pinMine'], anaNote: ['msg.ack', 'msg.reply'], anaText: [] },
+    boardSimpleTappedGot: { anaText: ['msg.reply', 'msg.pinMine'], anaOld: [] },
+    // A question pinned for this person is drawn in the pinned bar, out of the feed: its answers, and 📌 Unpin for me, its
+    // one unpin door in this view; one pinned for the room alone has none (the simple view keeps the room's pin off).
+    boardSimplePinned: { anaQuestion: ['msg.answer', 'msg.answerWords', 'msg.pinMine'], anaAnswered: ['msg.change', 'msg.pinMine'], anaText: [] },
     boardSimpleChanging: { anaAnswered: ['msg.answer', 'msg.answerWords'], anaQuestion: ['msg.answer', 'msg.answerWords'] },
-    // An observer and a Viewer: Copy, and Send to only for text where they may post elsewhere; no pin, no Look, no
-    // Download (their pages hold no file's link).
-    observer: { boardText: ['msg.copy'], anaFile: [], anaFileLinkless: [], anaQuestion: ['msg.copy'], chairHelp: ['msg.copy'] },
-    observerElsewhere: { boardText: ['msg.send', 'msg.copy'], anaFile: [], anaFileLinkless: [], anaQuestion: ['msg.send', 'msg.copy'] },
-    viewer: { boardText: ['msg.copy'], anaFile: [], anaFileLinkless: [], anaQuestion: ['msg.copy'] },
+    // An observer and a Viewer: Copy, and Send to only for text where they may post elsewhere; a pin for themselves alone
+    // (never the room's: they post nothing), no Look, no Download (their pages hold no file's link).
+    observer: { boardText: ['msg.pinMine', 'msg.copy'], anaFile: ['msg.pinMine'], anaFileLinkless: ['msg.pinMine'], anaQuestion: ['msg.pinMine', 'msg.copy'], chairHelp: ['msg.pinMine', 'msg.copy'] },
+    observerElsewhere: { boardText: ['msg.send', 'msg.pinMine', 'msg.copy'], anaFile: ['msg.pinMine'], anaFileLinkless: ['msg.pinMine'], anaQuestion: ['msg.send', 'msg.pinMine', 'msg.copy'] },
+    viewer: { boardText: ['msg.pinMine', 'msg.copy'], anaFile: ['msg.pinMine'], anaFileLinkless: ['msg.pinMine'], anaQuestion: ['msg.pinMine', 'msg.copy'] },
     // A Viewer granted hall.post sits backstage, and still never downloads nor moves a file (mayDownload).
-    viewerPost: { anaFile: ['msg.reply', 'msg.react', 'msg.pin'], anaFileLinkless: ['msg.reply', 'msg.react', 'msg.pin'], anaText: ['msg.reply', 'msg.react', 'msg.pin', 'msg.copy'] },
+    viewerPost: { anaFile: ['msg.reply', 'msg.react', 'msg.pin', 'msg.pinMine'], anaFileLinkless: ['msg.reply', 'msg.react', 'msg.pin', 'msg.pinMine'], anaText: ['msg.reply', 'msg.react', 'msg.pin', 'msg.pinMine', 'msg.copy'] },
     // Staff: messages and files, no Stagewatch: neither 📝 nor 🖥. Tech: Stagewatch's speaker's screen (no show desk), and
     // the hall's screens.
     // (What this room sent into another, by someone else, is not Staff's to withdraw.)
-    staff: { boardText: ['msg.reply', 'msg.react', 'msg.draft', 'msg.send', 'msg.pin', 'msg.copy'], anaFile: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.look', 'msg.download', 'msg.confidential'], sentThere: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.look', 'msg.download', 'msg.confidential'],
+    staff: { boardText: ['msg.reply', 'msg.react', 'msg.draft', 'msg.send', 'msg.pin', 'msg.pinMine', 'msg.copy'], anaFile: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.pinMine', 'msg.look', 'msg.download', 'msg.confidential'], sentThere: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.pinMine', 'msg.look', 'msg.download', 'msg.confidential'],
       // A file for download only: downloaded and moved, never opened.
-      anaZip: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.download', 'msg.confidential'] },
+      anaZip: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.pinMine', 'msg.download', 'msg.confidential'] },
     // A seat that may show the Board (canShow): 📺 Show the Board ▸ on a file the stage shows, never on one for download
     // only; the operator (canPush) too.
-    staffShow: { anaFile: ['msg.reply', 'msg.react', 'msg.stage', 'msg.send', 'msg.pin', 'msg.look', 'msg.download', 'msg.confidential'], anaZip: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.download', 'msg.confidential'], anaText: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.copy'] },
-    techPush: { anaFile: ['msg.reply', 'msg.react', 'msg.stage', 'msg.screens', 'msg.pin', 'msg.look', 'msg.download', 'msg.confidential'] },
-    tech: { boardText: ['msg.reply', 'msg.react', 'msg.draft', 'msg.speaker', 'msg.sendNow', 'msg.screens', 'msg.pin', 'msg.copy'], anaFile: ['msg.reply', 'msg.react', 'msg.screens', 'msg.pin', 'msg.look', 'msg.download', 'msg.confidential'] },
+    staffShow: { anaFile: ['msg.reply', 'msg.react', 'msg.stage', 'msg.send', 'msg.pin', 'msg.pinMine', 'msg.look', 'msg.download', 'msg.confidential'], anaZip: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.pinMine', 'msg.download', 'msg.confidential'], anaText: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.pinMine', 'msg.copy'] },
+    techPush: { anaFile: ['msg.reply', 'msg.react', 'msg.stage', 'msg.screens', 'msg.pin', 'msg.pinMine', 'msg.look', 'msg.download', 'msg.confidential'] },
+    tech: { boardText: ['msg.reply', 'msg.react', 'msg.draft', 'msg.speaker', 'msg.sendNow', 'msg.screens', 'msg.pin', 'msg.pinMine', 'msg.copy'], anaFile: ['msg.reply', 'msg.react', 'msg.screens', 'msg.pin', 'msg.pinMine', 'msg.look', 'msg.download', 'msg.confidential'] },
     // A question is not a thing a screen shows: no ⧉ on it.
     // The admin withdraws any send this room made, and deletes only its own.
     admin: {
-      anaQuestion: ['msg.reply', 'msg.react', 'msg.answer', 'msg.answerWords', 'msg.speaker', 'msg.sendNow', 'msg.send', 'msg.pin', 'msg.copy'], anaText: ['msg.reply', 'msg.react', 'msg.speaker', 'msg.sendNow', 'msg.screens', 'msg.send', 'msg.pin', 'msg.copy'],
-      sentThere: ['msg.reply', 'msg.react', 'msg.screens', 'msg.send', 'msg.pin', 'msg.look', 'msg.download', 'msg.confidential', 'msg.withdraw'], sentWithdrawn: ['msg.reply', 'msg.react', 'msg.speaker', 'msg.sendNow', 'msg.screens', 'msg.send', 'msg.pin', 'msg.copy'],
+      anaQuestion: ['msg.reply', 'msg.react', 'msg.answer', 'msg.answerWords', 'msg.speaker', 'msg.sendNow', 'msg.send', 'msg.pin', 'msg.pinMine', 'msg.copy'], anaText: ['msg.reply', 'msg.react', 'msg.speaker', 'msg.sendNow', 'msg.screens', 'msg.send', 'msg.pin', 'msg.pinMine', 'msg.copy'],
+      sentThere: ['msg.reply', 'msg.react', 'msg.screens', 'msg.send', 'msg.pin', 'msg.pinMine', 'msg.look', 'msg.download', 'msg.confidential', 'msg.withdraw'], sentWithdrawn: ['msg.reply', 'msg.react', 'msg.speaker', 'msg.sendNow', 'msg.screens', 'msg.send', 'msg.pin', 'msg.pinMine', 'msg.copy'],
     },
-    support: { boardText: ['msg.reply', 'msg.react', 'msg.draft', 'msg.speaker', 'msg.sendNow', 'msg.send', 'msg.pin', 'msg.copy'] },
+    support: { boardText: ['msg.reply', 'msg.react', 'msg.draft', 'msg.speaker', 'msg.sendNow', 'msg.send', 'msg.pin', 'msg.pinMine', 'msg.copy'] },
     // A room that may send into others by its list: Send to ▸ on words and a file (never a question, which only a forward
     // carries, and this seat forwards nowhere); Send back on what a room it sends into sent here, and none once its list
     // no longer lets it; the copy of what it sent is a message like any other, and what it sent here from another room is
     // not its to delete here.
     researchSends: {
-      anaText: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.copy'],
-      anaQuestion: ['msg.reply', 'msg.react', 'msg.answer', 'msg.answerWords', 'msg.pin', 'msg.copy'],
-      fromHall: ['msg.reply', 'msg.react', 'msg.send', 'msg.sendBack', 'msg.pin', 'msg.copy'],
-      sentThere: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.look', 'msg.download', 'msg.confidential', 'msg.withdraw', 'msg.delete'],
-      fromLou: ['msg.reply', 'msg.react', 'msg.send', 'msg.sendBack', 'msg.pin', 'msg.copy'],
+      anaText: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.pinMine', 'msg.copy'],
+      anaQuestion: ['msg.reply', 'msg.react', 'msg.answer', 'msg.answerWords', 'msg.pin', 'msg.pinMine', 'msg.copy'],
+      fromHall: ['msg.reply', 'msg.react', 'msg.send', 'msg.sendBack', 'msg.pin', 'msg.pinMine', 'msg.copy'],
+      sentThere: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.pinMine', 'msg.look', 'msg.download', 'msg.confidential', 'msg.withdraw', 'msg.delete'],
+      fromLou: ['msg.reply', 'msg.react', 'msg.send', 'msg.sendBack', 'msg.pin', 'msg.pinMine', 'msg.copy'],
       // Withdrawn already: no Withdraw; still its copy here, to delete.
-      sentWithdrawn: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.copy', 'msg.delete'],
+      sentWithdrawn: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.pinMine', 'msg.copy', 'msg.delete'],
     },
 
-    researchSentNowhere: { fromHall: ['msg.reply', 'msg.react', 'msg.pin', 'msg.copy'] },
+    researchSentNowhere: { fromHall: ['msg.reply', 'msg.react', 'msg.pin', 'msg.pinMine', 'msg.copy'] },
   };
   // The full view's sets are its menus; the simple view has no menu, and its sets are what its buttons may be.
   for (const [s, objs] of Object.entries(M)) {
@@ -663,14 +675,16 @@ test('a Board account\'s page is the Board\'s: in either view, on every object o
 test('what a seat may do but not now is shown, disabled, with the words why; the support view acts on nothing', () => {
   const disabled = (s, o) => Object.fromEntries(plain(C.items('msg', SEATS[s], OBJECTS[o])).filter((i) => !i.sep).flatMap((i) => (i.children || [i])).map((i) => [i.id, i.disabled || i.held || '']));
   // The link down: the speaker's screen says why, and the rest acts.
-  assert.deepEqual(disabled('researchLinkDown', 'boardText'), { 'msg.reply': '', 'msg.react': '', 'msg.draft': '', 'msg.speaker': C.WORDS.linkDown, 'msg.sendNow': C.WORDS.linkDown, 'msg.send': '', 'msg.pin': '', 'msg.copy': '' });
+  assert.deepEqual(disabled('researchLinkDown', 'boardText'), { 'msg.reply': '', 'msg.react': '', 'msg.draft': '', 'msg.speaker': C.WORDS.linkDown, 'msg.sendNow': C.WORDS.linkDown, 'msg.send': '', 'msg.pin': '', 'msg.pinMine': '', 'msg.copy': '' });
   // AI drafts off: the message's ✨ and the composer's say why alike, and the rest acts.
-  assert.deepEqual(disabled('researchAlone', 'boardText'), { 'msg.reply': '', 'msg.react': '', 'msg.draft': C.WORDS.aiOff, 'msg.speaker': '', 'msg.sendNow': '', 'msg.pin': '', 'msg.copy': '' });
+  assert.deepEqual(disabled('researchAlone', 'boardText'), { 'msg.reply': '', 'msg.react': '', 'msg.draft': C.WORDS.aiOff, 'msg.speaker': '', 'msg.sendNow': '', 'msg.pin': '', 'msg.pinMine': '', 'msg.copy': '' });
   // Not connected: an act on something says so; a send held by the outbox and a local act go on (◷ for the held).
   assert.deepEqual(disabled('researchOffline', 'anaQuestion'), {
     'msg.reply': '', 'msg.react': C.WORDS.offline, 'msg.answer': C.WORDS.held, 'msg.answerWords': C.WORDS.held, 'msg.speaker': C.WORDS.offline, 'msg.sendNow': C.WORDS.offline,
-    'msg.send': C.WORDS.held, 'msg.pin': C.WORDS.offline, 'msg.copy': '', 'msg.delete': C.WORDS.offline,
+    'msg.send': C.WORDS.held, 'msg.pin': C.WORDS.offline, 'msg.pinMine': C.WORDS.held, 'msg.copy': '', 'msg.delete': C.WORDS.offline,
   });
+  // Offline, For the room (now) is disabled with its words; For me (hold) stays live and shows ◷ until the server answers.
+  assert.deepEqual([C.ready('msg', 'msg.pin', SEATS.researchOffline, OBJECTS.anaText), C.ready('msg', 'msg.pinMine', SEATS.researchOffline, OBJECTS.anaText)], [C.WORDS.offline, true]);
   assert.equal(C.ready('msg', 'msg.answer', SEATS.researchOffline, OBJECTS.anaQuestion), true, 'a held send is ready while down');
   // No screens yet: ⧉ says where to add one.
   assert.equal(C.ready('msg', 'msg.screens', SEATS.techNoScreens, OBJECTS.boardText), C.WORDS.noScreens);
@@ -722,7 +736,7 @@ test('the inline bar: at most two, the lowest ranks, Reply then the seat\'s main
 test('the menu: groups apart, a fold as one item of its entries, flat when one is shown; at most 12 items and 2 dangers', () => {
   const m = plain(C.items('msg', SEATS.research, OBJECTS.anaQuestion));
   const shape = m.map((i) => (i.sep ? '—' : i.children ? i.fold + '▸' + i.children.map((c) => c.id + ':' + c.label).join(',') : i.id));
-  assert.deepEqual(shape, ['msg.reply', 'msg.react', 'msg.answer', 'msg.answerWords', '—', 'speaker▸msg.speaker:Ask the operator…,msg.sendNow:Send now', 'msg.send', '—', 'msg.pin', 'msg.copy', '—', 'msg.delete']);
+  assert.deepEqual(shape, ['msg.reply', 'msg.react', 'msg.answer', 'msg.answerWords', '—', 'speaker▸msg.speaker:Ask the operator…,msg.sendNow:Send now', 'msg.send', '—', 'pin▸msg.pin:For the room,msg.pinMine:For me', 'msg.copy', '—', 'msg.delete']);
   const noDesk = plain(C.items('msg', SEATS.researchNoDesk, OBJECTS.boardText)).find((i) => i.fold);
   assert.deepEqual(noDesk.children.map((c) => [c.id, c.label]), [['msg.speaker', 'Edit, then send…'], ['msg.sendNow', 'Send now']], 'with no show desk the line box edits the line, then sends it');
   assert.equal(C.entry('msg', 'msg.speaker').label(SEATS.researchNoDesk, OBJECTS.boardText), 'Edit, then send to the speaker\'s screen…');
@@ -735,7 +749,35 @@ test('the menu: groups apart, a fold as one item of its entries, flat when one i
   assert.deepEqual(plain(C.submenu('msg', 'msg.react', SEATS.board, OBJECTS.anaText)).find((v) => v.value === '👍'), { value: '👍', label: '👍', role: 'menuitemcheckbox', checked: true }, 'my reaction is checked');
   assert.deepEqual(plain(C.submenu('msg', 'msg.answer', SEATS.research, OBJECTS.anaQuestion)).map((v) => v.label), ['Yes', 'No']);
   assert.equal(C.submenu('msg', 'msg.send', SEATS.research, OBJECTS.anaText), null, 'the rooms are the server\'s, asked as the submenu opens');
-  assert.equal(plain(C.items('msg', SEATS.research, Object.assign({}, OBJECTS.anaText, { pinned: true }))).find((i) => i.id === 'msg.pin').label, 'Unpin');
+  // 📌 Pin ▸ For the room · For me (plan 7-§17.5): the room's first, each a checkbox checked where it is pinned that way;
+  // 📌 Unpin ▸ pinned both ways; the fold's one key, P. A seat that pins for itself alone has it flat.
+  const pinFold = (f, o) => plain(C.items('msg', f, o)).find((i) => i.fold === 'pin');
+  const pinShape = (i) => [i.label, i.icon, i.key, i.children.map((c) => [c.id, c.label, c.role, c.checked])];
+  assert.deepEqual(pinShape(pinFold(SEATS.research, OBJECTS.anaText)), ['Pin', '📌', 'P', [['msg.pin', 'For the room', 'menuitemcheckbox', false], ['msg.pinMine', 'For me', 'menuitemcheckbox', false]]]);
+  assert.deepEqual(pinShape(pinFold(SEATS.research, Object.assign({}, OBJECTS.anaText, { pinned: true }))), ['Pin', '📌', 'P', [['msg.pin', 'For the room', 'menuitemcheckbox', true], ['msg.pinMine', 'For me', 'menuitemcheckbox', false]]]);
+  const mineToo = seat({ role: 'research', uid: ANA, uploadToken: 't', pins: ['m2'] });
+  assert.deepEqual(pinShape(pinFold(mineToo, Object.assign({}, OBJECTS.anaText, { pinned: true }))), ['Unpin', '📌', 'P', [['msg.pin', 'For the room', 'menuitemcheckbox', true], ['msg.pinMine', 'For me', 'menuitemcheckbox', true]]]);
+  assert.deepEqual(pinShape(pinFold(mineToo, OBJECTS.anaText)), ['Pin', '📌', 'P', [['msg.pin', 'For the room', 'menuitemcheckbox', false], ['msg.pinMine', 'For me', 'menuitemcheckbox', true]]]);
+  // Flat where it is the only one: an observer, a Viewer, every seat On stage (and the admin there); not a checkbox.
+  for (const s of ['observer', 'viewer', 'board', 'boardAccount', 'adminOnStage']) {
+    const m2 = plain(C.items('msg', SEATS[s], OBJECTS.anaText)).filter((i) => !i.sep);
+    assert.ok(!m2.some((i) => i.fold === 'pin' || i.id === 'msg.pin'), s + ': no room\'s pin');
+    const flatPin = m2.find((i) => i.id === 'msg.pinMine');
+    assert.deepEqual([flatPin.label, flatPin.icon, flatPin.key, flatPin.role], ['Pin for me', '📌', 'P', undefined], s);
+  }
+  const theirs = seat({ role: 'observer', uid: OBS, pins: ['m2'] });
+  assert.equal(plain(C.items('msg', theirs, OBJECTS.anaText)).find((i) => i.id === 'msg.pinMine').label, 'Unpin for me');
+  // Its verbs and modes: the room's is an act on what everyone sees (now), one's own is held (a replay sets the same state).
+  assert.deepEqual(['msg.pin', 'msg.pinMine', 'file.pin', 'file.pinMine'].map((id) => { const e = C.entry(id.split('.')[0], id); return [e.verb, e.mode, e.fold, e.group, e.undo]; }),
+    [['pin', 'now', 'pin', '3_keep', 'msg.pin'], ['pin:mine', 'hold', 'pin', '3_keep', 'msg.pinMine'], ['pin', 'now', 'pin', '3_keep', 'file.pin'], ['pin:mine', 'hold', 'pin', '3_keep', 'file.pinMine']]);
+  for (const kind of ['msg', 'file']) { const list = C.KINDS[kind].map((e) => e.id); assert.equal(list.indexOf(kind + '.pinMine'), list.indexOf(kind + '.pin') + 1, kind + ': the room\'s first, then one\'s own'); }
+  // In the pinned strip, a message's door unpins each kind it is pinned by, beside Reply: one button where both.
+  const strip = (f, o) => plain(C.inline('msg', f, Object.assign({}, o, { where: 'strip' }))).map((i) => [i.id || 'fold:' + i.fold, i.label]);
+  assert.deepEqual(strip(SEATS.research, Object.assign({}, OBJECTS.anaText, { pinned: true })), [['msg.reply', 'Reply'], ['msg.pin', 'Unpin for the room']]);
+  assert.deepEqual(strip(mineToo, Object.assign({}, OBJECTS.anaText, { pinned: true })), [['msg.reply', 'Reply'], ['fold:pin', 'Unpin']]);
+  assert.deepEqual(strip(SEATS.observer, Object.assign({}, OBJECTS.anaText, { pinned: true })), [], 'the room\'s, for an observer: no door');
+  assert.deepEqual(strip(theirs, OBJECTS.anaText), [['msg.pinMine', 'Unpin for me']]);
+  assert.deepEqual(strip(SEATS.board, Object.assign({}, OBJECTS.anaText, { pinned: true })), [['msg.reply', 'Reply']], 'the room\'s, On stage: no door');
   // The caps, on the richest seat of each kind.
   const rich = { msg: [SEATS.admin, OBJECTS.anaQuestion], file: [SEATS.admin, Object.assign({}, OBJECTS.anaFile, { where: 'preview', pinned: true })], screen: [SEATS.admin, SCREEN] };
   for (const [kind, [f, o]] of Object.entries(rich)) {
@@ -749,16 +791,20 @@ test('the simple view\'s second door: a tap brings a message\'s own row, Got it 
   const label = (f, o) => { const i = plain(C.inline('msg', f, o)).find((x) => x.id === 'msg.ack'); return i ? i.label : null; };
   assert.equal(label(SEATS.boardSimpleTapped, OBJECTS.anaOld), 'Got it', 'an older one tapped answers itself alone');
   assert.equal(label(SEATS.boardSimpleTapped, OBJECTS.anaNote), 'Got all 2', 'the newest still answers every plain one');
-  assert.deepEqual(plain(C.inline('msg', SEATS.boardSimpleTapped, OBJECTS.anaOld)).map((i) => [i.id, i.icon]), [['msg.ack', '👍'], ['msg.reply', '↩']], 'its row: Got it then Reply');
-  assert.deepEqual(plain(C.inline('msg', SEATS.boardSimpleTappedGot, OBJECTS.anaText)).map((i) => i.id), ['msg.reply'], 'one answered: Reply alone');
+  assert.deepEqual(plain(C.inline('msg', SEATS.boardSimpleTapped, OBJECTS.anaOld, 3)).map((i) => [i.id, i.icon, i.label]), [['msg.ack', '👍', 'Got it'], ['msg.reply', '↩', 'Reply'], ['msg.pinMine', '📌', 'Pin for me']], 'its row: Got it, Reply, then 📌 Pin for me');
+  assert.deepEqual(plain(C.inline('msg', SEATS.boardSimpleTappedGot, OBJECTS.anaText, 3)).map((i) => i.id), ['msg.reply', 'msg.pinMine'], 'one answered: Reply and 📌 alone');
   assert.deepEqual(plain(C.inline('msg', SEATS.boardSimple, OBJECTS.anaOld)), [], 'untapped, an older one has no buttons');
   // A message this person answered by a reply waits no more (the page leaves it out of `waiting`): tapped, Reply alone,
   // never Got it. One's own message tapped draws no button (its status words are its line); nor does a line of the room's.
   const tapped = (id) => seat({ role: 'board', uid: CHAIR, uploadToken: null, forwardable: false, view: 'simple', waiting: { plain: ['m9'], priority: [] }, tapped: id });
-  assert.deepEqual(plain(C.inline('msg', tapped('m8'), OBJECTS.anaOld)).map((i) => i.id), ['msg.reply'], 'answered by a reply, then tapped: Reply alone');
-  assert.deepEqual(plain(C.inline('msg', tapped('m1'), OBJECTS.boardText)).map((i) => i.id), [], 'one\'s own message tapped: no button');
-  assert.deepEqual(plain(C.inline('msg', tapped('m7'), OBJECTS.system)).map((i) => i.id), [], 'a line of the room\'s tapped: no button');
-  assert.deepEqual(plain(C.inline('msg', tapped('m4'), OBJECTS.anaQuestion)).map((i) => i.id), [], 'a question tapped: its answers are its row');
+  assert.deepEqual(plain(C.inline('msg', tapped('m8'), OBJECTS.anaOld, 3)).map((i) => i.id), ['msg.reply', 'msg.pinMine'], 'answered by a reply, then tapped: Reply and 📌 alone');
+  assert.deepEqual(plain(C.inline('msg', tapped('m1'), OBJECTS.boardText, 3)).map((i) => i.id), ['msg.pinMine'], 'one\'s own message tapped: 📌 alone, its status words its line');
+  assert.deepEqual(plain(C.inline('msg', tapped('m7'), OBJECTS.system, 3)).map((i) => i.id), [], 'a line of the room\'s tapped: no button');
+  assert.deepEqual(plain(C.inline('msg', tapped('m4'), OBJECTS.anaQuestion, 3)).map((i) => i.id), ['msg.pinMine'], 'a question tapped: its answers its row, and 📌');
+  // Untapped, a message pinned for the person carries no 📌 in the simple view (the bar is its door); a question pinned for
+  // them, drawn in the bar, carries 📌 Unpin for me; one pinned for the room alone none (the room's pin is off here).
+  assert.deepEqual(plain(C.inline('msg', SEATS.boardSimplePinned, OBJECTS.anaQuestion, 3)).map((i) => [i.id, i.label]), [['msg.pinMine', 'Unpin for me']]);
+  assert.deepEqual(plain(C.inline('msg', SEATS.boardSimple, Object.assign({}, OBJECTS.anaQuestion, { pinned: true }), 3)), []);
   // Change: the simple view's own act on a question answered (local), never the full view's, nor on a question not answered.
   const change = C.entry('msg', 'msg.change');
   assert.deepEqual([change.verb, change.mode, change.label], ['local', 'local', 'Change']);
@@ -898,15 +944,33 @@ test('a file and a screen: what each seat is shown, its bar, and its asks', () =
   const list = Object.assign({}, OBJECTS.anaFile, { where: 'list', pinned: true });
   const preview = Object.assign({}, OBJECTS.anaFile, { where: 'preview', pinned: true });
   assert.deepEqual(ids('file', SEATS.research, list), ['file.look', 'file.download', 'file.pin', 'file.confidential']);
-  assert.deepEqual(ids('file', SEATS.research, preview), ['file.download', 'file.pin', 'file.confidential', 'file.close']);
+  assert.deepEqual(ids('file', SEATS.research, preview), ['file.download', 'file.pin', 'file.pinMine', 'file.confidential', 'file.close']);
   assert.deepEqual(ids('file', SEATS.tech, list), ['file.screens', 'file.look', 'file.download', 'file.pin', 'file.confidential']);
   assert.equal(C.ready('file', 'file.screens', SEATS.tech, Object.assign({}, list, { confidential: true })), C.WORDS.secretScreens, 'a confidential file: ⧉ greyed with why');
-  assert.deepEqual(ids('file', SEATS.board, list), ['file.look', 'file.pin'], 'On stage: no Download');
-  assert.deepEqual(ids('file', SEATS.observer, list), [], 'an observer: nothing of a file');
+  assert.deepEqual(ids('file', SEATS.board, list), ['file.look'], 'On stage: no Download, and the room\'s pin is not its to take off');
+  assert.deepEqual(ids('file', SEATS.observer, list), [], 'an observer: nothing of a file pinned for the room');
   assert.deepEqual(ids('file', SEATS.viewerPost, list), ['file.pin'], 'a Viewer granted hall.post: no Look and no Download');
-  // Backstage a file opens in the Preview; On stage it is a Look.
-  assert.deepEqual(plain(C.inline('file', SEATS.research, list)).map((i) => [i.id, i.label]), [['file.look', 'Preview'], ['file.pin', 'Unpin']]);
-  assert.deepEqual(plain(C.inline('file', SEATS.board, list)).map((i) => [i.id, i.label]), [['file.look', 'Look'], ['file.pin', 'Unpin']]);
+  // Backstage a file opens in the Preview; On stage it is a Look. A pinned entry's door unpins the kind it shows.
+  assert.deepEqual(plain(C.inline('file', SEATS.research, list)).map((i) => [i.id, i.label]), [['file.look', 'Preview'], ['file.pin', 'Unpin for the room']]);
+  assert.deepEqual(plain(C.inline('file', SEATS.board, list)).map((i) => [i.id, i.label]), [['file.look', 'Look']]);
+  // Pinned for the person: their door unpins it for them, On stage and an observer included; pinned both ways, one door
+  // that opens 📌 Unpin ▸ For the room · For me, both checked.
+  const MINE = { board: seat({ role: 'board', uid: CHAIR, uploadToken: null, pins: ['m3'] }), observer: seat({ role: 'observer', uid: OBS, uploadToken: null, pins: ['m3'] }), research: seat({ role: 'research', uid: ANA, uploadToken: 't', pins: ['m3'] }) };
+  const pinsMine = (s) => MINE[s];
+  const mineList = Object.assign({}, list, { pinned: false });
+  assert.deepEqual(plain(C.inline('file', pinsMine('board'), mineList)).map((i) => [i.id, i.label]), [['file.look', 'Look'], ['file.pinMine', 'Unpin for me']]);
+  assert.deepEqual(ids('file', pinsMine('observer'), mineList), ['file.pinMine']);
+  const both = plain(C.inline('file', pinsMine('research'), list));
+  assert.deepEqual(both.map((i) => [i.id || 'fold:' + i.fold, i.label]), [['file.look', 'Preview'], ['fold:pin', 'Unpin']]);
+  assert.deepEqual(both[1].children.map((c) => [c.id, c.label, c.checked]), [['file.pin', 'For the room', true], ['file.pinMine', 'For me', true]]);
+  // The Preview's 📌: the fold as one menu button backstage, flat 📌 Pin for me where only that is shown.
+  const unpinned = Object.assign({}, preview, { pinned: false });
+  assert.deepEqual(plain(C.inline('file', SEATS.research, unpinned)).map((i) => [i.id || 'fold:' + i.fold, i.label, i.icon]), [['fold:pin', 'Pin', '📌'], ['file.close', 'Close', '']]);
+  assert.deepEqual(plain(C.inline('file', SEATS.board, unpinned)).map((i) => [i.id || 'fold:' + i.fold, i.label]), [['file.pinMine', 'Pin for me'], ['file.close', 'Close']]);
+  // The simple view's one pin door is a tapped message's row: the Look panel's file and a pinned entry offer none.
+  const simpleMine = seat({ role: 'board', uid: CHAIR, uploadToken: null, view: 'simple', pins: ['m3'] });
+  const bar = (s, o) => plain(C.inline('file', s, o)).map((i) => i.id || 'fold:' + i.fold);
+  assert.deepEqual([bar(SEATS.boardSimple, unpinned), bar(simpleMine, Object.assign({}, preview, { pinned: false })), bar(simpleMine, mineList)], [['file.close'], ['file.close'], ['file.look']]);
   // A seat that may show the Board: 📺 Show the Board ▸ a picture of p. 1, of a page, or the document (a PDF); the picture
   // (an image); the document (any other type); never on a file for download only, which opens nowhere and downloads alone.
   assert.deepEqual(ids('file', SEATS.staffShow, list), ['file.stage', 'file.look', 'file.download', 'file.pin', 'file.confidential']);
@@ -916,9 +980,9 @@ test('a file and a screen: what each seat is shown, its bar, and its asks', () =
   assert.deepEqual([png, xlsx].map((o) => plain(C.submenu('file', 'file.stage', SEATS.staffShow, o)).map((v) => v.label)), [['This picture', 'The document…'], ['The document…']]);
   const zip = Object.assign({}, OBJECTS.anaZip, { where: 'list', pinned: true });
   assert.deepEqual(ids('file', SEATS.staffShow, zip), ['file.download', 'file.pin', 'file.confidential'], 'a file for download only');
-  assert.deepEqual(ids('file', SEATS.board, zip), ['file.pin'], 'On stage: neither Look nor Download');
+  assert.deepEqual(ids('file', SEATS.board, Object.assign({}, zip, { where: 'preview' })), ['file.pinMine', 'file.close'], 'On stage: neither Look nor Download');
   assert.deepEqual(plain(C.submenu('msg', 'msg.stage', SEATS.staffShow, OBJECTS.anaFile)).map((v) => v.value), ['picture1', 'picture', 'doc']);
-  assert.deepEqual(plain(C.inline('file', SEATS.research, preview)).map((i) => [i.id, i.label]), [['file.pin', 'Unpin'], ['file.close', 'Close']]);
+  assert.deepEqual(plain(C.inline('file', SEATS.research, preview)).map((i) => [i.id || 'fold:' + i.fold, i.label]), [['fold:pin', 'Pin'], ['file.close', 'Close']]);
 
   const noPath = Object.assign({}, SCREEN, { path: undefined });
   assert.deepEqual(ids('screen', SEATS.admin, SCREEN), ['screen.identify', 'screen.only', 'screen.copy', 'screen.open', 'screen.rename', 'screen.rotate', 'screen.remove']);
@@ -945,7 +1009,10 @@ test('a single key on the focused object: R E F P D, Enter, Delete or Backspace,
   const key = (s, o, k, kind = 'msg') => { const e = C.byKey(kind, SEATS[s], o, k); return e ? e.id : null; };
   assert.deepEqual(['r', 'E', 'f', 'p', 'Delete', 'Backspace', 'x', 'Enter'].map((k) => key('research', OBJECTS.anaText, k)), ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.delete', 'msg.delete', null, null]);
   assert.deepEqual(['Enter', 'd'].map((k) => key('research', OBJECTS.anaFile, k)), ['msg.look', 'msg.download']);
-  assert.equal(key('observer', OBJECTS.anaText, 'p'), null, 'a key runs only what the seat is shown');
+  assert.equal(key('observer', OBJECTS.anaText, 'd'), null, 'a key runs only what the seat is shown');
+  // P: the pin fold's one key (its first entry, which opens 📌 Pin ▸ where both are shown); for me alone where that is all.
+  assert.deepEqual(['research', 'observer', 'viewer', 'board', 'adminOnStage'].map((s) => key(s, OBJECTS.anaText, 'p')), ['msg.pin', 'msg.pinMine', 'msg.pinMine', 'msg.pinMine', 'msg.pinMine']);
+  assert.equal(key('boardSimple', OBJECTS.anaText, 'p'), null, 'the simple view acts on Tab, Enter and Escape alone');
   assert.equal(key('board', OBJECTS.anaFile, 'd'), null, 'On stage downloads nothing, by key either');
   // On the composer: Escape takes back a reply begun, and is nothing while none is.
   assert.deepEqual([key('research', COMPOSE.replying, 'Escape', 'compose'), key('board', COMPOSE.directorReplying, 'Escape', 'compose'), key('research', COMPOSE.text, 'Escape', 'compose')],

@@ -36,7 +36,9 @@
  *
  * Stored in `pages.json` (one write lane, written only once this copy holds its data folder: `hold()`): the takes by
  * hall and layer, the persons' answers, each hall's Earlier list, stage files and withdrawn takes, and what the admin
- * chose for each guest (`views`: their chat view and their clock or countdown, lib/views.js); each bounded, the oldest going first; and, once there are any, the confidential marks (`marks`, one record a
+ * chose for each guest (`views`: their chat view and their clock or countdown, lib/views.js); each bounded, the oldest going first; once
+ * there are any, each person's pins for themselves (`pins`: by their key and the room, the ids of the messages they pinned
+ * for themselves alone, never the room's pin, which is the message's own); and, once there are any, the confidential marks (`marks`, one record a
  * file by its upload's name, gone with the file) and the holds on Stagewatch frames that carry a confidential line
  * (`holds`, one a link, by MAC and id, never text: stepHold). A record of
  * the wrong shape is dropped when it is read. The reports are the run's alone: never saved, and a page that goes takes
@@ -223,11 +225,14 @@ const VIEWS = Object.freeze(['', 'simple', 'full']);
  * its one meaning there; test/modules.test.js holds each to that table, name and mark.
  */
 const MARKS = Object.freeze({ ok: '✓', partly: '◐', unseen: '◇', minimised: '▭', off: '○', waiting: '◷', couldNot: '△', fault: '✕' });
-const BOUNDS = Object.freeze({ views: 5000, personTakes: 200, answers: 500, earlier: 20, stageFiles: 200, withdrawn: 200 });
+const BOUNDS = Object.freeze({ views: 5000, pins: 5000, pinsPerRoom: 50, personTakes: 200, answers: 500, earlier: 20, stageFiles: 200, withdrawn: 200 });
 
 const HALL = /^[A-Z0-9]{4,12}$/;
 const PERSON = /^[au]:[A-Za-z0-9_-]{1,64}$/;
 const GUEST = /^[A-Za-z0-9_-]{1,64}$/;
+/** A message's id as a room keeps it (a pin names one), and a room's key (a hall's Main room or a side room). */
+const MESSAGE_ID = /^[A-Za-z0-9_-]{1,64}$/;
+const ROOM_KEY = /^[A-Z0-9]{4,12}$/;
 const own = (o, k) => (Object.hasOwn(o, k) ? o[k] : undefined);
 const isRecord = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 const whole = (n, min = 1) => Number.isInteger(n) && n >= min;
@@ -1254,6 +1259,19 @@ const PROPOSAL = /^[A-Za-z0-9_.:-]{1,40}$/;
  */
 const HOLD_MAX = Object.freeze({ waits: 20, rooms: 21 });
 /**
+ * A person's pins read back, {<room key>: [id…]}: each room by its key with its ids, unique, in their order, the newest
+ * BOUNDS.pinsPerRoom kept; a room of the wrong shape dropped; null when none is left.
+ */
+function storedPins(rooms) {
+  const out = {};
+  for (const [room, ids] of Object.entries(rooms)) {
+    if (!ROOM_KEY.test(room) || !Array.isArray(ids)) continue;
+    const kept = [...new Set(ids.filter((x) => typeof x === 'string' && MESSAGE_ID.test(x)))].slice(-BOUNDS.pinsPerRoom);
+    if (kept.length) out[room] = kept;
+  }
+  return Object.keys(out).length ? out : null;
+}
+/**
  * A confidential mark read back: {by: {who, name, uid?}, name, at} (who marked it: their actor's kind and id, the name and
  * the uid their messages carry, by which a page knows its own mark; the file's name), or null.
  */
@@ -1398,6 +1416,16 @@ class Pages {
         if (view || clock) this.views.set(k, { ...(view ? { view } : {}), ...(clock ? { clock } : {}), at: v.at });
       }
     }
+    // Each person's pins for themselves (plan 7-§17.5), in the order their records were last written (the oldest first),
+    // as the views are: by their key, then the room, the ids in the order pinned, at most BOUNDS.pinsPerRoom a room.
+    this.pins = new Map();
+    if (isRecord(data.pins)) {
+      for (const [k, rooms] of Object.entries(data.pins)) {
+        if (!PERSON.test(k) || !isRecord(rooms)) continue;
+        const kept = storedPins(rooms);
+        if (kept) this.pins.set(k, kept);
+      }
+    }
     this.halls = {};
     if (isRecord(data.halls)) for (const [code, book] of Object.entries(data.halls)) { const r = HALL.test(code) ? storedHall(book) : null; if (r) this.halls[code] = r; }
     // The confidential marks, one record a file whichever rooms and halls hold it (plan 4-§5.14), and the holds on the
@@ -1408,6 +1436,7 @@ class Pages {
     if (isRecord(data.holds)) for (const [link, h] of Object.entries(data.holds)) { const r = LINK_ID.test(link) ? storedHold(h) : null; if (r) this.holds.set(link, r); }
     for (const book of Object.values(this.halls)) this._trim(book);
     this._trimViews();
+    this._trimPins();
     // The run's reports: by hall, each page (its socket's id) with the take it reported on. Never saved.
     this.live = new Map();
     this.liveHall = new Map();
@@ -1424,9 +1453,10 @@ class Pages {
   save() {
     if (!this.held) { this.dirty = true; return; }
     this.dirty = false;
-    // The marks and the holds are written once there are any.
+    // The pins, the marks and the holds are written once there are any.
     this.lane.save(() => JSON.stringify({
       v: 1, views: Object.fromEntries(this.views), halls: this.halls,
+      ...(this.pins.size ? { pins: Object.fromEntries(this.pins) } : {}),
       ...(this.marks.size ? { marks: Object.fromEntries(this.marks) } : {}), ...(this.holds.size ? { holds: Object.fromEntries(this.holds) } : {}),
     }));
   }
@@ -2248,6 +2278,78 @@ class Pages {
   }
 
   /**
+   * The ids of the messages a person (`key`: 'a:<account id>', 'u:<uid>') pinned for themselves in a room (`room`, its key),
+   * in the order pinned: a copy, [] for none. An id whose message has gone since is still listed: the page passes it by,
+   * and the person's next pin write in that room drops it (pin).
+   */
+  pinsOf(key, room) {
+    const rooms = this.pins.get(guard.str(key));
+    const ids = rooms && Object.hasOwn(rooms, guard.str(room)) ? rooms[room] : null;
+    return ids ? [...ids] : [];
+  }
+
+  /**
+   * A person's pin for themselves set (`on` true) or taken off (false) on the message `id` in the room `room`: the ids kept
+   * there first lose those `live` says are gone (deleted, or no longer in the room), then the pin is added at the end, or
+   * removed. Added twice, it is kept once. Returns `{ids, changed}` (the ids now, in the order pinned, and whether
+   * anything was written: the record then moves to the end, as the one written last); `{full: true}` for a pin past
+   * BOUNDS.pinsPerRoom in that room, nothing written; null when the key, the room, the id or `on` is not one kept.
+   */
+  pin(key, room, id, on, live = () => true) {
+    const k = guard.str(key);
+    if (!PERSON.test(k) || !ROOM_KEY.test(guard.str(room)) || !MESSAGE_ID.test(guard.str(id)) || typeof on !== 'boolean') return null;
+    const rooms = this.pins.get(k) || {};
+    const was = Object.hasOwn(rooms, room) ? rooms[room] : [];
+    const next = was.filter((x) => x === id || live(x) === true).filter((x) => x !== id || on);
+    if (on && !next.includes(id)) {
+      if (next.length >= BOUNDS.pinsPerRoom) return { full: true };
+      next.push(id);
+    }
+    const changed = next.length !== was.length || next.some((x, i) => x !== was[i]);
+    if (!changed) return { ids: [...next], changed: false };
+    const kept = { ...rooms };
+    delete kept[room];
+    if (next.length) kept[room] = next;
+    this.pins.delete(k);
+    if (Object.keys(kept).length) this.pins.set(k, kept);
+    this._trimPins();
+    this.save();
+    return { ids: [...next], changed: true };
+  }
+
+  /** Every room any person holds pins in, by its key, each once. */
+  pinnedRooms() {
+    const out = new Set();
+    for (const rooms of this.pins.values()) for (const room of Object.keys(rooms)) out.add(room);
+    return [...out];
+  }
+
+  /** A person gone (an account removed): every pin of theirs goes. Whether any did (none: nothing written). */
+  forgetPinsOf(key) {
+    if (!this.pins.delete(guard.str(key))) return false;
+    this.save();
+    return true;
+  }
+
+  /**
+   * The rooms `rooms` (their keys) reset or removed: every person's pins in them go. Returns the persons whose pins went, by
+   * their keys (none: nothing written).
+   */
+  forgetPinsIn(rooms) {
+    const gone = new Set((Array.isArray(rooms) ? rooms : []).map((r) => guard.str(r)).filter((r) => ROOM_KEY.test(r)));
+    const touched = [];
+    if (!gone.size) return touched;
+    for (const [k, held] of [...this.pins]) {
+      const left = Object.fromEntries(Object.entries(held).filter(([r]) => !gone.has(r)));
+      if (Object.keys(left).length === Object.keys(held).length) continue;
+      touched.push(k);
+      if (Object.keys(left).length) this.pins.set(k, left); else this.pins.delete(k);
+    }
+    if (touched.length) this.save();
+    return touched;
+  }
+
+  /**
    * A hall closed: everything its people's pages were shown goes with it. Returns the names of its stage files (uploads a
    * take of it named that no message holds), which go with it whether or not its rooms' files are purged; [] when it held
    * none, and null when it held nothing at all.
@@ -2310,6 +2412,14 @@ class Pages {
     for (const k of this.views.keys()) {
       if (this.views.size <= BOUNDS.views) return;
       this.views.delete(k);
+    }
+  }
+
+  /** The persons' pins held to their bound, as the views are: the record written longest ago goes first. */
+  _trimPins() {
+    for (const k of this.pins.keys()) {
+      if (this.pins.size <= BOUNDS.pins) return;
+      this.pins.delete(k);
     }
   }
 }

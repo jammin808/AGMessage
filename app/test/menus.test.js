@@ -64,7 +64,11 @@ const ON_STAGE_WORDS = {
   'file:download': 'On stage tablets keep no copies — ask the backstage team to show it to you with Download ticked.',
   // A file's confidential mark is the backstage team's and the admin's: an On stage seat shares no file, so it marks none.
   'file:mark': 'Do that from a backstage page.',
+  // The room's pin is what everyone in it sees: On stage pins for itself alone (pin:mine), read before the seat's posting.
+  pin: 'Pinning for everyone is for the backstage team.',
 };
+/** The words a seat that reads but posts nothing (an observer, a Viewer account) is refused the room's pin with: today's. */
+const READS_ONLY_PIN = 'Observers can read but not post.';
 
 test('every act hidden from a seat by its rights is refused by the server as that seat, with words, and changes nothing', async (t) => {
   const sw = await fakeStagewatch({ name: 'Lectern timer' });
@@ -197,6 +201,7 @@ test('every act hidden from a seat by its rights is refused by the server as tha
     // A room this hall's list does not name (no list names it here): the reference is no room's.
     'room:send': () => ({ to: 'r' + 'A'.repeat(16), type: 'text', text: 'From a seat that may not send it' }),
     pin: (o) => ({ messageId: o.id, pinned: !o.pinned }),
+    'pin:mine': (o) => ({ messageId: o.id, on: true }),
     delete: (o) => ({ messageId: o.id }),
     'room:withdraw': (o) => ({ messageId: o.id }),
     'display:identify': (o) => ({ id: o.id }),
@@ -247,6 +252,9 @@ test('every act hidden from a seat by its rights is refused by the server as tha
     // A room's earlier messages: every seated page reads its own room, the support view included; the server refuses a
     // page seated nowhere and a change number it cannot read (test/server.test.js).
     'history:before': 'every seated page reads its own room\'s earlier messages',
+    // A pin for oneself: every seated page's, whatever its seat (plan 7-§17.5); the server refuses it from the support view,
+    // whose uid is the admin browser's (test/pins.test.js).
+    'pin:mine': 'every seated page pins for itself',
   };
   // The acts the hall page draws: each that fits some seat's facts and some object here (a kind's rows another page draws
   // never fit this one).
@@ -266,6 +274,7 @@ test('every act hidden from a seat by its rights is refused by the server as tha
     return { busy: true };
   };
   const refused = new Map();   // verb → how many seats' refusals were read
+  const pinRefused = new Set();   // the seats that read but post nothing, refused the room's pin
   // The verbs each On stage fixture was refused: a Board guest's, and a Board account's (unit 9), in the same words.
   const onStage = { board: new Set(), boardAccount: new Set() };
   const wrong = [];
@@ -278,6 +287,8 @@ test('every act hidden from a seat by its rights is refused by the server as tha
           if (!r || r.ok !== false || typeof r.error !== 'string' || !r.error || r.busy) wrong.push(name + ' · ' + e.id + ' on ' + (o.type || kind) + ': ' + JSON.stringify(r));
           // On stage, the words are the table's: a refusal for another reason would hide a check that never ran.
           else if (onStage[name] && r.error !== ON_STAGE_WORDS[e.verb]) wrong.push(name + ' · ' + e.id + ' on ' + (o.type || kind) + ': "' + r.error + '", not "' + ON_STAGE_WORDS[e.verb] + '"');
+          else if ((name === 'observer' || name === 'viewer') && e.verb === 'pin' && r.error !== READS_ONLY_PIN) wrong.push(name + ' · ' + e.id + ': "' + r.error + '", not "' + READS_ONLY_PIN + '"');
+          if ((name === 'observer' || name === 'viewer') && e.verb === 'pin') pinRefused.add(name);
           refused.set(e.verb, (refused.get(e.verb) || 0) + 1);
           if (onStage[name]) onStage[name].add(e.verb);
         }
@@ -292,6 +303,7 @@ test('every act hidden from a seat by its rights is refused by the server as tha
     assert.deepEqual(await refusal(seats.techNoWeb.s, 'page:push', PAYLOADS['page:push'](objects[kind][0], C.entry(kind, id))), { ok: false, error: 'Web pages on the stage need their own right — ask an admin.' }, id);
   }
   for (const [name, verbs] of Object.entries(onStage)) assert.deepEqual([...verbs].sort(), Object.keys(ON_STAGE_WORDS).sort(), 'every verb of the On stage table was sent as ' + name);
+  assert.deepEqual([...pinRefused].sort(), ['observer', 'viewer'], 'the room\'s pin was sent as an observer and a Viewer account, and refused in today\'s words');
   // Every verb was refused to some seat, so none passes by never being sent; those no right hides, none, and only they.
   assert.deepEqual([...sent].filter((v) => !refused.get(v) && !OPEN_TO_EVERY_SEAT[v]), [], 'every verb is sent as a seat it is hidden from: ' + JSON.stringify(Object.fromEntries(refused)));
   assert.deepEqual(Object.keys(OPEN_TO_EVERY_SEAT).filter((v) => !sent.has(v) || refused.get(v)), [], 'a verb no right hides is one an act sends, and no seat was refused it');
@@ -332,13 +344,14 @@ test('the join\'s forwardable is the forward picker\'s rule: a hall to send to, 
   // its own, `canShow`, the information over its show, `over`, its Earlier, `earlier`, and the information beside the
   // operator's in its side bar, `beside`; then the chat view it draws,
   // `view`; then, on a first open, whether the room holds earlier messages, `more`, what a page keeps in view from before
-  // its newest, `older`, and its files, `files`; then whether the page is "the admin", `theAdmin`, and the clock or
-  // countdown the admin chose for this person, `clock`, last).
+  // its newest, `older`, and its files, `files`; then whether the page is "the admin", `theAdmin`, the clock or
+  // countdown the admin chose for this person, `clock`, and the messages this person pinned for themselves here, `pins`,
+  // last).
   const anaB = await open();
   await join(anaB, hallB, 'Ana', 'research', { uid: first.identity });
   const again = await join(anaA, hallA, 'Ana', 'research', { uid: first.identity });
-  assert.deepEqual([again.forwardable, await rooms(anaA), Object.keys(again).slice(-26), again.sends, again.admin, again.page, again.canPush, again.canWeb, again.canShow, again.over, again.earlier, again.beside, again.view, again.more, again.older, again.files, again.theAdmin, again.clock], [true, [hallB],
-    ['forwardable', 'main', 'guestCode', 'codeOn', 'setsCode', 'build', 'hall', 'hallName', 'rooms', 'sends', 'admin', 'page', 'canPush', 'now', 'tz', 'canWeb', 'canShow', 'over', 'earlier', 'beside', 'view', 'more', 'older', 'files', 'theAdmin', 'clock'], false, false, null, false, false, false, null, [], null, 'full', false, [], [], false, { show: null, locked: false }]);
+  assert.deepEqual([again.forwardable, await rooms(anaA), Object.keys(again).slice(-27), again.sends, again.admin, again.page, again.canPush, again.canWeb, again.canShow, again.over, again.earlier, again.beside, again.view, again.more, again.older, again.files, again.theAdmin, again.clock, again.pins], [true, [hallB],
+    ['forwardable', 'main', 'guestCode', 'codeOn', 'setsCode', 'build', 'hall', 'hallName', 'rooms', 'sends', 'admin', 'page', 'canPush', 'now', 'tz', 'canWeb', 'canShow', 'over', 'earlier', 'beside', 'view', 'more', 'older', 'files', 'theAdmin', 'clock', 'pins'], false, false, null, false, false, false, null, [], null, 'full', false, [], [], false, { show: null, locked: false }, []]);
   // On stage, nothing leaves the room: false, though the same person sits backstage in B.
   const beaA = await open();
   const bea = await join(beaA, hallA, 'Bea', 'board', { invite: inviteOf(srv.dataDir, hallA) });

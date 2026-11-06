@@ -69,7 +69,7 @@ const FULLSCREEN = !!(document.fullscreenEnabled || document.webkitFullscreenEna
 // The chat view this page draws (`view`: the join's, then each `view` the server tells it), and in the simple view what
 // waits for this person's answer (`waiting`), the message they tapped (`tapped`, its second door) and the question whose
 // answers they brought back to change (`changing`): the simple view's facts, the page's own (Simple, below).
-const pageFacts = { role: ROLE, uid: '', account: null, uploadToken: '', canSendToStage: false, canPropose: false, ai: false, stage: null, forwardable: false, sends: false, targets: [], adminView: ADMIN_VIEW, name: NAME, screens: null, connected: false, guestCode: '', codeOn: false, setsCode: false, admin: false, canPush: false, canWeb: false, canShow: false, fullscreen: FULLSCREEN, docs: DOCS, view: 'full', waiting: null, tapped: '', changing: '' };
+const pageFacts = { role: ROLE, uid: '', account: null, uploadToken: '', canSendToStage: false, canPropose: false, ai: false, stage: null, forwardable: false, sends: false, targets: [], adminView: ADMIN_VIEW, name: NAME, screens: null, connected: false, guestCode: '', codeOn: false, setsCode: false, admin: false, canPush: false, canWeb: false, canShow: false, fullscreen: FULLSCREEN, docs: DOCS, view: 'full', waiting: null, tapped: '', changing: '', pins: [] };
 let F = AGM.catalog.facts(pageFacts);
 // Whether this page's room is its hall's Main room (the join's `main`; a hall until it answers): its seat words follow it
 // (roleLabel).
@@ -235,7 +235,7 @@ function rejoin() {
       forwardable: them ? them.forwardable === true : !!res.forwardable, name: NAME,
       guestCode: typeof res.guestCode === 'string' ? res.guestCode : '', codeOn: !!res.codeOn, setsCode: !!res.setsCode, sends: them ? them.sends === true : !!res.sends, ...((them ? them.sends : res.sends) ? {} : { targets: [] }), admin: res.admin === true,
       canPush: them ? them.canPush === true : res.canPush === true, canWeb: them ? them.canWeb === true : res.canWeb === true, canShow: them ? them.canShow === true : res.canShow === true,
-      theAdmin: res.theAdmin === true });
+      theAdmin: res.theAdmin === true, pins: Array.isArray(res.pins) ? res.pins : [] });
     // The admin's clock or countdown for this person, and AGMessage's clock and zone, before the view draws it.
     Clock.joined(res);
     // The chat view, before a message is drawn with it: the support view draws the person's.
@@ -275,6 +275,8 @@ function rejoin() {
       renderHistory(res);
     }
     lastSeq = Math.max(lastSeq, res.seq || 0);
+    // This person's pins as the join tells them, on what it drew and what it held already (a page back from a drop).
+    drawAllPins();
     joined = true;
     connection.joined();
     renderUsers(res.users || []);
@@ -344,7 +346,7 @@ function factsChanged(patch) {
   F = next;
   const records = new Map(allMessages.map((m) => [m.id, m]));
   for (const [id, node] of messagesById) { const m = records.get(id); if (m && m.type !== 'system' && node.classList.contains('msg')) drawActs(node, m); }
-  for (const node of document.querySelectorAll('#pinnedList .msg[data-id]')) { const m = records.get(node.dataset.id); if (m) drawActs(node, m); }
+  for (const node of document.querySelectorAll('#pinnedList .msg[data-id], #bvPinQ .msg[data-id]')) { const m = records.get(node.dataset.id); if (m) drawActs(node, m); }
   drawDocActs();
   refreshDocPinnedList();
   Screens.redraw();
@@ -834,7 +836,7 @@ function setReactions(messageId, reactions) {
   const node = messagesById.get(messageId);
   if (node) renderReactions(node, reactions);
   // Its pinned copy says the same, and so does its open menu (React ▸'s checks).
-  if (msg && msg.pinned) refreshPinned(messageId);
+  if (isPinned(msg)) refreshPinned(messageId);
   if (openOn && openOn.kind === 'msg' && openOn.id === messageId) refreshOpenMenu();
   // A 👍 of this person's answers it (Got it): what waits is read again.
   Simple.waits();
@@ -1017,7 +1019,7 @@ const feed = document.getElementById('feed');
 // Home and End to the first and the newest, Tab into the one with the focus; a question pinned (drawn in the pinned strip
 // alone) is passed over. The pinned strip, the People panel, the panel's files and the Screens dialog's list are one
 // stop each too.
-const feedRoving = AGM.roving(feed, { item: '.msg[data-key]', start: 'last', skip: '[data-type="action"][data-pinned="1"]' });
+const feedRoving = AGM.roving(feed, { item: '.msg[data-key]', start: 'last', skip: '[data-type="action"][data-pinned="1"], [data-type="action"][data-pinned-mine="1"]' });
 const tpl = document.getElementById('msgTpl');
 const messagesById = new Map();
 // Every message this page holds, in the room's order: those drawn (messagesById) and those waiting to be drawn (`undrawn`,
@@ -1119,7 +1121,7 @@ function drawAtEnd(msg, { arrived = false } = {}) {
   if (msg.type === 'help' && isMine(msg)) HelpChip.draw();
   if (arrived) keepPlace(el, msg, follow);
   if (arrived) Takes.heard(msg);
-  if (msg.pinned) refreshPinned();
+  if (isPinned(msg)) refreshPinned();
   // A file shared is a transfer (a download): it opens itself on nobody's panel. A person opens it with Look (Preview
   // backstage); what the backstage team shows the Board is a take, never a file in the chat.
   if (msg.type === 'file') refreshDocPinnedList();
@@ -1451,7 +1453,7 @@ const Earlier = (function () {
         if (mine !== era) return;
         if ((!r || r.busy) && left > 1) { setTimeout(() => { if (mine === era) tries(left - 1); }, 1000); return; }
         fetching.delete(id);
-        if (r && r.ok && r.message && r.message.id === id && r.message.pinned && !findMessage(id) && !gone.has(id)) keep(r.message);
+        if (r && r.ok && r.message && r.message.id === id && (r.message.pinned || pinnedForMe(id)) && !findMessage(id) && !gone.has(id)) keep(r.message);
       });
     };
     tries(TRIES);
@@ -1517,7 +1519,7 @@ Object.assign(RUN, { 'earlier.show': (o) => Earlier.load(o.find) });
 // A presence line: "Ana joined Backstage", "Ben joined On stage", "Wes joined as an observer", "Ana left"; an older line in a
 // hall's history ("Ana joined as research") is one too.
 const PRESENCE = /^(.+) (joined (?:On stage|Backstage|as an observer|as \w+)|left)$/;
-function renderMessage(msg) {
+function renderMessage(msg, { copy = false } = {}) {
   if (msg.type === 'system') {
     const div = document.createElement('div');
     div.className = 'sys' + (PRESENCE.test(msg.text || '') ? ' presence' : '');
@@ -1531,13 +1533,44 @@ function renderMessage(msg) {
   node.dataset.id = msg.id;
   node.dataset.key = msg.id;   // its place in the roving list it is drawn in (the feed, the pinned strip)
   node.dataset.type = msg.type;
+  // A message drawn again in a pinned place (the pinned strip, the simple view's pinned bar): its pins said as that
+  // place says them, its doors the strip's.
+  if (copy) node.classList.add('pinned-copy');
   rerenderMessage(node, msg);
   return node;
 }
 
+/** Whether a message is pinned for this person (their own pins, as the server told this page). */
+const pinnedForMe = (id) => F.pins.includes(id);
+/** Whether a message is pinned in a way this person sees: for the room, or for them. */
+const isPinned = (m) => !!m && (!!m.pinned || pinnedForMe(m.id));
+/**
+ * A pin's words (plan 7-§17.5): on a message's line in the feed, "Pinned for everyone", "Pinned for you", or "Pinned for
+ * everyone · for you" for one pinned both ways; in a pinned place (`copy`), "For everyone", "For you", "For everyone · for
+ * you".
+ */
+const pinWords = (room, mine, copy) => (copy ? '' : 'Pinned for ') + (room && mine ? (copy ? 'For everyone' : 'everyone') + ' · for you' : room ? (copy ? 'For everyone' : 'everyone') : copy ? 'For you' : 'you');
+/**
+ * A message's pins as its node says them: `data-pinned` the room's, on every page; `data-pinned-mine` this person's own
+ * (and, in the support view, the person's it shows); a question pinned either way is hidden from the feed while it stays
+ * pinned (styles.css), drawn in the pinned place alone; and its line's mark, muted, with its words.
+ */
+function drawPinMark(node, msg) {
+  const room = !!msg.pinned;
+  const mine = pinnedForMe(msg.id);
+  node.dataset.pinned = room ? '1' : '0';
+  node.dataset.pinnedMine = mine ? '1' : '0';
+  node.classList.toggle('pinned', room || mine);
+  const mark = node.querySelector(':scope > header .pinned-mark');
+  if (!mark) return;
+  mark.hidden = !room && !mine;
+  const words = mark.hidden ? '' : pinWords(room, mine, node.classList.contains('pinned-copy'));
+  const said = mark.querySelector('.pin-words');
+  if (said && said.textContent !== words) said.textContent = words;
+}
+
 function rerenderMessage(node, msg) {
-  node.dataset.pinned = msg.pinned ? '1' : '0';
-  node.classList.toggle('pinned', !!msg.pinned);
+  drawPinMark(node, msg);
   node.classList.toggle('is-action', msg.type === 'action');
   node.classList.toggle('is-help', msg.type === 'help');
   if (msg.type === 'help') node.dataset.help = (msg.help && msg.help.state) || 'open';
@@ -1558,7 +1591,6 @@ function rerenderMessage(node, msg) {
   const badge = node.querySelector('.priority-badge');
   if (badge) badge.textContent = simple ? '🔥 Priority' : '🔥 HIGH';
   time.textContent = formatTime(msg.at);
-  node.querySelector('.pinned-mark').hidden = !msg.pinned;
   body.innerHTML = '';
 
   // Reply preview (small quote block at the top of the body): a click goes to the message it answers.
@@ -1632,7 +1664,7 @@ function rerenderMessage(node, msg) {
   drawActs(node, msg);
   Simple.said(node, msg);
   // A message in the pinned strip is drawn there from its record (no copy of this node), so it acts as it does here.
-  if (msg.pinned && messagesById.get(msg.id) === node) refreshPinned(msg.id);
+  if (isPinned(msg) && messagesById.get(msg.id) === node) refreshPinned(msg.id);
   if (openOn && openOn.kind === 'msg' && openOn.id === msg.id) refreshOpenMenu();
 }
 
@@ -1641,9 +1673,22 @@ function rerenderMessage(node, msg) {
 // Shift+F10 (or the menu key) open its whole list; a single key on the focused object runs the act that carries it. Each
 // door reads the same entries with the same facts, so they are in step, and every act runs through act() below.
 const drawnActs = new WeakMap();   // an object's bar → what it was drawn from, so an unchanged bar is not drawn again
-/** One act of a bar, drawn into its button: its icon (and, with `words`, its label beside it), named by its catalogue label. */
+/**
+ * One act of a bar, drawn into its button: its icon (and, with `words`, its label beside it), named by its catalogue label.
+ * A fold drawn on the bar (📌 Pin ▸) is a menu button: it opens the object's menu at that fold.
+ */
 function drawActButton(b, item, words) {
-  b.dataset.action = item.id;
+  if (item.fold) {
+    delete b.dataset.action;
+    b.dataset.fold = item.fold;
+    b.setAttribute('aria-haspopup', 'menu');
+    if (!b.hasAttribute('aria-expanded')) b.setAttribute('aria-expanded', 'false');
+  } else {
+    b.dataset.action = item.id;
+    delete b.dataset.fold;
+    b.removeAttribute('aria-haspopup');
+    b.removeAttribute('aria-expanded');
+  }
   b.setAttribute('aria-label', item.label);
   b.title = item.disabled || item.label;
   if (item.disabled) b.setAttribute('aria-disabled', 'true'); else b.removeAttribute('aria-disabled');
@@ -1677,16 +1722,17 @@ function moreButton(name) {
  * that still offers the same act is drawn again in place (a reason or a label changed), and the ⋯ is kept while there
  * is a menu, so a change of the page's facts never takes the focus, or an open menu's opener, away.
  */
-function drawBar(bar, kind, o, { words = false, more = 'More actions', keysOn = null, all = false } = {}) {
-  const inl = AGM.catalog.inline(kind, F, o, all ? Infinity : 2);
+function drawBar(bar, kind, o, { words = false, more = 'More actions', keysOn = null, all = false, max = 2 } = {}) {
+  const inl = AGM.catalog.inline(kind, F, o, all ? Infinity : max);
   const shown = AGM.catalog.shown(kind, F, o);
   const menu = AGM.catalog.items(kind, F, o).length > 0;
-  const key = JSON.stringify([inl.map((i) => [i.id, i.label, i.icon, i.disabled]), menu, words]);
+  const key = JSON.stringify([inl.map((i) => [i.id || 'fold:' + i.fold, i.label, i.icon, i.disabled]), menu, words]);
   if (drawnActs.get(bar) === key) return;
   drawnActs.set(bar, key);
   const had = [...bar.querySelectorAll(':scope > .msg-act')];
   const dots = bar.querySelector(':scope > .obj-more');
-  if (had.length === inl.length && had.every((b, n) => b.dataset.action === inl[n].id)) inl.forEach((i, n) => drawActButton(had[n], i, words));
+  const same = (b, i) => (i.fold ? b.dataset.fold === i.fold : b.dataset.action === i.id);
+  if (had.length === inl.length && had.every((b, n) => same(b, inl[n]))) inl.forEach((i, n) => drawActButton(had[n], i, words));
   else {
     had.forEach((b) => b.remove());
     for (const i of inl) bar.insertBefore(actButton(i, words), dots);
@@ -1714,7 +1760,10 @@ function drawActs(node, msg) {
   const bar = simple ? resp : head;
   const other = simple ? head : resp;
   if (other && other.childElementCount) { other.textContent = ''; drawnActs.delete(other); }
-  if (bar) drawBar(bar, 'msg', msg, { keysOn: node, words: simple });
+  // In the pinned strip a message's door unpins each kind it is pinned by (`where: 'strip'`), beside its own two; in the
+  // simple view a tapped message's row holds Got it, Reply and 📌 Pin for me.
+  const o = node.classList.contains('pinned-copy') ? Object.assign({}, msg, { where: 'strip' }) : msg;
+  if (bar) drawBar(bar, 'msg', o, { keysOn: node, words: simple, max: simple || o !== msg ? 3 : 2 });
   // The body's own doors (a prompt's answers, a help request's answers) are the same entries, and say why when they
   // cannot run now.
   const shown = new Set(AGM.catalog.shown('msg', F, msg).map((e) => e.id));
@@ -1940,11 +1989,18 @@ function onMsgClick(e) {
     const tapped = e.target.closest('.msg[data-id]');
     if (tapped && !tapped.classList.contains('echo') && this.contains(tapped)) Simple.tap(tapped.dataset.id);
   }
-  const el = e.target.closest('[data-action], [data-more], [data-goto], [data-person]');
+  const el = e.target.closest('[data-action], [data-more], [data-goto], [data-person], [data-fold]');
   if (!el || !this.contains(el)) return;
   const node = el.closest('.msg[data-id]');
   const msg = node && findMessage(node.dataset.id);
   if (!msg) return;
+  // A fold on the message's bar (📌 Pin ▸): its menu, opened at that fold.
+  if (el.dataset.fold) {
+    e.preventDefault();
+    if (openOn && openOn.kind === 'msg' && openOn.id === msg.id) { AGM.menu.close(); return; }
+    openSubmenu(node, el, el.dataset.fold);
+    return;
+  }
   if (el.dataset.person) {
     e.preventDefault();
     if (openOn && openOn.kind === 'person' && openOn.node === el) { AGM.menu.close(); return; }
@@ -1966,11 +2022,13 @@ function onMsgClick(e) {
   if (entry && entry.submenu && el.dataset.value === undefined) { openSubmenu(node, more, entry.id); return; }
   act('msg', el.dataset.action, msg, { anchor: more || el, node, value: el.dataset.value, opener: el });
 }
-/** The object's menu, opened at its ⋯ with one of its submenus open (E reacts, F sends to). */
+/** The object's menu, opened at its ⋯ with one of its submenus open (E reacts, F sends to, P a fold: 📌 Pin ▸). */
 function openSubmenu(node, more, id) {
   const door = msgDoor(node);
   if (door.open({ anchor: more || node }) && AGM.menu.current()) AGM.menu.current().expand(id);
 }
+/** The fold the entry `e` is drawn in on this object's menu, or '' where it is drawn flat (one of its fold alone). */
+const foldIn = (kind, e, o) => (e.fold && AGM.catalog.shown(kind, F, o).filter((x) => x.fold === e.fold).length > 1 ? e.fold : '');
 /** A single key on the focused message runs the act that carries it: R E F P D, Enter, and Delete or Backspace. */
 function onMsgKey(e) {
   if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.isComposing) return;
@@ -1990,11 +2048,13 @@ function onMsgKey(e) {
   e.preventDefault();
   const more = node.querySelector(':scope > header .obj-more');
   if (entry.submenu) { openSubmenu(node, more, entry.id); return; }
+  // A key of a fold (P): its submenu opens, its first entry focused (📌 Pin ▸, For the room); one of it alone acts at once.
+  if (foldIn('msg', entry, msg)) { openSubmenu(node, more, entry.fold); return; }
   act('msg', entry.id, msg, { anchor: more || node, node, opener: node });
 }
 // On an On stage seat the feed's pictures are On stage content: AGMessage's menu in place of the browser's on them,
 // Shift+right-click too, so its "Save image as" is never offered (plan 4-§4.6.6).
-for (const host of [document.getElementById('feed'), document.getElementById('pinnedList')]) {
+for (const host of [document.getElementById('feed'), document.getElementById('pinnedList'), document.getElementById('bvPinQ')]) {
   host.addEventListener('click', onMsgClick);
   host.addEventListener('keydown', onMsgKey);
   AGM.menu.door(host, findMsgDoor, { stage: () => F.role === 'board' });
@@ -2059,13 +2119,35 @@ socket.on('disconnect', () => {
 const download = (m) => downloadBy({ messageId: m.id }, m.url, m.filename);
 /** Words to the clipboard (AGM.copy: over plain http too), said in the toast; the focus goes back where it was. */
 const copyText = (text, said, anchor) => AGM.copy(text, { said, anchor, say: (w) => AGM.toast(w) });
-/** Pin or unpin, with Undo for 10 s: the opposite op of the same kind. */
-function pinWithUndo(o) {
+/**
+ * Pinned or unpinned for the room (plan 7-§17.5: what everyone in it sees, so an act on it now), with Undo for 10 s: the
+ * opposite op of the same kind. A refusal says the server's words and changes nothing.
+ */
+function pinForRoom(o) {
   const pinned = !o.pinned;
   AGM.outbox.now('pin', { messageId: o.id, pinned }, (r) => {
     if (!r || !r.ok) { AGM.toast((r && r.error) || (pinned ? 'Not pinned.' : 'Not unpinned.'), true); return; }
-    AGM.toast(pinned ? 'Pinned.' : 'Unpinned.', { undo: () => AGM.outbox.now('pin', { messageId: o.id, pinned: !pinned }, saidIfNot(pinned ? 'Not unpinned.' : 'Not pinned.')) });
+    AGM.toast(pinned ? 'Pinned for the room.' : 'Unpinned for the room.', { undo: () => AGM.outbox.now('pin', { messageId: o.id, pinned: !pinned }, saidIfNot(pinned ? 'Not unpinned.' : 'Not pinned.')) });
   });
+}
+/**
+ * Pinned or unpinned for this person alone (plan 7-§17.5: their own state, so held through a blip and sent once the page
+ * is back; a replay sets the same state). Said once the server answers (drawHeldPin), with Undo for 10 s.
+ */
+function pinForMe(o, { undo = false } = {}) {
+  AGM.outbox.hold('pin:mine', { messageId: o.id, on: !pinnedForMe(o.id) }, { tag: { pinMine: true, ...(undo ? { undo: true } : {}) } });
+}
+/**
+ * A pin for oneself as the outbox holds it: held while the page is down (◷, and said so once), then the server's ids drawn
+ * and said with Undo (an Undo's own answer says nothing more), or its refusal in the server's words.
+ */
+function drawHeldPin(item) {
+  const on = item.args.on === true;
+  if (item.state === 'waiting' && item.attempt === 0 && !AGM.outbox.online) AGM.toast(marked('waiting', (on ? 'Pinned for you' : 'Unpinned for you') + ' when the connection is back.'));
+  else if (item.state === 'done') {
+    if (item.result && Array.isArray(item.result.ids)) setMyPins(item.result.ids);
+    if (!(item.tag && item.tag.undo)) AGM.toast(on ? 'Pinned for you.' : 'Unpinned for you.', { undo: () => { const m = findMessage(item.args.messageId); if (m) pinForMe(m, { undo: true }); } });
+  } else if (item.state === 'refused') { AGM.toast(item.words, true); AGM.outbox.drop(item.cid); }
 }
 /** The object after `node` in its list (or before it, at the end): where the focus goes when `node` is removed. */
 function neighbour(node) {
@@ -2118,7 +2200,8 @@ Object.assign(RUN, {
     setSendTo(m.sentFrom.ref);
     beginReply(m);
   },
-  'msg.pin': (m) => pinWithUndo(m),
+  'msg.pin': (m) => pinForRoom(m),
+  'msg.pinMine': (m) => { pinForMe(m); Simple.tap(''); },
   'msg.confidential': (m) => markFile(m),
   'msg.look': (m) => openDocInPanel(m),
   'msg.download': (m) => download(m),
@@ -2160,6 +2243,7 @@ function drawHeld(item) {
   else if (item.verb === 'forward') drawHeldForward(item);
   else if (item.verb === 'room:send') { if (item.tag && item.tag.composer) drawEcho(item); else drawHeldSend(item); }
   else if (item.verb === 'react' && item.state === 'refused') { AGM.toast(item.words, true); AGM.outbox.drop(item.cid); }
+  else if (item.verb === 'pin:mine') drawHeldPin(item);
 }
 
 /** What a held message says, in one line: one sent into another room says where first. */
@@ -2326,7 +2410,7 @@ function drawHeldAnswer(item) {
   const m = findMessage(a.messageId);
   const node = messagesById.get(a.messageId);
   if (m && node) rerenderMessage(node, m);
-  if (m && m.pinned) refreshPinned(m.id);
+  if (isPinned(m)) refreshPinned(m.id);
 }
 
 /** A message of this room sent into another (Send to ▸): held while the page is down, then said, or its refusal. */
@@ -2603,7 +2687,7 @@ function updateActionResponses(messageId, responses) {
   // only when their own answer changed (which ends a Change), so another's answer never takes away their choice or focus.
   if (node && msg && F.view === 'simple' && ownOf(responses) !== ownWas) { if (F.changing === messageId) factsChanged({ changing: '' }); rerenderMessage(node, msg); }
   // Its pinned copy says the same, and so does its open menu (Answer ▸'s choice).
-  if (node && node.dataset.pinned === '1') refreshPinned(messageId);
+  if (isPinned(msg)) refreshPinned(messageId);
   if (openOn && openOn.kind === 'msg' && openOn.id === messageId) refreshOpenMenu();
 }
 
@@ -2650,11 +2734,9 @@ function setMessagePinned(messageId, pinned) {
   // Pinned and not held (earlier than what this page holds): read, so it is in view as every pinned message is.
   else if (pinned) Earlier.fetchKept(messageId);
   const node = messagesById.get(messageId);
-  if (node && node.classList.contains('msg')) {
-    node.dataset.pinned = pinned ? '1' : '0';
-    node.classList.toggle('pinned', !!pinned);
-    node.querySelector('.pinned-mark').hidden = !pinned;
-    if (data) drawActs(node, data);
+  if (node && node.classList.contains('msg') && data) {
+    drawPinMark(node, data);
+    drawActs(node, data);
   }
   refreshPinned();
   refreshDocPinnedList();
@@ -2663,22 +2745,79 @@ function setMessagePinned(messageId, pinned) {
 }
 
 /**
- * The pinned strip: each pinned message (text, prompts and help; files are in the panel's pinned list) drawn afresh from
- * its record, as the feed draws it, so every act on it is the feed's, through the one delegated handler. A pinned prompt
- * is hidden from the feed while it is pinned and answered here.
+ * This person's own pins changed (plan 7-§17.5): the server's ids, from its `pins` (an account's other device, the admin's
+ * view of this person) or a pin:mine's answer. Each message whose pin for them came or went says so, a pinned question
+ * leaves the feed or comes back to its place, and every pinned place is drawn again; one not held is read, so it is in view
+ * as every pinned message is.
  */
+function setMyPins(ids) {
+  const list = Array.isArray(ids) ? ids.filter((x) => typeof x === 'string' && x.length > 0) : [];
+  const was = new Set(F.pins);
+  factsChanged({ pins: list });
+  const now = new Set(F.pins);
+  for (const id of new Set([...was, ...now])) {
+    if (was.has(id) === now.has(id)) continue;
+    const m = findMessage(id);
+    const node = messagesById.get(id);
+    if (m && node && node.classList.contains('msg')) drawPinMark(node, m);
+    if (!m && now.has(id)) Earlier.fetchKept(id);
+  }
+  refreshPinned();
+  refreshDocPinnedList();
+  if (currentDocMsgId) drawDocActs();
+  refreshOpenMenu();
+}
+socket.on('pins', (p) => { if (p && Array.isArray(p.ids)) setMyPins(p.ids); });
 /**
- * The pinned strip: each pinned message drawn from its record, in the hall's order. A copy already drawn is kept and
- * drawn again in place (only `onlyId`'s, when given), and moved only when its place changed, so a reaction or an answer
- * elsewhere never takes the focus or an open menu's opener from it. An unpinned copy that held the focus gives it to
- * the message in the feed.
+ * Every message's pins drawn from the facts as they stand (a join: what this person pinned is the join's), every pinned
+ * place with them. A first open carries every message this person pinned (the server's `older`); one this page does not
+ * hold after a resume (pinned on another device meanwhile, earlier than what it holds) is read back, so it is in view.
+ */
+function drawAllPins() {
+  const held = new Set();
+  for (const m of allMessages) { held.add(m.id); const node = messagesById.get(m.id); if (node && node.classList.contains('msg')) drawPinMark(node, m); }
+  for (const id of F.pins) if (!held.has(id)) Earlier.fetchKept(id);
+  refreshPinned();
+  refreshDocPinnedList();
+}
+
+/**
+ * Every message pinned in a way this person sees, held (drawn in the feed yet or not), in the order every pinned place
+ * draws them (plan 7-§17.5): the room's first, the newest message first, since they are what the backstage team needs
+ * everyone to see; then the person's own not pinned for the room, the newest pin first. An id whose message is not held
+ * (gone, or not read back yet) is passed by.
+ */
+function pinnedInOrder() {
+  // One pass over what the page holds, however many pins: the room's as they come, this person's by their id.
+  const want = new Set(F.pins);
+  const room = [];
+  const mine = new Map();
+  for (const m of allMessages) {
+    if (!m || m.type === 'system' || !(messagesById.has(m.id) || undrawn.has(m.id))) continue;
+    if (m.pinned) room.push(m); else if (want.has(m.id)) mine.set(m.id, m);
+  }
+  const own = [];
+  for (let i = F.pins.length - 1; i >= 0; i--) { const m = mine.get(F.pins[i]); if (m) own.push(m); }
+  return room.reverse().concat(own);
+}
+
+/**
+ * The full view's pinned strip: each message pinned for the room or for this person (text, questions and help; files are in
+ * the panel's pinned list, or here for a seat with no panel) drawn afresh from its record, as the feed draws it, so every act on it is the feed's, through the
+ * one delegated handler; its line says how it is pinned, and its door unpins each kind this seat may unpin. A pinned
+ * question is hidden from the feed while it is pinned and answered here. The room's first (pinnedInOrder). A copy already
+ * drawn is kept and drawn again in place (only `onlyId`'s, when given), and moved only when its place changed, so a
+ * reaction or an answer elsewhere never takes the focus or an open menu's opener from it. An unpinned copy that held the
+ * focus gives it to the message in the feed. The simple view draws its pinned bar in its place (PinBar).
  */
 function refreshPinned(onlyId) {
   const strip = document.getElementById('pinnedStrip');
   const list = document.getElementById('pinnedList');
   const have = new Map([...list.querySelectorAll(':scope > .msg[data-id]')].map((n) => [n.dataset.id, n]));
   // Every pinned message held, drawn in the feed yet or not (a first open draws its older ones as the page is idle).
-  const want = allMessages.filter((m) => m.pinned && m.type !== 'file' && m.type !== 'system' && (messagesById.has(m.id) || undrawn.has(m.id)));
+  // A seat with no panel (an observer, a Viewer account) lists its pinned files here too, by name.
+  const panel = document.body.dataset.role !== 'observer';
+  const want = F.view === 'simple' ? [] : pinnedInOrder().filter((m) => m.type !== 'file' || !panel);
   let prev = null;
   for (const m of want) {
     let copy = have.get(m.id);
@@ -2686,8 +2825,7 @@ function refreshPinned(onlyId) {
       have.delete(m.id);
       if (!onlyId || onlyId === m.id) rerenderMessage(copy, m);
     } else {
-      copy = renderMessage(m);
-      copy.classList.add('pinned-copy');
+      copy = renderMessage(m, { copy: true });
     }
     const at = prev ? prev.nextElementSibling : list.firstElementChild;
     if (at !== copy) list.insertBefore(copy, at);
@@ -2700,7 +2838,111 @@ function refreshPinned(onlyId) {
     if (there && there.isConnected) there.focus();
   }
   strip.hidden = !want.length;
+  PinBar.draw(onlyId);
 }
+
+// ---------------- The simple view's pinned bar (plan 7-§17.2, §17.5) ----------------
+/**
+ * Under the header (and a phone's tabs), only while the room or this person has a pin: one line, "📌 For everyone" (or "📌
+ * For you", "📌 For everyone · for you"), the message's words cut to one line, and "1 of 2" where there are several, the
+ * room's pins first (pinnedInOrder). The line is one button: on a message it goes to the message in the feed, outlined for
+ * 2 s, and the bar then shows the next pin. A pinned question is drawn here whole, and only here (the feed hides it while it
+ * is pinned, styles.css): its words, its answers and Answer in words…, "You answered Yes · 14:10 · Change" once answered,
+ * and on one pinned for this person 📌 Unpin for me, its one unpin door in this view (the room's has none here, as the
+ * simple view keeps the room's pin off); the line on it shows the next pin, and is no button while it is the only pin. The
+ * question is drawn from its record, as the feed draws it, its acts the feed's through the one delegated handler. The full
+ * view draws its pinned strip in its place.
+ */
+const PinBar = (function () {
+  const bar = document.getElementById('bvPins');
+  const head = document.getElementById('bvPinHead');
+  const host = document.getElementById('bvPinQ');
+  const OUTLINE_MS = 2000;
+  let at = '';            // the message the bar shows
+  let lineEl = null;      // its line: a button, or words where it goes nowhere
+  let outlined = null;
+  /** A message's words on one line (the line cuts them where they do not fit): a file by its name, help by its kind. */
+  const wordsOf = (m) => (m.type === 'file' ? (m.confidential ? '🔒 ' : '') + (m.filename || 'a file')
+    : m.type === 'help' ? 'Help — ' + (m.category || 'Other') + (m.text ? ': ' + m.text : '') : String(m.text || '')).replace(/\s+/g, ' ').trim();
+  /** The line as a button (it goes to the message, or to the next pin) or as words, kept while it stays which it is. */
+  function line(button) {
+    if (lineEl && (lineEl.tagName === 'BUTTON') === button) return lineEl;
+    const el = document.createElement(button ? 'button' : 'p');
+    if (button) el.type = 'button';
+    el.className = 'bv-pin-line';
+    el.id = 'bvPinLine';
+    for (const c of ['bv-pin-kind', 'bv-pin-words', 'bv-pin-count']) { const part = document.createElement('span'); part.className = c; el.appendChild(part); }
+    const focused = !!lineEl && lineEl.contains(document.activeElement);
+    if (lineEl) lineEl.replaceWith(el); else head.appendChild(el);
+    lineEl = el;
+    if (focused && button) el.focus();
+    return el;
+  }
+  /** The question shown drawn whole under the line (its copy kept and drawn again in place), or none. */
+  function drawQuestion(m, onlyId) {
+    const had = host.querySelector(':scope > .msg[data-id]');
+    if (!m) {
+      if (!had) return;
+      const focused = had.contains(document.activeElement);
+      had.remove();
+      if (focused) { const field = composerField(); if (field) field.focus(); }
+      return;
+    }
+    if (had && had.dataset.id === m.id) { if (!onlyId || onlyId === m.id) rerenderMessage(had, m); return; }
+    const copy = renderMessage(m, { copy: true });
+    if (had) had.replaceWith(copy); else host.appendChild(copy);
+  }
+  function draw(onlyId) {
+    const pins = F.view === 'simple' && !outOf ? pinnedInOrder() : [];
+    bar.hidden = pins.length === 0;
+    if (!pins.length) { at = ''; drawQuestion(null); return; }
+    let i = pins.findIndex((m) => m.id === at);
+    if (i < 0) i = 0;
+    const m = pins[i];
+    at = m.id;
+    const ask = m.type === 'action';
+    const n = pins.length;
+    const kind = pinWords(!!m.pinned, pinnedForMe(m.id), true);
+    const words = ask ? 'Question' : wordsOf(m);
+    const el = line(!ask || n > 1);
+    el.querySelector('.bv-pin-kind').textContent = '📌 ' + kind;
+    el.querySelector('.bv-pin-words').textContent = words;
+    const count = el.querySelector('.bv-pin-count');
+    count.textContent = n > 1 ? (i + 1) + ' of ' + n : '';
+    count.hidden = n < 2;
+    // Its name: "Pinned for everyone, 1 of 2: <the words>. Go to it"; on a question, "… Next pin".
+    if (el.tagName === 'BUTTON') el.setAttribute('aria-label', 'Pinned ' + kind.charAt(0).toLowerCase() + kind.slice(1) + (n > 1 ? ', ' + (i + 1) + ' of ' + n : '') + ': ' + words + '. ' + (ask ? 'Next pin' : 'Go to it'));
+    el.dataset.id = m.id;
+    // While it draws a question, the bar is a group labelled by its line, the question's words and answers after it.
+    if (ask) { bar.setAttribute('role', 'group'); bar.setAttribute('aria-labelledby', 'bvPinLine'); } else { bar.removeAttribute('role'); bar.removeAttribute('aria-labelledby'); }
+    drawQuestion(ask ? m : null, onlyId);
+  }
+  /** A message in the feed, gone to and outlined for 2 s (no motion where the person asks for less); one not drawn yet, read back. */
+  function go(m) {
+    const node = messagesById.get(m.id);
+    if (!node || !node.isConnected) { goToQuoted(m.id, lineEl); return; }
+    const still = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    node.scrollIntoView({ behavior: still ? 'auto' : 'smooth', block: 'center' });
+    if (outlined && outlined.node !== node) { clearTimeout(outlined.timer); outlined.node.classList.remove('found'); }
+    node.classList.add('found');
+    if (outlined) clearTimeout(outlined.timer);
+    outlined = { node, timer: setTimeout(() => { node.classList.remove('found'); outlined = null; }, OUTLINE_MS) };
+  }
+  head.addEventListener('click', (e) => {
+    const el = e.target.closest('button.bv-pin-line');
+    if (!el) return;
+    e.preventDefault();
+    const pins = pinnedInOrder();
+    const i = pins.findIndex((m) => m.id === at);
+    if (i < 0) { draw(); return; }
+    if (pins[i].type !== 'action') go(pins[i]);
+    at = pins[(i + 1) % pins.length].id;
+    draw();
+  });
+  /** The message the bar shows now ('' for none). */
+  const shown = () => (bar.hidden ? '' : at);
+  return { draw, shown };
+})();
 
 // ---------------- Doc panel ----------------
 const docPanel = document.getElementById('docPanel');
@@ -2875,16 +3117,22 @@ const docActs = document.getElementById('docActs');
 /** The open file's bar: its inline acts with their words (📌 Pin, Close) and its ⋯. */
 function drawDocActs() {
   const o = currentDocMsgId ? fileObject(currentDocMsgId, 'preview') : null;
-  if (!o) { docActs.textContent = ''; return; }
+  // Emptied, it is drawn afresh next time: the bar's record of what it last drew goes with its buttons.
+  if (!o) { docActs.textContent = ''; drawnActs.delete(docActs); return; }
   docActions.dataset.fileId = o.id;
   drawBar(docActs, 'file', o, { words: true, more: 'More for this file' });
 }
 
+/**
+ * The panel's pinned files: each file pinned for the room or for this person, the room's first (pinnedInOrder), each saying
+ * how it is pinned; its door unpins each kind this seat may unpin, and an entry pinned only in a way this seat may not
+ * unpin (the room's, for an observer or On stage) has none.
+ */
 function refreshDocPinnedList() {
   docPinnedList.textContent = '';
   let count = 0;
-  for (const m of allMessages) {
-    if (m.type !== 'file' || !m.pinned) continue;
+  for (const m of pinnedInOrder()) {
+    if (m.type !== 'file') continue;
     count++;
     const li = document.createElement('li');
     li.className = 'file-entry';
@@ -2895,6 +3143,10 @@ function refreshDocPinnedList() {
     name.className = 'pinned-item';
     const ico = (m.mime || '').startsWith('image/') ? '🖼' : (m.mime === 'application/pdf' ? '📕' : '📄');
     name.innerHTML = `<span class="ico" aria-hidden="true">${escapeHtml(ico)}</span><span class="name">${escapeHtml((m.confidential ? '🔒 Confidential · ' : '') + m.filename)}</span>`;
+    const kind = document.createElement('span');
+    kind.className = 'pin-kind';
+    kind.textContent = '📌 ' + pinWords(!!m.pinned, pinnedForMe(m.id), true);
+    name.appendChild(kind);
     const o = fileObject(m.id, 'list');
     if (AGM.catalog.shown('file', F, o).some((e) => e.id === 'file.look')) name.dataset.action = 'file.look';
     const bar = document.createElement('span');
@@ -2920,13 +3172,18 @@ function fileDoor(t) {
     open: (at) => openObjectMenu('file', () => fileObject(id, where), { node: holder, more, at, opener: holder.contains(document.activeElement) ? document.activeElement : more, label: 'File actions', header: (o) => o.filename || 'A file' }),
   };
 }
+/** A file's menu opened at its fold (📌 Pin ▸: the Preview's 📌, a pinned entry's door, P), its first entry focused. */
+function openFileFold(door, anchor, fold) {
+  if (openObjectMenu('file', () => fileObject(door.id, door.where), { node: door.el, more: anchor, opener: anchor, label: 'File actions', header: (o) => o.filename || 'A file' }) && AGM.menu.current()) AGM.menu.current().expand(fold);
+}
 docPanel.addEventListener('click', (e) => {
-  const el = e.target.closest('[data-action^="file."], [data-more]');
+  const el = e.target.closest('[data-action^="file."], [data-more], #docActions [data-fold], #docPinnedList [data-fold]');
   const door = el && fileDoor(el);
   if (!door) return;
   e.preventDefault();
-  if (el.dataset.more) {
+  if (el.dataset.more || el.dataset.fold) {
     if (openOn && openOn.kind === 'file' && openOn.id === door.id) { AGM.menu.close(); return; }
+    if (el.dataset.fold) { openFileFold(door, el, el.dataset.fold); return; }
     openObjectMenu('file', () => fileObject(door.id, door.where), { node: door.el, more: el, opener: el, label: 'File actions', header: (o) => o.filename || 'A file' });
     return;
   }
@@ -2940,6 +3197,7 @@ docPanel.addEventListener('keydown', (e) => {
   const entry = o && AGM.catalog.byKey('file', F, o, e.key);
   if (!entry) return;
   e.preventDefault();
+  if (foldIn('file', entry, o)) { openFileFold(door, door.more || door.el, entry.fold); return; }
   act('file', entry.id, o, { anchor: door.more || door.el, node: door.el, opener: door.el });
 });
 AGM.menu.door(docPanel, fileDoor);
@@ -2949,7 +3207,8 @@ Object.assign(RUN, {
   'file.look': (o) => openDocInPanel(findMessage(o.id) || o),
   'file.download': (o) => download(o),
   'file.stage': (o, c) => Show.fromMenu(findMessage(o.id) || o, c),
-  'file.pin': (o) => pinWithUndo(o),
+  'file.pin': (o) => pinForRoom(o),
+  'file.pinMine': (o) => pinForMe(o),
   'file.confidential': (o) => markFile(o),
   'file.close': () => dismissDoc(),
 });
@@ -3829,7 +4088,8 @@ function holdView(move, skip = null) {
 }
 /** A message that reached the hall: it may move the divider, and the feed follows it or counts it below. */
 function keepPlace(el, msg, follow) {
-  const news = msg.type !== 'system' && !isMine(msg);
+  // A question pinned in a way this person sees is drawn in the pinned place alone: never news below the feed.
+  const news = msg.type !== 'system' && !isMine(msg) && !(msg.type === 'action' && isPinned(msg));
   if (news && (!place.divider || place.touched)) {
     const d = place.divider;
     if (!d) {

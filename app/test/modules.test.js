@@ -730,7 +730,7 @@ test('(d), (i), (j) the contexts: conn made in the connection after each helper 
   const call = groupAt(server, built + 'const { ctx, takesCtx } = contexts('.length - 1);
   assert.equal(call.entries.length, 1, 'contexts() is given the parts and nothing else');
   const parts = groupAt(server, call.at[0]).entries.map(keyOf);
-  assert.deepEqual(parts.map((k) => k.key), ['store', 'apply', 'systemMessage', 'readSend', 'messageOf', 'uploadOnDisk', 'fileCopy', 'tickets', 'makeMessageId', 'removeUnused', 'fileNamesOf', 'audit', 'accounts', 'boardDirty', 'newSideRoom', 'renameRoom', 'roomNameRefused', 'newGuestCode', 'guestPagesOf', 'sendGuestsOut', 'codeChanged', 'invitesFor', 'settings', 'sendersOf', 'sendsInto', 'setRoomSends', 'linkFor', 'stagePayload', 'pages', 'stageRecord', 'hallPages', 'takeSends', 'holdingOf', 'pagesChanged', 'pageHidden', 'selfHosts', 'tellWebRights', 'viewChanged', 'clockChanged', 'stageSource', 'stageCheck', 'freshUpload', 'stageDropped', 'io', 'marked', 'fileMarked', 'inUseRooms', 'markShared', 'markFresh', 'markRefusal', 'markedTakes', 'screensShowing', 'madeUrls']);
+  assert.deepEqual(parts.map((k) => k.key), ['store', 'apply', 'systemMessage', 'readSend', 'messageOf', 'uploadOnDisk', 'fileCopy', 'tickets', 'makeMessageId', 'removeUnused', 'fileNamesOf', 'audit', 'accounts', 'boardDirty', 'newSideRoom', 'renameRoom', 'roomNameRefused', 'newGuestCode', 'guestPagesOf', 'sendGuestsOut', 'codeChanged', 'invitesFor', 'settings', 'sendersOf', 'sendsInto', 'setRoomSends', 'linkFor', 'stagePayload', 'pages', 'stageRecord', 'hallPages', 'takeSends', 'holdingOf', 'pagesChanged', 'pageHidden', 'selfHosts', 'tellWebRights', 'viewChanged', 'clockChanged', 'pinsChanged', 'ownPins', 'stageSource', 'stageCheck', 'freshUpload', 'stageDropped', 'io', 'marked', 'fileMarked', 'inUseRooms', 'markShared', 'markFresh', 'markRefusal', 'markedTakes', 'screensShowing', 'madeUrls']);
   assert.ok(parts.every((k) => k.value === null), 'each part by its own name');
   const declared = new Map();
   for (const m of server.matchAll(/^(?:const|let|var|class|function\*?|async function\*?)\s+([A-Za-z_$][\w$]*)/gm)) if (!declared.has(m[1])) declared.set(m[1], m.index);
@@ -1577,6 +1577,8 @@ const ANY_ROOM = {
     'a confidential take is in use in each room of its hall, Main or side, where every file it shows or was made from is',
     'and a confidential line refused names each room, Main or side, where its item is in use',
     'a held line\'s rooms, Main or side, are kept while they are still here',
+    'a person\'s pins for themselves are read in the room, Main or side, their page sits in',
+    'and kept at a start for every room, Main or side, still here',
   ],
   'lib/handlers/rooms.js': [
     'a hall full of rooms says how many it holds',

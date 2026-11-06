@@ -258,7 +258,11 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   is on its ⋯ (the countdown is its own), its right-click and Shift+F10 (or the menu key) — one list, drawn from one
   catalogue, so the buttons and the menus never disagree. A message keeps two acts on its row: ↩ Reply and the one the
   seat uses most (Ask the operator, Send now or Show on screens). What a seat may not do is not offered; what it cannot
-  do now is greyed with the reason. Keys on a message with the focus: R reply, E react, F send to, P pin (with Undo), D
+  do now is greyed with the reason. **📌 Pin ▸ For the room · For me**: the room's pin (the default) is what everyone in the
+  room sees, made by the backstage team; a pin for me is the person's own (on every device of an account; a guest's stays in that browser), and every seat has it
+  (an observer, a Viewer account and On stage pin for themselves alone, with a flat **📌 Pin for me**). Every page's
+  pinned place holds both, the room's first; a pinned question is answered there and is out of the chat until it is
+  unpinned. Keys on a message with the focus: R reply, E react, F send to, P pin (📌 Pin ▸, or Pin for me; with Undo), D
   download, Enter look, Delete delete. The hall page's first Tab is a skip link to the message box (or the messages), its
   feed is one Tab stop (↑ and ↓ between messages; ↑ from an empty message box goes to the newest, Escape comes back),
   and what an act did is said in one toast a screen reader hears. What reaches other people for good asks in place,
@@ -267,9 +271,10 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   Accounts page act the same way: a hall, a person, a message of the live feed, a linked Patterns or PlayMap, the
   internet link, a help request, an account and an entry of the audit log each have their ⋯, right-click and
   Shift+F10, and each of these pages has a skip link and lists that are one Tab stop (↑ and ↓ between their rows).
-- **The Board.** People On stage read, reply, answer the backstage team's questions, send 🔥 Priority and ask for help,
-  and mark their own help request sorted; what they write stays in their room, where the backstage team reads it. They
-  never share files, ask questions, forward or send anything into another room or answer other people's help requests: the
+- **The Board.** People On stage read, reply, answer the backstage team's questions, send 🔥 Priority, pin messages for
+  themselves and ask for help, and mark their own help request sorted; what they write stays in their room, where the
+  backstage team reads it. They never share files, ask questions, forward or send anything into another room, pin for
+  everyone or answer other people's help requests: the
   server refuses each by the seat, for the admin and an account seated On stage too. An account seated On stage in a
   hall answers none of that hall's help requests from its halls board either, but marks its own sorted.
 - **The Board's chat view.** A page seated On stage draws the simple view, chat first and compact, unless the admin
@@ -277,10 +282,12 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   admin page's people rows, in the hall page's People panel for the admin, and on the Accounts page). One reading column
   of messages with no card and no badge; one response place per screen: **👍 Got it** and **↩ Reply** after the words of
   the newest message from backstage that waits for this person ("Got all 3" when three wait) and of each waiting 🔥
-  message, and a tap on any other message brings its own row back. Got it tells the backstage team, with the name ("👍
+  message, and a tap on any other message brings its own row back, with **📌 Pin for me**. Got it tells the backstage team, with the name ("👍
   Margaret got it" on their page), and the message reads "👍 You: got it". A question's answers are 48 px, with
   **Answer in words…**; once answered it reads "You answered Yes · 14:10 · Change". A 🔥 message out of view is held in a
-  strip above the chat (and on a take's strip, with Got it beside Open chat); "↓ 3 new · 1 question" below a chat scrolled
+  strip above the chat (and on a take's strip, with Got it beside Open chat). **The pinned bar** under the header holds
+  the room's pins first, then the person's own ("📌 For everyone · …", "📌 For you · …", "1 of 2"): a tap goes to the
+  message and on to the next pin, and a pinned question is answered there, out of the chat until it is unpinned; "↓ 3 new · 1 question" below a chat scrolled
   up; "○ Nobody backstage is online" when no one backstage has been in the room for 10 s. The composer is **🔥 Priority**,
   "Message everyone here…" and Send, and keeps its words when a send is refused. The header holds the hall's name, the
   **time of day by default, or Stagewatch's countdown** ("⏱ 4:30 left" with its title and line, ▲ near the end and

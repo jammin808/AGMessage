@@ -7,14 +7,16 @@
 //
 // An entry: `id` (kind.verb: the data-action, the test key), `label` (one string, or a function of (f, o): the button's
 // aria-label, its tooltip and the menu item; "…" ends the label of an act that asks first or opens a dialog), `short`
-// (its label inside a fold), `icon` (aria-hidden), `key` (a single key on the focused object), `group` (GROUPS, in
+// (its label inside a fold), `foldChecked` (inside a fold, a checkbox checked where it holds: Pin ▸ For the room · For
+// me), `icon` (aria-hidden), `key` (a single key on the focused object), `group` (GROUPS, in
 // order), `inline` (a rank, or none: the object's bar draws the two lowest shown), `verb` (a socket verb, an HTTP route
 // written 'http:METHOD /path', or 'local'), `mode` (the outbox's: now, hold, self, local), `may` (rights: false and the
 // act is absent; each matches a refusal the server words), `fits` (the view, the object's kind and state: false and the
 // act is absent; never asked of the server), `ready` (now: true, or the words that say why not, and the act is shown
 // disabled with them), `confirm` (an ask in place, AGM.ask, before it runs), `undo` (the id that takes it back),
 // `submenu` (the values it offers one level down), `fold` (entries of one kind that share it and are both shown are
-// drawn as one item, FOLDS, their short labels one level down; one alone is drawn flat with its full label).
+// drawn as one item, FOLDS, their short labels one level down; one alone is drawn flat with its full label; a fold the
+// object's bar draws as one menu button too, `bar`, where two of its entries are inline).
 //
 // The ids later units name: `msg.speaker` is the speaker's screen's line box (Ask the operator…, or Edit, then send…
 // where Stagewatch keeps no show desk), shown wherever the Speaker's screen ▸ door is, and folded there with
@@ -78,7 +80,14 @@
   });
   /** The support view's words (R8): every door the person has, drawn, and none of them acts. */
   const supportWords = (name) => 'This is ' + name + '\'s view — act from your own page.';
-  const FOLDS = Object.freeze({ speaker: Object.freeze({ label: 'Speaker\'s screen', icon: '🖥' }) });
+  /** Whether a message (or a file's message) is pinned for this person, by the ids the server told this page (`pins`). */
+  const pinnedMine = (f, o) => !!o && f.pins.includes(o.id);
+  const FOLDS = Object.freeze({
+    speaker: Object.freeze({ label: 'Speaker\'s screen', icon: '🖥' }),
+    // 📌 Pin ▸ For the room · For me (plan 7-§17.5), 📌 Unpin ▸ while it is pinned both ways: in a menu, and as one button
+    // on the object's bar (the Preview's 📌, a pinned entry's door) where both are inline.
+    pin: Object.freeze({ label: (f, o) => (!!o.pinned && pinnedMine(f, o) ? 'Unpin' : 'Pin'), icon: '📌', bar: true }),
+  });
   /**
    * The kinds a take on people's pages may show (lib/pages.js KINDS, held to them by test/modules.test.js (n)), each by
    * the name a person reads in a menu, and as "Already showing …" says it. `chat` hands the pages back to their chat; a
@@ -462,9 +471,18 @@
       // composer, set to that room for one send, answers under it.
       { id: 'msg.sendBack', label: (f, o) => 'Send back to ' + placeOf(o.sentFrom), icon: '↗', group: '2_send', verb: 'room:send', mode: 'hold',
         may: (f) => f.sends && f.post, fits: (f, o) => full(f) && sendsBackTo(f, o) },
-      // The room's pin; the simple view keeps it off (its pinned place is read-only there).
-      { id: 'msg.pin', label: (f, o) => (o.pinned ? 'Unpin' : 'Pin'), icon: '📌', key: 'P', group: '3_keep', verb: 'pin', mode: 'now',
-        may: (f) => f.pin, fits: (f) => full(f), undo: 'msg.pin' },
+      // 📌 Pin ▸ For the room · For me (plan 7-§17.5). For the room, the default and first: the message's own pin, which
+      // everyone in the room sees, from a seat that posts and is not On stage; never in the simple view, whose hide list
+      // keeps it off. For me, every seat's: the person's own, in the menu, and in the simple view in a tapped message's row
+      // and on a question pinned for them (which the pinned bar draws, out of the feed). Both shown, one item, each checked
+      // where it is pinned that way; one alone, flat. In the pinned strip (`where: 'strip'`) each kind it is pinned by is
+      // its door to unpin it, beside Reply.
+      { id: 'msg.pin', label: (f, o) => (o.pinned ? 'Unpin for the room' : 'Pin for the room'), short: 'For the room', icon: '📌', key: 'P', group: '3_keep', fold: 'pin',
+        inline: (f, o) => (o.where === 'strip' && !!o.pinned ? 1.5 : false), verb: 'pin', mode: 'now',
+        may: (f) => f.pin, fits: (f) => full(f), undo: 'msg.pin', foldChecked: (f, o) => !!o.pinned },
+      { id: 'msg.pinMine', label: (f, o) => (pinnedMine(f, o) ? 'Unpin for me' : 'Pin for me'), short: 'For me', icon: '📌', key: 'P', group: '3_keep', fold: 'pin',
+        inline: (f, o) => (!full(f) ? 3 : o.where === 'strip' && pinnedMine(f, o) ? 1.5 : false), verb: 'pin:mine', mode: 'hold',
+        may: (f) => f.pinMine, fits: (f, o) => full(f) || (!!f.tapped && f.tapped === o.id) || (o.type === 'action' && pinnedMine(f, o)), undo: 'msg.pinMine', foldChecked: pinnedMine },
       // 👁 Look (On stage) or Preview (backstage): the file opened in the person's own panel, nothing reported or pushed;
       // never a file for download only, which AGMessage does not open.
       { id: 'msg.look', label: (f) => (f.role === 'research' ? 'Preview' : 'Look'), icon: '👁', key: 'Enter', group: '3_keep', verb: 'local', mode: 'local',
@@ -501,8 +519,14 @@
         may: (f) => seesFiles(f), fits: (f, o) => o.where === 'list' && opens(o) },
       { id: 'file.download', label: 'Download', icon: '⬇', key: 'D', group: '3_keep', verb: 'file:download', mode: 'now',
         may: (f) => f.download, fits: (f, o) => full(f) && linked(o) },
-      { id: 'file.pin', label: (f, o) => (o.pinned ? 'Unpin' : 'Pin'), icon: '📌', key: 'P', group: '3_keep', inline: () => 2, verb: 'pin', mode: 'now',
-        may: (f) => f.pin, fits: () => true, undo: 'file.pin' },
+      // 📌 Pin ▸ For the room · For me, as a message's (plan 7-§17.5): the Preview's 📌 is the fold as a menu button, or
+      // flat 📌 Pin for me where only that is shown; a pinned entry of the list offers to unpin only the kinds it is
+      // pinned by, and none where this seat may not unpin it (the room's, for an observer or On stage). The full view's
+      // alone: the simple view's one pin door is a tapped message's row (and a question pinned for the person, in the bar).
+      { id: 'file.pin', label: (f, o) => (o.pinned ? 'Unpin for the room' : 'Pin for the room'), short: 'For the room', icon: '📌', key: 'P', group: '3_keep', fold: 'pin', inline: () => 2, verb: 'pin', mode: 'now',
+        may: (f) => f.pin, fits: (f, o) => full(f) && (o.where !== 'list' || !!o.pinned), undo: 'file.pin', foldChecked: (f, o) => !!o.pinned },
+      { id: 'file.pinMine', label: (f, o) => (pinnedMine(f, o) ? 'Unpin for me' : 'Pin for me'), short: 'For me', icon: '📌', key: 'P', group: '3_keep', fold: 'pin', inline: () => 2, verb: 'pin:mine', mode: 'hold',
+        may: (f) => f.pinMine, fits: (f, o) => full(f) && (o.where !== 'list' || pinnedMine(f, o)), undo: 'file.pinMine', foldChecked: pinnedMine },
       MARK_ROW('file', (f, o) => full(f) && linked(o)),
       { id: 'file.close', label: 'Close', group: '4_manage', inline: () => 3, verb: 'local', mode: 'local',
         may: () => true, fits: (f, o) => o.where === 'preview' },
@@ -1103,7 +1127,8 @@
     return Object.freeze({
       page: 'hall', role, view: s.view === 'simple' ? 'simple' : 'full', uid: typeof s.uid === 'string' ? s.uid : '', post,
       viewer: !!(s.account && s.account.role === 'viewer'),
-      pin: post,                              // the room's pin: a seat that posts
+      pin: post && role !== 'board',          // the room's pin: a seat that posts, never On stage
+      pinMine: true,                          // a pin for oneself: whoever is seated in the room reads it
       ask: post && role !== 'board',          // a question for the Board comes from backstage
       respondHelp: post && role !== 'board',  // others' help requests are answered by the backstage team
       waiting: Object.freeze({ plain: idList(waiting.plain), priority: idList(waiting.priority) }),
@@ -1148,6 +1173,9 @@
       // Whether this page is "the admin" (the join's `theAdmin`: the host token, or an account whose role is admin), whose
       // alone is the clock or countdown's lock on a person of the People panel.
       theAdmin: s.theAdmin === true,
+      // The messages this person pinned for themselves in this room (the join's `pins`, then each `pins` the server tells:
+      // for the support view, the person's), in the order pinned.
+      pins: idList(s.pins),
     });
   }
 
@@ -1221,6 +1249,7 @@
     const note = e.note ? call(e.note, f, o) : '';
     if (note) item.note = note;
     if (e.checked) { item.role = 'menuitemcheckbox'; item.checked = !!e.checked(f, o); }
+    if (inFold && e.foldChecked) { item.role = 'menuitemcheckbox'; item.checked = !!e.foldChecked(f, o); }
     if (e.radio) { item.role = 'menuitemradio'; item.checked = !!e.radio(f, o); }
     return item;
   }
@@ -1243,10 +1272,14 @@
       const mates = e.fold ? list.filter((x) => x.fold === e.fold) : [e];
       if (mates.length < 2) { out.push(itemOf(kind, e, f, o, false)); continue; }
       for (const m of mates) folded.add(m.id);
-      const fold = FOLDS[e.fold];
-      out.push({ id: '', fold: e.fold, label: fold.label, icon: fold.icon, key: e.key || '', group: e.group, disabled: '', held: '', submenu: true, children: mates.map((m) => itemOf(kind, m, f, o, true)) });
+      out.push(foldItem(kind, e, mates, f, o));
     }
     return out;
+  }
+  /** A fold drawn as one item: its words (a fold's label may read the object: 📌 Unpin ▸), its entries one level down. */
+  function foldItem(kind, e, mates, f, o) {
+    const fold = FOLDS[e.fold];
+    return { id: '', fold: e.fold, label: call(fold.label, f, o), icon: fold.icon, key: e.key || '', group: e.group, disabled: '', held: '', submenu: true, children: mates.map((m) => itemOf(kind, m, f, o, true)) };
   }
 
   /** The ids a menu holds, a fold's entries in its place: what every door of the object must show alike. */
@@ -1257,12 +1290,21 @@
    * a take's layer, the Board's row of show kinds), in rank order, each with its full label.
    */
   function inline(kind, f, o, max = 2) {
-    return shown(kind, f, o)
+    const ranked = shown(kind, f, o)
       .map((e) => ({ e, rank: e.inline ? e.inline(f, o) : false }))
       .filter((x) => typeof x.rank === 'number')
-      .sort((a, b) => a.rank - b.rank)
-      .slice(0, max)
-      .map((x) => itemOf(kind, x.e, f, o, false));
+      .sort((a, b) => a.rank - b.rank);
+    // A fold the bar draws as one (`bar`), where two of its entries are inline here: one button, at the first one's rank.
+    const out = [];
+    const folded = new Set();
+    for (const x of ranked) {
+      if (folded.has(x.e.id)) continue;
+      const mates = x.e.fold && FOLDS[x.e.fold].bar ? ranked.filter((y) => y.e.fold === x.e.fold).map((y) => y.e) : [x.e];
+      if (mates.length < 2) { out.push(itemOf(kind, x.e, f, o, false)); continue; }
+      for (const m of mates) folded.add(m.id);
+      out.push(foldItem(kind, x.e, mates, f, o));
+    }
+    return out.slice(0, max);
   }
 
   /** The values an entry offers one level down (its reactions, its answers), or null where its runner finds them. */

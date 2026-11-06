@@ -240,15 +240,29 @@ Every day of the event
   where the backstage team reads it. Help requests are answered by the
   backstage team: On stage, you mark your own request sorted, and have no
   "On my way" or "Resolved" on anyone else's.
+- Pins: a message is pinned for the room (everyone in it sees it at the
+  top, On stage too: the backstage team pins these) or for you alone
+  (nobody else sees it; signed in, on every device of your account; with
+  a code, in that browser). Backstage, a message's ... holds Pin > For
+  the room (the default, first) and For me, and P opens it; pinned both
+  ways it reads Unpin >, the same pair to unpin. An observer, a Viewer
+  account and On stage have Pin for me alone, and P pins at once. A
+  pinned question is answered where it is pinned, and is out of the chat
+  until it is unpinned.
 - The Board's chat view (an On stage seat's page, unless the admin chooses
   Full for that person): the chat first. Under the newest message from
   backstage that waits for you, and under each waiting Priority message:
   "Got it" (it tells the backstage team, with your name; "Got all 3" when
-  three wait) and "Reply". Tap any other message for its own Got it and
-  Reply. A question: tap an answer, or "Answer in words..."; "Change"
-  picks another. Your Priority messages: press Priority before Send; it
-  is off again after each send. A Priority message you scrolled away from
-  waits in a strip above the chat. The view starts in Dark.
+  three wait) and "Reply". Tap any other message for its own Got it,
+  Reply and "Pin for me" (then "Unpin for me"). A question: tap an
+  answer, or "Answer in words..."; "Change" picks another.
+  The pinned bar under the header holds the room's pins first ("For
+  everyone"), then your own ("For you"), "1 of 2" when there are more:
+  tap it to go to the message, and again for the next. A pinned question
+  is answered in the bar, and is out of the chat until it is unpinned.
+  Your Priority messages: press Priority before Send; it is off again
+  after each send. A Priority message you scrolled away from waits in a
+  strip above the chat. The view starts in Dark.
   Beside the hall's name: the time of day, until you or the admin choose
   Stagewatch's countdown ("4:30 left", then "Wrap up", then "0:30 over";
   "--:--" when Stagewatch is offline or not linked) or Off.
@@ -537,8 +551,9 @@ moved there in 0.6.0. A file in the On stage panel and each screen in
 Screens have one too. Something you may do but not now is greyed, with
 the reason under it ("Not connected — AGMessage is reconnecting.").
 On a message with the focus (click it first):
-  R reply, E react, F send to another hall, P pin (the note at the bottom
-  offers Undo for 10 seconds), D download a file (backstage), Enter open
+  R reply, E react, F send to another hall, P pin (Pin > For the room,
+  the default, or For me: the note at the bottom offers Undo for 10
+  seconds), D download a file (backstage), Enter open
   a file in your own panel (Look, or Preview backstage),
   Delete or Backspace delete your own (it asks first).
 Shift+right-click opens the browser's own menu (Copy, spelling). No page

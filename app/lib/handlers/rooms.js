@@ -166,7 +166,7 @@ const made = new Map();
  * @param {object} ctx    the server's context, frozen (lib/gate.js `contexts`)
  */
 function register(socket, conn, ctx) {
-  const { store, apply, systemMessage, readSend, messageOf, uploadOnDisk, fileCopy, tickets, hallPages, makeMessageId, removeUnused, fileNamesOf, audit, boardDirty, newSideRoom, renameRoom, roomNameRefused, newGuestCode, guestPagesOf, sendGuestsOut, codeChanged, invitesFor, sendersOf, sendsInto, setRoomSends, pages, tellWebRights, marked, fileMarked, inUseRooms, markShared, markRefusal, markedTakes } = ctx;
+  const { store, apply, systemMessage, readSend, messageOf, uploadOnDisk, fileCopy, tickets, hallPages, makeMessageId, removeUnused, fileNamesOf, audit, boardDirty, newSideRoom, renameRoom, roomNameRefused, newGuestCode, guestPagesOf, sendGuestsOut, codeChanged, invitesFor, sendersOf, sendsInto, setRoomSends, pages, ownPins, tellWebRights, marked, fileMarked, inUseRooms, markShared, markRefusal, markedTakes } = ctx;
 
   /** A hall as a refusal names it: its name, or "This hall" when it has none. */
   const hallSaid = (hall) => hall.name || 'This hall';
@@ -600,14 +600,15 @@ function register(socket, conn, ctx) {
   });
 
   // A room's earlier messages (`{beforeSeq}`, the change number of the oldest message its page holds): the WINDOW before
-  // it, oldest first, each as a page is sent it, and whether there are more before those. A read of the room this page
-  // sits in, every seat's and the support view's, never another room's: it names no room. One chatter token per ask.
+  // it, oldest first, each as a page is sent it, and whether there are more before those that its first open did not
+  // carry (the person's own pins among what it carried). A read of the room this page sits in, every seat's and the
+  // support view's, never another room's: it names no room. One chatter token per ask.
   socket.on('history:before', (args, ack) => {
     if (!conn.gate(ack, { bucket: conn.chatter })) return;
     const answer = conn.ok(ack);
     const a = isRecord(args) ? args : {};
     if (!Number.isInteger(a.beforeSeq) || a.beforeSeq < 1) return answer({ ok: false, error: EARLIER_FROM });
-    const got = store.before(conn.room(), a.beforeSeq);
+    const got = store.before(conn.room(), a.beforeSeq, undefined, ownPins(socket));
     const seen = conn.linklessPage() ? linkless : (m) => m;
     answer({ ok: true, history: got.history.map(forPage).map(marked).map(seen), more: got.more });
   });

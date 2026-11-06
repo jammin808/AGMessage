@@ -593,6 +593,8 @@ async function doorsOf(tab, kind, sel, obj, { facts = 'F', bar = '.msg-acts > .m
   out.inline = await tab.eval(`(async () => {
     const n = ${sel}; const menu = document.querySelector('.agm-menu:not(.agm-sub)'); const rows = [];
     for (const b of n.querySelectorAll(${codeLiteral(bar)})) {
+      // A fold on the bar (📌 Pin ▸) is the menu's fold row, under the same name.
+      if (b.dataset.fold) { const f = menu.querySelector(':scope > .agm-mi[data-fold="' + b.dataset.fold + '"]'); rows.push(['fold:' + b.dataset.fold, !!f && b.getAttribute('aria-label') === f.getAttribute('aria-label')]); continue; }
       const id = b.dataset.action;
       let row = menu.querySelector(':scope > .agm-mi[data-action="' + id + '"]');
       const fold = row ? null : [...menu.querySelectorAll(':scope > .agm-mi[data-children]')].find((r) => r.dataset.children.split(' ').includes(id));
@@ -2568,36 +2570,46 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await hallView.until(`!F.connected`);
     await hallView.eval(`(() => { window.__sent = []; const t = document.getElementById('agmToast'); if (t) t.textContent = ''; })()`);
     await hallView.eval(`messagesById.get(${codeLiteral(doorMsgs.chairText)}).querySelector('.obj-more').click()`);
-    const pinRow = await hallView.until(`(() => { const r = document.querySelector('.agm-menu .agm-mi[data-action="msg.pin"]'); return r && JSON.stringify({ disabled: r.getAttribute('aria-disabled'), why: r.querySelector('.mi-why').textContent, focusable: r.tabIndex === -1 && !r.disabled }); })()`);
-    await hallView.eval(`document.querySelector('.agm-menu .agm-mi[data-action="msg.pin"]').click()`);
+    // 📌 Pin ▸ opened: For the room (an act on what everyone sees) disabled with why; For me (held) live, with ◷.
+    await hallView.until(`!!document.querySelector('.agm-menu .agm-mi[data-fold="pin"]')`, 3000);
+    await hallView.eval(`document.querySelector('.agm-menu .agm-mi[data-fold="pin"]').click()`);
+    const pinRow = await hallView.until(`(() => { const r = document.querySelector('.agm-sub .agm-mi[data-action="msg.pin"]'); const m = document.querySelector('.agm-sub .agm-mi[data-action="msg.pinMine"]');
+      return r && m && JSON.stringify({ disabled: r.getAttribute('aria-disabled'), why: r.querySelector('.mi-why').textContent, focusable: r.tabIndex === -1 && !r.disabled, mine: [m.getAttribute('aria-disabled'), m.querySelector('.mi-why').textContent] }); })()`);
+    await hallView.eval(`document.querySelector('.agm-sub .agm-mi[data-action="msg.pin"]').click()`);
     const saidWhy = await hallView.until(`(document.getElementById('agmToast') || {}).textContent`);
     const sentOffline = await hallView.eval(`JSON.stringify(window.__sent)`);
-    await press(hallView, 'Escape');
+    await hallView.eval(`AGM.menu.close()`);
     await hallView.eval(`socket.connect()`);
     await hallView.until(`socket.connected && joined && F.connected`, 8000);
-    report(pinRow === JSON.stringify({ disabled: 'true', why: 'Not connected — AGMessage is reconnecting.', focusable: true }) && saidWhy === 'Not connected — AGMessage is reconnecting.' && sentOffline === '[]',
-      `not connected, Pin is shown disabled and focusable with its reason, says it when chosen, and sends nothing (${pinRow}; "${saidWhy}"; sent ${sentOffline})`);
+    report(pinRow === JSON.stringify({ disabled: 'true', why: 'Not connected — AGMessage is reconnecting.', focusable: true, mine: [null, '◷ sent when the connection is back'] }) && saidWhy === 'Not connected — AGMessage is reconnecting.' && sentOffline === '[]',
+      `not connected, Pin for the room is shown disabled and focusable with its reason, says it when chosen, and sends nothing; Pin for me stays live with ◷ (${pinRow}; "${saidWhy}"; sent ${sentOffline})`);
 
     // An open menu keeps its items and their order while its message changes under it: pinned elsewhere, its Pin reads Unpin
     // in place, and nothing moves.
     await research.eval(`messagesById.get(${codeLiteral(doorMsgs.ownText)}).querySelector('.obj-more').click()`);
     const idsBefore = await research.until(MENU_IDS);
+    await research.eval(`document.querySelector('.agm-menu .agm-mi[data-fold="pin"]').click()`);
+    await research.until(`!!document.querySelector('.agm-sub .agm-mi[data-action="msg.pin"]')`, 3000);
     await hallView.eval(`new Promise((r) => socket.emit('pin', { messageId: ${codeLiteral(doorMsgs.ownText)}, pinned: true }, r))`);
     await board.eval(`new Promise((r) => socket.emit('react', { messageId: ${codeLiteral(doorMsgs.ownText)}, emoji: '👀', on: true }, r))`);
-    const relabelled = await research.until(`(() => { const r = document.querySelector('.agm-menu .agm-mi[data-action="msg.pin"]'); return r && r.getAttribute('aria-label') === 'Unpin' && findMessage(${codeLiteral(doorMsgs.ownText)}).reactions.length > 0 && 'Unpin'; })()`, 5000);
+    const relabelled = await research.until(`(() => { const r = document.querySelector('.agm-sub .agm-mi[data-action="msg.pin"]'); return r && r.getAttribute('aria-checked') === 'true' && findMessage(${codeLiteral(doorMsgs.ownText)}).reactions.length > 0 && 'checked'; })()`, 5000);
     const idsAfter = await research.eval(MENU_IDS);
     await research.eval(`AGM.menu.close()`);
     await hallView.eval(`new Promise((r) => socket.emit('pin', { messageId: ${codeLiteral(doorMsgs.ownText)}, pinned: false }, r))`);
-    report(!!relabelled && idsBefore === idsAfter && !!idsBefore, `an open menu keeps its items and their order as its message is pinned and reacted to elsewhere; Pin reads Unpin in place (${idsBefore} → ${idsAfter})`);
+    report(!!relabelled && idsBefore === idsAfter && !!idsBefore, `an open menu keeps its items and their order as its message is pinned and reacted to elsewhere; For the room is checked in place (${idsBefore} → ${idsAfter})`);
 
-    // A single key on the focused message: P pins it, with Undo in the toast for 10 s; Undo unpins it.
+    // A single key on the focused message: P opens 📌 Pin ▸ with For the room focused, Enter pins it for the room, with Undo
+    // in the toast for 10 s; Undo unpins it.
     await research.until(`!findMessage(${codeLiteral(doorMsgs.ownText)}).pinned`);
     await research.eval(`messagesById.get(${codeLiteral(doorMsgs.ownText)}).focus()`);
     await press(research, 'p');
+    const keyFold = await research.until(`(() => { const a = document.activeElement; return a && a.matches('.agm-sub .agm-mi') && JSON.stringify([a.dataset.action, a.getAttribute('role'), a.getAttribute('aria-checked')]); })()`, 3000);
+    await pressEnter(research);
     const keyPinned = await research.until(`findMessage(${codeLiteral(doorMsgs.ownText)}).pinned && (document.getElementById('agmToast') || {}).textContent`, 5000);
     await research.eval(`document.querySelector('#agmToast .toast-undo').click()`);
     const undone = await research.until(`!findMessage(${codeLiteral(doorMsgs.ownText)}).pinned && 'unpinned'`, 5000);
-    report(keyPinned === 'Pinned. · Undo' && undone === 'unpinned', `P on a focused message pins it and the toast's Undo unpins it ("${keyPinned}", then ${undone})`);
+    report(keyFold === JSON.stringify(['msg.pin', 'menuitemcheckbox', 'false']) && keyPinned === 'Pinned for the room. · Undo' && undone === 'unpinned',
+      `P on a focused message opens 📌 Pin ▸ with For the room focused, Enter pins it for the room, and the toast's Undo unpins it (${keyFold}; "${keyPinned}", then ${undone})`);
 
     // ---------------- Every act's path on a message, from a page that may send elsewhere ----------------
     // The admin lets the backstage page forward into a second hall: the page is told, and asks which halls it may send to.
@@ -2780,6 +2792,266 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await hallView.eval(`new Promise((r) => socket.emit('pin', { messageId: ${codeLiteral(capexId)}, pinned: false }, r))`);
     report(doorsInStep(fileDoors.list) && doorsInStep(fileDoors.preview), `a file's doors, in the panel's pinned list and open in the panel, are in step (${JSON.stringify(doorsInStep(fileDoors.list) && doorsInStep(fileDoors.preview) ? { list: fileDoors.list.want, preview: fileDoors.preview.want } : fileDoors)})`);
 
+    // A file pinned both ways (plan 7-§17.5): the panel's entry says so, and its door opens 📌 Unpin ▸ For the room · For me,
+    // both checked; unchecking For me leaves the room's pin, and the entry's door is then Unpin for the room alone.
+    await research.until(`!document.querySelector('.agm-toast.show')`, 15000);
+    await hallView.eval(`new Promise((r) => socket.emit('pin', { messageId: ${codeLiteral(capexId)}, pinned: true }, r))`);
+    const capexMine = await research.eval(`new Promise((r) => socket.emit('pin:mine', { messageId: ${codeLiteral(capexId)}, on: true }, (x) => r(JSON.stringify(x))))`);
+    await research.until(`F.pins.includes(${codeLiteral(capexId)}) && !!${fileEntry} && !!${fileEntry}.querySelector('[data-fold="pin"]')`, 5000);
+    const bothEntry = await research.eval(`(() => { const li = ${fileEntry}; return JSON.stringify([li.querySelector('.pin-kind').textContent, li.querySelector('[data-fold="pin"]').getAttribute('aria-label')]); })()`);
+    await research.eval(`${fileEntry}.querySelector('[data-fold="pin"]').click()`);
+    const bothChecks = await research.until(`(() => { const r = [...document.querySelectorAll('.agm-sub .agm-mi')].map((b) => [b.dataset.action, b.getAttribute('aria-checked')]); return r.length === 2 && JSON.stringify(r); })()`, 3000);
+    await research.eval(`document.querySelector('.agm-sub .agm-mi[data-action="file.pinMine"]').click()`);
+    const roomLeft = await research.until(`!F.pins.includes(${codeLiteral(capexId)}) && findMessage(${codeLiteral(capexId)}).pinned && (() => { const b = ${fileEntry}.querySelector('.file-acts .msg-act[data-action^="file.pin"]'); return b && JSON.stringify([${fileEntry}.querySelector('.pin-kind').textContent, b.dataset.action, b.getAttribute('aria-label')]); })()`, 5000);
+    await hallView.eval(`new Promise((r) => socket.emit('pin', { messageId: ${codeLiteral(capexId)}, pinned: false }, r))`);
+    report(JSON.parse(capexMine).ok && bothEntry === JSON.stringify(['📌 For everyone · for you', 'Unpin']) && bothChecks === JSON.stringify([['file.pin', 'true'], ['file.pinMine', 'true']]) && roomLeft === JSON.stringify(['📌 For everyone', 'file.pin', 'Unpin for the room']),
+      `a file pinned both ways reads so in the panel, its door opens 📌 Unpin ▸ with both checked, and unchecking For me leaves the room's pin and its own door (${bothEntry}; ${bothChecks}; ${roomLeft})`);
+
+    // ---------------- Pins for the room or for me (plan 7-§17.5, unit 20c) ----------------
+    {
+      // A hall of its own: Pia backstage (the full view), Bo and Cal On stage (the simple view; Cal then the full view, by the
+      // admin's Chat view), Oli an observer, each a person of their own (a browser of their own), and the admin's view of Bo.
+      const pinHall = (await (await fetch(base + '/api/rooms', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ name: 'Pins' }) })).json()).code;
+      const pinUrl = (name, role) => `${base}/app.html?code=${pinHall}&name=${name}&role=${role}${role === 'board' ? '&invite=' + inviteOf(dataDir, pinHall) : ''}`;
+      const pia = await edge.tab(pinUrl('Pia', 'research'), { alone: true });
+      const bo = await edge.tab(pinUrl('Bo', 'board'), { alone: true });
+      const cal = await edge.tab(pinUrl('Cal', 'board'), { alone: true });
+      const oli = await edge.tab(pinUrl('Oli', 'observer'), { alone: true });
+      const pinTabs = [pia, bo, cal, oli];
+      await Promise.all(pinTabs.map((t) => t.until('typeof joined !== "undefined" && joined && F.connected', 15000)));
+      const pinSay = (args) => pia.eval(`new Promise((r) => socket.emit('message', ${codeLiteral(args)}, (x) => r(x.id)))`);
+      const pm = {
+        t1: await pinSay({ type: 'text', text: 'Pins: the agenda is final' }),
+        t2: await pinSay({ type: 'text', text: 'Pins: lunch is at one' }),
+        q1: await pinSay({ type: 'action', text: 'Pins: adjourn at twelve?', options: ['Yes', 'No'] }),
+        t3: await pinSay({ type: 'text', text: 'Pins: the room is booked until five' }),
+        q2: await pinSay({ type: 'action', text: 'Pins: take the vote now?', options: ['Yes', 'No'] }),
+        t4: await pinSay({ type: 'text', text: 'Pins: the last word' }),
+      };
+      const pinDrawn = `${codeLiteral(Object.values(pm))}.every((id) => messagesById.has(id))`;
+      await Promise.all(pinTabs.map((t) => t.until(pinDrawn, 8000)));
+      const nodeOf = (id) => `messagesById.get(${codeLiteral(id)})`;
+      /** A message's line, as a page draws it: its pin's words ('' where it has none), and whether the feed shows it. */
+      const lineOf = (id) => `(() => { const n = ${nodeOf(id)}; const m = n.querySelector(':scope > header .pinned-mark'); return JSON.stringify([m.hidden ? '' : m.textContent.replace(/\\s+/g, ' ').trim(), getComputedStyle(n).display !== 'none']); })()`;
+      const PIN_BAR = `(() => { const b = document.getElementById('bvPins'); const l = document.getElementById('bvPinLine'); return b.hidden || !l ? '' : JSON.stringify([l.tagName, l.querySelector('.bv-pin-kind').textContent, l.querySelector('.bv-pin-words').textContent, l.querySelector('.bv-pin-count').textContent]); })()`;
+      const toastNow = `(document.getElementById('agmToast') || {}).textContent || ''`;
+      const clearToast = async (t) => { await t.eval(`(() => { const x = document.getElementById('agmToast'); if (x) x.textContent = ''; })()`); };
+      // What each page sends: counted from here (a support view's doors send nothing).
+      const COUNT_SENDS = `(() => { window.__sent = []; const e = socket.emit; socket.emit = function (ev, ...a) { window.__sent.push([ev, a[0] && typeof a[0] === 'object' ? a[0] : null]); return e.call(this, ev, ...a); }; })()`;
+      for (const t of pinTabs) await t.eval(COUNT_SENDS);
+
+      // A backstage page (the full view): ⋯ holds one 📌 Pin ▸, which opens with For the room focused and both unchecked; Enter
+      // pins it for the room, the default: every page reads "📌 Pinned for everyone", the backstage strip "📌 For everyone"
+      // and the Board's bar "📌 For everyone"; the toast's Undo takes it back.
+      await pia.eval(`${nodeOf(pm.t1)}.querySelector('.obj-more').click()`);
+      const foldRow = await pia.until(`(() => { const f = document.querySelector('.agm-menu .agm-mi[data-fold="pin"]'); return f && JSON.stringify([f.getAttribute('aria-label'), f.dataset.children, ![...document.querySelectorAll('.agm-menu:not(.agm-sub) > .agm-mi')].some((b) => /^msg\\.pin/.test(b.dataset.action || ''))]); })()`, 3000);
+      await pia.eval(`document.querySelector('.agm-menu .agm-mi[data-fold="pin"]').focus()`);
+      await press(pia, 'ArrowRight');
+      const roomFirst = await pia.until(`(() => { const a = document.activeElement; const r = [...document.querySelectorAll('.agm-sub .agm-mi')].map((b) => [b.dataset.action, b.getAttribute('aria-label'), b.getAttribute('role'), b.getAttribute('aria-checked')]); return a && a.dataset.action === 'msg.pin' && JSON.stringify(r); })()`, 3000);
+      await pressEnter(pia);
+      const roomToast = await pia.until(`findMessage(${codeLiteral(pm.t1)}).pinned && ${toastNow}`, 5000);
+      const roomLines = await Promise.all(pinTabs.map((t) => t.until(`findMessage(${codeLiteral(pm.t1)}).pinned && ${lineOf(pm.t1)}`, 5000)));
+      const piaStrip = await pia.until(`(() => { const c = document.querySelector('#pinnedList .msg[data-id=${JSON.stringify(pm.t1)}]'); return c && c.querySelector('.pinned-mark').textContent.replace(/\\s+/g, ' ').trim(); })()`, 3000);
+      const boBar = await bo.until(PIN_BAR, 3000);
+      const sentRoom = await pia.eval(`JSON.stringify(window.__sent.filter(([ev]) => ev === 'pin' || ev === 'pin:mine').map(([ev, a]) => [ev, a.pinned === undefined ? a.on : a.pinned]))`);
+      await pia.eval(`document.querySelector('#agmToast .toast-undo').click()`);
+      const roomUndone = await Promise.all(pinTabs.map((t) => t.until(`!findMessage(${codeLiteral(pm.t1)}).pinned && ${lineOf(pm.t1)}`, 5000)));
+      report(foldRow === JSON.stringify(['Pin', 'msg.pin msg.pinMine', true]) && roomFirst === JSON.stringify([['msg.pin', 'For the room', 'menuitemcheckbox', 'false'], ['msg.pinMine', 'For me', 'menuitemcheckbox', 'false']])
+        && roomToast === 'Pinned for the room. · Undo' && roomLines.every((l) => l === JSON.stringify(['📌 Pinned for everyone', true])) && piaStrip === '📌 For everyone'
+        && boBar === JSON.stringify(['BUTTON', '📌 For everyone', 'Pins: the agenda is final', '']) && sentRoom === JSON.stringify([['pin', true]]) && roomUndone.every((l) => l === JSON.stringify(['', true])),
+      `a backstage page's ⋯ holds one 📌 Pin ▸, For the room first and focused, both unchecked; Enter pins for the room, which every page reads, the strip and the Board's bar too, and Undo takes it back (${foldRow}; ${roomFirst}; "${roomToast}"; ${roomLines.join(' ')}; ${piaStrip}; ${boBar}; ${sentRoom})`);
+
+      // On a coarse pointer at 390 px, ⋯ → 📌 Pin ▸ drills in, in the same panel, with "‹ Back" first.
+      const pip = await edge.tab(pinUrl('Pip', 'research'), { alone: true, metrics: PHONE });
+      await pip.until(`typeof joined !== "undefined" && joined && F.connected && ${pinDrawn} && matchMedia('(pointer: coarse)').matches`, 15000);
+      await pip.eval(`${nodeOf(pm.t1)}.querySelector('.obj-more').click()`);
+      await pip.until(`!!document.querySelector('.agm-menu .agm-mi[data-fold="pin"]')`, 3000);
+      await pip.eval(`document.querySelector('.agm-menu .agm-mi[data-fold="pin"]').click()`);
+      const drilled = await pip.until(`(() => { const d = document.querySelector('.agm-menu.drill'); return d && JSON.stringify([...d.querySelectorAll('.agm-mi')].map((b) => b.getAttribute('aria-label'))); })()`, 3000);
+      await pip.eval(`AGM.menu.close()`);
+      const pipProblems = pip.problems.slice();
+      pip.close();
+      report(drilled === JSON.stringify(['‹ Back', 'For the room', 'For me']) && pipProblems.length === 0, `on a phone ⋯ → 📌 Pin ▸ drills in with "‹ Back" (${drilled})${pipProblems.length ? ' — ' + pipProblems.slice(0, 2).join(' | ') : ''}`);
+
+      // For me: P opens the same submenu, and ↓ Enter pins it for Pia alone: her pages read "📌 Pinned for you" and "📌 For
+      // you"; nobody else's line moves.
+      await pia.until(`!document.querySelector('.agm-menu')`, 3000);
+      await clearToast(pia);
+      await pia.eval(`window.__sent = []; ${nodeOf(pm.t1)}.focus()`);
+      await press(pia, 'p');
+      await pia.until(`document.activeElement && document.activeElement.dataset.action === 'msg.pin'`, 3000);
+      await press(pia, 'ArrowDown');
+      await pressEnter(pia);
+      const mineToast = await pia.until(`F.pins.includes(${codeLiteral(pm.t1)}) && ${toastNow}`, 5000);
+      const mineLine = await pia.eval(lineOf(pm.t1));
+      const mineStrip = await pia.until(`(() => { const c = document.querySelector('#pinnedList .msg[data-id=${JSON.stringify(pm.t1)}]'); return c && c.querySelector('.pinned-mark').textContent.replace(/\\s+/g, ' ').trim(); })()`, 3000);
+      await sleep(300);
+      const othersLines = await Promise.all([bo, cal, oli].map((t) => t.eval(lineOf(pm.t1))));
+      const sentMine = await pia.eval(`JSON.stringify(window.__sent.filter(([ev]) => ev === 'pin' || ev === 'pin:mine').map(([ev, a]) => [ev, a.pinned === undefined ? a.on : a.pinned]))`);
+      report(mineToast === 'Pinned for you. · Undo' && mineLine === JSON.stringify(['📌 Pinned for you', true]) && mineStrip === '📌 For you' && othersLines.every((l) => l === JSON.stringify(['', true])) && sentMine === JSON.stringify([['pin:mine', true]]),
+        `P opens 📌 Pin ▸ and ↓ Enter pins for me: only Pia's page reads "📌 Pinned for you" and "📌 For you" (${mineToast}; ${mineLine}; ${mineStrip}; others ${othersLines.join(' ')}; ${sentMine})`);
+
+      // Pinned both ways: the item reads 📌 Unpin ▸ with both checked; unchecking For me leaves the room's pin.
+      await pia.eval(`new Promise((r) => socket.emit('pin', { messageId: ${codeLiteral(pm.t1)}, pinned: true }, r))`);
+      await pia.until(`findMessage(${codeLiteral(pm.t1)}).pinned`, 3000);
+      await pia.eval(`${nodeOf(pm.t1)}.querySelector('.obj-more').click()`);
+      await pia.until(`!!document.querySelector('.agm-menu .agm-mi[data-fold="pin"]')`, 3000);
+      const unpinFold = await pia.eval(`document.querySelector('.agm-menu .agm-mi[data-fold="pin"]').getAttribute('aria-label')`);
+      await pia.eval(`document.querySelector('.agm-menu .agm-mi[data-fold="pin"]').click()`);
+      const bothChecked = await pia.until(`(() => { const r = [...document.querySelectorAll('.agm-sub .agm-mi')].map((b) => b.getAttribute('aria-checked')); return r.length === 2 && JSON.stringify(r); })()`, 3000);
+      await pia.eval(`document.querySelector('.agm-sub .agm-mi[data-action="msg.pinMine"]').click()`);
+      const leftRoom = await pia.until(`!F.pins.includes(${codeLiteral(pm.t1)}) && findMessage(${codeLiteral(pm.t1)}).pinned && ${lineOf(pm.t1)}`, 5000);
+      report(unpinFold === 'Unpin' && bothChecked === JSON.stringify(['true', 'true']) && leftRoom === JSON.stringify(['📌 Pinned for everyone', true]),
+        `pinned both ways the item reads 📌 Unpin ▸ with both checked, and unchecking For me leaves the room's pin (${unpinFold}; ${bothChecked}; ${leftRoom})`);
+
+      // An observer: a flat 📌 Pin for me and no Pin ▸; P pins at once, with Undo; the room's pin in its strip has no door to
+      // take it off, its own has.
+      await oli.eval(`${nodeOf(pm.t2)}.querySelector('.obj-more').click()`);
+      const oliMenu = await oli.until(`(() => { const m = document.querySelector('.agm-menu:not(.agm-sub)'); if (!m) return ''; const b = m.querySelector('.agm-mi[data-action="msg.pinMine"]'); return JSON.stringify([!!b && b.getAttribute('aria-label'), !!m.querySelector('[data-fold="pin"], [data-action="msg.pin"]')]); })()`, 3000);
+      await press(oli, 'Escape');
+      await oli.until(NO_MENU, 3000);
+      await oli.eval(`${nodeOf(pm.t2)}.focus()`);
+      await press(oli, 'p');
+      const oliToast = await oli.until(`F.pins.includes(${codeLiteral(pm.t2)}) && ${toastNow}`, 5000);
+      const oliStrip = await oli.until(`(() => { const room = document.querySelector('#pinnedList .msg[data-id=${JSON.stringify(pm.t1)}]'); const own = document.querySelector('#pinnedList .msg[data-id=${JSON.stringify(pm.t2)}]');
+        return room && own && JSON.stringify([!!room.querySelector('.msg-acts [data-action^="msg.pin"], .msg-acts [data-fold]'), (own.querySelector('.msg-acts [data-action="msg.pinMine"]') || {}).ariaLabel || '']); })()`, 3000);
+      await oli.eval(`document.querySelector('#agmToast .toast-undo').click()`);
+      const oliUndone = await oli.until(`!F.pins.includes(${codeLiteral(pm.t2)}) && 'undone'`, 5000);
+      report(oliMenu === JSON.stringify(['Pin for me', false]) && oliToast === 'Pinned for you. · Undo' && oliStrip === JSON.stringify([false, 'Unpin for me']) && oliUndone === 'undone',
+        `an observer's menu holds a flat 📌 Pin for me and no Pin ▸; P pins at once with Undo; the room's pin in its strip has no door, its own one has (${oliMenu}; "${oliToast}"; ${oliStrip})`);
+
+      // A Board page (the simple view): a tapped message's row has 📌 Pin for me, then Unpin for me; its line reads "📌 Pinned
+      // for you"; the bar "📌 For you" with its words, after the room's "📌 For everyone", "1 of 2"; a tap on the bar's line
+      // goes to the message, outlined, and the bar shows the next pin.
+      // A tap on a message's words (a question's own words, never one of its answers).
+      const tapOn = async (t, id) => { await leftClick(t, await middleOf(t, `(${nodeOf(id)}.querySelector('.body .action-text') || ${nodeOf(id)}.querySelector('.body p') || ${nodeOf(id)}.querySelector('.body'))`)); };
+      await tapOn(bo, pm.t2);
+      const boRow = await bo.until(`(() => { const b = ${nodeOf(pm.t2)}.querySelector('.msg-response [data-action="msg.pinMine"]'); return b && b.getAttribute('aria-label'); })()`, 3000);
+      await bo.eval(`${nodeOf(pm.t2)}.querySelector('.msg-response [data-action="msg.pinMine"]').click()`);
+      const boLine = await bo.until(`F.pins.includes(${codeLiteral(pm.t2)}) && ${lineOf(pm.t2)}`, 5000);
+      await tapOn(bo, pm.t2);
+      const boRowAfter = await bo.until(`(() => { const b = ${nodeOf(pm.t2)}.querySelector('.msg-response [data-action="msg.pinMine"]'); return b && b.getAttribute('aria-label') === 'Unpin for me' && 'Unpin for me'; })()`, 3000);
+      await press(bo, 'Escape');
+      const boBars = [await bo.until(`(() => { const r = ${PIN_BAR}; return r && JSON.parse(r)[3] === '1 of 2' && r; })()`, 3000)];
+      const boBarNoUnpin = await bo.eval(`!document.querySelector('#bvPins [data-action="msg.pinMine"], #bvPins [data-action="msg.pin"]')`);
+      await bo.eval(`${nodeOf(pm.t4)}.scrollIntoView()`);
+      await bo.eval(`document.getElementById('bvPinLine').click()`);
+      const wentTo = await bo.until(`${nodeOf(pm.t1)}.classList.contains('found') && (() => { const r = ${PIN_BAR}; return r && JSON.parse(r)[3] === '2 of 2' && r; })()`, 3000);
+      boBars.push(wentTo);
+      await bo.eval(`document.getElementById('bvPinLine').click()`);
+      const wentToMine = await bo.until(`${nodeOf(pm.t2)}.classList.contains('found') && (() => { const r = ${PIN_BAR}; return r && JSON.parse(r)[3] === '1 of 2' && 'back to 1 of 2'; })()`, 3000);
+      report(boRow === 'Pin for me' && boLine === JSON.stringify(['📌 Pinned for you', true]) && boRowAfter === 'Unpin for me' && boBarNoUnpin
+        && boBars[0] === JSON.stringify(['BUTTON', '📌 For everyone', 'Pins: the agenda is final', '1 of 2']) && boBars[1] === JSON.stringify(['BUTTON', '📌 For you', 'Pins: lunch is at one', '2 of 2']) && !!wentToMine,
+        `the Board's simple view: a tapped message's row has 📌 Pin for me, then Unpin for me; its line reads "📌 Pinned for you"; the bar reads the room's pin first, "1 of 2", with no Unpin, and a tap goes to each in turn (${boRow}; ${boLine}; ${boBars.join(' → ')}; ${wentToMine})`);
+      await bo.eval(`new Promise((r) => socket.emit('pin:mine', { messageId: ${codeLiteral(pm.t2)}, on: false }, r))`);
+      await pia.eval(`new Promise((r) => socket.emit('pin', { messageId: ${codeLiteral(pm.t1)}, pinned: false }, r))`);
+      await Promise.all(pinTabs.map((t) => t.until(`!findMessage(${codeLiteral(pm.t1)}).pinned`, 5000)));
+      await bo.until(`document.getElementById('bvPins').hidden`, 3000);
+
+      // Cal in the full view (the admin's Chat view): a flat 📌 Pin for me in the message menu; P pins at once.
+      const pinAdmin = await connect(base, cookie);
+      const calSid = await cal.eval('socket.id');
+      const calFull = await emit(pinAdmin, 'admin:setView', { roomCode: pinHall, socketId: calSid, view: 'full' });
+      await cal.until(`F.view === 'full'`, 5000);
+      await cal.eval(`${nodeOf(pm.t3)}.querySelector('.obj-more').click()`);
+      const calMenu = await cal.until(`(() => { const m = document.querySelector('.agm-menu:not(.agm-sub)'); return m ? JSON.stringify([!!m.querySelector('.agm-mi[data-action="msg.pinMine"]'), !!m.querySelector('[data-fold="pin"], [data-action="msg.pin"]')]) : ''; })()`, 3000);
+      await press(cal, 'Escape');
+      await cal.until(NO_MENU, 3000);
+      await cal.eval(`${nodeOf(pm.t3)}.focus()`);
+      await press(cal, 'p');
+      const calPinned = await cal.until(`F.pins.includes(${codeLiteral(pm.t3)}) && ${lineOf(pm.t3)}`, 5000);
+      await cal.eval(`new Promise((r) => socket.emit('pin:mine', { messageId: ${codeLiteral(pm.t3)}, on: false }, r))`);
+      report(!!calFull.ok && calMenu === JSON.stringify([true, false]) && calPinned === JSON.stringify(['📌 Pinned for you', true]),
+        `On stage in the full view: a flat 📌 Pin for me in the message menu and no Pin for the room; P pins at once (${calMenu}; ${calPinned})`);
+
+      // A pinned question, in every view: pinned for the room it leaves every reader's feed (backstage, an observer, the
+      // Board's simple view and its full view) and is drawn whole in each one's pinned place; from the Board's bar its answers
+      // (48 px) and Answer in words… (asked in place, no prompt) answer it, and the bar then reads "You answered Yes · … ·
+      // Change"; scrolled to the feed's top and end, the feed draws no copy.
+      await pia.eval(`new Promise((r) => socket.emit('pin', { messageId: ${codeLiteral(pm.q1)}, pinned: true }, r))`);
+      const hidden = await Promise.all(pinTabs.map((t) => t.until(`findMessage(${codeLiteral(pm.q1)}).pinned && getComputedStyle(${nodeOf(pm.q1)}).display === 'none' && 'hidden'`, 5000)));
+      const placed = await Promise.all(pinTabs.map((t) => t.until(`document.querySelectorAll('#pinnedList .msg[data-id=${JSON.stringify(pm.q1)}], #bvPinQ .msg[data-id=${JSON.stringify(pm.q1)}]').length === 1 && (document.querySelector('#bvPinQ .msg[data-id=${JSON.stringify(pm.q1)}]') ? 'bar' : 'strip')`, 5000)));
+      const qBar = await bo.until(PIN_BAR, 3000);
+      const answers = await bo.eval(`JSON.stringify([...document.querySelectorAll('#bvPinQ .action-btn')].map((b) => Math.round(b.getBoundingClientRect().height)))`);
+      // The bar's height with the question, not answered yet and then answered, on a tablet (1180 × 820) and a phone (390 ×
+      // 844), recorded against §17.4's estimate (about 105 px and 101 px), and each within 30% of its viewport.
+      const BAR_SIZES = [[1180, 820, 105], [390, 844, 101]];
+      const barHeights = async () => {
+        const out = [];
+        for (const [w, h] of BAR_SIZES) {
+          await bo.send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 2, mobile: true });
+          out.push(await bo.until(`(async () => { await new Promise((r) => setTimeout(r, 100)); return innerWidth === ${w} && Math.round(document.getElementById('bvPins').getBoundingClientRect().height); })()`, 3000));
+        }
+        await bo.send('Emulation.clearDeviceMetricsOverride', {});
+        await bo.until(`innerWidth !== ${BAR_SIZES[1][0]}`, 3000);
+        return out;
+      };
+      const unansweredHeights = await barHeights();
+      await bo.eval(`document.querySelector('#bvPinQ .answer-words-btn').click()`);
+      const asked = await bo.until(`(() => { const a = document.querySelector('.agm-ask'); return a && !!a.querySelector('input, textarea') && 'asked in place'; })()`, 3000);
+      await press(bo, 'Escape');
+      await bo.until(`!document.querySelector('.agm-ask')`, 3000);
+      await bo.eval(`document.querySelector('#bvPinQ .action-btn[data-value="0"]').click()`);
+      const answeredBar = await bo.until(`(() => { const l = document.querySelector('#bvPinQ .bv-answered'); return l && /^You answered Yes · \\d{1,2}:\\d\\d( [AP]M)? · Change$/.test(l.textContent) && l.textContent; })()`, 5000);
+      const noCopy = await bo.eval(`(async () => { const f = document.getElementById('feed'); const seen = []; for (const top of [0, f.scrollHeight]) { f.scrollTop = top; await new Promise((r) => setTimeout(r, 100)); seen.push(f.querySelectorAll('.msg[data-id=${JSON.stringify(pm.q1)}]').length === 1 && getComputedStyle(${nodeOf(pm.q1)}).display === 'none'); } return seen.every(Boolean); })()`);
+      const answeredHeights = await barHeights();
+      const heightsOk = [unansweredHeights, answeredHeights].every((hs) => hs.every((x, i) => Number.isInteger(x) && x > 0 && x <= Math.ceil(BAR_SIZES[i][1] * 0.3)));
+      const heightsSaid = BAR_SIZES.map(([w, h, est], i) => `${unansweredHeights[i]} px not answered and ${answeredHeights[i]} px answered at ${w} × ${h} (estimate ${est} px)`).join('; ');
+      report(hidden.every((h) => h === 'hidden') && JSON.stringify(placed) === JSON.stringify(['strip', 'bar', 'strip', 'strip']) && qBar === JSON.stringify(['P', '📌 For everyone', 'Question', ''])
+        && JSON.parse(answers).length === 2 && JSON.parse(answers).every((h) => h >= 44) && asked === 'asked in place' && !!answeredBar && noCopy && heightsOk && !bo.problems.some((x) => /native prompt/.test(x)),
+      `a question pinned for the room leaves every reader's feed and is drawn whole in their pinned place (${placed.join(', ')}); from the Board's bar its answers (${answers} px) and Answer in words… (in place) answer it, and the bar reads "${answeredBar}"; the feed draws no copy at its top or end; the bar with the question, within 30% of the viewport: ${heightsSaid}`);
+
+      // A question pinned for one Board member leaves only their feed: the other Board page and the backstage page draw it in
+      // place, with its answers. With two pinned questions the bar reads "1 of 2", and a tap on its line shows the other;
+      // each is answered there; its 📌 Unpin for me puts it back in the feed between the same neighbours, its answers kept.
+      const before = await bo.eval(`JSON.stringify((() => { const n = ${nodeOf(pm.q2)}; return [n.previousElementSibling && n.previousElementSibling.dataset.id, n.nextElementSibling && n.nextElementSibling.dataset.id, findMessage(${codeLiteral(pm.q2)}).seq]; })())`);
+      await tapOn(bo, pm.q2);
+      await bo.until(`!!${nodeOf(pm.q2)}.querySelector('.msg-response [data-action="msg.pinMine"]')`, 3000);
+      await bo.eval(`${nodeOf(pm.q2)}.querySelector('.msg-response [data-action="msg.pinMine"]').click()`);
+      await bo.until(`F.pins.includes(${codeLiteral(pm.q2)}) && getComputedStyle(${nodeOf(pm.q2)}).display === 'none'`, 5000);
+      await sleep(300);
+      const elsewhere = await Promise.all([cal, pia].map((t) => t.eval(`getComputedStyle(${nodeOf(pm.q2)}).display !== 'none' && ${nodeOf(pm.q2)}.querySelectorAll('.action-btn').length === 2`)));
+      const twoBar = await bo.until(`(() => { const r = ${PIN_BAR}; return r && JSON.parse(r)[3] === '1 of 2' && r; })()`, 3000);
+      await bo.eval(`document.getElementById('bvPinLine').click()`);
+      const secondQ = await bo.until(`(() => { const r = ${PIN_BAR}; const q = document.querySelector('#bvPinQ .msg[data-id=${JSON.stringify(pm.q2)}]'); return r && q && JSON.parse(r)[3] === '2 of 2' && JSON.stringify([JSON.parse(r)[1], (q.querySelector('.msg-response [data-action="msg.pinMine"]') || {}).ariaLabel || '', document.getElementById('bvPinLine').getAttribute('aria-label')]); })()`, 3000);
+      await bo.eval(`document.querySelector('#bvPinQ .action-btn[data-value="1"]').click()`);
+      await bo.until(`(findMessage(${codeLiteral(pm.q2)}).responses || []).some((r) => r.uid === MY_UID && r.optionIndex === 1)`, 5000);
+      await bo.eval(`document.getElementById('bvPinLine').click()`);
+      const backToFirst = await bo.until(`(() => { const r = ${PIN_BAR}; return r && JSON.parse(r)[3] === '1 of 2' && !!document.querySelector('#bvPinQ .msg[data-id=${JSON.stringify(pm.q1)}]') && 'first'; })()`, 3000);
+      await bo.eval(`document.getElementById('bvPinLine').click()`);
+      await bo.until(`!!document.querySelector('#bvPinQ .msg[data-id=${JSON.stringify(pm.q2)}] .msg-response [data-action="msg.pinMine"]')`, 3000);
+      await bo.eval(`document.querySelector('#bvPinQ .msg[data-id=${JSON.stringify(pm.q2)}] .msg-response [data-action="msg.pinMine"]').click()`);
+      const backInFeed = await bo.until(`!F.pins.includes(${codeLiteral(pm.q2)}) && getComputedStyle(${nodeOf(pm.q2)}).display !== 'none' && JSON.stringify((() => { const n = ${nodeOf(pm.q2)}; return [n.previousElementSibling && n.previousElementSibling.dataset.id, n.nextElementSibling && n.nextElementSibling.dataset.id, findMessage(${codeLiteral(pm.q2)}).seq]; })())`, 5000);
+      const answersKept = await pia.until(`(() => { const q1 = findMessage(${codeLiteral(pm.q1)}); const q2 = findMessage(${codeLiteral(pm.q2)}); return [q1, q2].every((q) => (q.responses || []).some((r) => r.name === 'Bo')) && JSON.stringify([q1, q2].map((q) => q.responses.find((r) => r.name === 'Bo').optionIndex)); })()`, 5000);
+      report(elsewhere.every(Boolean) && twoBar === JSON.stringify(['BUTTON', '📌 For everyone', 'Question', '1 of 2']) && secondQ === JSON.stringify(['📌 For you', 'Unpin for me', 'Pinned for you, 2 of 2: Question. Next pin']) && backToFirst === 'first'
+        && backInFeed === before && answersKept === JSON.stringify([0, 1]),
+      `a question pinned for one Board member leaves their feed alone; with two the bar reads "1 of 2", its line shows the other ("2 of 2", 📌 Unpin for me), each answered there; unpinned it is back between the same neighbours with its answers (${twoBar}; ${secondQ}; ${backInFeed}; ${answersKept})`);
+      await pia.eval(`new Promise((r) => socket.emit('pin', { messageId: ${codeLiteral(pm.q1)}, pinned: false }, r))`);
+      const q1Back = await Promise.all(pinTabs.map((t) => t.until(`!findMessage(${codeLiteral(pm.q1)}).pinned && getComputedStyle(${nodeOf(pm.q1)}).display !== 'none' && 'back'`, 5000)));
+      report(q1Back.every((x) => x === 'back'), `unpinned for the room, the question is back in every reader's feed (${q1Back.join(', ')})`);
+
+      // The admin's view of Bo draws his pins, both kinds, and his pin doors disabled with the support view's words, sending
+      // nothing.
+      await bo.eval(`new Promise((r) => socket.emit('pin:mine', { messageId: ${codeLiteral(pm.q2)}, on: true }, r))`);
+      await pia.eval(`new Promise((r) => socket.emit('pin', { messageId: ${codeLiteral(pm.t1)}, pinned: true }, r))`);
+      const boUid = await bo.eval('MY_UID');
+      const boView = await edge.tab(`${base}/app.html?code=${pinHall}&name=Bo&role=board&adminView=1&viewOf=${encodeURIComponent(boUid)}`);
+      await boView.until(`typeof joined !== "undefined" && joined && F.view === 'simple' && F.pins.includes(${codeLiteral(pm.q2)}) && !!document.getElementById('bvPinLine') && !document.getElementById('bvPins').hidden`, 15000);
+      await boView.eval(COUNT_SENDS);
+      const viewBar = await boView.eval(PIN_BAR);
+      await boView.eval(`document.getElementById('bvPinLine').click()`);
+      const viewDoor = await boView.until(`(() => { const b = document.querySelector('#bvPinQ .msg-response [data-action="msg.pinMine"]'); return b && JSON.stringify([b.getAttribute('aria-disabled'), b.title]); })()`, 3000);
+      await boView.eval(`document.querySelector('#bvPinQ .msg-response [data-action="msg.pinMine"]').click()`);
+      await sleep(300);
+      const viewSent = await boView.eval(`JSON.stringify(window.__sent.filter(([ev]) => ev === 'pin' || ev === 'pin:mine'))`);
+      report(viewBar === JSON.stringify(['BUTTON', '📌 For everyone', 'Pins: the agenda is final', '1 of 2']) && viewDoor === JSON.stringify(['true', 'This is Bo\'s view — act from your own page.']) && viewSent === '[]',
+        `the admin's view of Bo draws his pins, the room's first, and his pin doors disabled with whose view it is, sending nothing (${viewBar}; ${viewDoor}; ${viewSent})`);
+      const pinProblems = [...pinTabs, boView].flatMap((t) => t.problems);
+      report(pinProblems.length === 0, `the pins' pages ran clean${pinProblems.length ? ': ' + pinProblems.slice(0, 3).join(' | ') : ''}`);
+      for (const t of [...pinTabs, boView]) t.close();
+      pinAdmin.close();
+    }
+
     // A screen, inside the Screens dialog: its menu and its asks open in the dialog, Escape closes them and the dialog stays;
     // Rename… is a field in place and Remove… asks in place, never a native dialog.
     const doorScreen = await hallView.eval(`new Promise((r) => socket.emit('display:create', { code: ROOM, name: 'Doors spare' }, (x) => r(x.display.id)))`);
@@ -2903,6 +3175,8 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     // The composer: Send is its act on the row, named for where it sends; its ⋯, a right-click and Shift+F10 on Send open
     // the same list (✨ Draft a reply, Send, To ▸ — Press's list names Smoke AGM, May send in… above —, 🔥 Priority,
     // Attach a file…); 🔥 is a checked toggle there; the text field keeps the browser's own menu.
+    // (once a toast the steps above left has gone from over the composer, as a person waits for it)
+    await research.until(`!document.querySelector('.agm-toast.show')`, 15000);
     const composeDoors = await doorsOf(research, 'compose', 'textPane', `composeObject('text')`, { hit: '.send-btn', bar: '.send-btn', focus: `textPane.querySelector('.send-btn')` });
     await research.eval(`textPriBtn.click()`);
     await research.eval(`textPane.querySelector('.compose-more').click()`);
@@ -5362,8 +5636,8 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
         files: document.querySelectorAll('.msg[data-type="file"]').length,
       });
     })()`);
-    report(shown === JSON.stringify({ composer: false, header: ['header.people', 'header.size', 'header.theme', 'header.leave'], acts: ['msg.copy'], bars: 0, answer: false, answerWords: false, reactions: false, files: shown && JSON.parse(shown).files }) && JSON.parse(shown).files > 0,
-      `the Viewer is offered nothing the server refuses: Copy text alone, no pin, reaction, answer, Send to, Look or Download on any message, a file's included (${shown})`);
+    report(shown === JSON.stringify({ composer: false, header: ['header.people', 'header.size', 'header.theme', 'header.leave'], acts: ['msg.copy', 'msg.pinMine'], bars: 0, answer: false, answerWords: false, reactions: false, files: shown && JSON.parse(shown).files }) && JSON.parse(shown).files > 0,
+      `the Viewer is offered nothing the server refuses: Copy text and 📌 Pin for me alone (a pin for itself), no pin for the room, reaction, answer, Send to, Look or Download on any message, a file's included (${shown})`);
     report(await viewerHall.eval(`document.getElementById('movedLine').hidden`), 'a page opened in this browser after What moved\'s Got it does not say it again');
     await readOldWords('the hall page opened by a Viewer account, Observer', viewerHall);
     const pagesRead = Object.keys(oldWords);
@@ -6145,7 +6419,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       const bodyAt = await meg.eval(`(() => { const n = [...feed.querySelectorAll('.msg[data-id]')].find((x) => (findMessage(x.dataset.id) || {}).text === 'Tom has the roving mic.'); const r = n.querySelector('.body p').getBoundingClientRect(); return { x: r.left + 10, y: r.top + r.height / 2 }; })()`);
       await rightClick(meg, bodyAt);
       const noMenu = await meg.eval(`!AGM.menu.isOpen() && !document.querySelector('.agm-menu')`);
-      // The second door: a tap on an older waiting message brings its own Got it (never Got all) and Reply.
+      // The second door: a tap on an older waiting message brings its own Got it (never Got all), Reply and 📌 Pin for me.
       await tapAt(meg, `#feed .msg[data-id="${(await meg.eval(`allMessages.find((m) => m.text === 'Slides 3 to 6 are loaded for the resolutions.').id`))}"] .body p`);
       const second = await meg.until(`(() => { const m = allMessages.find((x) => x.text === 'Slides 3 to 6 are loaded for the resolutions.'); const b = [...messagesById.get(m.id).querySelectorAll('.msg-response button')]; return b.length ? JSON.stringify(b.map((x) => x.textContent.trim())) : null; })()`, 5000);
       // Reply quotes it, the composer focused; Escape takes the reply back.
@@ -6153,8 +6427,8 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       const replying = await meg.until(`(() => { const c = document.getElementById('replyChip'); return c && document.activeElement === document.getElementById('directorInput') && c.textContent; })()`, 3000);
       await press(meg, 'Escape');
       const unreplied = await meg.until(`!document.getElementById('replyChip') && 'gone'`, 3000);
-      report(noKey && noMenu && second === JSON.stringify(['👍Got it', '↩Reply']) && /Replying to Ana Ribeiro/.test(replying || '') && unreplied === 'gone',
-        `the simple view acts on Tab, Enter and Escape alone (R begins nothing, a right-click opens no menu of AGMessage's); a tap on an older waiting message brings its own 👍 Got it and ↩ Reply; Reply quotes, Escape takes it back (${JSON.stringify({ noKey, noMenu, second, replying })})`);
+      report(noKey && noMenu && second === JSON.stringify(['👍Got it', '↩Reply', '📌Pin for me']) && /Replying to Ana Ribeiro/.test(replying || '') && unreplied === 'gone',
+        `the simple view acts on Tab, Enter and Escape alone (R begins nothing, a right-click opens no menu of AGMessage's); a tap on an older waiting message brings its own 👍 Got it, ↩ Reply and 📌 Pin for me; Reply quotes, Escape takes it back (${JSON.stringify({ noKey, noMenu, second, replying })})`);
       // Got all 4 on the newest plain message waiting (the file shown since): four 👍, one per waiting plain message, each
       // then "👍 You: got it"; backstage reads "👍 Margaret … got it".
       const gotLabel = await meg.eval(`(() => { const b = [...messagesById.get(allMessages.find((m) => m.type === 'file').id).querySelectorAll('.msg-response button')].find((x) => x.dataset.action === 'msg.ack'); const t = b.textContent.trim(); b.click(); return t; })()`);

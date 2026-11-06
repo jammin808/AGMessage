@@ -86,6 +86,14 @@ const keptInView = (m) => !!m && (!!m.pinned
   || (m.type === 'help' && !(m.help && m.help.state === 'resolved'))
   || (m.type === 'action' && !(Array.isArray(m.responses) && m.responses.length > 0)));
 /**
+ * What a page keeps in view for one person: what every page keeps (keptInView), and the messages that person pinned for
+ * themselves (`mine`, their ids: the pinned place draws them however old, as the room's pins).
+ */
+function keptBy(mine) {
+  const own = new Set(Array.isArray(mine) ? mine.filter((id) => typeof id === 'string') : []);
+  return own.size ? (m) => keptInView(m) || (!!m && own.has(m.id)) : keptInView;
+}
+/**
  * A file as the first open's index names it: its message's id, its address, its name and its kind, and whether it is
  * transfer-only (one AGMessage never opens).
  */
@@ -170,6 +178,9 @@ class RoomStore {
     // read at this start (its files busy, or both torn) is still one, and loads again once it can be; what is kept beside a
     // hall (its stage record) goes only with a hall in neither this nor `rooms`.
     this.hallsOnDisk = new Set();
+    // The rooms whose files the last load found on disk, by their keys (a hall's, a side room's), loaded or not: what is
+    // kept for a room elsewhere (a person's pins in it) goes only with a room in neither this nor the rooms loaded.
+    this.roomsOnDisk = new Set();
     // Told of each snapshot written: (ms it took — the stall a commit waits — the room's message count). Health's peaks.
     this.onCompact = null;
   }
@@ -201,6 +212,7 @@ class RoomStore {
     try { names = fs.readdirSync(this.dir); } catch (e) { if (e.code !== 'ENOENT') throw e; }
     const stems = new Set(names.map((f) => (/^(.+)\.json(\.bak)?$/.exec(f) || [])[1]).filter(Boolean));
     this.hallsOnDisk = new Set([...stems].filter((stem) => RoomStore.validCode(stem)));
+    this.roomsOnDisk = new Set([...stems].map((stem) => (RoomStore.validCode(stem) ? stem : (SIDE_RE.exec(stem) || [])[2])).filter(Boolean));
     const sides = [];
     for (const stem of stems) {
       const side = SIDE_RE.exec(stem);
@@ -573,16 +585,18 @@ class RoomStore {
   /**
    * What a page opens a room with (a join that names no change it holds): its newest WINDOW messages (`history`, oldest
    * first), and of those before them only what a page keeps in view however old it is (`older`, in the room's order: every
-   * pinned message, help not yet resolved and every question nobody has answered yet); whether messages before the window
-   * were left out (`more`), which `before` reads; and every file of the room (`files`: its id, address, name and kind, in
-   * the room's order), so a page lists them all without holding their messages. Its run of messages is bounded by the
-   * window, whatever the room's whole history; what it keeps in view from before them and its file index are not, and
-   * grow with the day. Each message is as a reader is sent it (asRead).
+   * pinned message, help not yet resolved and every question nobody has answered yet, and the messages the page's person
+   * pinned for themselves, `mine`: their ids); whether messages before the window were left out (`more`), which `before`
+   * reads; and every file of the room (`files`: its id, address, name and kind, in the room's order), so a page lists them
+   * all without holding their messages. Its run of messages is bounded by the window, whatever the room's whole history;
+   * what it keeps in view from before them and its file index are not, and grow with the day (a person's own pins by at
+   * most 50 a room, lib/pages.js). Each message is as a reader is sent it (asRead).
    */
-  firstOpen(room, n = WINDOW) {
+  firstOpen(room, n = WINDOW, mine = []) {
     const list = room.messages;
     const start = Math.max(0, list.length - n);
-    const older = list.slice(0, start).filter(keptInView);
+    const kept = keptBy(mine);
+    const older = list.slice(0, start).filter(kept);
     const read = (m) => asRead(room, m);
     return { history: list.slice(start).map(read), older: older.map(read), more: older.length < start, files: list.filter((m) => m && m.type === 'file').map(fileEntry) };
   }
@@ -590,18 +604,19 @@ class RoomStore {
   /**
    * The `n` messages before a change (`beforeSeq`, a page's oldest message's seq): those before the first message whose
    * seq is it or later (all of them where none is), oldest first, each as a reader is sent it (asRead), and whether any
-   * came before those that a first open does not carry (`more`): the page that reads back holds those it keeps in view
-   * already (a first open's `older`, a message pinned since read with `readMessage`), so where only they are left there
-   * is nothing more to show. A message kept from before messages carried their seq is read by its place, as it stands
-   * among the others.
+   * came before those that a first open does not carry (`more`, its person's own pins `mine` among what it carries): the
+   * page that reads back holds those it keeps in view already (a first open's `older`, a message pinned since read with
+   * `readMessage`), so where only they are left there is nothing more to show. A message kept from before messages
+   * carried their seq is read by its place, as it stands among the others.
    */
-  before(room, beforeSeq, n = WINDOW) {
+  before(room, beforeSeq, n = WINDOW, mine = []) {
     const list = room.messages;
     let end = list.findIndex((m) => m && Number.isInteger(m.seq) && m.seq >= beforeSeq);
     if (end < 0) end = list.length;
     const start = Math.max(0, end - n);
+    const kept = keptBy(mine);
     let more = false;
-    for (let i = 0; i < start && !more; i++) more = !keptInView(list[i]);
+    for (let i = 0; i < start && !more; i++) more = !kept(list[i]);
     return { history: list.slice(start, end).map((m) => asRead(room, m)), more };
   }
 

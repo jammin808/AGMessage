@@ -76,7 +76,8 @@ test('client values are read by their type: a value String() cannot convert reac
   const made = await emit(ctl, 'display:create', { code: hall, name: 'Lectern monitor' });
   const anon = await connect(base); sockets.push(anon);
   const guest = await connect(base); sockets.push(guest);
-  assert.ok((await emit(guest, 'join', { roomCode: hall, name: 'Rita', role: 'research' })).ok);
+  const rita = await emit(guest, 'join', { roomCode: hall, name: 'Rita', role: 'research' });
+  assert.ok(rita.ok);
   // A message of the guest's own, so a reaction's `on` is read: an unknown message is refused before it.
   const posted = await emit(guest, 'message', { type: 'text', text: 'react to me' });
   assert.ok(posted.ok, JSON.stringify(posted));
@@ -167,6 +168,8 @@ test('client values are read by their type: a value String() cannot convert reac
     // screen (a locked hall's guest, and an open hall's): the push named is read before anything is looked up or sent.
     [lockedGuest, 'stage:propose', { text: U, withTake: U }],
     [guest, 'stage:propose', { text: U, withTake: U }], [guest, 'stage:send', { withTake: U }], [guest, 'stage:send', { text: U, withTake: U, messageId: U }],
+    // A pin for oneself, its message and its `on` by type, from a seated guest: no message, then no pin or unpin; nothing kept.
+    [guest, 'pin:mine', { messageId: U, on: U }], [guest, 'pin:mine', { messageId: posted.id, on: U }], [guest, 'pin:mine', U],
   ];
   // What each is answered: the field it could not read named, and nothing shown, numbered or reported.
   const KINDS = 'Choose what to show: back to chat, Stagewatch, the clock, holding, blank, a web page, a document, a picture or a quote.';
@@ -217,6 +220,12 @@ test('client values are read by their type: a value String() cannot convert reac
     if (ev === 'admin:setClock') {
       const typed = arg && typeof arg === 'object' && (arg.show === U || arg.locked === U);
       assert.deepEqual(r, { ok: false, error: typed ? 'Choose Off, Time of day or Countdown.' : 'That person is not in this room now.' }, ev + ' ' + JSON.stringify(arg));
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      continue;
+    }
+    if (ev === 'pin:mine') {
+      const words = arg && typeof arg === 'object' && arg.messageId === posted.id ? 'Say pin or unpin.' : 'Message not found';
+      assert.deepEqual(r, { ok: false, error: words }, ev + ' ' + JSON.stringify(arg));
       await new Promise((resolve) => setTimeout(resolve, 250));
       continue;
     }
@@ -282,5 +291,6 @@ test('client values are read by their type: a value String() cannot convert reac
   assert.ok(!audit.body.entries.some((e) => e.action === 'room.guestWeb'), 'a switch in the wrong type switches nothing, and so is not audited');
   assert.ok(!audit.body.entries.some((e) => e.action === 'stagewatch.send' || e.action === 'stagewatch.propose'), 'a line with a push in the wrong type sends nothing, and so is not audited');
   assert.equal((await send(ctl, 'page:status', { code: hall })).board.seq, 0, 'and nothing was numbered');
+  assert.deepEqual((await send(guest, 'join', { roomCode: hall, name: 'Rita', role: 'research', uid: rita.identity })).pins, [], 'and nothing pinned for the guest');
   assert.deepEqual((await send(ctl, 'room:settings', { code: hall })).sendFrom, [], 'and no room may send into the hall');
 });

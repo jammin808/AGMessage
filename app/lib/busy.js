@@ -55,6 +55,8 @@ const INPUT = new Set([
   'admin:setView', 'admin:setClock',
   // A download asked for: a person's act on a file; and a file's confidential mark set or removed.
   'file:download', 'file:mark',
+  // A message pinned or unpinned for the person alone: a person's act on their own page, held for them.
+  'pin:mine',
 ]);
 const READS = new Set([
   'join', 'seen', 'myRooms', 'board:watch', 'userState:push', 'userState:requestPeers', 'stage:targets', 'display:list',

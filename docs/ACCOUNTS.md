@@ -122,8 +122,19 @@ choice is refused ("Choose one to lock it."). Their choice takes a lock off with
 own. A guest's is kept by their uid in `pages.json` beside their chat view, an account's on the account
 (`clock`, told last on its row); each of the person's pages and the admin's view of them is told it at once (`clock`),
 nothing is closed, and the admin's people list carries it (`clock`) beside `view`. The join's answer says the admin's
-choice as its last key (`clock`). The device's own choice is the device's: told to the admin's support view of the
-person alone, never kept on the server, never audited. `/api/halls` gives each hall's row the seat the account joins its Main room with (`seat`) and
+choice (`clock`). The device's own choice is the device's: told to the admin's support view of the
+person alone, never kept on the server, never audited.
+
+**Pins, by seat.** A pin is for the room (the default: the message's own, which everyone in the room sees, On stage
+included) or for me (the person's alone: on every device of an account, a guest's in that browser). For the room is
+backstage's, a side room's Member's and the admin's off stage: a seat that may post and is not On stage. For me is every
+seat's: an observer and a Viewer account post nothing, so they pin for nobody else, and an On stage seat, the admin seated there included, pins
+for itself only (the owner's rule: "pinning for everyone is for backroom teams, not the board or presenters on stage").
+The server refuses the room's pin On stage first, "Pinning for everyone is for the backstage team.", then from a seat
+that may not post, "Observers can read but not post."; a pin for oneself is kept by the person's key (an account's id, a
+guest's uid) and the room in `pages.json`, at most 50 a room, never audited, and the admin's support view makes none
+("Pins are the person's own."). The join's answer appends the person's pins in that room (`pins`) after `clock`, as its
+last key. `/api/halls` gives each hall's row the seat the account joins its Main room with (`seat`) and
 the hall's side rooms it may enter (`rooms`, each with its key, name, people, guest code where it may know it, whether the
 code admits and its seat there), and lists apart the side rooms it may enter in a hall it does not see, by that hall's
 name and never its key; the halls board does the same (`rooms` on each row, `yourRooms` apart). Each way in carries that

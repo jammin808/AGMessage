@@ -71,6 +71,15 @@
  * and its lock, kept as their chat view is, and tells their pages and the admin's view of them by the named effect
  * `clockChanged`. Whoever sets a chat view sets the choice; the lock is "the admin's" alone (conn.theAdmin: the host token,
  * or an account whose role is admin, never a manager granted settings.manage).
+ *
+ * A pin for oneself (plan 7-§17.5): `pin:mine {messageId, on}` keeps, for the person alone (their key: an account's on every
+ * device of it, a guest's by its uid), the id of a message of the room they sit in, or takes it off (`on`, true or false),
+ * in `pages.json` (lib/pages.js `pin`), at most 50 a room; an id whose message has gone is dropped at the person's next
+ * write there. Every seat that reads the room has it, On stage, observers and Viewer accounts included; the admin's support
+ * view has none, since it joins under the admin browser's own uid, never the person's. It is not a room's op: the message
+ * is unchanged and nobody else is told. The person's pages in that room and the admin's view of them are told their pins
+ * now (`pins {ids}`, by the named effect `pinsChanged`), and the answer carries them. It is never audited: a person's act
+ * on their own page. Asked again (a held send after a drop), it sets the same state and says it stood already.
  */
 const { str } = require('../guard');
 const { cleanPage, askedOf, canShow, describePage, personKey, layerOf, filesOf, ARRIVALS, FILE_KINDS, STAGE_FULL } = require('../pages');
@@ -125,6 +134,11 @@ const VIEWS = Object.freeze(['', 'simple', 'full']);
 /** Each view in an audit row's words, as the Accounts page's rows say it (lib/http-accounts.js). */
 const VIEW_SAID = Object.freeze({ '': 'by seat', simple: 'simple', full: 'full' });
 const VIEW_WORDS = 'Choose By seat, Simple or Full.';
+/** A pin for oneself from the admin's support view, which joins under the admin browser's uid, never the person's. */
+const PINS_OWN = 'Pins are the person\'s own.';
+const PIN_WORDS = 'Say pin or unpin.';
+const PINS_FULL = '50 pins in this room at most: unpin one first.';
+const NO_MESSAGE = 'Message not found';
 /** The person a chat view is set for has no page in that room now (or the room is gone). */
 const NOT_IN_ROOM = 'That person is not in this room now.';
 /** What a confidential file asked onto a holding slide is refused with: a holding image goes on screens (plan 4-§5.14, S3). */
@@ -164,7 +178,7 @@ const pagesWords = (n) => n + ' page' + (n === 1 ? '' : 's');
  * @param {object} ctx    the takes context, frozen: none of lib/gate.js `ROOM_SENDS` (`contexts`)
  */
 function register(socket, conn, ctx) {
-  const { store, audit, accounts, linkFor, sendersOf, pages, stageRecord, tickets, hallPages, takeSends, holdingOf, pagesChanged, pageHidden, selfHosts, viewChanged, clockChanged, stageSource, stageCheck, freshUpload, stageDropped, inUseRooms, screensShowing, markFresh, madeUrls, sendTo } = ctx;
+  const { store, audit, accounts, linkFor, sendersOf, pages, stageRecord, tickets, hallPages, takeSends, holdingOf, pagesChanged, pageHidden, selfHosts, viewChanged, clockChanged, pinsChanged, stageSource, stageCheck, freshUpload, stageDropped, inUseRooms, screensShowing, markFresh, madeUrls, sendTo } = ctx;
 
   const write = (action, target, words) => audit.write(conn.actor(), action, target, words, socket.data.ip);
   /**
@@ -734,6 +748,28 @@ function register(socket, conn, ctx) {
     }
     clockChanged(key);
     answer({ ok: true, clock: next });
+  });
+
+  // A pin for oneself (plan 7-§17.5): seated in the room, a token, and a right to read it, which every seat holds; never
+  // from the admin's support view (its uid is the admin browser's); the message in this room; `on` true or false. Kept
+  // under the person's key for this room (the ids whose messages have gone dropped as it is written); the person's pages
+  // here and the admin's view of them are told their pins. As it stood already: said so, nothing written.
+  socket.on('pin:mine', (args, ack) => {
+    if (!conn.gate(ack, { bucket: conn.writes, may: 'hall.view' })) return;
+    const answer = conn.ok(ack);
+    if (socket.data.adminView) return answer({ ok: false, error: PINS_OWN });
+    const a = isRecord(args) ? args : {};
+    const room = conn.room();
+    const me = conn.me();
+    const id = str(a.messageId);
+    if (!id || !room.byId.has(id)) return answer({ ok: false, error: NO_MESSAGE });
+    if (typeof a.on !== 'boolean') return answer({ ok: false, error: PIN_WORDS });
+    const key = personKey(me.uid, !!me.acct);
+    const done = key ? pages.pin(key, room.code, id, a.on, (x) => room.byId.has(x)) : null;
+    if (!done) return answer({ ok: false, error: NO_MESSAGE });
+    if (done.full) return answer({ ok: false, error: PINS_FULL });
+    if (done.changed) pinsChanged(key, room.code);
+    answer({ ok: true, ids: done.ids, ...(done.changed ? {} : { already: true }) });
   });
 }
 

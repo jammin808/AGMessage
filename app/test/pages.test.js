@@ -347,7 +347,8 @@ test('a Board take puts away the older takes and answers of everyone seated On s
 });
 
 test('the bounds: 200 person takes and 500 answers a hall, 5,000 guests\' views, the oldest going first', () => {
-  assert.deepEqual(BOUNDS, { views: 5000, personTakes: 200, answers: 500, earlier: 20, stageFiles: 200, withdrawn: 200 });
+  // The persons' pins for themselves are bounded as the views are (5,000 persons), and 50 a room (plan 7-§17.5).
+  assert.deepEqual(BOUNDS, { views: 5000, pins: 5000, pinsPerRoom: 50, personTakes: 200, answers: 500, earlier: 20, stageFiles: 200, withdrawn: 200 });
   const p = store();
   const key = (i) => 'u:ubound' + String(i).padStart(6, '0');
   for (let i = 0; i < 201; i++) {
@@ -450,6 +451,69 @@ test('a guest\'s clock or countdown: the admin\'s choice and its lock, kept besi
   assert.equal(p.setView('uguest00001', null, 8), true);
   assert.deepEqual(onDisk(p).views, {});
   assert.deepEqual(p.clockOf({ toString: () => 'uguest00001' }), { show: null, locked: false });
+});
+
+test('a person\'s pins for themselves: by their key and the room, in the order pinned, once each; gone ids dropped at the next write; 50 a room; a room forgotten; 5,000 persons, the oldest written first', () => {
+  const p = store();
+  const LEGAL = 'LEGAL123';
+  assert.deepEqual(p.pinsOf(BEN, HALL), [], 'none until one is pinned');
+  assert.deepEqual(p.pin(BEN, HALL, 'm1', true), { ids: ['m1'], changed: true });
+  assert.deepEqual(p.pin(BEN, HALL, 'm1', true), { ids: ['m1'], changed: false }, 'twice keeps one, and writes nothing');
+  assert.deepEqual(p.pin(BEN, HALL, 'm2', true), { ids: ['m1', 'm2'], changed: true });
+  assert.deepEqual(p.pin(BEN, LEGAL, 'm9', true), { ids: ['m9'], changed: true });
+  assert.deepEqual(p.pin(ANA, HALL, 'm2', true), { ids: ['m2'], changed: true }, 'each person their own');
+  assert.deepEqual(onDisk(p).pins, { [BEN]: { [HALL]: ['m1', 'm2'], [LEGAL]: ['m9'] }, [ANA]: { [HALL]: ['m2'] } });
+  // Unpinned: gone, the room's entry with its last pin, the person's record with its last room.
+  assert.deepEqual(p.pin(BEN, LEGAL, 'm9', false), { ids: [], changed: true });
+  assert.deepEqual(p.pin(BEN, LEGAL, 'm9', false), { ids: [], changed: false });
+  assert.deepEqual(onDisk(p).pins[BEN], { [HALL]: ['m1', 'm2'] });
+  // An id whose message has gone (`live` says so) is dropped as the person next writes there, the one written kept.
+  assert.deepEqual(p.pin(BEN, HALL, 'm3', true, (id) => id !== 'm1'), { ids: ['m2', 'm3'], changed: true });
+  assert.deepEqual(p.pin(BEN, HALL, 'm3', true, () => false), { ids: ['m3'], changed: true }, 'the one asked for is kept, its message checked by the asker');
+  // What is not kept: no person, a room that is no room's key, an id that is none, `on` that is no boolean.
+  for (const args of [['', HALL, 'm1', true], ['x:abc', HALL, 'm1', true], [BEN, 'hall2', 'm1', true], [BEN, 'A.B', 'm1', true], [BEN, HALL, '', true], [BEN, HALL, 'a b', true], [BEN, HALL, { toString: () => 'm1' }, true], [BEN, HALL, 'm1', 'yes'], [BEN, HALL, 'm1', undefined]]) {
+    assert.equal(p.pin(...args), null, JSON.stringify(args));
+  }
+  assert.deepEqual(p.pinsOf(BEN, HALL), ['m3'], 'a refused pin changes nothing');
+  assert.deepEqual([p.pinsOf({ toString: () => BEN }, HALL), p.pinsOf(BEN, '__proto__'), p.pinsOf(BEN, 'toString')], [[], [], []]);
+  // Fifty a room: the 51st refused, nothing written; one unpinned makes room.
+  const q = store();
+  for (let i = 0; i < 50; i++) assert.equal(q.pin(CY, HALL, 'n' + i, true).changed, true);
+  assert.deepEqual(q.pin(CY, HALL, 'n50', true), { full: true });
+  assert.equal(q.pinsOf(CY, HALL).length, 50);
+  assert.equal(q.pin(CY, HALL, 'n0', true).changed, false, 'one already pinned is no 51st');
+  assert.equal(q.pin(CY, HALL, 'n0', false).changed, true);
+  assert.deepEqual(q.pin(CY, HALL, 'n50', true).ids.slice(-2), ['n49', 'n50']);
+  // A room reset or removed: every person's pins in it go, the persons named; their other rooms stay.
+  assert.equal(p.pin(BEN, LEGAL, 'm9', true).changed, true);
+  assert.deepEqual(p.forgetPinsIn([HALL]), [ANA, BEN], 'in the order their records were last written');
+  assert.deepEqual(onDisk(p).pins, { [BEN]: { [LEGAL]: ['m9'] } });
+  assert.deepEqual([p.forgetPinsIn([HALL]), p.forgetPinsIn([]), p.forgetPinsIn('LEGAL123'), p.forgetPinsIn(null)], [[], [], [], []], 'none held there: nothing to write');
+  assert.deepEqual(p.forgetPinsIn([LEGAL, 'NOPE99']), [BEN]);
+  assert.equal(Object.hasOwn(onDisk(p), 'pins'), false, 'written once there are any');
+  // The rooms anyone holds pins in, each once (a start's sweep reads them); a person gone (an account removed) goes whole.
+  assert.deepEqual(p.pinnedRooms(), []);
+  for (const [who, room] of [[BEN, HALL], [BEN, LEGAL], [ANA, LEGAL]]) assert.equal(p.pin(who, room, 'm1', true).changed, true);
+  assert.deepEqual(p.pinnedRooms(), [HALL, LEGAL]);
+  assert.deepEqual([p.forgetPinsOf(BEN), p.forgetPinsOf(BEN), p.forgetPinsOf({ toString: () => ANA })], [true, false, false]);
+  assert.deepEqual(onDisk(p).pins, { [ANA]: { [LEGAL]: ['m1'] } });
+  p.forgetPinsOf(ANA);
+  // 5,001 persons: the record written longest ago goes, whatever pinned last.
+  const r = store();
+  for (let i = 0; i < 5000; i++) assert.equal(r.pin('u:upin' + i, HALL, 'm1', true).changed, true);
+  assert.equal(r.pin('u:upin0', HALL, 'm2', true).changed, true, 'written again, so the newest');
+  assert.equal(r.pin('u:upin5000', HALL, 'm1', true).changed, true);
+  assert.equal(r.pins.size, BOUNDS.pins);
+  assert.deepEqual([r.pinsOf('u:upin0', HALL), r.pinsOf('u:upin1', HALL), r.pinsOf('u:upin2', HALL)], [['m1', 'm2'], [], ['m1']]);
+  // Read back: each room's ids once, the newest 50; a room, a person or an id of the wrong shape dropped.
+  const file = path.join(folder(), 'pages.json');
+  const many = Array.from({ length: 55 }, (_, i) => 'k' + i);
+  fs.writeFileSync(file, JSON.stringify({ v: 1, views: {}, halls: {}, pins: {
+    [BEN]: { [HALL]: ['m1', 'm1', 5, 'a b', 'm2'], [LEGAL]: many, hall2: ['m3'], OTHER2: 'm4', EMPTY1: [] },
+    [ANA]: { bad: ['m1'] }, 'x:nobody': { [HALL]: ['m1'] }, [CY]: ['m1'], 'u:PROTO': { [HALL]: ['m1'] },
+  } }).replace('"u:PROTO"', '"__proto__"'));
+  const back = new Pages(file);
+  assert.deepEqual(Object.fromEntries(back.pins), { [BEN]: { [HALL]: ['m1', 'm2'], [LEGAL]: many.slice(-50) } });
 });
 
 test('status: a mark and its words, person first, from each page\'s report on the take it holds', () => {

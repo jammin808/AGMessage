@@ -456,10 +456,13 @@
           draw(r, v || gone(r.item));
         }
       },
-      /** Open the submenu of the item `id` (a key's door: E reacts, F sends to), the focus on its first item. */
+      /**
+       * Open the submenu of the item `id` (a key's door: E reacts, F sends to), or of the fold `id` names (P opens 📌 Pin ▸,
+       * as the object's 📌 button does), the focus on its first item.
+       */
       expand(id) {
         if (!open || open.handle !== handle) return;
-        const r = top.rows.find((x) => x.item.id === id);
+        const r = top.rows.find((x) => x.item.id === id || (!x.item.id && !!x.item.fold && x.item.fold === id));
         if (r && r.item.submenu && !r.item.disabled) openSub(r, { focus: true });
       },
       close: () => { if (open && open.handle === handle) close(true); },

@@ -480,11 +480,12 @@ body[data-role="research"] .file.clickable:hover { outline: 2px solid var(--acce
 @media (pointer: coarse) {
   .msg-act, .obj-more { min-width: var(--target-touch); min-height: var(--target-touch); }
 }
-/* Pinned action prompts are hoisted to the pinned strip — hide the original
-   in the feed so it isn't shown twice. The pinned-strip clone lives in
-   #pinnedList (outside .feed) so it stays visible. Unpinning flips
-   data-pinned back to "0" and the original reappears in place. */
-.feed .msg[data-type="action"][data-pinned="1"] { display: none; }
+/* A question pinned in a way this reader sees (for the room, data-pinned; for them, data-pinned-mine) is drawn in their
+   pinned place alone, the strip or the simple view's bar, where it is answered, in every view: hidden from the feed while
+   it stays pinned, and back in its place, by its seq and with its answers, once it is unpinned. */
+.feed .msg[data-type="action"][data-pinned="1"], .feed .msg[data-type="action"][data-pinned-mine="1"] { display: none; }
+/* The panel's pinned files say how each is pinned, after the name, which gives way first */
+.pinned-item .pin-kind { flex: 0 0 auto; margin-left: auto; font-size: var(--fs-xs); color: var(--c-ink-muted); white-space: nowrap; }
 .msg .body p { margin: 0; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }
 
 /* File body in feed */
@@ -2177,7 +2178,7 @@ body[data-pushed][data-role="observer"] .doc-panel .doc-actions, body[data-pushe
    bottom, left, margin-left and margin-right, never inset or a logical property (Chrome 84 to 86 have neither), and every
    colour is a token, in both themes. Nothing in it moves. */
 .ask-word, .bv-said { display: none; }
-.bv-tabs[hidden], .bv-strip[hidden], .bv-alone[hidden], .bv-empty[hidden], .bv-sheet[hidden], .bv-strip-more[hidden] { display: none; }
+.bv-tabs[hidden], .bv-strip[hidden], .bv-alone[hidden], .bv-empty[hidden], .bv-sheet[hidden], .bv-strip-more[hidden], .bv-pins[hidden], .bv-pin-count[hidden] { display: none; }
 /* A Board member's 👍 on a backstage page: who got it, in words beside the reactions */
 .got-line { font-size: var(--fs-sm); color: var(--c-ink-muted); align-self: center; }
 
@@ -2284,7 +2285,7 @@ body[data-view="simple"] .feed { padding: var(--sp-3) max(16px, env(safe-area-in
 body[data-view="simple"] .feed > *, body[data-view="simple"] .bv-strip, body[data-view="simple"] .bv-alone,
 body[data-view="simple"] #directorForm, body[data-view="simple"] .reply-chip { width: 100%; max-width: 46rem; margin-left: auto; margin-right: auto; }
 body[data-view="simple"] .feed .msg, body[data-view="simple"] .feed .msg.mine, body[data-view="simple"] .feed .msg.priority,
-body[data-view="simple"] .feed .msg.is-action, body[data-view="simple"] #pinnedList .msg {
+body[data-view="simple"] .feed .msg.is-action, body[data-view="simple"] #pinnedList .msg, body[data-view="simple"] #bvPinQ .msg {
   align-self: stretch; max-width: 46rem; background: transparent; border: 0; border-left: 4px solid transparent; border-radius: 0;
   box-shadow: none; padding: var(--sp-1) 0 var(--sp-1) var(--sp-3); font-size: calc(var(--bv-body) * var(--zoom-msg, 1)); color: var(--c-ink);
 }
@@ -2341,6 +2342,26 @@ body[data-view="simple"] .bv-strip-acts { margin-top: 0; }
 .bv-strip-more { grid-column: 1 / -1; font-size: calc(var(--fs-sm) * var(--zoom-msg, 1)); color: var(--c-ink-muted); }
 @media (max-height: 699.98px) { .bv-strip-words { -webkit-line-clamp: 2; } }
 @media (max-height: 499.98px) { .bv-strip-words { -webkit-line-clamp: 1; } }
+
+/* The pinned bar, under the header and a phone's tabs while there is a pin: one line of 48 px (44 px on a phone or under
+   500 px tall), the room's pins first; a pinned question drawn whole under it, up to 30% of the viewport, past which it
+   scrolls within the bar */
+.bv-pins { flex: 0 0 auto; max-height: 30vh; overflow: auto; padding: 0 max(16px, env(safe-area-inset-left)); background: var(--c-surface-raised); border-bottom: 1px solid var(--c-border); }
+.bv-pin-head, .bv-pin-q { width: 100%; max-width: 46rem; margin: 0 auto; }
+.bv-pin-line {
+  display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-height: var(--target-answer); margin: 0; padding: 0; border: 0; background: none;
+  font: inherit; font-size: calc(var(--fs-md) * var(--zoom-msg, 1)); color: var(--c-ink); text-align: left;
+}
+button.bv-pin-line { cursor: pointer; }
+.bv-pin-kind { flex: 0 0 auto; color: var(--c-action); font-weight: 600; white-space: nowrap; }
+.bv-pin-words { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bv-pin-count { flex: 0 0 auto; font-size: calc(var(--fs-sm) * var(--zoom-msg, 1)); color: var(--c-ink-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+@media (max-width: 600px), (max-height: 499.98px) { .bv-pin-line { min-height: var(--target-touch); } }
+/* The question in the bar: its words at the body size and weight 600, under the line that names it; its author's line is
+   the bar's own */
+#bvPinQ .msg > header { display: none; }
+#bvPinQ .msg { padding-bottom: var(--sp-2); }
+#bvPinQ .msg .action-text { font-weight: 600; }
 
 /* Over the composer: ↓ n new (48 px), Nobody backstage, and the empty feed's words */
 body[data-view="simple"] .new-below { min-height: var(--target-answer); }

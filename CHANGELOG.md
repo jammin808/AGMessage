@@ -6042,6 +6042,106 @@ predicate)
   passed, so a fit its box's first size sets off is never read before it runs.
 - The papers: `README.md`, `README.txt`, `docs/ACCOUNTS.md`, `docs/ANALYSIS.md` (the pure set), `CLAUDE.md`.
 
+**A pin for the room or for me; On stage for me only** (the plan's Part 7, unit 20c, its §17.5 with §17.1's `pin` and
+`pin:mine` rows, its facts `pin` and `pinMine`, the catalogue's pin rows and their fold, "The pin doors by seat" and §17.2's
+pinned bar, as Part 7 §0.1-§0.3 amend Part 1 §1.10, §2.7, §3.3 and §6, Part 5 §15.5 and §16.2-§16.8 and Part 4 §7.7; the
+owner's answer B1, "they can pin messages for themselves", the pin rule of 2026-10-27, "A pin can be for the room (default)
+(including On stage - essential for action prompts), or personal" and "A board member cannot pin for the room, only
+themselves", and the three readings answered the same day)
+- **Two kinds of pin.** **For the room** is the message's own pin, as before: a room's op every page in the room hears
+  (`pin {messageId, pinned}`, `pinUpdate`), shown to everyone, On stage included, and kept in the room's record and the
+  transcript. It is made only by a seat that may post and is not On stage: **On stage it is refused first**, the admin
+  seated there included, "Pinning for everyone is for the backstage team.", then an observer or a Viewer account with
+  today's "Observers can read but not post.". **For me** (`pin:mine {messageId, on}`, new, the takes module) keeps a
+  message's id for the person alone, by their key (`a:<account id>`, so every device of the account shares them;
+  `u:<uid>` for a guest's browser) and the room, in `pages.json`'s `pins` (the `pages` lane; at most 50 a room, the 51st
+  refused "50 pins in this room at most: unpin one first.", and 5,000 persons, the record written longest ago going
+  first: a bound of its own beside the views' 5,000, where the plan counted them inside it, since one shared count would
+  let a guest's pins, made under fresh browser identities, push out the admin's chat-view and clock choices); it is
+  **every seat's** that reads the room, On stage, observers and Viewer accounts included; it never changes
+  the message, is no room's op and reaches nobody else: the person's pages in that room and the admin's view of them are
+  told their pins (`pins {ids}`), and the answer carries them. It passes the one gate first, a `writes` token and then
+  `hall.view`, as every verb of a handler module does, so the support view's refusal comes after the token, where
+  §17.5 put it before; nothing the request names is read before either. Twice keeps one; `on` that is no boolean is refused "Say
+  pin or unpin."; a message not in the room "Message not found"; from the admin's support view, which joins under the
+  admin browser's uid, "Pins are the person's own.", nothing kept under either key. An id whose message has gone is passed
+  by on the page, never told at a join, and dropped at the person's next pin write in that room; a room reset drops every
+  person's pins in it (their pages told) and a room removed (its hall's rooms with a hall) drops them too, unless it
+  comes back at the next start; a start drops every pin in a room neither loaded nor on disk, and an account removed
+  takes its pins with it. Neither kind of pin is audited; a pin for oneself is in no transcript, context, hello or AI
+  brief (the room's stays "📌 pinned" in the transcript).
+- **The join's answer appends `pins`** (this person's ids in this room whose messages it still holds, in the order
+  pinned; the support view's, the person's it shows) after `clock`, its last key, and a first open carries every message
+  they name however old (`older`, beside the room's pins), so the pinned place is drawn whole at once, however many: a
+  read back counts them as carried, and a page reads one back by its id only after a resume; the catalogue's facts gain `pin` (the room's: a seat that posts and is
+  not On stage), `pinMine` (every seat) and `pins`. The gate (`lib/gate.js`) reads a third right, `hall.view`, with its
+  words; `pin:mine` asks no more, and the busy line counts it as a person's input.
+- **One door, the room's first.** A seat that may pin both ways (backstage, a side room's Member, the admin off stage)
+  has **📌 Pin ▸ For the room · For me** in a message's ⋯, right-click and Shift+F10, each a `menuitemcheckbox` checked where
+  it is pinned that way, For the room first and focused (P, then Enter, pins for the room; P, ↓, Enter for me), and
+  **📌 Unpin ▸** while it is pinned both ways; on a touch screen it drills in with "‹ Back". A seat that pins for itself
+  alone (an observer, a Viewer account, On stage in the full view, the admin On stage) has a flat **📌 Pin for me** /
+  **📌 Unpin for me**, and P acts at once. The Preview's 📌 is the same: the fold as one menu button, or the flat Pin for
+  me. **Undo by kind** for 10 s: "Pinned for the room. · Undo", "Pinned for you. · Undo", "Unpinned for the room. ·
+  Undo", "Unpinned for you. · Undo"; a refusal says the server's words. Offline, For the room is disabled with
+  "Not connected — AGMessage is reconnecting."; For me is held by the outbox, shows ◷ and goes when the page is back.
+- **Every pinned place holds both kinds, the room's first** (the newest message first), then the person's own (the newest
+  pin first): the full view's pinned strip (a seat with no panel lists its pinned files there too) and the panel's pinned
+  files, each entry saying "📌 For everyone", "📌 For you" or "📌 For everyone · for you", its door unpinning the kind it
+  shows (both: 📌 Unpin ▸) and none where this seat may not unpin it (the room's, for an observer or On stage); that door
+  is 📌, named "Unpin for the room" or "Unpin for me", where §17.5 drew ✕: ✕ is the fault mark, and no act's icon is a
+  mark; a message's
+  line says "📌 Pinned for everyone", "📌 Pinned for you" or "📌 Pinned for everyone · for you", muted.
+- **The simple view's pinned bar**, under the header and a phone's tabs while there is a pin: one line, 48 px (44 px on a
+  phone or under 500 px tall), "📌 For everyone" or "📌 For you", the message's words cut to one line, "1 of 2" where there
+  are several; on a message it goes to it in the feed, outlined for 2 s (no motion where the person asks for less), and
+  shows the next pin. A tapped message's row (the second door) gains **📌 Pin for me** / **📌 Unpin for me** after Got it
+  and Reply; it is the simple view's one pin door (with 📌 Unpin for me on a question pinned for oneself, in the bar): the
+  room's pin has none there, and neither has a file in the Look panel.
+- **A pinned question, in every view** (the owner, 2026-10-27: "A pinned question becomes hidden in the scrolling chat,
+  and becomes visible in scrolling chat when unpinned."): a question pinned for the room, or for this person, is hidden
+  from their feed (`data-pinned`, `data-pinned-mine`; ↓ n new does not count it and the roving feed skips it) and drawn
+  whole in their pinned place alone, the strip or the bar, where it is answered: in the bar its words, its answers (48
+  px), Answer in words… (asked in place) and, once answered, "You answered Yes · 14:10 · Change"; one pinned for the person
+  has 📌 Unpin for me there, its one unpin door in the simple view; the line on a question shows the next pin ("Next
+  pin"), and is no button while it is the only pin. One pinned for the person leaves only that person's feed (their pages
+  and their support view). Unpinned, it is back in its place by its seq, its answers kept.
+- **The support view** draws the person's pins, both kinds, and their pin doors disabled with "This is Kim's view — act
+  from your own page.", sending nothing.
+- **Got it clears** (and its rule that a message pinned either way is never cleared) lands with the admin's On stage
+  settings, unit 20d.
+- **Rolling back:** 0.5.1 reads no `pages.json`; a room's pin is unchanged.
+- Tests: `test/pins.test.js` (new, end to end: `pin:mine` from a Board guest, a backstage guest, an observer and a Viewer
+  account, each kept under its own key in `pages.json` and told to that person's other pages and support view alone, no
+  room op; a Board account's tablet to its phone and support view; twice once, unpinned, the refusals in their words, the
+  support view's under either key; the room's pin heard by every page, refused an observer and a Viewer by today's words
+  and the Board guest, the Board account and the host's admin On stage first; a question pinned for the room answered On
+  stage; a deleted message's id never told at a join and dropped at the next write; the 51st refused; a reset dropping
+  them, its pages told; a side room and a hall removed dropping them, the hall's other rooms keeping theirs; an account
+  removed taking its own; a start dropping those in a room no longer here; no audit row for either kind),
+  `test/server.test.js` (45 pins for oneself older than the window, every one carried with the first open, in the room's
+  order, and read back alike),
+  `test/pages.test.js` (the store: order, once, gone ids, 50 a room, rooms forgotten, the rooms held, a person
+  forgotten, 5,000 persons, read back by shape), `test/units.test.js` (a first open and a read back carrying a person's
+  own pins),
+  `test/catalog.test.js` (the facts; the fold, its checks and labels, flat where alone, its key and the strip's doors;
+  every seat's set; the simple view's second door with 📌; a pinned file's doors in the list and the Preview's, none in
+  the simple view;
+  offline, held), `test/menus.test.js` (`pin` refused as both Board fixtures in the On stage words and as an observer and a
+  Viewer in today's; `pin:mine` open to every seat; the join's keys), `test/inputs.test.js` (`pin:mine`'s typed cases),
+  `test/units.test.js` (the gate's `hall.view`), `test/modules.test.js` (`pinsChanged` and `ownPins` in the contexts),
+  `test/server.test.js` and `test/takes.test.js` (the join's last keys), and the browser smoke (a backstage page's 📌 Pin
+  ▸, For the room focused, Enter, every page's line, the strip and the Board's bar, Undo; P ↓ Enter for me on that page
+  alone; both ways and unchecking For me; an observer's flat door, P and Undo, and no door on the room's pin; the Board's
+  tapped row, its line, its bar's order, "1 of 2" and its taps; the full view's flat door and P; a pinned question hidden
+  from every reader's feed and answered in the bar, Answer in words in place, "You answered …"; a question pinned for one
+  Board member alone, two in the bar, each answered, unpinned back between its neighbours; the bar's height with a
+  pinned question, not answered and answered, at 1180 × 820 and 390 × 844, recorded against §17.4's estimate (105 px
+  and 101 px) and within 30% of the viewport: measured 150 px and 169 px on the tablet, 187 px and 159 px on the phone,
+  above the estimate, which a device's reading checks; the support view's doors disabled; a pinned file both ways in the panel;
+  offline, For the room disabled and For me ◷).
+- The papers: `README.md`, `README.txt`, `SECURITY.md`, `docs/ACCOUNTS.md` (pins by seat), `docs/ANALYSIS.md` (the gate's rights, the typed case), `CLAUDE.md`.
+
 **Fixed**
 - An upload whose stored path is no file (a folder in its place) is refused as one that could not be checked, on every
   platform. The archive's check opened it and, on Windows, read a folder as an empty file, so it was refused in the
