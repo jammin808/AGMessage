@@ -411,11 +411,13 @@ test('a check that cannot finish refuses the file in words of its own, and a typ
     for (const [ext, words] of [['docx', 'a docx that could not be checked'], ['xlsx', 'an xlsx that could not be checked'], ['png', 'a png that could not be checked']]) {
       assert.deepEqual(await uploadcheck.refusalOf(gone, ext), { status: 503, error: uploadcheck.UNCHECKED, words, failed: 'ENOENT' }, ext + ': a file gone before its check');
     }
-    // A read that fails once the file is open: a folder where the file was.
+    // A folder where the file was is no file to check, on every platform (Windows opens a folder and reads it as empty,
+    // which the archive's check would read as a file packed some other way).
     const folder = path.join(dir, 'a-folder');
     fs.mkdirSync(folder);
-    const failed = await uploadcheck.refusalOf(folder, 'pptx');
-    assert.deepEqual([failed.status, failed.error, failed.words, typeof failed.failed], [503, uploadcheck.UNCHECKED, 'a pptx that could not be checked', 'string']);
+    for (const [ext, words] of [['pptx', 'a pptx that could not be checked'], ['png', 'a png that could not be checked']]) {
+      assert.deepEqual(await uploadcheck.refusalOf(folder, ext), { status: 503, error: uploadcheck.UNCHECKED, words, failed: 'EISDIR' }, ext + ': a folder');
+    }
     assert.equal(uploadcheck.UNCHECKED, 'That file could not be checked, so it wasn\'t shared. Try sending it again.');
     // The types it does not read are kept as their first bytes allowed, read or not.
     for (const ext of ['pdf', 'txt', 'md', 'csv', 'xls']) assert.equal(await uploadcheck.refusalOf(gone, ext), null, ext);

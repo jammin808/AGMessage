@@ -5,13 +5,14 @@
  * transfer-only type is never opened.
  *
  * Invariants:
- *   - Fail closed: a check that cannot finish (its file could not be read) refuses the file, never keeps it unread, and
- *     says so in words of its own, to the uploader (try again) and to the audit ("could not be checked"), never in the
+ *   - Fail closed: a check that cannot finish (its file could not be read, or is no file: a folder, which Windows opens
+ *     and reads as empty) refuses the file, never keeps it unread, and says so in words of its own, to the uploader (try again) and to the audit ("could not be checked"), never in the
  *     words of a check that found something.
  *   - A refusal is `{status, error, words, failed?}`: the answer's status, the uploader's words, the audit's words (never
  *     the file's name), and for a check that could not finish the code of what failed, for the console. No synchronous
  *     call, and nothing logged here.
  */
+const fs = require('node:fs');
 const zipcheck = require('./zipcheck');
 const imagesize = require('./imagesize');
 const { STAGE_TYPES, TRANSFER_ONLY } = require('./pages');
@@ -32,6 +33,8 @@ async function refusalOf(file, ext) {
   if (!check) return null;
   let verdict;
   try {
+    const kind = await fs.promises.stat(file);
+    if (!kind.isFile()) throw Object.assign(new Error('not a file'), { code: kind.isDirectory() ? 'EISDIR' : 'ENOTFILE' });
     verdict = await check.run(file, ext);
   } catch (e) {
     return { status: 503, error: UNCHECKED, words: check.words.auditWords(ext, { why: 'unchecked' }), failed: (e && e.code) || 'its read failed' };

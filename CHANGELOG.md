@@ -4897,6 +4897,14 @@ Web pages need rights of their own.", confirmed "Right", the readings S5 and S13
   the same lockfile entries. The fences find nothing new; nothing that ships changed.
 
 **Fixed**
+- An upload whose stored path is no file (a folder in its place) is refused as one that could not be checked, on every
+  platform. The archive's check opened it and, on Windows, read a folder as an empty file, so it was refused in the
+  words for a file packed some other way; Linux could not read it at all. The upload check now asks first whether it
+  is a file, for every type it checks. CI's Windows run found it; nothing a person uploads takes that path.
+- The browser smoke's HTML probe, which hands `parseInert` an inline handler on purpose, keeps its refusal to itself.
+  Chrome on CI's Linux runner tried the handler from the template's content, and the page's policy refused it, so the
+  backstage documents page counted a violation that was the probe's. Nothing ran then or now; the probe says how many
+  times the browser tried, each refused, and only that one refusal is taken off that page's problems.
 - "Leave the hall?", asked from the Board's chat view's ⋯ sheet, stays open while the page draws what it hears. At each
   refresh (a message, a person come or gone) the page reads an ask's object again and closes the ask when the object is
   gone; it had no reading for the sheet, so the first refresh closed the ask under the person's finger and said the

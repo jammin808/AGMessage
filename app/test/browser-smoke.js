@@ -1027,15 +1027,27 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       report(stuck.r.state === 'failed' && stuck.r.words === 'the file took too long to read' && stuck.after.workers === stuck.before && afterStuck.state === 'shown' && newWorker.workers === stuck.before + 1,
         `a PDF whose first page is not drawn by its deadline fails with its words and takes the shared worker with it; the next PDF makes a new one and draws (${JSON.stringify({ stuck, afterStuck, newWorker })})`);
 
-      // HTML is parsed inert: nothing in it runs, loads or applies, and what comes back is plain data.
+      // HTML is parsed inert: nothing in it runs, loads or applies, and what comes back is plain data. The HTML carries
+      // one inline handler of its own; a browser may still try it from the template's content, and the page's policy refuses
+      // it: that one refusal, in the probe's own window, is the probe's and not the page's, so it is said here and taken off
+      // this tab's problems; any other stays one.
+      const beforeInert = docsR.problems.length;
       const inert = await docsR.eval(`(async () => {
+        const tried = [];
+        const heard = (e) => tried.push(e.effectiveDirective + ' ' + e.blockedURI);
+        document.addEventListener('securitypolicyviolation', heard);
         const m = await import('/docmodel.mjs');
         const r = m.parseInert('<meta http-equiv="refresh" content="0;url=/halls.html"><style>body{display:none}</style><script>window.__ran=1</script><p>Shown <span hidden>SECRETA</span><span style="display:none">SECRETB</span><b style="visibility:hidden">SECRETC</b></p><template>SECRETD</template><noscript>SECRETE</noscript><img src="/x.png" onerror="window.__ran=2">');
         await new Promise((res) => setTimeout(res, 300));
-        return { blocks: structuredClone(r.blocks), ran: window.__ran || 0, metas: document.querySelectorAll('meta[http-equiv]').length, shown: getComputedStyle(document.body).display !== 'none', path: location.pathname };
+        document.removeEventListener('securitypolicyviolation', heard);
+        return { blocks: structuredClone(r.blocks), ran: window.__ran || 0, metas: document.querySelectorAll('meta[http-equiv]').length, shown: getComputedStyle(document.body).display !== 'none', path: location.pathname, tried };
       })()`);
-      report(JSON.stringify(inert.blocks) === JSON.stringify([{ kind: 'p', text: 'Shown', at: { block: 1 } }]) && inert.ran === 0 && inert.metas === 0 && inert.shown && inert.path === '/app.html',
-        `parseInert reads HTML through an inert template into plain data: no script ran, no refresh or style reached the page, hidden text left out (${JSON.stringify(inert)})`);
+      const probesOwn = (x) => /^log: Executing inline event handler violates the following Content Security Policy directive 'script-src 'self''/.test(x);
+      const refusedAt = docsR.problems.findIndex((x, i) => i >= beforeInert && probesOwn(x));
+      inert.refused = refusedAt >= 0 ? docsR.problems.splice(refusedAt, 1).length : 0;
+      report(JSON.stringify(inert.blocks) === JSON.stringify([{ kind: 'p', text: 'Shown', at: { block: 1 } }]) && inert.ran === 0 && inert.metas === 0 && inert.shown && inert.path === '/app.html'
+        && inert.tried.every((t) => /^script-src(-attr)? inline$/.test(t)),
+        `parseInert reads HTML through an inert template into plain data: no script ran (its one handler tried by this browser ${inert.refused} time(s), refused by the page's policy), no refresh or style reached the page, hidden text left out (${JSON.stringify(inert)})`);
     }
 
     // The outbox, in a hall of its own (a listener seated there hears each message the hall gets): a send while the
