@@ -126,7 +126,12 @@ test('a first start makes its folders, machine key, certificate, secret and sett
   fs.writeFileSync(path.join(f.AGM_DATA_DIR, 'settings.json'), JSON.stringify({ aiKey: 'kept in clear by 0.2' }));
   const srv = await h.startServer({ ...f, AGM_TLS: '1' });
   t.after(() => h.stopServer(srv.child));
-  for (const made of ['data/rooms/', 'data/secret.key', 'uploads/', 'keys/machine.key', 'keys/tls.json']) assert.ok(made in tree(base), made + ' made');
+  // Each looked for by its name, never by reading the folder whole: the server is serving and may be saving its settings
+  // (a file written beside settings.json and renamed over it) while the test looks.
+  for (const made of ['data/rooms/', 'data/secret.key', 'uploads/', 'keys/machine.key', 'keys/tls.json']) {
+    const at = path.join(base, made);
+    assert.ok(fs.existsSync(at) && fs.statSync(at).isDirectory() === made.endsWith('/'), made + ' made');
+  }
   const login = await h.api(srv.base, 'POST', '/api/admin/login', { token: h.TOKEN });
   const admin = await h.connect(srv.base, login.cookie);
   t.after(() => admin.close());

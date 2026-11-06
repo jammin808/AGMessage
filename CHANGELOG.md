@@ -5740,6 +5740,9 @@ confidential line's rule, §5.9.10's three steps and S6, is the confidential mar
   words for a file packed some other way; Linux could not read it at all. The upload check now asks first whether it
   is a file, for every type it checks, and so does a file's check at its first take on the stage, which shows no such
   file. CI's Windows run found it; nothing a person uploads takes that path.
+- A test of a first start no longer reads the data folder whole while the server may be saving its settings beside it
+  (a file written next to `settings.json` and renamed over it): a run on Node 24 listed that file, which was gone when
+  it was read. It looks for each folder and file it wants by name. Nothing that ships changed.
 - The browser smoke starts its browser on a port the browser takes itself, read from its profile's `DevToolsActivePort`,
   and waits 30 s for it. It chose a free port and handed it over, with 15 s to answer; CI's Linux run once found no
   answer there, the browser started and the run over before a page was opened. Nothing that ships changed.
