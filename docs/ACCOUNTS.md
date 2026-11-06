@@ -503,7 +503,9 @@ task, so either one there stops it with code 3.
 
 `data/audit.jsonl`: one line per action that matters — sign-ins (and failed ones), the first admin, accounts and rights,
 halls and their Stagewatch, the admin's room controls (a hall made from the admin page or over HTTP, its messages cleared
-with the files that left the disk, a message removed with whose it was and its kind, a guest's role, roles locked or
+with the files that left the disk, the takes it ended on people's pages and its stage record cleared (a side room's: the
+entries sent from it dropped from its hall's, "…, 2 entries dropped from the stage record"; a record whose file could not
+be read at the start, "…, the stage record not cleared on disk: its file could not be read (EBUSY)"), a message removed with whose it was and its kind, a guest's role, roles locked or
 unlocked with the seats kept, a guest let forward into another hall or no longer (that hall by its name, never its
 code), a person sent out, the AI's minutes posted, a hall removed (`hall.remove`, with how many other rooms went with it,
 how many accounts were given it or its rooms no more, and its rooms by name and key, each of which has its own

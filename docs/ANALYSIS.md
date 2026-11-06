@@ -213,6 +213,18 @@ to the server's tables (`lib/pages.js` `STAGE_TYPES`, `lib/guard.js` `TRANSFER_T
 stage's too, and no other page script names a table of its own: a type added on the server and not on the pages, or
 the other way, fails the build.
 
+The stage record (the plan's Part 4, unit 30) adds `lib/stagerecord.js`, at 0 synchronous calls and named by the guard:
+it reads each hall's record once after the hold, and removes a record's files, through `fs.promises`, and writes only
+through its lanes. Each hall's lane is made at its first write and named in health beside the others, so health's
+`saves.built` now counts the lanes made and not closed (`WriteLane.close()`, a hall removed), and the test that holds it
+equal to the distinct lanes named reads a hall's lane, and its going, end to end. A lane's `clearBak()` (a reset, a
+withdrawal) goes through the atomic writer's one backup copy, a copy of what it writes (`freshBak`); a copy another
+program refuses fails the write once the file is written, so the lane keeps the clear and tries it again, never counting
+it landed while the `.bak` holds what it cleared. A lane that is its file's one writer (`whole`, the record's) keeps a
+file it knows whole as `.bak` unread (`knownWhole`), as the rooms' snapshots do, so a full hall's save reads nothing.
+`lib/resilience.js` stays at 13 and `server.js` at 15. The takes module is given the record through its context
+(`stageRecord`, a row of the contexts fence); it registers no verb, so the inputs fuzz and the wire fence are unchanged.
+
 0.6.0's start rules (nothing written before the hold; a secret made only where there is none) move four caps, each with
 its reason. `lib/resilience.js` goes to 13: `publishOnce`, the one way a file that must never be written over is made
 (whole in a temporary file, then a hard link that refuses one already there), adds its link and the removal of its

@@ -167,6 +167,15 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   choice kept on the device); Send now replaces what the speaker's screen shows, the operator's message included, and
   every Stagewatch output, NDI and its viewer page show it. The server builds the line from the take it stored and
   refuses one that differs; the room's line names its length, never its words.
+- **What was shown to the Board is recorded, in the transcript and the minutes.** Each take on people's pages, and each
+  take-down: who showed it and from which seat, to whom, what it showed (a file by its name and page, a web page by its
+  host), a quote's words, the line sent with it to the speaker's screen, what the pages reported ("✓ on 6 of 6", "on 4 of
+  6 within 10 s", "2 as a picture") and when it was withdrawn, which leaves the entry in place. A room's transcript
+  interleaves it with the messages by time ("📺 14:02 — Ana (backstage) showed the Board (6 pages): ❝ a table cell from
+  Q3.xlsx, 'Sheet1'!C4 — “Revenue Q3 £4.2m” · ✓ on 6 of 6"; a side room's, what was sent from it), and the AI's minutes
+  are given it. Kept per hall in `data/stage/` (500 entries, the transcript saying how many earlier ones are no longer
+  kept); clearing the Main room's messages clears it, clearing a side room's drops what came from it, and removing a hall
+  takes it.
 - **Messages that land.** Action prompts with tap-to-answer buttons; documents (PDF, Word, Excel, PowerPoint, CSV,
   Markdown, text, images) shared for download, opened in a person's own panel (👁 Look, 👁 Preview), shown to the Board or
   on screens, PDFs on iPads from iPadOS 16.4 (pdf.js's
@@ -302,7 +311,8 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   certificate a person confirmed.
   [docs/NODES.md](docs/NODES.md)
 - **AI drafts (optional, Claude).** Answers for the backstage team from the thread and the document on stage, buttons
-  for action prompts, the minutes — always a draft a person edits and sends. Everything else works offline.
+  for action prompts, the minutes (from the thread and what was shown to the Board) — always a draft a person edits and
+  sends. Everything else works offline.
 - **Secure by default.** Encrypted connections (HTTPS on the same port, `/tls` to trust it), pinned links between show
   systems, sealed keys, a strict Content-Security-Policy, uploads checked by content (and a Word, Excel or PowerPoint
   file's archive and a picture's size checked before anyone opens them: one with macros, packed past AGMessage's bounds,

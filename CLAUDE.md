@@ -69,10 +69,11 @@ reliability (`docs/DESIGN.md` says which practice lives where). Every build is v
   once a page uses it), and fails on a socket listener in any other shipped file or in a form the
   fuzz does not read.
 - **Every store** on disk goes through a `WriteLane` that is in `saveLanes()` (flushed at stop and crash, named in
-  health; health's `saves.built` counts the lanes made and `saves.named` the distinct lanes in that list, and a test
-  holds them equal); one server per data folder (the folder lock), and nothing is written before the lock and the port
-  are held: a store is read at load and written only once `serving` (`firstWrites` makes the folders, keys and secret; a
-  save asked earlier waits; a stop or crash before then saves nothing). A secret or key file is made only where there is
+  health; health's `saves.built` counts the lanes made and not closed (a removed hall's stage record closes its lane) and
+  `saves.named` the distinct lanes in that list, and a test holds them equal); one server per data folder (the folder
+  lock), and nothing is written before the lock and the port are held: a store is read at load and written only once
+  `serving` (`firstWrites` makes the folders, keys and secret; a save asked earlier waits; a stop or crash before then
+  saves nothing). A secret or key file is made only where there is
   none (`readText`'s ENOENT, then `publishOnce`), never over one that could not be read; a settings file that could not be
   read (EBUSY, EACCES) is never saved over nor stood in for by its `.bak`, and an act that would save it is refused with
   why. The one exception is the internet link's Turn on (`admin:tunnelStart`), whose act is the link itself: it still
@@ -201,6 +202,7 @@ A sentence and the files; the detail is the code's and the CHANGELOG's. A test n
 | A document drawn in a page: bounded readers into one block model (text, CSV, Markdown, a deck's outline, HTML parsed in one place and never put in the page), the drawing with its page box, zoom, find and kept place, one pdf.js worker and a deadline, Office files read in the document worker under a deadline, Word's pages and hidden text, what each seat draws of hidden parts; what the backstage team picks in it (a PDF's text layer and structure tree, a grid's cells and labels, a region) and the Preview's bars that show it; words pasted or typed into ❝ Quote, a paste read for its structure through the same one parse | `app/public/docview.mjs`, `app/public/docmodel.mjs`, `app/public/docworker.js`, `app/public/wordpages.js`, `app/public/zipcore.js`, `app/public/app.js` (`PickBar`, `PreviewBar`, `QuoteTab`), `app/test/fixtures/`; tests `docmodel`, `wordpages`, `zipcore`, `catalog`, the browser smoke |
 | Screens (display URLs) | `app/lib/displays.js`, `app/public/display.*` |
 | People's pages: what a person's hall page is shown over its chat in two layers, the show and information drawn over it (a web page, a document, a picture, a quote), and a researcher's information kept beside the operator's (numbered takes to the Board or one person, their answers, the status read from each page's report, the hall's Earlier list; a web page's address sealed at rest; where a file shown may come from; the stage's files, kept while a take names them; what ends a take) and guests' chat views, kept in `pages.json` through the `pages` lane; the take verbs (a push, a page's report, a console's read, a withdrawal), each take sent to a page by its socket's id, who may push, who may show information by a right of its own (`canShow`, `stage.show`) and who may show a web page (`stage.web`; a locked hall's guests by the admin's switch, `admin:guestWeb`) | `app/lib/pages.js`, `app/lib/handlers/takes.js`, `app/lib/handlers/rooms.js`, `app/server.js`; tests `pages`, `takes` |
+| What was shown on people's pages, hall by hall (the stage record): an entry per take and take-down with a quote's words, the line sent with it and what its pages reported, one lane a hall, cleared by a reset and gone with its hall; the transcript that interleaves it and the minutes given it | `app/lib/stagerecord.js`, `app/lib/handlers/takes.js`, `app/server.js`, `app/lib/ai.js`; test `stagerecord` |
 | A take on the hall page: drawn over it by a module that holds no socket (a document and a picture through the documents' reader, kept by no device; a quote drawn from data), information over the show (held under blank, or arriving in the side bar, beside the operator's too), minimised as a card in its side bar, Earlier there and its Look, the page saying what it drew of each; a web page in the one frame a page makes, which only the hall page's policy allows (`CSP_HALL`); the Board chip and the console's People's pages that show it and take it down | `app/public/pagelayer.mjs`, `app/public/app.js`, `app/public/app.html`, `app/public/catalog.js`, `app/lib/guard.js`; tests `catalog`, `menus`, `modules`, `server`, the browser smoke |
 | Stagewatch links, peers, hello; what a send says (Stagewatch's grammar as the oracle); the one line a push carries to the speaker's screen, by one core the server and the hall page share (＋ the speaker's screen) | `app/lib/nodes.js`, `app/lib/stagelines.js`, `app/public/linecore.js`, `app/public/app.js`; tests `showbus`, `server` |
 | Patterns and PlayMap links; the context other show systems read | `app/lib/peerlinks.js`, `app/lib/context.js` |
@@ -255,7 +257,8 @@ where a seat may never do it and disabled with its reason where it cannot now; *
 kind drawn as one item when both are shown (Speaker's screen ▸: Ask the operator… · Send now), flat when one is; **a
 transfer** — a file shared for download (a file message), never opened on anyone's page by itself; **a download ticket**
 — the server's single-use leave to download one file; **a quote** — words or cells picked in a file (or pasted or typed), shown on
-the stage as data (a `snippet` take) and never as HTML.
+the stage as data (a `snippet` take) and never as HTML; **the stage record** — what was shown on people's pages, hall by
+hall, for the transcript and the minutes.
 
 **One word per thing** (the smoke's word check holds the pages to it): a hall (never "meeting", "session" or "room");
 a room — Main, Legal, Media, named "Hall 2 › Legal" (never "hall"): the Main room is the hall itself, its key the hall's, and a side room one of its other rooms, kept beside it and reached by its key; a code — what guests type, each room its own, a hall's its key until New code ("guest code" in the

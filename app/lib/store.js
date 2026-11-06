@@ -166,6 +166,10 @@ class RoomStore {
     // What the last load found on disk, which a stop that saved never leaves: the rooms whose log held lines, and the
     // newest snapshot's `savedAt` (lib/laststop.js `judge` reads a stop's record against them).
     this.found = { lines: 0, newest: 0 };
+    // The halls whose files the last load found on disk (a snapshot or its .bak), loaded or not: a hall that could not be
+    // read at this start (its files busy, or both torn) is still one, and loads again once it can be; what is kept beside a
+    // hall (its stage record) goes only with a hall in neither this nor `rooms`.
+    this.hallsOnDisk = new Set();
     // Told of each snapshot written: (ms it took — the stall a commit waits — the room's message count). Health's peaks.
     this.onCompact = null;
   }
@@ -196,6 +200,7 @@ class RoomStore {
     let names = [];
     try { names = fs.readdirSync(this.dir); } catch (e) { if (e.code !== 'ENOENT') throw e; }
     const stems = new Set(names.map((f) => (/^(.+)\.json(\.bak)?$/.exec(f) || [])[1]).filter(Boolean));
+    this.hallsOnDisk = new Set([...stems].filter((stem) => RoomStore.validCode(stem)));
     const sides = [];
     for (const stem of stems) {
       const side = SIDE_RE.exec(stem);

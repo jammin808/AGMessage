@@ -195,6 +195,19 @@ kind of thing ("the clock", "a holding slide", "a web page on vote.example.com",
 from a side room and ", withdrawn" for a withdrawal), never a file's name or an address. Nothing of a take is on the halls board, in the context
 another show system reads, or in the AI's brief.
 
+**What was shown is recorded** (the stage record, `app/lib/stagerecord.js`), for the admin's transcript and the AI's
+minutes: one entry for each take a hall accepted and each take-down, with who put it up and from which seat, whom it
+was for (a person by name), what it showed in the console's words (a web page by its host alone), a quote's words, the
+line sent with it to the speaker's screen ("sent now" or "asked the operator") and when it was withdrawn (the entry
+stays). Its **seen** is written once, when every page that held it has settled on it (shown it, or said it could not, or
+been put back to chat by its person; a page out of view is waited for, since it may yet show it) or 10 s after it: "✓ on
+6 of 6", "on 4 of 6 within 10 s", "✓ on 6 of 6, 2 as a picture". A room's transcript interleaves the entries with its
+messages by time (a Main room's, the hall's; a side room's, those sent from it): "📺 14:02 — Ana (backstage)
+showed the Board (6 pages): ❝ a table cell from Q3.xlsx, 'Sheet1'!C4 — “Revenue Q3 £4.2m” · ✓ on 6 of 6". Kept per hall
+in `data/stage/<HALL>.json`, at most 500 entries, the transcript saying how many earlier ones are no longer kept; a Main
+room's reset clears it, a side room's drops the entries sent from it (what the Main room showed of a side room's file
+stays the hall's), and a hall removed takes it.
+
 ### A document, a picture
 
 **A document** (`{kind: 'doc', url, at?, download, note?}`) is a file the hall holds, the whole of it, opened at its

@@ -5682,9 +5682,8 @@ confidential line's rule, §5.9.10's three steps and S6, is the confidential mar
   knows its own proposal and drops one whose line the desk no longer holds as asked ("lost"). One `stagewatch.send` or
   `stagewatch.propose` row, counts only: "a line (17 characters) on the speaker's screen, sent now, with a push", "asked
   the operator: a message (17 characters) for the speaker's screen, with a push — proposal p3". The words stay where what
-  was shown is kept: the take itself, and its Earlier entry. Until unit 30 records the line in the stage record (its
-  `line`), that is their only copy in AGMessage: a take withdrawn after its line went leaves none of words Stagewatch may
-  still show.
+  was shown is kept: the take itself, its Earlier entry, and the take's entry in the stage record (its `line`, below),
+  which a withdrawal leaves in place.
 - **The Preview's bar has one line above it for every choice**: the box moved out of the pick's bar to sit beside whom
   it goes to and where it arrives, and a picture of a page, a region, a picture in the file, the document and What I see
   each carry it now (a document's and a picture's note were `cleanPage`'s already; the bar sent none).
@@ -5733,6 +5732,108 @@ confidential line's rule, §5.9.10's three steps and S6, is the confidential mar
   `docs/ACCOUNTS.md` (the rows' words), `docs/DISPLAYS.md`, `SECURITY.md` (the line built by the server; no quote in the
   room's record), `docs/ANALYSIS.md` (the page core and the fences that hold it), `app/README.md` (`AGM_PUSH_LINE_MS`),
   `CLAUDE.md`.
+
+**What was shown to the Board is recorded, in the transcript and the minutes** (the plan's Part 4, unit 30, its §5.13 with
+§5.11's stores and lifetimes and §5.12's minutes; the owner's answer 19, "Yes": who, the file and page, and a quote's
+text; the confidential mark, its words in the transcript and what it withholds from the AI are unit 31's)
+- **The stage record** (`lib/stagerecord.js`, new): one entry for each take a hall accepts, both layers, the Board's or
+  one person's, and one for each take-down: who put it up and from which seat ("Ana (backstage)", "Ben (admin)"), for
+  whom (the Board, or a person by name, never their key), the layer and the kind, what it showed in the console's words
+  (a file by its name and place, "≈" where approximate; a web page by its host alone, never its address), a quote's words
+  in reading order (its cells joined by " · ", its rows by line breaks), the side room it was sent from and the side room
+  whose file it shows something of. A line sent with the take to the speaker's screen is kept on its entry as the server
+  built it, "sent now" or "asked the operator"; a withdrawal marks its entry with its time, and the entry stays: what was
+  shown was shown. **`seen`** is written once, when every page that held the take has settled on it or 10 s after it,
+  whichever is first: how many showed it, of how many, and how many drew a document's stand-in ("✓ on 6 of 6", "on 4 of 6
+  within 10 s", "✓ on 6 of 6, 2 as a picture"), what the pages said and nothing more. A page settles once it says it
+  showed it (a page that showed it and was then minimised or put back to chat counts as showing it), or that it could
+  not draw it, or that its person put it back to chat; a page that says it holds it out of view (asleep, in another app,
+  under another take or held under blank) may still show it, so it is waited for until the deadline.
+- **Where it lives**: `data/stage/<HALL>.json`, at most 500 entries a hall, the oldest going first and counted. Each
+  hall's file has a write lane of its own (mode 0600), made at its first write, flushed at a stop and a crash and named in
+  health (`stage <HALL>`); a stop that could not write one says "the stage record of 1 hall", never a hall's code. It is
+  read once the copy holds its data folder, through `fs.promises`, and whatever is asked of it before then waits for it,
+  in order; a torn file is read from its `.bak`, and a hall's file that cannot be read (a folder in its place is never
+  read as one, on any platform) is said on the console and never written over that run, nor is any hall's when the folder
+  itself cannot be listed. The record of a hall whose files are gone from `data/rooms/` goes at the start with its `.bak`
+  (the boot sweep); a hall whose files are there but could not be read at that start (busy, or both torn) keeps its record
+  for the start it loads (the store now keeps the halls a load found on disk, loaded or not). The start's sweep of
+  temporary files a stop cut short reads `data/stage/` too. The record is its file's one writer, so its lane keeps a file
+  it read whole as the `.bak` unread (a write lane's `whole`, the rooms' snapshots' `knownWhole`), and a torn one only
+  once its own write has replaced it.
+- **What clears it.** A Main room's reset clears its hall's record ("…, 3 takes ended, the stage record cleared" in its
+  `room.reset` row, `cleared` in its answer); a side room's drops the entries sent from it ("…, 2 entries dropped from the
+  stage record"), and what the Main room showed of one of its files stays the hall's. Each is written with no copy of the
+  record before it, and so is `pages.json` at a reset and at a withdrawal, so a cleared quote's words are in neither file
+  nor its `.bak`: a write lane's `clearBak()` makes its next write's `.bak` a copy of itself, after which each write
+  keeps the one before again. A `.bak` another program holds (a scanner, on Windows) fails that write once the file
+  itself is written, with why, and the lane keeps the clear and tries again until the `.bak` no longer holds what was
+  cleared; it never counts as landed before. A record whose file could not be read at the start is not cleared on disk:
+  this run's entries go, the row says "…, the stage record not cleared on disk: its file could not be read (EBUSY)", the
+  answer carries `recordUnread`, and the admin page says what was shown before that start is still in it.
+  A hall removed closes its lane, dropping what is pending, and takes its file and `.bak` with it, "purge files" or not,
+  as it already takes its stage-only pictures; health's `saves.built` counts the lanes made and not closed, so it stays
+  equal to the lanes named.
+- **The transcript** (`/api/admin/transcript/:code`): a Main room's interleaves the hall's entries with its messages by
+  time, a side room's the entries sent from it, each built with the same escaping as a message:
+  "📺 14:02 — Ana (backstage) showed the Board (6 pages): ❝ a table cell from Q3.xlsx, 'Sheet1'!C4 — “Revenue Q3 £4.2m” ·
+  ✓ on 6 of 6", "🖥 line: “…” (sent now)" when a line went, "withdrawn 14:03" when it was; "12 earlier entries are no
+  longer kept" past the bound. Its header counts the messages ("120 messages", where it said "120 entries") and what was
+  shown. It answers **`Cache-Control: no-store`** (it set none): whoever the admin page admits reads it, the laptop's
+  token and any account with `settings.manage`, on any device.
+- **The minutes** (`admin:summary`): the AI is given every entry the record keeps, beside the thread, "[14:02] Ana
+  showed the Board: a table cell from Q3.xlsx, 'Sheet1'!C4 — "Revenue Q3 £4.2m"", with `; on the speaker's screen: "…"`
+  for a line, what the pages reported and a withdrawal, under "Shown on people's pages (to the Board on stage, or to one
+  person), oldest first", and a line counting those the record no longer keeps ("(12 earlier entries of the hall's record
+  are no longer kept, so not included)"); its instructions read "From the conversation and what was shown to the
+  Board". A take stays out of the room's feed and every reader of it: only the transcript and the minutes read the record,
+  and the audit names the act without its content, as before.
+- Choices where the plan left room: a withdrawal marks the take's own entry (`withdrawn`, with its time) rather than
+  adding one; a hand-back the server makes itself (a reset, a deleted file, a withdrawal) is no entry, a person's
+  take-down is; `from`, which the plan names without a shape, is the side room whose file a take shows something of, kept
+  on the entry; a side room's reset drops, and its transcript shows, the entries sent from it (`sentFrom`), as §5.13
+  says, so the Main room's record of showing a picture of a side room's file stays when that room is reset, and a side
+  room removed leaves its hall's record as it is; `seen` counts the pages that held the take when it was recorded (a
+  page that joins later is not counted, and one that goes before it settles is counted as not showing it); `clearBak()`
+  keeps a copy of the new file as the `.bak` instead of none, so a write torn after a reset still has a whole backup, and
+  `lib/resilience.js` keeps its count of synchronous calls; a side room's transcript says how many of the hall's entries
+  are no longer kept.
+- Rolling back: 0.5.1 does not read `data/stage/` and leaves it as it is; back on 0.6.0 it is read again. 0.5.1's
+  transcript shows no entry.
+- Tests: `test/stagerecord.test.js` (new: an entry's fields for a cell, a table, a web page by its host alone, a take-down,
+  back to chat, a show take, a push sent from a side room of a file there and a picture of a page; an entry read back
+  whole and one of the wrong shape refused; the transcript's and the minutes' words; nothing written before the record is
+  read, one lane a hall named `stage <HALL>`, mode 0600; `seen` once every page settled: a page out of view or minimised
+  waited for and counted once it shows it, a page that could not draw it or was put back to chat settled without showing
+  it, a later report and another page's changing nothing, at the deadline what was shown by then, a stand-in counted,
+  none to wait for; a line and a withdrawal on their entry, which stays; 501 entries keep 500 and count one; the minutes'
+  lines, every entry and those no longer kept counted; a restart keeps it, a torn file read from its `.bak`, an entry of
+  the wrong shape dropped, an unreadable file never written over and its clear saying so, a folder that cannot be listed
+  writing no hall's, and the boot sweep; a side room's reset dropping the entries sent from it and keeping Main's picture
+  of its file, and a Main reset clearing them, neither leaving the words in the `.bak`; a hall removed closing its lane,
+  removing its file and `.bak`, writing nothing after; end to end with a mock Stagewatch and a mock AI:
+  a quote's entry with its seat and words, `seen` from two Board pages once, the line sent now on its entry, a web page by
+  its host, a take-down, a push from Legal and its withdrawal; the hall's lane in health with `built` and `named` equal; the
+  transcript `no-store`, interleaved by time, a `<script>` quote escaped, the line and the withdrawal, Legal's transcript
+  its own; the minutes' prompt holding the record's lines with their words; a restart keeping it, a planted full record
+  with 12 gone saying so in the transcript and in the minutes' prompt, which holds all 500, the record of a hall gone
+  removed at the start; Legal's reset and then Main's, neither the stage record, `pages.json` nor their `.bak` holding the
+  cleared words, and their `room.reset` rows; a hall removed without purging taking its record, its `.bak` and its
+  stage-only picture, its lane no longer named or counted; a hall whose snapshot is torn for one start keeping its record
+  through it while a hall gone loses its own, and its transcript showing the record once it loads again),
+  `test/resilience.test.js` (a lane's `clearBak()` and `close()`, a clear kept for a write that failed, a clear whose
+  `.bak` is held once failing with the file written and landing on the next try with the words in neither file, a
+  one-writer lane keeping a whole file as `.bak` unread and a torn one only after its own write; the record at 0
+  synchronous calls), `test/modules.test.js` (`stageRecord` in the contexts), `test/uploads.test.js` (a Main room's reset
+  row with the stage record's words; a side room's, which ends Main's take of its picture, leaves the record as it is).
+  The admin page's Clear messages… says when a record could not be cleared; the browser smoke runs as before.
+- Bench: the lane's save of a full hall's record at the quote's bound (500 entries of 4,000 characters, 2.1 MB), 20
+  saves a run, three runs, on the build machine (Linux, 4 vCPUs): kept as `.bak` unread, 26 to 28 ms at the middle of a
+  run and 38 ms at most; read first, as every lane's save was before, 34 to 36 ms and 42 ms at most, and one earlier run
+  of that reached 51 ms, over the 50 ms mark reading 4 sets for a snapshot's stall. Kept unread, the worst save is under
+  the mark, so the bound stays 500. The show laptop's is not measured.
+- The papers: `README.md`, `README.txt`, `docs/DISPLAYS.md`, `docs/DESIGN.md`, `docs/ACCOUNTS.md` (`room.reset`'s
+  words), `docs/ANALYSIS.md`, `SECURITY.md`, `CLAUDE.md`.
 
 **Fixed**
 - An upload whose stored path is no file (a folder in its place) is refused as one that could not be checked, on every

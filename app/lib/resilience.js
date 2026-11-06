@@ -167,9 +167,12 @@ function asleepWords(s) {
  * never has a short file renamed over a whole one. A write that throws removes its temporary file, so it does not
  * keep the disk full. Its folder is made when it is not there, unless `makeDir` is false: a folder another program
  * makes, with an access list of its own, is never made here, and the write then throws ENOENT. A reader sees the old file
- * or the new one whole, never one cut short or empty. Returns the number of bytes written.
+ * or the new one whole, never one cut short or empty. With `freshBak` (and `keepBak`) the `.bak` kept is a copy of what
+ * this write wrote, never the file before it: what a clear took out is then in neither file, and a backup whole is still
+ * there for the write after it; a `.bak` that cannot be made so fails the write once the file itself is written. Returns
+ * the number of bytes written.
  */
-function writeFileAtomic(file, data, { keepBak = false, knownWhole = false, worthKeeping = isJson, mode, makeDir = true } = {}) {
+function writeFileAtomic(file, data, { keepBak = false, knownWhole = false, worthKeeping = isJson, mode, makeDir = true, freshBak = false } = {}) {
   if (makeDir) fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = file + '.' + process.pid + '.tmp';
   const bytes = Buffer.from(data);
@@ -183,12 +186,17 @@ function writeFileAtomic(file, data, { keepBak = false, knownWhole = false, wort
       }
       fs.fsyncSync(fd);
     } finally { fs.closeSync(fd); }
+    // A clear's backup that could not be made (another program holds the .bak): the file is still written, and the write
+    // then fails with why, so its lane keeps the clear and tries it again; never a write that counts as landed while the
+    // .bak still holds what it cleared.
+    let bakLeft = null;
     if (keepBak) {
       try {
-        if (knownWhole || worthKeeping(fs.readFileSync(file, 'utf8'))) fs.copyFileSync(file, file + '.bak');
-      } catch { /* no old file yet */ }
+        if (freshBak || knownWhole || worthKeeping(fs.readFileSync(file, 'utf8'))) fs.copyFileSync(freshBak ? tmp : file, file + '.bak');
+      } catch (e) { if (freshBak) bakLeft = e; /* else no old file yet */ }
     }
     fs.renameSync(tmp, file);
+    if (bakLeft) throw new Error('written, but its .bak still holds what was cleared (' + (bakLeft.code || bakLeft.message) + ')');
   } catch (e) {
     try { fs.unlinkSync(tmp); } catch { /* never made, or already gone */ }
     throw e;
@@ -264,26 +272,51 @@ function readJsonWithBak(file) { return readJsonWhole(file).data; }
  * when it still cannot. A lane that keeps a set of small files together (`files: true`) is given [[file, text], …] by
  * `produce`, and writes each atomically, in that order.
  *
- * `WriteLane.built` counts every lane this process has made, wherever it was made: health carries it beside the
- * distinct lanes the server flushes at a stop or a crash, and a test holds the two equal, so no store has a lane
- * nothing flushes.
+ * `clearBak()` asks that the next write keep no copy of the file before it (a reset's or a withdrawal's words cleared
+ * are then in neither file): its `.bak` is a copy of what it writes, and the clear is kept until a write makes it.
+ * `close()` ends a lane whose file goes (a hall removed): what is pending is dropped and nothing is written by it again.
+ *
+ * `whole` is said only by a lane that is its file's one writer: whether the file on disk is whole now (its owner read it
+ * whole, or found none). While it is, the file is kept as `.bak` unread (writeFileAtomic's `knownWhole`), and it is once
+ * a write of the lane's has landed; a lane that says nothing (`null`) reads the file before it may replace the `.bak`.
+ *
+ * `WriteLane.built` counts every lane this process has made and not closed, wherever it was made: health carries it
+ * beside the distinct lanes the server flushes at a stop or a crash, and a test holds the two equal, so no store has a
+ * lane nothing flushes.
  */
 class WriteLane {
   static #built = 0;
+  static #closed = 0;
 
-  constructor(file, { delayMs = 200, keepBak = true, mode, files = false } = {}) {
+  constructor(file, { delayMs = 200, keepBak = true, mode, files = false, whole = null } = {}) {
     this.file = file; this.delayMs = delayMs; this.keepBak = keepBak; this.mode = mode; this.files = files;
+    this.whole = typeof whole === 'boolean' ? whole : null;   // the one writer's word that its file is whole (null: none)
     this.pending = null;      // () => string, the latest content
     this.timer = null;
     this.writes = 0; this.coalesced = 0; this.lastError = null; this.failures = 0;
     this.onSaved = null;      // told after each write that landed
+    this.freshBak = false;    // the next write keeps a copy of itself as .bak, never the file before it (clearBak)
+    this.closed = false;
     WriteLane.#built++;
   }
 
-  /** How many lanes this process has made, in any file. */
-  static get built() { return WriteLane.#built; }
+  /** How many lanes this process has made and not closed, in any file. */
+  static get built() { return WriteLane.#built - WriteLane.#closed; }
+
+  /** The next write that lands keeps no copy of the file before it: its `.bak` is a copy of what it wrote. */
+  clearBak() { this.freshBak = true; }
+
+  /** The lane ends: what is pending is dropped, a retry waiting is called off, and a save asked later writes nothing. */
+  close() {
+    if (this.closed) return;
+    this.closed = true;
+    this.pending = null;
+    if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+    WriteLane.#closed++;
+  }
 
   save(produce) {
+    if (this.closed) return;
     if (this.pending) this.coalesced++;
     this.pending = produce;
     if (!this.timer) {
@@ -299,8 +332,11 @@ class WriteLane {
     if (!produce) return;
     try {
       const content = produce();
-      if (this.files) for (const [file, text] of content) writeFileAtomic(file, text, { keepBak: this.keepBak, mode: this.mode });
-      else writeFileAtomic(this.file, content, { keepBak: this.keepBak, mode: this.mode });
+      const o = { keepBak: this.keepBak, mode: this.mode, freshBak: this.freshBak, knownWhole: this.whole === true };
+      if (this.files) for (const [file, text] of content) writeFileAtomic(file, text, o);
+      else writeFileAtomic(this.file, content, o);
+      this.freshBak = false;
+      if (this.whole !== null) this.whole = true;
       this.writes++;
       this.lastError = null;
       this.failures = 0;

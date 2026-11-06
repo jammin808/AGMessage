@@ -31,7 +31,9 @@
  * is told there is none), so neither verb says whether a code is real. Each
  * page whose take changed (the take's own targets, and a person's pages elsewhere in the hall that a Board take puts
  * their own take away from) is sent `page:take` by its socket's id; one `page.push` row is written per target, naming
- * what it shows in a few words (lib/pages.js describePage), never a file. The answer is "sending", never "on screen":
+ * what it shows in a few words (lib/pages.js describePage), never a file; and the take is recorded, with its words, in
+ * the hall's stage record (`stageRecord`, lib/stagerecord.js: the transcript's and the minutes'), the reports of the
+ * pages that hold it making its `seen` and a withdrawal marking it. The answer is "sending", never "on screen":
  * each page says what it did with the take (`page:report`), and only those reports make the status (lib/pages.js
  * `Pages.status`), which a console reads (`page:status`) whenever it is told the hall's pages changed (`pages:changed`).
  * Two layers (plan 4-§5.9.1): the show (Stagewatch, the clock, holding, blank) and information drawn over it (a web page,
@@ -148,7 +150,7 @@ const pagesWords = (n) => n + ' page' + (n === 1 ? '' : 's');
  * @param {object} ctx    the takes context, frozen: none of lib/gate.js `ROOM_SENDS` (`contexts`)
  */
 function register(socket, conn, ctx) {
-  const { store, audit, accounts, linkFor, sendersOf, pages, tickets, hallPages, takeSends, holdingOf, pagesChanged, pageHidden, selfHosts, viewChanged, stageSource, stageCheck, freshUpload, stageDropped, sendTo } = ctx;
+  const { store, audit, accounts, linkFor, sendersOf, pages, stageRecord, tickets, hallPages, takeSends, holdingOf, pagesChanged, pageHidden, selfHosts, viewChanged, stageSource, stageCheck, freshUpload, stageDropped, sendTo } = ctx;
 
   const write = (action, target, words) => audit.write(conn.actor(), action, target, words, socket.data.ip);
   /**
@@ -205,6 +207,8 @@ function register(socket, conn, ctx) {
   const readable = (hall) => store.roomsOf(hall.code).filter((r) => conn.canIn('hall.view', r) || r === conn.room());
   /** Who a take says put it up: the name this page sits under, else the account's, else the actor's (the laptop). */
   const byName = () => { const me = conn.me(); const a = socket.data.account; return me ? me.name : a ? a.name || a.username : conn.actor().name; };
+  /** The seat a push is made from, as the stage record names it: this page's seat, else the admin (the admin page); '' for none. */
+  const seatOf = () => { const me = conn.me(); return me && !socket.data.adminView ? me.role : socket.data.isAdmin ? 'admin' : ''; };
   /**
    * Whether this page may show a web page in `hall` (which it may push or show in): true, or why not, in the words of who
    * it is: a code guest's hall has its guests' web pages off; anyone else lacks the right.
@@ -312,6 +316,10 @@ function register(socket, conn, ctx) {
     }
     tell(hall.code, before);
     const holding = holdingOf(hall.code);
+    // What was shown is recorded (lib/stagerecord.js): who, from which seat, for whom, what it shows in the console's words
+    // and a quote's words; its `seen` from the reports of the pages that hold it now.
+    const holders = hallPages(hall.code).filter((p) => !p.support && [p.current, p.info, p.beside].some((c) => !!c.take && c.take.seq === take.seq));
+    stageRecord.shown(hall.code, take, { to, name, role: seatOf(), hallHolding: holding, pages: holders.map((p) => ({ sid: p.sid, docs: p.docs })) });
     // In the audit's voice: whom, how many of the Board's pages it reached, what it shows in a few words (never a file's
     // name, a text or a path), and an arrival in the side bar.
     const side = take.arrive === 'side' ? ', in their side bar' + (aside ? ', beside the operator\'s' : '') : named === 'beside' ? ', from their side bar' : '';
@@ -450,6 +458,8 @@ function register(socket, conn, ctx) {
       return answer({ ok: false, error: r.error });
     }
     if (r.hiddenMs !== undefined) pageHidden(r.hiddenMs);
+    // What it said counts toward the take's `seen` in the stage record, once.
+    stageRecord.reported(hall, socket.id, a.seq, a.state);
     tell(hall, before);
     pagesChanged(hall);
     answer({ ok: true });
@@ -479,6 +489,8 @@ function register(socket, conn, ctx) {
     if (!operator && !(whoKey && found.take.by.who === whoKey)) return answer({ ok: false, error: NOT_YOURS });
     const before = hallPages(hall.code);
     pages.withdraw(hall.code, a.seq, { who: whoKey });
+    // What was shown was shown: its entry in the stage record stays, marked withdrawn.
+    stageRecord.withdrawn(hall.code, a.seq);
     // Its download tickets are void, and none is given for it again ("This was withdrawn.", file:download).
     tickets.voidTake(hall.code, a.seq);
     tell(hall.code, before);

@@ -259,6 +259,107 @@ test('every write lane made is counted, a lane of several files too, and one tha
   assert.deepEqual(lanes.map((l) => l.writes), [0, 0], 'counted when made, not when they write');
 });
 
+test('a lane asked to clear its backup writes next with a copy of itself as .bak, never the file before it, then keeps the one before again; a closed lane drops what is pending, writes nothing more and is no longer counted', () => {
+  const dir = tmp('agm-clear-');
+  const f = path.join(dir, 'record.json');
+  const lane = new r.WriteLane(f, { delayMs: 5000, keepBak: true });
+  lane.save(() => '{"words":"cleared later"}');
+  assert.ok(lane.flushSync());
+  lane.save(() => '{"words":"kept"}');
+  assert.ok(lane.flushSync());
+  assert.equal(fs.readFileSync(f + '.bak', 'utf8'), '{"words":"cleared later"}', 'the file before it, as every write keeps');
+  lane.clearBak();
+  lane.save(() => '{"words":"after the clear"}');
+  assert.ok(lane.flushSync());
+  assert.deepEqual([fs.readFileSync(f, 'utf8'), fs.readFileSync(f + '.bak', 'utf8')], ['{"words":"after the clear"}', '{"words":"after the clear"}'], 'what was cleared is in neither file');
+  lane.save(() => '{"words":"next"}');
+  assert.ok(lane.flushSync());
+  assert.equal(fs.readFileSync(f + '.bak', 'utf8'), '{"words":"after the clear"}', 'the next write keeps the file before it again');
+  // A clear asked of a write that fails is kept for the write that lands.
+  const held = new r.WriteLane(path.join(dir, 'held.json'), { delayMs: 5000, keepBak: true });
+  held.save(() => '{"n":1}');
+  assert.ok(held.flushSync());
+  fs.renameSync(path.join(dir, 'held.json'), path.join(dir, 'held.json.moved'));
+  fs.mkdirSync(path.join(dir, 'held.json'));
+  held.clearBak();
+  held.save(() => '{"n":2}');
+  assert.equal(held.flushSync(), false);
+  fs.rmdirSync(path.join(dir, 'held.json'));
+  fs.renameSync(path.join(dir, 'held.json.moved'), path.join(dir, 'held.json'));
+  assert.ok(held.flushSync());
+  assert.equal(fs.readFileSync(path.join(dir, 'held.json.bak'), 'utf8'), '{"n":2}');
+  held.close();
+  // Closed: what is pending is dropped, a later save writes nothing, and it is counted as made no more.
+  const before = r.WriteLane.built;
+  lane.save(() => '{"words":"never written"}');
+  lane.close();
+  lane.close();
+  assert.equal(r.WriteLane.built, before - 1, 'closed once, counted once');
+  lane.save(() => '{"words":"never written either"}');
+  assert.ok(lane.flushSync(), 'nothing is left to write');
+  assert.equal(fs.readFileSync(f, 'utf8'), '{"words":"next"}');
+});
+
+test('a clear whose backup another program holds still writes its file, then fails until the .bak no longer holds what it cleared', () => {
+  const dir = tmp('agm-clearheld-');
+  const f = path.join(dir, 'record.json');
+  const lane = new r.WriteLane(f, { delayMs: 5000, keepBak: true });
+  lane.save(() => '{"words":"cleared words"}');
+  assert.ok(lane.flushSync());
+  lane.save(() => '{"words":"kept"}');
+  assert.ok(lane.flushSync());
+  assert.equal(fs.readFileSync(f + '.bak', 'utf8'), '{"words":"cleared words"}');
+  // The .bak held once (EBUSY, as a scanner holds it on Windows): the file is written, the write fails with why, and the
+  // clear is kept for the next try, which makes it.
+  const copy = fs.copyFileSync;
+  let held = 1;
+  fs.copyFileSync = (from, to, ...rest) => {
+    if (String(to).endsWith('.bak') && held-- > 0) throw Object.assign(new Error('EBUSY: resource busy or locked, copyfile'), { code: 'EBUSY' });
+    return copy.call(fs, from, to, ...rest);
+  };
+  try {
+    lane.clearBak();
+    lane.save(() => '{"cleared":true}');
+    lane._run();
+    assert.deepEqual([lane.failures, lane.freshBak, lane.pending !== null], [1, true, true], 'failed, the clear kept, the content kept');
+    assert.match(lane.lastError, /\.bak still holds what was cleared \(EBUSY\)/);
+    assert.equal(fs.readFileSync(f, 'utf8'), '{"cleared":true}', 'the file itself written');
+    assert.ok(lane.flushSync(), 'the next try lands');
+  } finally { fs.copyFileSync = copy; }
+  assert.deepEqual([fs.readFileSync(f, 'utf8'), fs.readFileSync(f + '.bak', 'utf8'), lane.freshBak, lane.lastError], ['{"cleared":true}', '{"cleared":true}', false, null], 'the cleared words in neither file');
+  assert.deepEqual(fs.readdirSync(dir).sort(), ['record.json', 'record.json.bak'], 'no temporary file left');
+});
+
+test('a lane that is its file\'s one writer keeps a whole file as .bak unread, and a torn one only once its own write has replaced it', () => {
+  const dir = tmp('agm-whole-');
+  // Said whole: kept as .bak unread (its text is not JSON, which a read would have refused to keep).
+  const said = path.join(dir, 'said.json');
+  fs.writeFileSync(said, 'whole, in its writer\'s word');
+  const sure = new r.WriteLane(said, { delayMs: 5000, whole: true });
+  sure.save(() => '{"n":1}');
+  assert.ok(sure.flushSync());
+  assert.equal(fs.readFileSync(said + '.bak', 'utf8'), 'whole, in its writer\'s word');
+  // Not whole (its owner read it torn and fell back to the .bak): read first, the torn file never kept over the good .bak;
+  // whole once the lane's own write has landed, and kept unread from then on.
+  const torn = path.join(dir, 'torn.json');
+  fs.writeFileSync(torn, '{"n":');
+  fs.writeFileSync(torn + '.bak', '{"n":0}');
+  const lane = new r.WriteLane(torn, { delayMs: 5000, whole: false });
+  lane.save(() => '{"n":1}');
+  assert.ok(lane.flushSync());
+  assert.deepEqual([fs.readFileSync(torn + '.bak', 'utf8'), lane.whole], ['{"n":0}', true]);
+  lane.save(() => '{"n":2}');
+  assert.ok(lane.flushSync());
+  assert.equal(fs.readFileSync(torn + '.bak', 'utf8'), '{"n":1}');
+  // A lane that says nothing reads the file before every copy, as before: a torn file is never kept.
+  const plain = path.join(dir, 'plain.json');
+  fs.writeFileSync(plain, '{"n":');
+  const other = new r.WriteLane(plain, { delayMs: 5000 });
+  other.save(() => '{"n":1}');
+  assert.ok(other.flushSync());
+  assert.deepEqual([fs.existsSync(plain + '.bak'), other.whole], [false, null]);
+});
+
 test('a lane whose write fails keeps the content, says so, retries on its own and lands it', async () => {
   const dir = tmp('agm-lane-');
   const f = path.join(dir, 'lane.json');
@@ -553,6 +654,9 @@ test('guard rails: no eval, no key in a URL, and synchronous file calls only whe
   // The upload checks run on every upload of a type the stage can show, before its answer: each reads its file through
   // fs.promises, so neither the archive's directory nor an image's header holds the loop.
   for (const f of ['lib/uploadcheck.js', 'lib/zipcheck.js', 'lib/imagesize.js', 'public/zipcore.js', 'public/imagecore.js']) assert.ok(files.includes(f), f + ' is read, at 0 synchronous calls');
+  // The stage record is read at a start and its files removed beside the show: through fs.promises (its writes are its
+  // lanes', in lib/resilience.js).
+  assert.ok(files.includes('lib/stagerecord.js'), 'lib/stagerecord.js is read, at 0 synchronous calls');
   // The documents' readers run on a person's page and in its document worker: none may hold either.
   for (const f of ['public/wordpages.js', 'public/docmodel.mjs', 'public/docview.mjs', 'public/docworker.js']) assert.ok(files.includes(f), f + ' is read, at 0 synchronous calls');
   // Synchronous fs calls block every meeting on the server while they run. These are allowed — each with its reason —
@@ -563,7 +667,7 @@ test('guard rails: no eval, no key in a URL, and synchronous file calls only whe
     'lib/store.js': { max: 10, why: 'durability: a change is appended to its log (the system\'s file cache) before the ack, or kept for the next snapshot when the disk refuses it; snapshots every 500 ops' },
     'lib/resilience.js': { max: 13, why: 'the atomic writer itself, and the temporary file of a write that failed removed so a full disk is not kept full; a file read with why it was not (readText), every store\'s read; a file made only where none is (publishOnce: its link, which refuses one there, and its temporary file removed); a folder\'s real path, read once per place at start (placeId)' },
     'lib/secretbox.js': { max: 3, why: 'the machine key, read once, or made once and published whole' },
-    'lib/laststop.js': { max: 4, why: 'once a start, after the hold: the last stop\'s record moved aside (or removed where it cannot be), and the data and rooms folders listed for the temporary files a stop cut short left, each removed; the record itself goes through lib/resilience.js\'s atomic writer, at the stop' },
+    'lib/laststop.js': { max: 4, why: 'once a start, after the hold: the last stop\'s record moved aside (or removed where it cannot be), and the data, rooms and stage record\'s folders listed for the temporary files a stop cut short left, each removed; the record itself goes through lib/resilience.js\'s atomic writer, at the stop' },
     'lib/serverlog.js': { max: 4, why: 'the watchdog\'s process alone, never the server\'s: a console line appended to server.log as it is said, so a line said just before the watchdog ends is on disk; its folder made and its size read once, and a rename when it reaches its bound' },
     'lib/version.js': { max: 8, why: 'the version and its stamp (or the checkout\'s commit), read once at startup' },
     'lib/dataformat.js': { max: 8, why: 'the data folder\'s format, once a start: read through to tell a new folder from a 0.5 one, and a folder of a lower format copied whole into backups/ (a copy a stop left part way removed, its size and the disk\'s free space read, its folder made, a partial copy made, renamed whole, or removed when it failed, the watchdog\'s beat sent while it runs) before anything else is written in it, never on a request' },

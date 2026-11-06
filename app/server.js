@@ -70,6 +70,7 @@ const laptop = require('./lib/laptop');
 const power = require('./lib/power');
 const dataformat = require('./lib/dataformat');
 const laststop = require('./lib/laststop');
+const { StageRecord, whoSaid, didSaid, seenSaid } = require('./lib/stagerecord');
 const tunnelend = require('./lib/tunnelend');
 const busy = require('./lib/busy');
 const machinewire = require('./lib/machinewire');
@@ -283,6 +284,10 @@ const displays = new Displays(path.join(DATA_DIR, 'displays.json'), { seal: secr
 // through its lane only once this copy holds its data folder (`firstWrites` calls `hold`). A web page's address is kept
 // sealed with this machine's key, as a screen's link is.
 const pages = new Pages(path.join(DATA_DIR, 'pages.json'), { seal: secretbox.seal, open: secretbox.open, wait: UPLOAD_ORPHAN_MS });
+// What was shown on people's pages, hall by hall, for the transcript and the minutes (lib/stagerecord.js): one file a hall
+// in data/stage/, read once this copy holds its data folder (`firstWrites`), each through a lane of its own.
+const STAGE_DIR = path.join(DATA_DIR, 'stage');
+const stageRecord = new StageRecord(STAGE_DIR);
 // The results of approved show-desk proposals this AGMessage ran that Stagewatch has not taken yet (lib/deskresults.js):
 // read now, written only by the desk loop, which runs once this copy holds the data folder and its port. In memory too:
 // the tries (attempts, posts), when the next is due, the last answer, and the link's generation it was collected under
@@ -308,20 +313,29 @@ function savePeaks() {
 }
 /**
  * Every store saved through a write lane, by the name health and the console give it. Every lane made in any file is
- * here, once, so a stop or a crash flushes them all: health's `saves.built` counts the lanes made and `saves.named` the
- * distinct lanes here, and a test holds both to this list.
+ * here, once, so a stop or a crash flushes them all, each hall's stage record's from its first write until the hall is
+ * removed (`stage <HALL>`): health's `saves.built` counts the lanes made and not closed and `saves.named` the distinct
+ * lanes here, and a test holds both to this list.
  */
-const saveLanes = () => [['settings', settingsLane], ['accounts', accounts.lane], ['sessions', sessions.lane], ['adminSessions', tokenSessions.lane], ['screens', displays.lane], ['pages', pages.lane], ['deskResults', deskLane], ['peaks', peaksLane], ['auditHead', audit.headLane]];
+const saveLanes = () => [['settings', settingsLane], ['accounts', accounts.lane], ['sessions', sessions.lane], ['adminSessions', tokenSessions.lane], ['screens', displays.lane], ['pages', pages.lane], ['deskResults', deskLane], ['peaks', peaksLane], ['auditHead', audit.headLane], ...stageRecord.lanes()];
 /**
  * Write the audit entries still waiting and the head that covers them first, then every lane, now (shutdown, a crash);
- * what still cannot be written is named on the console, and returned in words ([] when everything was written). The
- * audit's last appends are timed as they reach the disk, so the peaks are asked for after it.
+ * what still cannot be written is named on the console, and returned in words ([] when everything was written): a hall's
+ * stage record counted among the halls' ("the stage record of 2 halls"), never by its code. The audit's last appends are
+ * timed as they reach the disk, so the peaks are asked for after it.
  */
 function flushLanes() {
   const unwritten = [];
   if (!audit.flush()) { console.error('  [audit] ' + audit.unwritten + ' entries could not be written: ' + audit.lastError); unwritten.push('the audit log'); }
   savePeaks();
-  for (const [name, lane] of saveLanes()) if (!lane.flushSync()) { console.error('  [save] ' + name + ' could not be written: ' + lane.lastError); unwritten.push(name); }
+  const stage = new Set(stageRecord.lanes().map(([, lane]) => lane));
+  let stageLeft = 0;
+  for (const [name, lane] of saveLanes()) {
+    if (lane.flushSync()) continue;
+    console.error('  [save] ' + name + ' could not be written: ' + lane.lastError);
+    if (stage.has(lane)) stageLeft++; else unwritten.push(name);
+  }
+  if (stageLeft) unwritten.push('the stage record of ' + plural(stageLeft, 'hall'));
   return unwritten;
 }
 /**
@@ -1391,17 +1405,23 @@ app.get('/d/:token', (req, res) => {
   res.sendFile(path.join(PUBLIC_DIR, 'display.html'));
 });
 
-app.get('/api/admin/transcript/:code', (req, res) => {
+// A room's transcript: its messages, and what was shown on people's pages interleaved with them by time (the stage record:
+// the hall's whole for its Main room, the entries sent from it for a side room). Its answer is never kept by a browser or
+// a proxy (`no-store`): whoever the admin page admits reads it, on any device.
+app.get('/api/admin/transcript/:code', async (req, res) => {
   if (!isAdminReq(req)) return res.status(403).send('Forbidden');
   const room = store.room(String(req.params.code || '').toUpperCase());
   if (!room) return res.status(404).send('Room not found');
+  // The record is read at once once the start has read it; before then the transcript waits for it.
+  const shown = await stageRecord.of(room.hall, { room: room.code });
   // Read by the laptop's token first, as a socket is: the token's reads are the laptop's, an account's its own.
   const w = isValidAdminCookie(req) ? null : web.who(req);
   readAsAdmin(w ? web.actorOf(w) : HOST_ACTOR, w ? w.account : null, room, (n) => 'transcript of ' + n, guard.clientIp(req));
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'");
   res.setHeader('Content-Disposition', 'inline; filename="transcript-' + room.code + '.html"');
-  res.send(renderTranscriptHtml(room));
+  res.send(renderTranscriptHtml(room, shown));
 });
 
 // Health: anyone may ask whether it is up; the detail is for the admin (or the host laptop).
@@ -2819,6 +2839,9 @@ io.on('connection', (socket) => {
       // A room closed while Stagewatch answered keeps nothing of the send: no line is written into a room that is no
       // longer kept (its files are gone), nor into another room made since under the same key.
       if (store.room(from.code) === from) {
+        // A line sent with a push is kept where what was shown is: on the take's entry in the stage record, its words as
+        // they reached the speaker's screen (the room's own line names its length alone).
+        if (push) stageRecord.line(from.hall, args.withTake, { text: said, via: 'now' });
         // The receipt, and later the speaker's acknowledgement, live on the record of the send (and on the source
         // message). …with the link it went to, that Stagewatch's address tag and the seq of its frames then, so a restart
         // keeps following it only where it went, and only while that Stagewatch has not restarted since.
@@ -2891,6 +2914,8 @@ io.on('connection', (socket) => {
     const proposal = { id: r.proposal.id, link: link.id, state: r.proposal.state, ok: null, words: '', to: built.words, at: Date.now(), sw: link.tag, ...(push ? { lineMac: lineMacOf(built.line) } : { line: built.line }) };
     // A room closed while the desk answered keeps nothing of the proposal, as for a send above.
     if (store.room(from.code) === from) {
+      // A line asked with a push is kept on the take's entry in the stage record, as the desk was asked it.
+      if (push) stageRecord.line(from.hall, args.withTake, { text: parsed.text, via: 'operator' });
       // Followed on the records that took it, as for a send above.
       const said = push ? `${asker} asked the operator for a line (${count}) on the speaker's screen with a push — waiting for the show desk`
         : `${asker} asked Stagewatch's operator to put this on ${built.words}: “${stagelines.cut(parsed.text, 120)}” — waiting for the show desk`;
@@ -3298,15 +3323,24 @@ io.on('connection', (socket) => {
     systemMessage(r, '— Messages cleared by the admin —');
     // What its people's pages are shown of it ends too (lib/pages.js endTakes), the show left as it is: a Main room's reset
     // ends every information take of the hall and empties its Earlier; a side room's, those showing what it holds or sent.
-    const ended = store.isMain(r) ? endTakesWhere(r.hall, () => true, { earlier: 'all' }) : endTakesWhere(r.hall, sourcedFrom(r.code));
+    // The stage record goes too (lib/stagerecord.js): a Main room's reset clears its hall's, a side room's drops the entries
+    // sent from it. Both stores are written with no copy of the file before them, so the words cleared are in neither file
+    // nor its .bak; a record whose file could not be read at the start is not cleared on disk, and the row and the answer
+    // say so.
+    const main = store.isMain(r);
+    const ended = main ? endTakesWhere(r.hall, () => true, { earlier: 'all' }) : endTakesWhere(r.hall, sourcedFrom(r.code));
+    pages.clearBak();
+    const record = main ? stageRecord.clear(r.hall) : stageRecord.drop(r.hall, r.code);
     // Its documents leave the disk too, unless another hall or a screen still shows them. The row counts the files that
     // left, so it is written once their removal has run, before the answer: a stop while they are being removed keeps
     // the reset and loses its row — the price of a count that says what happened rather than what was meant to.
-    const done = (n) => {
-      auditRoom('room.reset', r.code, 'messages and documents cleared, ' + plural(n, 'file') + ' removed' + (ended ? ', ' + plural(ended, 'take') + ' ended' : ''));
-      ok(ack)({ ok: true, removed: n, ...(ended ? { ended } : {}) });
+    const done = ([n, { cleared, unread }]) => {
+      const recordWords = unread ? ', the stage record not cleared on disk: its file could not be read (' + unread + ')'
+        : !cleared ? '' : main ? ', the stage record cleared' : ', ' + plural(cleared, 'entry', 'entries') + ' dropped from the stage record';
+      auditRoom('room.reset', r.code, 'messages and documents cleared, ' + plural(n, 'file') + ' removed' + (ended ? ', ' + plural(ended, 'take') + ' ended' : '') + recordWords);
+      ok(ack)({ ok: true, removed: n, ...(ended ? { ended } : {}), ...(cleared ? { cleared } : {}), ...(unread ? { recordUnread: unread } : {}) });
     };
-    removeUnused(files, records).then(done, () => done(0));
+    Promise.all([removeUnused(files, records).catch(() => 0), record.catch(() => ({ cleared: 0, unread: '' }))]).then(done);
   });
   socket.on('admin:deleteRoom', async ({ roomCode, purgeFiles } = {}, ack) => {
     if (!admin(ack)) return;
@@ -3376,6 +3410,8 @@ io.on('connection', (socket) => {
     // What its people's pages were shown goes too, unless the hall comes back at the next start, and its stage files
     // (uploads a take named that no message holds) leave the disk with it, purged or not: nothing could keep them.
     const stageFiles = (!removed.back.includes(r.code) && pages.forgetHall(r.code)) || [];
+    // Its stage record goes with it too (its lane closed now, its file and .bak removed), unless it comes back at the next start.
+    const recordGone = removed.back.includes(r.code) ? Promise.resolve([]) : stageRecord.forget(r.code);
     // Its own Stagewatch's address goes with it, and so do that Stagewatch's pins: read while the link still has its
     // address, and kept when another link follows the same one.
     if (hallLinks.has(r.code)) forgetStagewatchPins(hallLinks.get(r.code));
@@ -3387,6 +3423,7 @@ io.on('connection', (socket) => {
     audit.write(by, 'hall.remove', r.code, wordsWithList(head, sides.map((x) => (x.name || 'no name') + ' · ' + x.code)), socket.data.ip);
     const purged = gone.purge ? await removeUnused(files) : 0;
     if (stageFiles.length) await removeUnused(stageFiles);
+    for (const [file, code] of await recordGone) console.error('  [stage] ' + file + ', the record of a hall removed, could not be removed (' + code + '): the next start removes it');
     ok(ack)({ ok: true, purged, ...gone.answer });
   });
   // A file on people's pages now (a take or an Earlier entry names it, and no other message of the hall holds it) is asked
@@ -3543,10 +3580,12 @@ io.on('connection', (socket) => {
     const r = store.room(roomCode);
     if (!r) return ok(ack)({ ok: false, error: 'Room not found' });
     // A side room's minutes name it with its hall ("Legal (Hall 2)"); its messages handed to the AI are a read of it,
-    // written as asked, since the AI's answer is not known yet.
-    runAi(ack, (signal) => {
+    // written as asked, since the AI's answer is not known yet. Beside them, what was shown on people's pages, as the
+    // room's transcript reads it (the stage record's entries, a quote with its words).
+    runAi(ack, async (signal) => {
       readAsAdmin(socket.data.actor || HOST_ACTOR, socket.data.account, r, (n) => 'minutes of ' + n + ' asked of the AI', socket.data.ip);
-      return ai.summarise(aiKey(), { messages: r.messages, roomName: store.isMain(r) ? r.name : roomInHall(r) }, signal);
+      const { entries, dropped } = await stageRecord.of(r.hall, { room: r.code });
+      return ai.summarise(aiKey(), { messages: r.messages, shown: entries, shownDropped: dropped, roomName: store.isMain(r) ? r.name : roomInHall(r) }, signal);
     });
   });
   socket.on('admin:postSummary', ({ roomCode, text } = {}, ack) => {
@@ -4335,11 +4374,34 @@ function buildMessage(user, payload, { room, cid, held, size } = {}) {
   return null;
 }
 
-function renderTranscriptHtml(room) {
+/**
+ * A room's transcript as a page of its own: its messages, oldest first, with what was shown on people's pages (`shown`,
+ * the stage record's {entries, dropped} as lib/stagerecord.js `of` reads it for the room) interleaved by time, each entry
+ * built with the same escaping as a message: who showed what to whom, a quote's words, what the pages reported, the line
+ * sent with it to the speaker's screen, and when it was withdrawn.
+ */
+function renderTranscriptHtml(room, shown = { entries: [], dropped: 0 }) {
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const fmt = (ts) => new Date(ts).toLocaleString();
   const rows = [];
+  // What was shown, in the order it was shown: each entry goes before the first message after it.
+  const entries = [...shown.entries].sort((a, b) => a.at - b.at || a.seq - b.seq);
+  const VIA_SAID = { now: 'sent now', operator: 'asked the operator' };
+  const shownRow = (e) => {
+    const what = e.kind === 'chat' ? '' : ': ' + esc(e.what);
+    const sent = e.sentFrom ? ', sent from ' + esc(e.sentFrom.name || 'another room') : '';
+    const quote = e.text ? ' — “' + esc(e.text).replace(/\n/g, '<br>') + '”' : '';
+    const seen = seenSaid(e.seen);
+    const withdrawn = e.withdrawn ? ' <span class="pin">withdrawn ' + esc(new Date(e.withdrawn).toLocaleTimeString()) + '</span>' : '';
+    const line = e.line ? '<div class="line">🖥 line: “' + esc(e.line.text) + '” (' + VIA_SAID[e.line.via] + ')</div>' : '';
+    return '<div class="shown">📺 <time>' + esc(fmt(e.at)) + '</time> — ' + esc(whoSaid(e)) + ' ' + esc(didSaid(e)) + what + sent + quote + (seen ? ' · ' + esc(seen) : '') + withdrawn + line + '</div>';
+  };
+  let next = 0;
+  const shownUntil = (at) => { while (next < entries.length && entries[next].at <= at) rows.push(shownRow(entries[next++])); };
+  const main = store.isMain(room);
+  if (shown.dropped) rows.push('<div class="sys">📺 ' + plural(shown.dropped, 'earlier entry', 'earlier entries') + (main ? '' : ' of the hall\'s') + (shown.dropped === 1 ? ' is' : ' are') + ' no longer kept</div>');
   for (const m of room.messages) {
+    shownUntil(m.at);
     if (m.type === 'system') { rows.push('<div class="sys">— ' + esc(m.text) + ' (' + esc(fmt(m.at)) + ')</div>'); continue; }
     const who = m.from ? esc(m.from.name) + ' <span class="role">' + esc(m.from.role) + '</span>' : '—';
     let content = '';
@@ -4372,8 +4434,8 @@ function renderTranscriptHtml(room) {
     const cls = ['msg', 'type-' + m.type, m.priority ? 'priority' : ''].filter(Boolean).join(' ');
     rows.push('<article class="' + cls + '"><header><strong>' + who + '</strong><time>' + esc(fmt(m.at)) + '</time></header>' + extras + '<div class="body">' + content + '</div></article>');
   }
+  shownUntil(Infinity);
   // A side room is named with its hall ("Legal (Hall 2)"), and by its key: an address, never a code a guest types.
-  const main = store.isMain(room);
   const named = main ? room.name : roomInHall(room);
   const title = named ? named + ' — transcript' : 'AGMessage transcript';
   return '<!doctype html><html><head><meta charset="utf-8"><title>' + esc(title) + '</title><style>' +
@@ -4388,9 +4450,11 @@ function renderTranscriptHtml(room) {
     '.responses{font-size:.85rem;color:#065f46}.rt{font-size:.85rem;font-style:italic;color:#6b7280;border-left:3px solid #2b57d1;padding-left:.5rem;margin-bottom:.25rem}' +
     '.rx{font-size:.9rem;color:#374151;margin-top:.15rem}.prio{display:inline-block;background:#dc2626;color:#fff;padding:0 .35rem;border-radius:999px;font-size:.7rem;font-weight:700;margin-right:.3rem}' +
     '.pin{font-size:.8rem;color:#7a4d00;margin-right:.3rem}.fwd{font-size:.85rem;color:#6b7280;font-style:italic}' +
-    '.sys{color:#6b7280;font-style:italic;text-align:center;margin:.25rem 0;font-size:.85rem}@media print{body{max-width:100%}.msg{break-inside:avoid;border-color:#aaa}}' +
+    '.sys{color:#6b7280;font-style:italic;text-align:center;margin:.25rem 0;font-size:.85rem}' +
+    '.shown{border-left:3px solid #1c3f9e;background:#f5f7fd;padding:.4rem .7rem;margin:.4rem 0;font-size:.9rem;break-inside:avoid}.shown time{font-variant-numeric:tabular-nums}.shown .line{color:#374151;margin-top:.15rem}' +
+    '@media print{body{max-width:100%}.msg{break-inside:avoid;border-color:#aaa}}' +
     '</style></head><body><h1>' + esc(named || 'AGMessage transcript') + '</h1>' +
-    '<p class="meta">' + (main ? 'Code' : 'Room key') + ' <strong>' + esc(room.code) + '</strong> · Started ' + esc(fmt(room.createdAt)) + ' · ' + room.messages.length + ' entries · Generated ' + esc(fmt(Date.now())) + '</p>' +
+    '<p class="meta">' + (main ? 'Code' : 'Room key') + ' <strong>' + esc(room.code) + '</strong> · Started ' + esc(fmt(room.createdAt)) + ' · ' + plural(room.messages.length, 'message') + (entries.length ? ' · ' + entries.length + ' shown on people\'s pages' : '') + ' · Generated ' + esc(fmt(Date.now())) + '</p>' +
     rows.join('\n') + '<p class="meta" style="margin-top:2rem">— end of transcript —</p></body></html>';
 }
 
@@ -5492,13 +5556,21 @@ function firstWrites() {
   // the stage recorded alone, removed unless something else holds them.
   const staleStage = pages.stageGone(Date.now());
   if (staleStage.length) removeUnused(staleStage).catch(() => { /* a file left behind is only space */ });
+  // The stage record, read beside the start (lib/stagerecord.js, through fs.promises): the record of a hall that no longer
+  // exists removed with its .bak, and a hall's that could not be read said, never written over this run. A hall whose files
+  // are on disk exists, loaded or not: one that could not be read at this start keeps its record for the start it loads.
+  stageRecord.load((hall) => store.has(hall) || store.hallsOnDisk.has(hall)).then(({ gone, unread, kept }) => {
+    if (gone.length) console.log('  Removed the stage record of ' + plural(gone.length, 'hall') + ' no longer here');
+    for (const [hall, code] of unread) console.error('  [stage] ' + (hall ? 'the stage record of hall ' + hall : STAGE_DIR) + ' could not be read (' + code + '): ' + (hall ? 'it is not written over this run, and what is shown there is kept for this run alone' : 'no hall\'s record is read this run'));
+    for (const [file, code] of kept) console.error('  [stage] ' + file + ', the record of a hall no longer here, could not be removed (' + code + ')');
+  }, (e) => { console.error('  [stage] the stage record could not be read: ' + (e && e.message ? e.message : e)); });
   if (watchdogBefore) { try { fs.renameSync(path.join(DATA_DIR, 'watchdog.json'), path.join(DATA_DIR, 'watchdog.seen.json')); } catch { /* shown once anyway */ } }
   // How the copy before this one stopped, its record moved aside now, so a crash or a kill of this one is never read as
   // a stop that saved; and the temporary files a stop cut short left (a process no longer running), removed.
   stopBefore = laststop.judge(laststop.take(DATA_DIR), store.found);
   if (stopBefore.state === 'stale') console.error('  [save] ' + laststop.FILE + ' says the stop before saved, but ' + stopBefore.code + ': each hall says AGMessage restarted');
   if (stopBefore.left) console.error('  [save] ' + laststop.FILE + ' could not be moved aside or removed (' + stopBefore.left + '): the next start reads it as taken by this one' + (stopBefore.left.includes(laststop.SEEN) ? ' only once a hall has changed' : ''));
-  const swept = laststop.sweep([DATA_DIR, ROOMS_DIR]);
+  const swept = laststop.sweep([DATA_DIR, ROOMS_DIR, STAGE_DIR]);
   if (swept.removed.length) console.log('  Removed ' + plural(swept.removed.length, 'temporary file') + ' a stop cut short left in ' + DATA_DIR);
   for (const [name, why] of swept.failed) console.error('  [save] ' + name + ', left by a stop cut short, could not be removed (' + why + ')');
 }
@@ -5510,7 +5582,7 @@ function firstWrites() {
 // new id `makeMessageId`), the download tickets (`tickets`, issued by `file:download` and voided with a withdrawn take), the rooms that may send into
 // a room (`sendersOf`, read, and `sendsInto`, the rooms a room may send into; `setRoomSends`, its one writer, the rooms
 // module's alone), a room's invite links (`invitesFor`, made with the server's secret), the Stagewatch a hall follows and
-// its frame, what people's pages are shown (the `pages` store, the
+// its frame, what people's pages are shown (the `pages` store, what was shown on them, `stageRecord`, the
 // pages open in a hall with what each is shown, `hallPages`, those a change moved, `takeSends`, the hall's holding
 // picture, `holdingOf`, the consoles told, `pagesChanged`, a Board page's time out of view kept in the day's peaks,
 // `pageHidden`, where a file shown may come from, `stageSource`, its check at its first take, `stageCheck`, this run's
@@ -5520,7 +5592,7 @@ function firstWrites() {
 // room's op or a room's broadcast.
 const { ctx, takesCtx } = contexts({
   store, apply, systemMessage, readSend, messageOf, uploadOnDisk, fileCopy, tickets, makeMessageId, removeUnused, fileNamesOf, audit, accounts, boardDirty, newSideRoom, renameRoom, roomNameRefused, newGuestCode, guestPagesOf, sendGuestsOut, codeChanged, invitesFor, settings, sendersOf, sendsInto, setRoomSends, linkFor, stagePayload,
-  pages, hallPages, takeSends, holdingOf, pagesChanged, pageHidden, selfHosts, tellWebRights, viewChanged, stageSource, stageCheck, freshUpload, stageDropped, io,
+  pages, stageRecord, hallPages, takeSends, holdingOf, pagesChanged, pageHidden, selfHosts, tellWebRights, viewChanged, stageSource, stageCheck, freshUpload, stageDropped, io,
 });
 
 // The installed node reads its keys before it holds its folder, and stops with their words when it may not run on them.

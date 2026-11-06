@@ -710,7 +710,9 @@ Object.assign(ADMIN_RUN, {
   'adminRoom.transcript': (o) => { window.open('/api/admin/transcript/' + encodeURIComponent(o.code), '_blank', 'noopener'); },
   'adminRoom.clear': (o) => AGM.outbox.now('admin:resetRoom', { roomCode: o.code }, (res) => {
     if (!res?.ok) { say(res?.error || 'Not cleared.', true); return; }
-    say('Cleared every message in ' + o.hall + '.');
+    // A stage record whose file could not be read at the start keeps what that file holds: said, never as cleared.
+    if (res.recordUnread) say('Cleared every message in ' + o.hall + '. Its stage record\'s file could not be read, so what was shown before this start is still in it.', true);
+    else say('Cleared every message in ' + o.hall + '.');
     if (currentRoom && currentRoom.code === o.code) { currentRoom.messages = []; renderFeed(currentRoom.messages); updateCounts(); }
   }),
   // Closed: the page starts afresh on the list without it, once the admin has read what stayed on disk, if anything did.

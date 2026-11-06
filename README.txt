@@ -733,6 +733,18 @@ document, picture and web page on the Board's pages (the show stays);
 clearing a side room ends what came from it; deleting a file's message
 ends what shows that file (the admin is asked first).
 
+What was shown is recorded. Each take and each take-down is kept in the
+hall's stage record: who showed it, to whom, what it was (a file by its
+name and page, a web page by its site), a quote's words, the line sent
+with it to the speaker's screen, what the pages said ("on 6 of 6") and
+when it was withdrawn (the entry stays). The admin's transcript of a
+room shows it between the messages, by time ("📺 14:02 - Ana (backstage)
+showed the Board (6 pages): ..."; a side room's, what was sent from
+it), and Minutes are written from it too. It keeps 500 entries a hall
+and says how many earlier ones are no longer kept. Clearing the Main
+room's messages clears it, clearing a side room's drops what came from
+it, and removing the hall removes it.
+
 What a Board tablet keeps: nothing AGMessage writes or offers. What is
 shown is drawn from memory and let go when it goes; files are never kept
 in the browser's cache, and opening a file's address does not save it or
@@ -1389,10 +1401,12 @@ AI (optional; Admin -> AI drafts, or set ANTHROPIC_API_KEY)
     It lands in your box to check and edit; nothing is sent until you press
     Send, and the transcript marks it "drafted with AI, sent by a person".
   - Action prompts: "Suggest" proposes tap-to-answer buttons.
-  - Admin: "Minutes" lists decisions, open questions and action items; you read
-    it first and post it to the room only if you want.
+  - Admin: "Minutes" lists decisions, open questions and action items, from
+    the conversation and what was shown to the Board; you read it first and
+    post it to the room only if you want.
   - What's sent to Anthropic: the conversation, and the text of the document
-    you have open when you ask for a draft.
+    you have open when you ask for a draft; for Minutes, what was shown on
+    people's pages (a quote with its words).
   - Without a key, "Draft answer" and "Suggest" are drawn with a dashed
     edge: pressed, they say why ("AI drafts are off: they need an Anthropic
     key (admin) and the internet") and send nothing. Without the internet no

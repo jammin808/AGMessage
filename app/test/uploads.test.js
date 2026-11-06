@@ -469,6 +469,7 @@ test('what ends a take: a Main reset ends the hall\'s information and keeps the 
   // Legal's reset: Gil's take of Legal's picture ends, his page told; the Board's picture of Main's stays.
   const reset = await emit(op, 'admin:resetRoom', { roomCode: LEGAL });
   assert.deepEqual([reset.ok, reset.ended], [true, 1], JSON.stringify(reset));
+  // Main's operator showed Gil a picture of Legal's: what was shown from Main stays in the hall's stage record.
   assert.match(rows().at(-1), /, 1 take ended$/);
   await until(() => gil.heard.some(([ev, v]) => ev === 'page:take' && v.layer === 'info' && v.seq > toGil && v.content && v.content.kind === 'chat'), 4000, 'Gil told it ended');
   assert.equal((await status()).info.kind, 'image');
@@ -477,7 +478,7 @@ test('what ends a take: a Main reset ends the hall\'s information and keeps the 
   await until(() => gil.heard.some(([ev, v]) => ev === 'page:take' && v.seq === mainSeq), 4000, 'Gil shown it');
   const main = await emit(op, 'admin:resetRoom', { roomCode: code });
   assert.equal(main.ok, true, JSON.stringify(main));
-  assert.match(rows().at(-1), /^messages and documents cleared, \d+ files? removed, 2 takes ended$/);
+  assert.match(rows().at(-1), /^messages and documents cleared, \d+ files? removed, 2 takes ended, the stage record cleared$/);
   await until(() => gil.heard.some(([ev, v]) => ev === 'page:take' && v.layer === 'info' && v.seq > mainSeq && v.content && v.content.kind === 'chat'), 4000, 'Gil told the information ended');
   const after = await status();
   assert.deepEqual([after.kind, after.info.kind], ['clock', 'chat']);

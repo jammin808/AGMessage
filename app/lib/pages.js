@@ -1246,6 +1246,14 @@ class Pages {
     this.lane.save(() => JSON.stringify({ v: 1, views: Object.fromEntries(this.views), halls: this.halls }));
   }
   flush() { return this.lane.flushSync(); }
+  /**
+   * Written again with no copy of the file before it (a reset): what it took off people's pages and out of Earlier is then
+   * in neither `pages.json` nor its `.bak`.
+   */
+  clearBak() {
+    this.lane.clearBak();
+    this.save();
+  }
 
   /**
    * A take: `content` as cleanPage made it, to `'board'` or a person's key, numbered next in its hall, in each place it
@@ -1581,7 +1589,8 @@ class Pages {
   /**
    * The information take numbered `seq` withdrawn (a take shown by mistake): handed back wherever a page shows it now (one
    * hand-back, numbered next), gone from Earlier, its answers let go, and kept as withdrawn (with `who`, who withdrew it),
-   * so a repeat is told it is done. Returns {take, to} as find() found it, or null when there is none.
+   * so a repeat is told it is done. Written with no copy of the file before it, so its words are in neither file. Returns
+   * {take, to} as find() found it, or null when there is none.
    */
   withdraw(hall, seq, { at = Date.now(), who = '' } = {}) {
     const found = this.find(hall, seq);
@@ -1591,7 +1600,7 @@ class Pages {
     book.withdrawn = (book.withdrawn || []).filter((w) => w.seq !== seq);
     book.withdrawn.push({ seq, ...(WHO.test(guard.str(who)) ? { who } : {}) });
     this._trim(book, at);
-    this.save();
+    this.clearBak();
     return found;
   }
 
