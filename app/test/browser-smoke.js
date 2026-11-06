@@ -4988,16 +4988,19 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
           const a = leave.getBoundingClientRect(), b = s.getBoundingClientRect(); return JSON.stringify({ inView: a.top >= 0 && a.bottom <= innerHeight && a.top >= b.top - 1 && a.bottom <= b.bottom + 1, tall: b.height <= innerHeight + 1 }); })()`, 3000);
         await tab.eval(`document.querySelector('#bvSheet [data-action="sheet.leave"]').click(); true`);
         const asks = await tab.until(`!!document.querySelector('.agm-ask') && 'asks'`, 3000);
+        // A refresh of what the page shows (a message heard, a person come or gone) keeps the ask: the sheet it was asked
+        // from is still open, so its object is not gone.
+        const kept = asks ? await tab.eval(`(() => { refreshOpenMenu(); return !!document.querySelector('.agm-ask'); })()`) : null;
         await press(tab, 'Escape');
-        layout[w + 'x' + h] = { ...r, sheetEnd: JSON.parse(sheetEnd || 'null'), asks, problems: tab.problems.length };
+        layout[w + 'x' + h] = { ...r, sheetEnd: JSON.parse(sheetEnd || 'null'), asks, kept, problems: tab.problems.length };
         console.log(`the Board's chat view at ${w}×${h}: the feed is ${r && r.feedHeight} px tall (a record, not a pass mark)`);
         tab.close();
       }
       const layoutOk = (k, r) => { const [w, h] = k.split('x').map(Number);
         return !!r && r.view === 'simple' && r.column === (w >= 900) && r.tabs === (w < 900) && r.body === (Math.min(w, h) >= 600 ? 22 : 20) && r.scroll && r.missed.length === 0 && r.fits
-          && r.placeholder === (r.longFits ? 'Message everyone here…' : 'Message everyone…') && r.label === 'Message everyone here…' && !!r.sheetEnd && r.sheetEnd.inView && r.sheetEnd.tall && r.asks === 'asks' && r.problems === 0; };
+          && r.placeholder === (r.longFits ? 'Message everyone here…' : 'Message everyone…') && r.label === 'Message everyone here…' && !!r.sheetEnd && r.sheetEnd.inView && r.sheetEnd.tall && r.asks === 'asks' && r.kept === true && r.problems === 0; };
       report(Object.entries(layout).every(([k, r]) => layoutOk(k, r)),
-        `the layout leg at nine sizes: the Shown to you column at 900 px wide or more and the tabs below, 22 px where the smaller side is 600 px or more, no sideways scroll, a 44 px band through each control, the placeholder whole (the short words where the long do not fit the field, measured), the sheet within the screen with Leave reached and asked in place, no script error (${JSON.stringify(Object.fromEntries(Object.entries(layout).map(([k, r]) => [k, r && { column: r.column, tabs: r.tabs, body: r.body, scroll: r.scroll, missed: r.missed, placeholder: r.placeholder, fits: r.fits, sheetEnd: r.sheetEnd, asks: r.asks, problems: r.problems }])))})`);
+        `the layout leg at nine sizes: the Shown to you column at 900 px wide or more and the tabs below, 22 px where the smaller side is 600 px or more, no sideways scroll, a 44 px band through each control, the placeholder whole (the short words where the long do not fit the field, measured), the sheet within the screen with Leave reached and asked in place, the ask kept through a refresh of the page, no script error (${JSON.stringify(Object.fromEntries(Object.entries(layout).map(([k, r]) => [k, r && { column: r.column, tabs: r.tabs, body: r.body, scroll: r.scroll, missed: r.missed, placeholder: r.placeholder, fits: r.fits, sheetEnd: r.sheetEnd, asks: r.asks, kept: r.kept, problems: r.problems }])))})`);
 
       // The floor leg's chat-view steps: no Fullscreen API (both its forms gone) and no Wake Lock: no Full screen row in the
       // sheet and none on a take, and the sheet says why the device may sleep; not a secure context: the HTTPS words; a

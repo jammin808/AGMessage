@@ -1414,3 +1414,21 @@ test('a person, from a seat that may change what people\'s pages show: 📺 Show
   assert.deepEqual([web(kim), web({ ...kim, kind: 'web' }), web({ ...kim, kind: '' }), web({ ...kim, kind: undefined })], [true, true, 'They have no page open in this hall now.', 'Reading where their pages stand…']);
   assert.equal(plain(C.entry('person', 'person.web').confirm(SEATS.guestWeb, kim)).title, 'Show a web page on Kim\'s pages');
 });
+
+// An ask the hall page opens before an act is held to its object: at every refresh of what the page shows (a message, a
+// person come or gone) the page reads the object again (objectNow) and closes the ask when it is gone. So each kind whose
+// acts the hall page runs and whose row may ask has its case there; one without would read as gone at the first refresh
+// and close the ask under the person's finger (the sheet's Leave the hall… did).
+test('every kind the hall page runs whose acts may ask is read again by objectNow, so a refresh never closes its ask', () => {
+  const app = readSource(path.join(ROOT, 'public', 'app.js'));
+  const now = /\nfunction objectNow\(kind, o\) \{\n([\s\S]*?)\n\}\n/.exec(app);
+  assert.ok(now, 'objectNow, the page\'s one read of an object as it is now');
+  const read = new Set([...now[1].matchAll(/kind === '([a-z]+)'/g)].map((m) => m[1]));
+  // The page's runners (RUN's keys, `'kind.verb': …`): the kinds the hall page acts on.
+  const runs = new Set([...app.matchAll(/^\s*'([a-z]+)\.[a-zA-Z]+': /gm)].map((m) => m[1]));
+  assert.ok(runs.has('msg') && runs.has('sheet'), 'the runners are read: ' + [...runs]);
+  const asking = KINDS.filter((k) => C.KINDS[k].some((e) => typeof e.confirm === 'function'));
+  const missing = asking.filter((k) => runs.has(k) && !read.has(k));
+  assert.deepEqual(missing, [], 'kinds the hall page runs that may ask, with no case in objectNow');
+  assert.ok(read.has('sheet'));
+});

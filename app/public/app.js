@@ -1736,6 +1736,7 @@ function objectNow(kind, o) {
   if (kind === 'take') return Takes.object();
   if (kind === 'card') return Takes.cardObject(o && o.layer);
   if (kind === 'past') return Takes.pastObject(o && o.seq);
+  if (kind === 'sheet') return Simple.sheetNow();
   return null;
 }
 /**
@@ -5575,6 +5576,8 @@ const Simple = (function () {
     if (field && document.activeElement !== field) { e.preventDefault(); field.focus(); }
   });
 
-  return { setView, waits, said, tap, change, people: drawAlone, sheet, layout, isSimple, awakeState: () => awake };
+  return { setView, waits, said, tap, change, people: drawAlone, sheet, layout, isSimple, awakeState: () => awake,
+    // The sheet as an ask from it reads it: its object while it is open, null once it is closed (its ask goes with it).
+    sheetNow: () => (sheetOpen() ? sheetObject() : null) };
 })();
 socket.on('view', (v) => { if (v && typeof v.view === 'string') Simple.setView(v.view); });

@@ -4897,6 +4897,12 @@ Web pages need rights of their own.", confirmed "Right", the readings S5 and S13
   the same lockfile entries. The fences find nothing new; nothing that ships changed.
 
 **Fixed**
+- "Leave the hall?", asked from the Board's chat view's ⋯ sheet, stays open while the page draws what it hears. At each
+  refresh (a message, a person come or gone) the page reads an ask's object again and closes the ask when the object is
+  gone; it had no reading for the sheet, so the first refresh closed the ask under the person's finger and said the
+  thing was gone. The browser smoke found it at a phone's size when the machine was busy. The sheet is now read as it
+  is while it is open, the smoke refreshes the page under each Leave ask and wants it kept, and a test holds every kind
+  the hall page runs that may ask to a reading of its own.
 - A hall's side rooms keep the order they were made in. The store ordered them by the millisecond each was made, and
   two made in the same millisecond by their keys, which are random: CI's Node 26 run listed twenty rooms made one after
   another with Room 7 before Room 6. A room made now is stamped after the newest the store holds, loaded or made, so the
