@@ -7,7 +7,8 @@
  * Invariants:
  *   - Fail closed: a check that cannot finish (its file could not be read, or is no file: a folder, which Windows opens
  *     and reads as empty) refuses the file, never keeps it unread, and says so in words of its own, to the uploader (try
- *     again) and to the audit ("could not be checked"), never in the words of a check that found something.
+ *     again) and to the audit ("could not be checked"), never in the words of a check that found something; at a take,
+ *     such a file is not shown.
  *   - A refusal is `{status, error, words, failed?}`: the answer's status, the uploader's words, the audit's words (never
  *     the file's name), and for a check that could not finish the code of what failed, for the console. No synchronous
  *     call, and nothing logged here.
@@ -56,6 +57,16 @@ const CHECKS = Object.freeze([
   { types: imagesize.IMAGES, words: imagesize, run: (file, ext) => imagesize.checkFile(file, ext) },
 ]);
 
+/**
+ * `check` run on the file at `file`, which must be one: a folder (which Windows opens and reads as empty) or anything
+ * else that is no file rejects (EISDIR, ENOTFILE), as a read that failed does, on every platform.
+ */
+async function runCheck(check, file, ext) {
+  const kind = await fs.promises.stat(file);
+  if (!kind.isFile()) throw Object.assign(new Error('not a file'), { code: kind.isDirectory() ? 'EISDIR' : 'ENOTFILE' });
+  return check.run(file, ext);
+}
+
 /** What an uploader is told of a file whose contents are not its type's: the words the first-bytes check answers with. */
 const MISMATCH = 'That file\'s contents don\'t match its type, so it wasn\'t shared.';
 
@@ -81,9 +92,7 @@ async function refusalOf(file, ext, name = '', { transferOnly = false, compound 
   if (!check) return null;
   let verdict;
   try {
-    const kind = await fs.promises.stat(file);
-    if (!kind.isFile()) throw Object.assign(new Error('not a file'), { code: kind.isDirectory() ? 'EISDIR' : 'ENOTFILE' });
-    verdict = await check.run(file, ext);
+    verdict = await runCheck(check, file, ext);
   } catch (e) {
     return { status: 503, error: UNCHECKED, words: check.words.auditWords(ext, { why: 'unchecked' }), failed: (e && e.code) || 'its read failed' };
   }
@@ -109,7 +118,7 @@ async function stageRefusalOf(file, ext, name) {
   let verdict = found.get(name);
   if (!verdict) {
     try {
-      verdict = await check.run(file, ext);
+      verdict = await runCheck(check, file, ext);
     } catch (e) {
       return { error: STAGE_UNREAD, failed: (e && e.code) || 'its read failed' };
     }

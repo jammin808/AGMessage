@@ -5738,7 +5738,8 @@ confidential line's rule, §5.9.10's three steps and S6, is the confidential mar
 - An upload whose stored path is no file (a folder in its place) is refused as one that could not be checked, on every
   platform. The archive's check opened it and, on Windows, read a folder as an empty file, so it was refused in the
   words for a file packed some other way; Linux could not read it at all. The upload check now asks first whether it
-  is a file, for every type it checks. CI's Windows run found it; nothing a person uploads takes that path.
+  is a file, for every type it checks, and so does a file's check at its first take on the stage, which shows no such
+  file. CI's Windows run found it; nothing a person uploads takes that path.
 - The browser smoke starts its browser on a port the browser takes itself, read from its profile's `DevToolsActivePort`,
   and waits 30 s for it. It chose a free port and handed it over, with 15 s to answer; CI's Linux run once found no
   answer there, the browser started and the run over before a page was opened. Nothing that ships changed.

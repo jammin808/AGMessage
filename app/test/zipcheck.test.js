@@ -485,6 +485,10 @@ test('a stage file\'s check at its first take: its upload\'s check where none is
     // A file gone, or a type with no check.
     const gone = await uploadcheck.stageRefusalOf(path.join(dir, 'gone.png'), 'png', '1730000000000-ffffffffffff-gone.png');
     assert.deepEqual([gone.error, gone.failed], ['That file could not be read, so it was not shown.', 'ENOENT']);
+    // A folder where the file was is not shown either, on every platform (Windows would read it as an empty file).
+    const folder = path.join(dir, '1730000000000-gggggggggggg-f.pptx');
+    fs.mkdirSync(folder);
+    assert.deepEqual(await uploadcheck.stageRefusalOf(folder, 'pptx', '1730000000000-gggggggggggg-f.pptx'), { error: 'That file could not be read, so it was not shown.', failed: 'EISDIR' });
     for (const ext of ['pdf', 'txt', 'csv', 'md', 'xls']) assert.equal(await uploadcheck.stageRefusalOf(path.join(dir, 'gone.' + ext), ext, 'x'), null, ext);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
