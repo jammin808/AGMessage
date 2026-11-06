@@ -52,12 +52,24 @@ const readOnly = () => document.body.dataset.role === 'observer';
 // page (the join's answer, the screens it may drive, the link's state, whether it is connected), kept current by its
 // events, and every button, menu and key on a message, a file, a screen, a person, the composer and the header's chips is
 // drawn from the catalogue's entries for them. A page binds only what each act does: RUN, by the entry's id.
+/**
+ * Whether this device opens documents (plan 4-§5.15.2), sent at each join as `docs: true` and only then: it makes a
+ * `DecompressionStream('deflate-raw')`, which came with pdf.js's legacy build's floor (Safari 16.4, Chrome 103) and which
+ * the document worker inflates Office files with, inside try; and no import of pdf.js failed on it this session (NO_DOCS,
+ * kept in this tab). No user agent is read and no syntax is probed (the page's policy has no 'unsafe-eval'). A page that
+ * cannot draws a document's stand-in in its place, or says it cannot open documents.
+ */
+const NO_DOCS = 'agm.noDocs';
+let DOCS = (() => {
+  try { if (sessionStorage.getItem(NO_DOCS) === '1') return false; } catch { /* storage blocked: the probe alone decides */ }
+  try { return typeof DecompressionStream === 'function' && !!new DecompressionStream('deflate-raw'); } catch { return false; }
+})();
 // Whether this device can show a take full screen (the Fullscreen API: an iPhone has none), read once here and sent nowhere.
 const FULLSCREEN = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled) && (typeof document.documentElement.requestFullscreen === 'function' || typeof document.documentElement.webkitRequestFullscreen === 'function');
 // The chat view this page draws (`view`: the join's, then each `view` the server tells it), and in the simple view what
 // waits for this person's answer (`waiting`), the message they tapped (`tapped`, its second door) and the question whose
 // answers they brought back to change (`changing`): the simple view's facts, the page's own (Simple, below).
-const pageFacts = { role: ROLE, uid: '', account: null, uploadToken: '', canSendToStage: false, canPropose: false, ai: false, stage: null, forwardable: false, sends: false, targets: [], adminView: ADMIN_VIEW, name: NAME, screens: null, connected: false, guestCode: '', codeOn: false, setsCode: false, admin: false, canPush: false, canWeb: false, canShow: false, fullscreen: FULLSCREEN, view: 'full', waiting: null, tapped: '', changing: '' };
+const pageFacts = { role: ROLE, uid: '', account: null, uploadToken: '', canSendToStage: false, canPropose: false, ai: false, stage: null, forwardable: false, sends: false, targets: [], adminView: ADMIN_VIEW, name: NAME, screens: null, connected: false, guestCode: '', codeOn: false, setsCode: false, admin: false, canPush: false, canWeb: false, canShow: false, fullscreen: FULLSCREEN, docs: DOCS, view: 'full', waiting: null, tapped: '', changing: '' };
 let F = AGM.catalog.facts(pageFacts);
 // Whether this page's room is its hall's Main room (the join's `main`; a hall until it answers): its seat words follow it
 // (roleLabel).
@@ -174,7 +186,7 @@ socket.on('connect', rejoin);
 /** Join (or rejoin after a drop): the server sends only what we missed when it still has it. */
 function rejoin() {
   const who = AS_ACCOUNT ? { as: 'account' } : { name: NAME, role: ROLE, uid: IDENTITY, invite: INVITE };
-  socket.emit('join', { roomCode: ROOM, adminView: ADMIN_VIEW, ...(VIEW_OF ? { viewOf: VIEW_OF } : {}), since: joined ? lastSeq : undefined, ...who }, (res) => {
+  socket.emit('join', { roomCode: ROOM, adminView: ADMIN_VIEW, ...(VIEW_OF ? { viewOf: VIEW_OF } : {}), since: joined ? lastSeq : undefined, ...who, ...(DOCS ? { docs: true } : {}) }, (res) => {
     if (!res || !res.ok) {
       // Signing in is the way into this hall: the sign-in page opens, and brings the person back here after.
       if (res && res.signIn) {
@@ -274,6 +286,18 @@ function rejoin() {
     // The build serving now: on another, this page reloads itself at a quiet moment (below).
     AGM.reconnect.build.heard(res.build);
   });
+}
+/**
+ * This device passed the documents' probe yet could not import pdf.js (plan 4-§5.15.2): from now on, for the rest of this
+ * tab's session, it opens no document, draws a document's stand-in in its place, and joins without `docs`; it joins again
+ * now, on its own socket, so the server counts it and its pushers' consoles offer a picture.
+ */
+function noDocs() {
+  if (!DOCS) return;
+  DOCS = false;
+  try { sessionStorage.setItem(NO_DOCS, '1'); } catch { /* storage blocked: this page's own run remembers it */ }
+  factsChanged({ docs: false });
+  if (joined && socket.connected) rejoin();
 }
 /**
  * A guest's code and invite, taken by the join, kept in this tab (sessionStorage) and taken out of the address and its
@@ -2728,6 +2752,15 @@ let docDrawing = 0;        // each drawing numbered: only the newest may draw or
 let docShown = false;      // whether the panel's reader drew the file it opened (its ready said 'shown')
 /** The document on stage as plain text, for AI drafts (capped by the reader, hidden parts left out). */
 const docForAi = { id: null, name: '', text: '' };
+/**
+ * Whether a device that cannot open documents lacks the reader for a file (plan 4-§5.15.2): pdf.js (a PDF) and the
+ * document worker's inflater (a zipped Word, Excel or PowerPoint file), by docview.mjs's kind and the file's type (an Excel
+ * 97-2003 workbook is not zipped); and what such a device says in a document's place, to the Board or an observer, and
+ * backstage.
+ */
+const readerNeeded = (kind, name) => ['pdf', 'word', 'deck'].includes(kind) || (kind === 'book' && extOfName(name) !== 'xls');
+const NO_DOCS_WORDS = 'This device cannot open documents — ask the backstage team to show you a picture.';
+const NO_DOCS_HERE = 'This device cannot open documents: open it on another device, or show a picture of it.';
 /** The document reader (docview.mjs), imported once. */
 async function docReader() {
   if (!docViewMod) docViewMod = await import('/docview.mjs');
@@ -2755,6 +2788,16 @@ async function drawDoc(source, name, mime, at) {
   }
   if (n !== docDrawing) return;
   docDisplay.textContent = '';
+  // A device that cannot open documents (DOCS) says so for a file pdf.js or the document worker reads, in place of a
+  // reader that would fail on it; a picture, a CSV, Markdown and text need neither, and are drawn.
+  if (!DOCS && readerNeeded(docViewMod.kindOf(name, mime), name)) {
+    const p = document.createElement('p');
+    p.className = 'take-device';
+    p.textContent = docSeat() === 'research' ? NO_DOCS_HERE : NO_DOCS_WORDS;
+    docDisplay.appendChild(p);
+    PreviewBar.draw();
+    return;
+  }
   const view = docViewMod.open(docDisplay, source, { at, seat: docSeat(), name, mime });
   docView = view;
   // On a backstage seat what is highlighted in it is a pick, which the Preview's bar sends (PickBar).
@@ -4390,7 +4433,13 @@ const Takes = (function () {
     return loading;
   };
   // The page's own seat draws a document as that seat does (docview.mjs): never the take's.
-  const ctxOf = (t) => ({ stage, offset, tz, hallName: (t && t.hallName) || HALL_NAME, holding: (t && t.holding) || '', connected: socket.connected, by: (t && t.by && t.by.name) || '', seat: docSeat() });
+  // Whether this device opens documents (DOCS): a page that cannot draws a document's stand-in in its place.
+  const ctxOf = (t) => ({ stage, offset, tz, hallName: (t && t.hallName) || HALL_NAME, holding: (t && t.holding) || '', connected: socket.connected, by: (t && t.by && t.by.name) || '', seat: docSeat(), docs: DOCS });
+  /**
+   * What a drawing said, heard: a device that passed the documents' probe but could not import pdf.js (`device`, the take
+   * then drawn as such a device draws it: its stand-in, or the words) opens no document from now on (noDocs).
+   */
+  const drawnSaid = (r) => { if (r && r.device === true) noDocs(); return r; };
   /** What a box holds let go: a document's reader destroyed and its object URLs revoked (pagelayer.mjs clear). */
   const clearBox = (b) => { if (renderer) renderer.clear(b); else b.textContent = ''; };
   const visible = () => document.visibilityState === 'visible';
@@ -4581,6 +4630,7 @@ const Takes = (function () {
       if (t.content.kind === 'web' && n === turn && stillOver(key)) { drawing = key; open(t); }
       return drawn;
     }).then((r) => {
+      drawnSaid(r);
       if (n !== turn || !stillOver(key)) return;
       drawing = '';
       result = r && typeof r === 'object' ? r : { state: 'failed', words: 'it could not be drawn' };
@@ -4672,6 +4722,7 @@ const Takes = (function () {
           inner.className = 'take-card-box';
           li.append(inner);
           Promise.resolve(m.render(inner, t.content, { ...ctxOf(t), card: true })).then((r) => {
+            drawnSaid(r);
             if (cardOf[l] !== now) return;
             now.result = r && typeof r === 'object' ? r : { state: 'failed', words: 'it could not be drawn' };
             sayAll();
@@ -4761,7 +4812,7 @@ const Takes = (function () {
   function look(o) {
     const e = pastEntry(o.seq);
     if (e && (e.content.kind === 'doc' || e.content.kind === 'image' || e.content.kind === 'snippet')) {
-      load().then((m) => Preview.look(m, e, ctxOf(e)), () => AGM.toast('This page could not load what draws a take: reload it.', true));
+      load().then((m) => Preview.look(m, e, ctxOf(e), drawnSaid), () => AGM.toast('This page could not load what draws a take: reload it.', true));
       return;
     }
     if (o.kind !== 'web' || !o.url) { AGM.toast('This page cannot open that one again.', true); return; }
@@ -5098,7 +5149,15 @@ const Console = (function () {
    * it up (`op`: a researcher's Take down is only over its own kind).
    */
   const takeIn = (i) => (i && i.seq && i.kind && i.kind !== 'chat' ? { seq: i.seq, kind: i.kind, mark: i.mark, words: i.words, showing: i.showing, arrive: i.arrive === 'side' ? 'side' : 'over', op: i.op === true, mine: i.mine === true, on: i.on, pages: i.pages,
-    by: typeof i.by === 'string' ? i.by : '', at: readAt - (Number.isFinite(i.ago) ? i.ago : 0) } : null);
+    by: typeof i.by === 'string' ? i.by : '', at: readAt - (Number.isFinite(i.ago) ? i.ago : 0), ...counts(i), ...(i.doc && typeof i.doc === 'object' ? { doc: i.doc } : {}) } : null);
+  /**
+   * A status's pages that cannot open documents (plan 4-§5.15.2), as page:status counts them: `nodocs`, those that drew a
+   * document's stand-in (`standin`, as a picture or as a quote: `standinAs`) and those that could not show it (`cannot`); 0
+   * where it says none. With a document some could not open, the file to draw from (`doc`), where the read gives this
+   * page one.
+   */
+  const counts = (i) => ({ nodocs: count(i, 'nodocs'), standin: count(i, 'standin'), standinAs: i && i.standinAs === 'quote' ? 'quote' : 'picture', cannot: count(i, 'cannot') });
+  const count = (i, k) => (i && Number.isInteger(i[k]) && i[k] > 0 ? i[k] : 0);
   const infoOf = (row) => takeIn(row && row.info);
   const besideOf = (row) => takeIn(row && row.beside);
   /**
@@ -5121,7 +5180,10 @@ const Console = (function () {
     const b = status && status.board;
     const info = infoOf(b);
     return { id: 'board', seq: b ? b.seq : 0, kind: b ? kindNow(b) : undefined, pages: b ? b.pages : 0, on: b ? b.on : 0, mark: b ? b.mark : '', words: b ? b.words : '', showing: b ? b.showing : '',
-      mine: mine && b && mine.seq === b.seq ? mine : null, info, beside: besideOf(b), show: !status || status.show !== false, opOn: opOnBoard({ info }) };
+      mine: mine && b && mine.seq === b.seq ? mine : null, info, beside: besideOf(b), show: !status || status.show !== false, opOn: opOnBoard({ info }),
+      // Its pages that cannot open documents, and, where a document could not be shown on some of them, what Show them a
+      // picture sends them (Show.standinSaid: its words; none where this page has nothing of it to draw from).
+      nodocs: count(b, 'nodocs'), standin: pictureFor(info) };
   }
   /** What is over the show and beside it, in words: " · over it: a web page on … (Opened …) · in their side bar: …". */
   const infoWords = (o) => (o.info ? ' · over it: ' + o.info.showing + ' (' + o.info.words + ')' : '') + (o.beside ? ' · in their side bar: ' + o.beside.showing + ' (' + o.beside.words + ')' : '');
@@ -5133,7 +5195,7 @@ const Console = (function () {
    * back over that take alone, never older content put back (which could pop up again what the Board had closed); it is
    * kept beside the operator's (`aside`) where the operator's information is up, said so. A Take down offers nothing.
    */
-  function push(to, content, { ifSeq, undoable = true, name = '', arrive = '', refused = null } = {}) {
+  function push(to, content, { ifSeq, undoable = true, name = '', arrive = '', refused = null, taken = null } = {}) {
     const onBoard = to === 'board';
     const info = INFO.includes(content.kind);
     const handBack = content.kind === 'chat' && content.layer === 'info';
@@ -5141,6 +5203,8 @@ const Console = (function () {
       // A refusal its sender can mend (a picture whose file went: drawn and sent again) is its sender's to say.
       if ((!r || !r.ok) && refused && refused(r)) { read(); return; }
       if (!r || !r.ok) { AGM.toast((r && r.error) || 'Nothing was shown.', true); read(); return; }
+      // Its sender keeps what it was, by its number (a document: Show them a picture of its place).
+      if (taken) taken(r);
       const st = Array.isArray(r.results) && r.results[0] ? r.results[0].status : null;
       // What was shown before in the show layer, as the server gives it back: their chat where nothing was, else its
       // content; none where this page could not put it up itself (a picture in a room it may not read), and then no Undo is
@@ -5200,15 +5264,35 @@ const Console = (function () {
    * where it is asked to arrive there, or where the operator's information is up there and this page may only show (the
    * server refuses it over that).
    */
-  function showFile(to, content, { name = '', arrive = '', refused = null } = {}) {
+  function showFile(to, content, { name = '', arrive = '', refused = null, taken = null } = {}) {
     const o = to === 'board' ? board() : rowOf(to.uid);
     const side = arrive === 'side' || (!F.canPush && !!o && ((!!o.info && o.info.op) || !!o.opOn));
-    push(to, content, { name, refused, ...(side ? { arrive: 'side' } : {}) });
+    push(to, content, { name, refused, taken, ...(side ? { arrive: 'side' } : {}) });
   }
   /** The people a page may show something to by name, as the console's read lists them: [{key, name}]. */
   const people = () => (status && Array.isArray(status.people) ? status.people.map((p) => ({ key: p.uid, name: String(p.name || '') })) : []);
+  /**
+   * The people seated On stage whose pages could not open the Board's document take `seq` (their own read of it counts
+   * pages that failed: `cannot`), as the console's read lists them: [{key, name}]. A person since shown a take of their own
+   * reads that one, and is left out.
+   */
+  const older = (seq) => (status && Array.isArray(status.people) ? status.people.filter((p) => { const i = infoOf(p); return p.board === true && !!i && i.seq === seq && i.cannot > 0; }).map((p) => ({ key: p.uid, name: String(p.name || '') })) : []);
+  /** What Show them a picture sends for a document take some pages could not open (`info`), or null (Show.standinSaid). */
+  const pictureFor = (info) => (info && info.kind === 'doc' && info.cannot > 0 ? Show.standinSaid(info) : null);
+  /**
+   * How many of a target's pages cannot open documents, and of how many ({n, of}), as the console's read counts them: the
+   * Board's (`to` 'board') or a person's ({uid}).
+   */
+  function olderOf(to) {
+    const row = !status ? null : to === 'board' ? status.board : Array.isArray(status.people) ? status.people.find((p) => p.uid === (to && to.uid)) : null;
+    return { n: count(row, 'nodocs'), of: row && Number.isInteger(row.pages) ? row.pages : 0 };
+  }
   for (const [kind] of AGM.catalog.SHOW_KINDS) if (AGM.catalog.entry('board', 'board.' + kind)) RUN['board.' + kind] = () => push('board', { kind });
   RUN['board.web'] = (o, c) => web('board', 'board', 'board.web', board, c);
+  // Show them a picture: the Board's document, at its place, to each person On stage whose page could not open it, as a
+  // take of their own drawn over the Board's (plan 4-§5.15.2); a person's, to that person.
+  RUN['board.picture'] = (o) => { if (o.info) Show.sendStandins(o.info, older(o.info.seq)); };
+  RUN['person.picture'] = (p) => { if (p.info) Show.sendStandins(p.info, [{ key: p.key, name: p.name }]); };
 
   // ---- the Board chip, in the header: "Board · 🕐 Clock ✓ 6/6"; a click on it, a right-click and Shift+F10 open its menu
   const chipDoor = () => (chip.hidden ? null : { el: chip, more: chip, open: (at) => openObjectMenu('board', board, { node: chip, more: chip, at, opener: chip, label: 'The Board', header: boardHeader }) });
@@ -5218,6 +5302,8 @@ const Console = (function () {
     const door = chipDoor();
     if (door) door.open({ anchor: chip });
   });
+  /** A count's words for the pages that drew a document's stand-in: " (2 as a picture)" ("✓ 6/6 (2 as a picture)"), or a quote. */
+  const pictured = (row) => (count(row, 'standin') ? ' (' + count(row, 'standin') + ' as a ' + (row.standinAs === 'quote' ? 'quote' : 'picture') + ')' : '');
   function drawChip() {
     const show = may() && !outOf;
     chip.hidden = !show;
@@ -5228,7 +5314,7 @@ const Console = (function () {
     const entry = kind ? AGM.catalog.entry('board', 'board.' + kind[0]) : null;
     let head = 'Board', mark = '', words = '';
     if (b && !b.pages) { head = 'Board ·'; mark = 'fault'; words = 'nobody on stage'; }
-    else if (b && b.seq && kind) { head = 'Board · ' + entry.icon + ' ' + kind[1]; mark = AGM.markOf(b.mark) || 'fault'; words = b.on + '/' + b.pages; }
+    else if (b && b.seq && kind) { head = 'Board · ' + entry.icon + ' ' + kind[1]; mark = AGM.markOf(b.mark) || 'fault'; words = b.on + '/' + b.pages + pictured(b); }
     else if (b) head = 'Board · Chat';
     $('boardWhat').textContent = head;
     const state = $('boardState');
@@ -5251,7 +5337,7 @@ const Console = (function () {
       name.textContent = '· ' + (e ? e.icon + ' ' : '') + (k ? k[1] : 'Shown') + (shown === i ? ' ' : ' in the side bar ');
       const st = document.createElement('span');
       st.className = 'board-over-state';
-      AGM.chip(st, AGM.markOf(shown.mark) || 'fault', shown.on + '/' + shown.pages);
+      AGM.chip(st, AGM.markOf(shown.mark) || 'fault', shown.on + '/' + shown.pages + pictured(shown));
       over.append(name, st);
     }
     const s = o.beside;
@@ -5268,7 +5354,10 @@ const Console = (function () {
    */
   function takesOf(key) {
     const p = status && Array.isArray(status.people) ? status.people.find((x) => x.uid === key) : null;
-    return p ? { info: infoOf(p), beside: besideOf(p), show: status.show !== false } : { info: null, beside: null, show: !status || status.show !== false };
+    if (!p) return { info: null, beside: null, show: !status || status.show !== false };
+    const info = infoOf(p);
+    // Where their pages could not open a document, what Show them a picture sends them.
+    return { info, beside: besideOf(p), show: status.show !== false, standin: pictureFor(info) };
   }
   const rowOf = (key) => {
     if (key === 'board') return board();
@@ -5347,7 +5436,7 @@ const Console = (function () {
     for (const fn of drawn) fn();
     refreshOpenMenu();
   }
-  return { read, draw, board, kindOf, takesOf, chipDoor, showFile, people, rowOf, onDraw: (fn) => { drawn.add(fn); } };
+  return { read, draw, board, kindOf, takesOf, chipDoor, showFile, people, older, olderOf, rowOf, onDraw: (fn) => { drawn.add(fn); } };
 })();
 
 /**
@@ -5483,11 +5572,169 @@ const Show = (() => {
     const from = src.url ? { url: src.url, ...(at && Object.keys(at).length ? { at } : {}) } : { local: true, name: src.name, ...(at && Object.keys(at).length ? { at } : {}) };
     Console.showFile(to, { kind: 'snippet', ...body, from, ...(note ? { note } : {}) }, { name, arrive });
   }
-  /** `src` shown whole to `to`, opened at `at`, with Download when ticked: one of this device's uploaded first. */
+  /**
+   * `src` shown whole to `to`, opened at `at`, with Download when ticked: one of this device's uploaded first. Where the
+   * console's read counts pages of the target that cannot open documents, and this file needs a reader they lack, its
+   * stand-in is made here first and sent with it (plan 4-§5.15.2); for no such page, none is made, so nothing is uploaded
+   * for nothing. A stand-in picture kept from before whose file the stage let go is drawn and uploaded again, once. The
+   * document is kept by its take's number, for Show them a picture.
+   */
   async function whole(src, at, download, to, { name = '', arrive = '' } = {}) {
     const url = src.url || await upload(src.file, 'the document');
     if (!url) return;
-    Console.showFile(to, { kind: 'doc', url, ...(at ? { at } : {}), download: download === true }, { name, arrive });
+    const doc = { url, name: src.name || '', file: src.file || null };
+    const send = async (fresh) => {
+      const made = Console.olderOf(to).n > 0 && STANDIN_TYPES.includes(extOf(src)) ? await standinFor(doc, at, fresh) : null;
+      const refused = made && made.kept && !fresh ? (r) => { if (!(r && GONE_FILE.test(r.error || ''))) return false; send(true); return true; } : null;
+      Console.showFile(to, { kind: 'doc', url, ...(at ? { at } : {}), download: download === true, ...(made ? { standin: made.standin } : {}) }, { name, arrive, refused, taken: (r) => keepDoc(r.seq, doc, at) });
+    };
+    await send(false);
+  }
+
+  // ---- a document's stand-in, for the pages that cannot open documents (plan 4-§5.15.2)
+  /** The files whose readers such a page lacks: pdf.js (a PDF) and the document worker (Word, Excel, PowerPoint). */
+  const STANDIN_TYPES = AGM.catalog.READER_EXT;
+  /** Where docview.mjs opens a place: its unit by number (a page, a slide, a sheet, a line), and a Word paragraph's number. */
+  const readerAt = (at) => {
+    if (!at || typeof at !== 'object') return null;
+    const block = Number.isInteger(at.block) && at.block > 0 ? { block: at.block } : {};
+    for (const k of ['page', 'slide', 'sheet', 'line']) if (Number.isInteger(at[k]) && at[k] > 0) return { page: at[k], ...block };
+    return block.block ? block : null;
+  };
+  /** A place in words: "p. 12", "slide 3", "sheet 2", "line 40"; "its top" for none (a Word document opens there). */
+  const placeSaid = (at) => {
+    if (!at || typeof at !== 'object') return 'its top';
+    const [k, n] = Object.entries(at).find(([, v]) => Number.isInteger(v) && v > 0) || [];
+    return k ? (k === 'page' ? 'p.' : k) + ' ' + n : 'its top';
+  };
+  /** Whether the Preview draws `src` now: its page's picture is drawn from that view, not read again. */
+  const previewed = (src) => !!docView && !!previewing && (previewing.file ? !!src.file && previewing.file === src.file : !!previewing.msg && previewing.msg.url === src.url);
+  /**
+   * Page `page` of a PDF drawn here and uploaded as a picture (as a page picture is: kept to show again without a second
+   * upload while the stage keeps its file, unless `fresh`): {url, kept} (`kept`: the one kept from before, which a push
+   * refused because the stage let its file go draws again), or null with the words said.
+   */
+  async function pagePictureUrl(src, page, fresh = false) {
+    const key = pictureKey(src, page, null);
+    const kept = drawnPictures.get(key);
+    if (!fresh && kept && Date.now() - kept.at < PICTURE_KEEP_MS) return { url: kept.url, kept: true };
+    say('Drawing p. ' + page + ' for the older devices…');
+    let blob;
+    try {
+      const mod = await docReader();
+      blob = previewed(src) ? await docView.pagePicture(page) : await mod.pagePictureOf(src.url ? { url: src.url } : { file: src.file }, page);
+    } catch { blob = null; }
+    if (!blob) { AGM.toast('p. ' + page + ' could not be drawn for the older devices.', true); return null; }
+    const stem = (src.name || 'page').replace(/\.[A-Za-z0-9]{1,5}$/, '');
+    const url = await upload(new File([blob], stem + ' p' + page + '.' + (blob.type === 'image/jpeg' ? 'jpg' : 'png'), { type: blob.type || 'image/png' }), 'the picture');
+    if (!url) return null;
+    keepPicture(key, url, blob.size);
+    return { url, kept: false };
+  }
+  /**
+   * What is at an Office file's place, read here as What I see reads it (its hidden parts left out), in a reader laid out
+   * as a tablet's take and never seen, let go once read: a quote's body, or null where nothing there could be read.
+   */
+  async function seenAt(src, at) {
+    let mod;
+    try { mod = await docReader(); } catch { return null; }
+    const box = document.createElement('div');
+    box.className = 'standin-reader';
+    box.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(box);
+    const v = mod.open(box, src.file ? { file: src.file } : { url: src.url }, { at: readerAt(at), seat: 'research', name: src.name || '', ext: extOf(src) });
+    try {
+      const r = await v.ready;
+      if (!r || r.state !== 'shown') return null;
+      const seen = v.seen({});
+      const q = seen && seen.quote && !seen.quote.error ? seen.quote : seen && seen.fits ? seen.fits : null;
+      if (!q) return null;
+      // Its body alone: the take's place is the document's own.
+      const { at: _at, approx, over, ...body } = q;
+      return body;
+    } finally { v.destroy(); box.remove(); }
+  }
+  /**
+   * A document's stand-in (lib/pages.js standinOf): a picture of a PDF's place ({url}), or what is at an Office file's
+   * ({snippet}), as {standin, kept} (`kept`: a picture kept from before); null for a file such a page draws itself, or
+   * where none could be made (its pages then say they cannot open it, and Show them a picture is offered).
+   */
+  async function standinFor(src, at, fresh = false) {
+    const ext = extOf(src);
+    if (!STANDIN_TYPES.includes(ext)) return null;
+    if (ext === 'pdf') {
+      const pic = await pagePictureUrl(src, at && Number.isInteger(at.page) && at.page > 0 ? at.page : 1, fresh);
+      return pic ? { standin: { url: pic.url }, kept: pic.kept } : null;
+    }
+    const snippet = await seenAt(src, at);
+    return snippet ? { standin: { snippet }, kept: false } : null;
+  }
+  /** The documents this page put up lately, by their takes' numbers ({src: {url, name, file}, at}): the newest 20. */
+  const sentDocs = new Map();
+  function keepDoc(seq, src, at) {
+    if (!Number.isInteger(seq)) return;
+    sentDocs.set(seq, { src, at: at || null });
+    while (sentDocs.size > 20) sentDocs.delete(sentDocs.keys().next().value);
+  }
+  /**
+   * The document a take some pages could not open shows (`info`, the console's read of it): this page's own copy where it
+   * put it up, else the file as the console's read gives it to its pusher, an operator and the admin (`doc`); or null.
+   */
+  function docFor(info) {
+    if (!info || !Number.isInteger(info.seq)) return null;
+    const d = sentDocs.get(info.seq);
+    if (d) return d;
+    const f = info.doc;
+    return f && typeof f === 'object' && isFileUrl(f.url) ? { src: { url: f.url, name: typeof f.name === 'string' ? f.name : '' }, at: f.at && typeof f.at === 'object' ? f.at : null } : null;
+  }
+  /** What Show them a picture sends for the document a take shows (`info`): {said}, or null where this page has none of it. */
+  function standinSaid(info) {
+    const d = docFor(info);
+    if (!d || !STANDIN_TYPES.includes(extOf(d.src))) return null;
+    return { said: (extOf(d.src) === 'pdf' ? 'a picture of ' : 'what is at ') + placeSaid(d.at) };
+  }
+  /**
+   * Show them a picture (plan 4-§5.15.2): the document a take shows (`info`, the console's read) at its place, to each of
+   * `people` ({key, name}: those whose page could not open it), as a take of their own: a picture of a PDF's page (drawn
+   * and uploaded once, then the same picture to each; one kept from before whose file the stage let go drawn and uploaded
+   * again, once, for those it was refused to), or what is at an Office file's place as a quote.
+   */
+  async function sendStandins(info, people) {
+    const d = docFor(info);
+    if (!d || !people.length) { AGM.toast('Nobody here is left without it.', true); return; }
+    const src = d.src;
+    const ext = extOf(src);
+    if (ext === 'pdf') {
+      const page = d.at && Number.isInteger(d.at.page) && d.at.page > 0 ? d.at.page : 1;
+      const pic = await pagePictureUrl(src, page);
+      if (!pic) return;
+      const picture = (url) => ({ kind: 'image', url, from: { url: src.url, at: { page } } });
+      let again = null;
+      const refused = (p) => (pic.kept ? (r) => {
+        if (!(r && GONE_FILE.test(r.error || ''))) return false;
+        again = again || pagePictureUrl(src, page, true);
+        again.then((made) => { if (made) Console.showFile({ uid: p.key }, picture(made.url), { name: p.name }); });
+        return true;
+      } : null);
+      for (const p of people) Console.showFile({ uid: p.key }, picture(pic.url), { name: p.name, refused: refused(p) });
+      return;
+    }
+    const snippet = await seenAt(src, d.at);
+    if (!snippet) { AGM.toast('Nothing at that place could be read to send them.', true); return; }
+    for (const p of people) Console.showFile({ uid: p.key }, { kind: 'snippet', ...snippet, from: { url: src.url, ...(d.at ? { at: d.at } : {}) } }, { name: p.name });
+  }
+  /**
+   * The words the bar says before a document goes, for `to`'s pages that cannot open documents (`older`, the console's
+   * {n, of}): "2 of 6 Board pages are older devices: they get a picture of p. 12 in its place"; '' for none, or for a file
+   * they draw themselves.
+   */
+  function olderWords(to, ext, at, name = '') {
+    const { n, of } = Console.olderOf(to);
+    if (!n || !STANDIN_TYPES.includes(ext)) return '';
+    const what = (ext === 'pdf' ? 'a picture of ' : 'what is at ') + (at === undefined ? 'that place' : placeSaid(at));
+    const whose = to === 'board' ? n + ' of ' + of + ' Board pages ' + (n === 1 ? 'is an older device: it gets ' : 'are older devices: they get ')
+      : (name ? name + '\'s ' : 'Their ') + (n === 1 ? 'page is an older device: it gets ' : n + ' pages are older devices: they get ');
+    return whose + what + ' in its place';
   }
   /** Whether the Preview has `src` open now and its reader found hidden parts in it (never shown with Download). */
   const hiddenIn = (src) => !!docView && !!previewing && (previewing.file ? previewing.file === src.file : !!previewing.msg && previewing.msg.url === src.url) && docView.hiddenParts();
@@ -5517,7 +5764,8 @@ const Show = (() => {
       { name: 'download', label: 'Let them download it', type: 'checkbox', value: false, ...(hidden ? { disabled: HIDDEN_PARTS } : {}) },
       { name: 'arrive', label: 'Where', type: 'select', options: [{ value: 'over', label: 'Over their chat' }, { value: 'side', label: 'In their side bar' }], value: 'over' },
     ];
-    const r = await AGM.ask(anchor, { title: 'Show ' + (to === 'board' ? 'the Board' : name || 'them') + ' the document', words: (src0 ? (src0.name || 'The file') : 'The file') + ', whole: they can page through it.', fields, yes: to === 'board' ? 'Show the Board' : 'Show ' + (name || 'them'), no: 'Cancel' }, { opener });
+    const older = olderWords(to, ext, undefined, name);
+    const r = await AGM.ask(anchor, { title: 'Show ' + (to === 'board' ? 'the Board' : name || 'them') + ' the document', words: (src0 ? (src0.name || 'The file') : 'The file') + ', whole: they can page through it.' + (older ? ' ' + older + '.' : ''), fields, yes: to === 'board' ? 'Show the Board' : 'Show ' + (name || 'them'), no: 'Cancel' }, { opener });
     if (!r.yes) return;
     const src = files ? (files.find((f) => f.value === r.values.file) || files[0]).src : src0;
     const n = parseInt(r.values.at, 10);
@@ -5537,7 +5785,7 @@ const Show = (() => {
     }
     if (value === 'doc') docAsk(src, { anchor, opener });
   }
-  return { picture, inside, quote, whole, document: docAsk, fromMenu, sourceOf, atOf, hiddenIn, drawnSize, IMAGE, PLACE, STAGE, HIDDEN_PARTS };
+  return { picture, inside, quote, whole, document: docAsk, fromMenu, sourceOf, atOf, hiddenIn, drawnSize, standinSaid, sendStandins, olderWords, IMAGE, PLACE, STAGE, HIDDEN_PARTS };
 })();
 
 /** A take's kind as a person reads it: "a quote", "a web page" (the catalogue's words). */
@@ -5923,8 +6171,11 @@ const PreviewBar = (() => {
     // A page's picture says its size once it has been drawn here (kept to show again); until then, what it is.
     const drawnBytes = ext === 'pdf' ? Show.drawnSize(s, n) : 0;
     const small = ext === 'pdf' ? smallText(n) : 0;
+    // The target's pages that cannot open documents get the document's stand-in, said before it goes (plan 4-§5.15.2).
+    const older = image ? '' : Show.olderWords(t.to, ext, Show.atOf(ext, n), t.name);
     note.textContent = (image ? 'Show ' + whom + ' this picture' + (noMeta.checked ? ', drawn again without its metadata' : '')
-      : (ext === 'pdf' ? 'Picture of p. ' + n + ': this page only, as a picture' + (drawnBytes ? ' (' + sizeWords(drawnBytes) + ')' : '') + '. ' : '') + 'Document: the whole file' + (size ? ' (' + sizeWords(size) + ')' : '') + ', opened ' + (place ? 'at ' + (place === 'page' ? 'p.' : place) + ' ' + n : 'here') + ' — ' + (t.to === 'board' ? 'the Board' : whom) + ' can page through it')
+      : (ext === 'pdf' ? 'Picture of p. ' + n + ': this page only, as a picture' + (drawnBytes ? ' (' + sizeWords(drawnBytes) + ')' : '') + '. ' : '') + 'Document: the whole file' + (size ? ' (' + sizeWords(size) + ')' : '') + ', opened ' + (place ? 'at ' + (place === 'page' ? 'p.' : place) + ' ' + n : 'here') + ' — ' + (t.to === 'board' ? 'the Board' : whom) + ' can page through it'
+        + (older ? '; ' + older : ''))
       + (s.file ? '. It is uploaded as you show it.' : '.')
       + (small ? ' Whole, its text stands about ' + small + ' px tall on a tablet — 🔳 What I see sends the part in view, larger.' : '');
     PickBar.draw();
@@ -6016,14 +6267,18 @@ const Preview = (function () {
     box.append(made.frame);
     show(go ? 'Preview' : 'Look', made.host, go ? 'Only you see it here. Show it puts it on their pages; nothing is sent until then.' : LOOK, go);
   }
-  /** A document, a picture or a quote an Earlier entry (`e`) showed, drawn again here alone, as the take was. */
-  function look(m, e, ctx) {
+  /**
+   * A document, a picture or a quote an Earlier entry (`e`) showed, drawn again here alone, as the take was (on a device that
+   * cannot open documents, a document's stand-in, or its words: `said`, drawn in the box, so no toast repeats them).
+   */
+  function look(m, e, ctx, heard = (r) => r) {
     letBoxGo();
     drawer = m;
     seq = e.seq;
     show('Look', (e.content && (e.content.name || (e.content.kind === 'snippet' ? 'A quote' : ''))) || 'Shown earlier', LOOK, null);
     Promise.resolve(m.render(box, e.content, ctx)).then((r) => {
-      if (seq === e.seq && r && r.state === 'failed') AGM.toast('This could not be shown again: ' + r.words + '.', true);
+      heard(r);
+      if (seq === e.seq && r && r.state === 'failed' && r.said !== true) AGM.toast('This could not be shown again: ' + r.words + '.', true);
     }, () => AGM.toast('This page could not load what draws it: reload it.', true));
   }
   /** The Earlier entries the dialog shows now (a Look's), by number. */
@@ -6120,7 +6375,7 @@ const Simple = (function () {
   let awake = null;
   let stopAwake = null;
   // Who is backstage in the room, and since when nobody (the line over the composer says so after 10 s).
-  const ALONE_MS = 10_000;
+  const ALONE_MS = 10000;
   let aloneTimer = null;
   // The 🔥 message the strip would hold, and whether its node is in view (IntersectionObserver, where the browser has it):
   // unknown until the observer has said, and the strip waits for it, so it never comes and goes as a message is drawn.

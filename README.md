@@ -267,8 +267,14 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   from iPadOS 16.4 and Chrome 103). An older browser is told so in one line and opens nothing, so it never joins a hall
   half working. A newer feature a device lacks has a fallback chosen by what the browser has, never by what it calls
   itself: a dialog opens where the browser has no `showModal()`, and each of the stylesheet's newer rules follows one
-  every device from the floor reads. [docs/DEVICES.md](docs/DEVICES.md) holds the matrix of devices, each fallback, and
-  the walk on the owner's devices before the release.
+  every device from the floor reads. **A device that cannot open documents** (an iPad before iPadOS 16.4, found by a
+  probe as it joins) **is shown a document as its stand-in**: a picture of its place, or what is at that place as a
+  quote, made by the showing page only when a target needs one ("As a picture of p. 12: this device cannot page through
+  the document"); its Download, quotes, pictures, web pages and Earlier work as on any device. The bar says how many
+  Board pages will get it before it goes, the console reads "✓ 6/6 (2 as a picture)", and a page that joined later is
+  sent a picture with **Show them a picture of p. 12**. Every page script parses as ES2020, which Safari reads from 14
+  (the lint holds it). [docs/DEVICES.md](docs/DEVICES.md) holds the matrix of devices, each fallback, and the walk on
+  the owner's devices before the release.
 - **The show network (Show Bus 1.2).** Send to Stagewatch — straight to the speaker's screen, or to the operator to
   approve and pass on to the confidence monitor, a moderator, backstage or interpreter screen, a department, or keep.
   A line reads as it was typed: cut on a whole character where Stagewatch cuts, its braces as parentheses so Stagewatch

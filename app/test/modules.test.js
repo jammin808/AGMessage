@@ -192,7 +192,7 @@ const HANDLER_MAY = {
 /** A store or an edge one handler module requires by name, for the pure functions it holds, with why. */
 const HANDLER_ROWS = {
   'lib/handlers/takes.js': {
-    'lib/pages.js': { names: ['cleanPage', 'askedOf', 'describePage', 'canShow', 'cleanSnippet', 'personKey', 'layerOf', 'fileOf', 'ARRIVALS', 'FILE_KINDS', 'STAGE_FULL'], why: 'the pages\' pure vocabulary, kept where it is tested (a person\'s key, what a pusher asked for, a kind\'s layer and the arrivals among it, the kinds that show a file, the upload a take shows and the stage\'s bound in words); the store itself reaches the module through its context' },
+    'lib/pages.js': { names: ['cleanPage', 'askedOf', 'describePage', 'canShow', 'cleanSnippet', 'personKey', 'layerOf', 'filesOf', 'ARRIVALS', 'FILE_KINDS', 'STAGE_FULL'], why: 'the pages\' pure vocabulary, kept where it is tested (a person\'s key, what a pusher asked for, a kind\'s layer and the arrivals among it, the kinds that show a file, the uploads a take shows and the stage\'s bound in words); the store itself reaches the module through its context' },
   },
 };
 
@@ -754,7 +754,7 @@ test('(d) a planted handler module that requires past its row, or makes what it 
   assert.deepEqual(rooms("const { ...all } = require('../guard');"), ['lib/handlers/rooms.js:6: takes ... from lib/guard.js, which is not among its pure helpers (str, cleanText, mac, Bucket)']);
   // The one row: the takes module takes the pages' pure vocabulary by name; no other module requires the store.
   assert.deepEqual(run('lib/handlers/takes.js', "const { cleanPage, canShow } = require('../pages');"), []);
-  assert.deepEqual(run('lib/handlers/takes.js', "const { PagesStore } = require('../pages');"), ['lib/handlers/takes.js:6: takes PagesStore from lib/pages.js, which is not among its pure helpers (cleanPage, askedOf, describePage, canShow, cleanSnippet, personKey, layerOf, fileOf, ARRIVALS, FILE_KINDS, STAGE_FULL)']);
+  assert.deepEqual(run('lib/handlers/takes.js', "const { PagesStore } = require('../pages');"), ['lib/handlers/takes.js:6: takes PagesStore from lib/pages.js, which is not among its pure helpers (cleanPage, askedOf, describePage, canShow, cleanSnippet, personKey, layerOf, filesOf, ARRIVALS, FILE_KINDS, STAGE_FULL)']);
   assert.deepEqual(rooms("const { cleanPage } = require('../pages');"), ['lib/handlers/rooms.js:6: requires lib/pages.js: a store, a link or an edge reaches a handler module only through its context']);
   // Nothing it requires is made in it, however it is reached; a word in a comment or a string is not code.
   assert.deepEqual(rooms("const { Bucket } = require('../guard');\nconst b = new Bucket(5, 15);"), ['lib/handlers/rooms.js:7: makes what it requires (new Bucket): it is given the server\'s, through its context']);

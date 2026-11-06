@@ -6,10 +6,10 @@ is tuned to one device. And on 2026-10-31, of the page floor below: "Keep these 
 device below it is not supported.
 
 This paper is the one matrix, the one floor of the pages and the one walk. It holds the hall page's, its menus', its
-dialogs' and its stylesheet's part (the plan's Part 5 §15.10). The stage's rows (the document floor, a document's
-stand-in below it, the no-save measures) join it with the stage's devices unit; the Board's chat view's rows (the
-sheet's Full screen and wake-lock rows, the layout by size) are §6, from the chat view's unit (the plan's Part 7 §17.7);
-neither makes a second matrix or a second walk.
+dialogs' and its stylesheet's part (the plan's Part 5 §15.10); the Board's chat view's rows (the sheet's Full screen and
+wake-lock rows, the layout by size) are §6 (the plan's Part 7 §17.7); the stage's (the document floor, a document's
+stand-in below it, the no-save measures, every stage feature on every row) are §8 (the plan's Part 4 §5.15). None makes
+a second matrix or a second walk.
 
 Every browser version here is MDN's compatibility data (https://github.com/mdn/browser-compat-data), named by its path
 there. No page reads the user agent: each fallback is chosen by a probe or by what failed, so a device nobody listed
@@ -19,14 +19,14 @@ draws by what it is.
 
 | Row | Device | Browser | Why it is a row | Walked |
 |---|---|---|---|---|
-| D1 | an iPad on an iPadOS before 16.4, the oldest the owner's devices run | Safari | below the document floor (Safari 16.4); at or above the page floor (iPadOS 14.5) unless the owner's oldest iPad is older, which this row then says | not walked |
-| D2 | an iPad on iPadOS 16.4 to 16.7 | Safari | the oldest that opens documents | not walked |
+| D1 | an iPad on an iPadOS before 16.4, the oldest the owner's devices run | Safari | below the document floor (Safari 16.4, §8): a document's stand-in, and everything else as on any row; at or above the page floor (iPadOS 14.5) unless the owner's oldest iPad is older, which this row then says | not walked |
+| D2 | an iPad on iPadOS 16.4 to 16.7 | Safari | the oldest that opens documents; no `<link rel="modulepreload">` (Safari 17) and no `Promise.withResolvers` (Safari 17.4), so the timed `import()` and pdf.js's legacy build are what it runs | not walked |
 | D3 | an iPad on the current iPadOS | Safari | the newest WebKit | not walked |
 | D4 | an Android tablet | Chrome, current | a long press fires `contextmenu` | not walked |
-| D5 | an Android tablet | Samsung Internet, current | a second Blink browser, with menus and downloads of its own | not walked |
-| D6 | an iPhone on the current iOS | Safari | a phone's width | not walked |
+| D5 | an Android tablet | Samsung Internet, current | a second Blink browser (`browsers/samsunginternet_android.json`), with menus and downloads of its own | not walked |
+| D6 | an iPhone on the current iOS | Safari | a phone's width; the chat view's Shown to you tab | not walked |
 | D7 | an Android phone | Chrome, current | a phone's width and a long press | not walked |
-| CI | the smoke's Chrome (Linux) and Edge (Windows) | — | every push (§4) | every push |
+| CI | the smoke's Chrome (Linux) and Edge (Windows), with the device legs and the floor leg | — | every push (§4, §6, §8) | every push |
 
 - A walked row records the device's model, its OS and browser versions and the date: "current" is whatever the device ran
   that day, written down. Which iPadOS the owner's oldest Board iPad runs (D1) is recorded here; it no longer decides the
@@ -77,8 +77,8 @@ Each fallback is the same on every device. "Today" is the tree as 0.6.0 is built
 | `inset` and the logical properties | `css.properties.inset`, `margin-inline` and the rest: Safari 14.1, Chrome 87, so Chrome 84 to 86 drop them | the Shown to you panel's rail, the support view's backdrop, the Help chip's ask | `top`, `right`, `bottom` and `left` (or the physical sides) first | in `styles.css` |
 | The Fullscreen API | `api.Element.requestFullscreen`: Safari 16.4 (prefixed before it, and on iOS "only available on iPad, not on iPhone"), Chrome 71 | a take's ⛶ Full screen on the hall page, and the simple view's sheet's Full screen | not drawn where the page's probe at load finds none (`fullscreenEnabled` or its `webkit` form, and `requestFullscreen` or its `webkit` form): the take covers the page all the same, and an iPhone's sheet has no Full screen row | `app/public/app.js` (`FULLSCREEN`, the `fullscreen` fact) |
 | `light-dark()`, `@container`, `text-wrap` | Safari 17.5, 16, 17.4; Chrome 123, 105, 114 | not used | a plain declaration of the same property first, or inside `@supports` | held by the fence |
-| pdf.js | its legacy build's targets: Safari 16.4, Chrome 103 (the document floor) | the panel and screens | the stage's stand-in below the document floor, with the stage's devices unit | the legacy build |
-| `DecompressionStream('deflate-raw')` | `api.DecompressionStream`, its `deflate-raw` format: Safari 16.4, Chrome 103, Firefox 113 (the document floor, the same probe as pdf.js's) | the document worker (`docworker.js`), which inflates a Word, Excel or PowerPoint file's parts with it | none on the panel: a device without it reads "this device cannot open documents — ask for a picture" for an Office file (an `.xls`, which is not zipped, still opens); the stage's stand-in, with the stage's devices unit | `app/public/docworker.js` (`inflater`, the answer `device`) |
+| pdf.js | its legacy build's targets: Safari 16.4, Chrome 103 (the document floor) | the panel, screens and the stage | a document's stand-in on the stage below the document floor (§8); the panel's Look says the device cannot open documents | the legacy build; the stand-in in `app/public/pagelayer.mjs` |
+| `DecompressionStream('deflate-raw')` | `api.DecompressionStream`, its `deflate-raw` format: Safari 16.4, Chrome 103, Firefox 113 (the document floor, the same probe as pdf.js's) | the hall page's documents' probe at its join (`docs`); the document worker (`docworker.js`), which inflates a Word, Excel or PowerPoint file's parts with it | a page without it joins without `docs` and is sent a document's stand-in (§8); its panel says "This device cannot open documents — ask the backstage team to show you a picture." for a PDF or a zipped Office file, and draws a picture, a CSV, Markdown, text and an Excel 97-2003 workbook (not zipped) | `app/public/app.js` (`DOCS`), `app/public/pagelayer.mjs`, `app/public/docworker.js` (`inflater`, the answer `device`) |
 | The CSS Custom Highlight API | `api.Highlight`, `CSS.highlights`: Safari 17.2, Chrome 105 | a pick in the researcher's Preview | where it is missing, the pick's blocks are outlined (`.dv-pick`), its cells and a picture always are | `app/public/docview.mjs` |
 | `Intl.Segmenter` | `javascript.builtins.Intl.Segmenter`: Safari 14.1, Chrome 87 | a word and a sentence picked | where it is missing (Chrome 84 to 86), a word is a run of letters and digits and a sentence ends at . ! or ? | `app/public/docmodel.mjs` `segmentOf` |
 | A caret from a point | `api.Document.caretPositionFromPoint`: Chrome 128; `caretRangeFromPoint`: every row | a tap on a word picks it | the one the browser has, the standard one first; with neither, a tap picks nothing and a selection still does | `app/public/docview.mjs` |
@@ -119,7 +119,14 @@ Each fallback is the same on every device. "Today" is the tree as 0.6.0 is built
   page and the hall page each show the floor's words and nothing else and ask nothing (no fetch, request, WebSocket or
   beacon); health's `clients` does not move, the hall never hears of the guest, and the sign-in form, sent, goes
   nowhere.
-- **The device legs, the layout leg and the floor leg's chat-view steps** are §6's.
+- **The device legs, the layout leg and the floor leg's chat-view steps** are §6's; **the stage's device legs and floor
+  leg** are §8's.
+- **The ES2020 fence** (`eslint.config.mjs`, `ecmaVersion: 2020` for `app/public/**`): a class field, a private field, a
+  static block, a logical assignment (`||=`, `&&=`, `??=`), a numeric separator or a top-level await in a page script or
+  page module is a parse error, so every row parses what it is sent (ES2020's newest syntax, BigInt, Safari parses from 14:
+  `javascript.builtins.BigInt`; optional chaining and `??` from 13.1). `test/lint-rules.test.js` plants each and lints
+  every page script of the tree. Built-ins are not syntax: the floor legs and the walk hold those. The vendored files are
+  outside the lint, which is why pdf.js sets the document floor.
 - **Not in CI:** Safari, Samsung Internet and WebView. Playwright's WebKit is refused: it would be a new dev dependency,
   and it is not the older iPadOS Safari this answer is about. The legs take features away in Chromium; the walk runs
   the real browsers. The floor leg's menu steps come with the units that build what they test.
@@ -242,4 +249,117 @@ The quotes' benches (the stage's picks), each read before its number is fixed; o
 | The `pages` lane's save of 50 halls each holding its 200 person takes and 20 Earlier entries as quotes (about 6 KB each) | the rig's laptop | a further bound on `pages.json`, only if it is measured to matter | not measured |
 
 A quote reaches a phone in at least 20 px type, a table wider than its card scrolling inside it; the walk's rows for a
-quote (a word, a paragraph, a cell with its labels, a 25 × 10 table) are §5.15.1's, on every row, D1 included.
+quote (a word, a paragraph, a cell with its labels, a 25 × 10 table) are §8's, on every row, D1 included.
+
+The stage's devices bench (a phone may be remote, through the internet link on mobile data, owner answer 33):
+
+| Bench | Rows | What it records | D6 | D7 |
+|---|---|---|---|---|
+| A document take's bytes and time to a phone through the tunnel: a 25 MB PDF shown at p. 12 (its first page drawn, by ranges) and a 2 MB Word file, the bytes the phone fetched and the seconds to `shown` | D6, D7 | a record beside the tunnel's own row: no bound is set from it unless it is measured to matter | not measured | not measured |
+
+## 8. The stage on every row
+
+The stage (what the Board's pages are shown over their chat: a quote, a picture, a web page, a document) on every row of
+the matrix: the plan's Part 4 §5.15. No user agent is read anywhere in the stage's code; each fallback is chosen by a
+probe or by what failed, and its words say what this device does.
+
+**The document floor is Safari 16.4 (iOS and iPadOS 16.4), Chrome 103 and Firefox ESR.** pdf.js 4.10.38's legacy build is
+compiled for those targets (its `gulpfile.mjs`'s `ENV_TARGETS`) and keeps a class static block, which Safari parses from
+16.4 (`javascript.classes.static_initialization_blocks`); below it the module does not parse. The document worker inflates
+Office files with `DecompressionStream('deflate-raw')`, which arrived at the same versions (`api.DecompressionStream`). An
+older pdf.js for devices below the floor is not taken: 3.11.174's legacy build predates CVE-2024-4367's fix, and two
+pdf.js versions would double what is vendored and tested. A picture of the place reaches those devices instead.
+
+- **The probe.** At its join the hall page makes `new DecompressionStream('deflate-raw')` inside `try`, and sends `docs:
+  true` only when it succeeds (`app/public/app.js`, `DOCS`). No syntax is probed: the page's policy has no
+  `'unsafe-eval'`. The server keeps it per page (anything but `true` is no), and the console's read of where the pages
+  stand counts each target's pages without it (`nodocs`). A device that passes the probe yet cannot import pdf.js draws
+  that document as a device below the floor does (its stand-in, or "this device cannot open documents — ask for a
+  picture") and opens no document for the rest of its tab's session (kept in `sessionStorage`, in `try`), joining again
+  at once without `docs`.
+- **A document's stand-in** (`standin` on a document take): for a PDF, a picture of the take's place, drawn and uploaded
+  by the showing page as a page picture is (`{url}`: checked as a picture take is, kept as a stage file named by the
+  take); for a Word, Excel or PowerPoint file, what is at that place, read as What I see reads it with its hidden parts
+  left out (`{snippet}`: a quote's body, by a quote's rules and bounds); the server refuses either shape on the other's
+  type. The showing page makes it only when the console's
+  read says a target page joined without `docs`, so nothing is uploaded for nothing, and its bar says so before it goes
+  ("2 of 6 Board pages are older devices: they get a picture of p. 12 in its place").
+- **What a page without `docs` draws.** A document's stand-in, under its words ("As a picture of p. 12: this device cannot
+  page through the document"; "As a quote from slide 3: …"), the document's line below it, reported `shown` with those
+  words; the console reads "✓ 6/6 (2 as a picture)" ("as a quote" for a quote). With no stand-in (a page that joined
+  after the push), a PDF or a zipped Office file draws "This device cannot open documents — ask the backstage team to
+  show you a picture." and reports `failed`; the console of the take's pusher, an operator or the admin offers **Show
+  them a picture of p. 12** (what is at the place, for an Office file) on the Board chip and on the person's row, a take
+  of its own to each such page's person, drawn over the Board's on their pages alone (the console's read gives those
+  seats the file to draw from, where each may show it). A picture, a CSV, Markdown, text and an Excel 97-2003 workbook
+  (not zipped) need no reader, and are drawn. A side bar card and a Look under Earlier draw the stand-in; a Look at a document
+  without one, and the panel's Look at a file, read the device's words. ⬇ Download on a take shown with Download ticked
+  is offered as on any device: a form POST needs no parser. pdf.js is never fetched.
+- **Everything else works below the floor**: quotes and tables (drawn with `textContent` and CSS), pictures
+  (`HTMLImageElement.decode()`, Safari 11.1), zoom (Pointer Events, Safari 13), web pages (the one frame), Earlier,
+  Download and the no-save measures.
+- **Older devices' other gaps, each with its fallback:** `<link rel="modulepreload">` arrived in Safari 17 and Safari has
+  no `requestIdleCallback`: the Board page imports the take layer and the document reader with a timed `import()` 2 s
+  after its join. Fetch Metadata arrived in Safari 16.4 (`http.headers.Sec-Fetch-Mode`): a device without it is served,
+  so on D1 a file's address typed into the address bar opens it (`SECURITY.md` says so). `'wasm-unsafe-eval'` (Safari 16)
+  is under the floor, so every device that opens documents draws JPEG 2000.
+- **A long press:** iOS never fires `contextmenu` on one, so `-webkit-touch-callout: none` keeps "Save to Photos" off a
+  picture there; Chrome on Android fires `contextmenu` on a long press, and the layer's handler opens AGMessage's menu in
+  place of "Download image". Whether Samsung Internet does the same is D5's walk.
+- **Phones** (D6, D7): the side bar is the chat view's 📺 Shown to you tab; a quote's type floor is 20 px under 600 px
+  wide, and a table wider than the screen scrolls sideways inside its card; the zoom controls and the page box are 48 px,
+  as in the simple view. A phone may be remote, through the tunnel on mobile data (answer 33): a quote or a picture costs
+  its own bytes, a document its file (by ranges for a PDF). No measurement this round: §7's bench records it.
+
+**What every push proves** (the browser smoke, Chromium):
+
+- **The device legs**: a Board page at 1180 × 820, 820 × 1180 and 390 × 844, each a device of its own with a mobile viewport
+  and touch, each opening documents by its probe: a quote in 28 px or more on a tablet and 20 px or more on a phone; a
+  25 × 10 table scrolling sideways inside its card at 390 px, the page never sideways on any leg; a picture drawn, never
+  draggable, its menu the page's; a PDF at its page, zoomed in by a tap on + and paged on by a tap, shown with Download
+  ticked and saved whole by ⬇ Download on the phone, the page staying; a Word document without its hidden run or its
+  tracked deletion, and found in; a workbook without its hidden column, row and sheets, a deck without its hidden shape
+  and slide, a CSV, and Markdown without its comment; a JPEG 2000 page drawn; a web page's frame; each ✓ on all three
+  (the web page ◇); a picture under Earlier drawn again in a Look; 20 takes in a row, then Back to chat, each page still
+  drawing and never reloaded. Not on the legs: a pinch and a double-tap (touch gestures the legs do not make; the walk's),
+  the first page of a 25 MB pack timed (the bench's, §7), Word's page numbers (the panel's steps, the same reader), and a
+  device asleep and back (the walk's). The Board-side checks of the stage units still to land join the legs with them.
+- **The floor leg**: a Board page with `DecompressionStream`, `requestIdleCallback` and `Promise.withResolvers` taken away
+  before its scripts run joins without `docs`; a document shown before it joined says it cannot open documents and fails,
+  and the pusher's console offers Show them a picture of p. 1, which reaches that page alone; the pusher's bar then says
+  "1 of 4 Board pages is an older device: it gets a picture of p. 1 in its place", the PDF goes with its stand-in, drawn
+  with its words, never dragged out, its menu the page's, ✓ on the console "(1 as a picture)", and ⬇ Download on it,
+  ticked, saves the file whole; a Word document's stand-in is what is at its place, as a quote naming the document,
+  without its hidden run or tracked deletion, ✓ "(1 as a quote)"; under Earlier a Look at a document with no stand-in
+  reads the device's words and one with a stand-in draws it; quotes, pictures (never dragged out, the page's menu), web
+  pages and Earlier draw; pdf.js is never fetched (the tab's network log, from its first request); no script error. It
+  cannot take away syntax the browser parses: that is the ES2020 fence's and the walk's.
+- **A Board page that passes the probe but cannot import pdf.js** (its module refused on the way): it draws the document
+  as a page below the floor does (here its stand-in, with its words), opens no document for the rest of its tab's
+  session, kept across a reload, and joins again without `docs`, counted on the console.
+- **The server's half** (`test/pages.test.js`, `test/takes.test.js`): a stand-in is `{url}` (an image upload, checked as a
+  picture take) for a PDF or a picture, or `{snippet}` (a quote's rules) for any other type, and any other shape, both,
+  the other type's, or one on another kind is refused; a document and its stand-in find room on the stage together; a
+  join's `docs` is yes only as `true`; `page:status` counts each target's pages without it; a page that drew the stand-in
+  counts toward ✓ "as a picture" ("as a quote"); without one, its `failed` is counted (`cannot`), and the read gives the
+  file to its pusher, an operator and the admin, never to a seat that may only show; a person's picture take reaches
+  their pages alone. Show them a picture itself is the page's act: the floor leg drives it.
+
+**The walk** (on every row; ✓, a fallback named, or ✕):
+
+| Feature | D1 | D2 | D3 | D4 | D5 | D6 | D7 |
+|---|---|---|---|---|---|---|---|
+| A quote: a word, a paragraph, a cell with its labels and a 25 × 10 table, drawn, fitted, ✓ | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| A picture: a page picture and a region, drawn; pinch, double-tap and + / − zoom with pan; ✓ | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| A web page: the frame, its "Look for" strip, Open in a new tab | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| A PDF: the page box, paging, zoom, find; a JPEG 2000 page; the first page of a 25 MB pack, timed (D1: its stand-in, with its words) | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| A DOCX, XLSX, PPTX, CSV, Markdown or text document, without hidden parts; Word's page numbers (D1: CSV, Markdown and text drawn, the others as their stand-in) | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| Earlier and Look: an Earlier entry, and a Look at a picture (D1: a document's entry draws its stand-in; a Look at one without reads the device's words) | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| ⬇ Download on a take shown with Download ticked: the file in the device's downloads under its name, the page staying | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| No save: a long press on a picture offers no save, a drag leaves it, AGMessage's menu where `contextmenu` fires | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| Many takes: 20 in a row, then Back to chat; the tab still draws, nothing reloads it | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| Asleep, then back: a take sent while the device slept drawn at its next join, current or under Earlier | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+
+A model or browser version that appears after the walk is not proven until its row is walked again. The benches that
+named "a Board iPad" run on the rows §7 names: D1 and D2 for the image decode limit, D2 and D4 for parse times, D2 and D6
+for the glance budget, and D6 and D7 for a document through the tunnel.

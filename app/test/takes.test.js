@@ -19,9 +19,14 @@ const rowsOf = (dataDir) => fs.readFileSync(path.join(dataDir, 'audit.jsonl'), '
   .filter((e) => e.action === 'page.push').map((e) => [e.target, e.words, e.actor.name]);
 /**
  * A join as a guest who was sent the hall's On stage link joins On stage: the invite added to a guest's On stage join that
- * names none (an open hall's code seats nobody there); a join that names one (or '', none) is sent as it is.
+ * names none (an open hall's code seats nobody there); a join that names one (or '', none) is sent as it is. Each page
+ * opens documents, as a current device's does (`docs: true`), unless its join says otherwise: the Board's devices' test
+ * names the pages that cannot.
  */
-const invited = (dataDir, args) => (args && args.role === 'board' && !args.as && !args.adminView && !Object.hasOwn(args, 'invite') ? { ...args, invite: inviteOf(dataDir, args.roomCode) } : args);
+const invited = (dataDir, args) => {
+  const docs = args && typeof args === 'object' && !Object.hasOwn(args, 'docs') ? { ...args, docs: true } : args;
+  return docs && docs.role === 'board' && !docs.as && !docs.adminView && !Object.hasOwn(docs, 'invite') ? { ...docs, invite: inviteOf(dataDir, docs.roomCode) } : docs;
+};
 /** An act asked again while its socket's bucket says slow down: the answer the verb gives, not the rate's. */
 async function act(s, ev, arg) {
   for (let i = 0; i < 20; i++) {
@@ -1384,4 +1389,129 @@ test('a quote on the stage: words or cells picked from a file of the hall, carri
   assert.ok(sueMain.includes('On the Board\'s pages now: ❝ a quote typed by Sue Staff (21 characters) — Capex rose 8% on plan'), sueMain);
   assert.ok(tomMain.includes('On the Board\'s pages now: ❝ a quote typed by Sue Staff (21 characters)') && !tomMain.includes('Capex rose 8%'), 'another pusher\'s words are not in it: ' + tomMain);
   assert.ok(!sueSide.includes('On the Board\'s pages now') && !sueSide.includes('Capex rose 8%'), 'a side room\'s draft is told none of it: ' + sueSide);
+});
+
+test('the Board\'s devices: a page joins with `docs` only when it says true; page:status counts the target\'s pages without it; a document\'s stand-in is kept, checked and kept as a stage file, and a page that drew it counts toward ✓ "as a picture"; without one such a page fails, counted, the console\'s read gives the file to its pusher, the operator and the admin, and a person\'s picture take reaches that person alone', { timeout: 120_000 }, async (t) => {
+  const srv = await startServer();
+  t.after(() => stopServer(srv.child));
+  const sockets = [];
+  t.after(() => sockets.forEach((s) => s.close()));
+  const heard = new Map();
+  const page = async (cookie, who) => {
+    const s = await connect(srv.base, cookie);
+    sockets.push(s);
+    heard.set(s, []);
+    s.onAny((ev, ...args) => heard.get(s).push([ev, args[0]]));
+    s.who = who;
+    return s;
+  };
+  const info = (s) => heard.get(s).filter(([ev, v]) => ev === 'page:take' && v.layer === 'info').map(([, v]) => v);
+  const joined = async (s, args) => { const r = await emit(s, 'join', invited(srv.dataDir, args)); assert.equal(r.ok, true, s.who + ': ' + JSON.stringify(r)); return r; };
+  const upload = async (token, name, bytes, type) => {
+    const f = new FormData();
+    f.append('file', new Blob([bytes], { type }), name);
+    const r = await fetch(srv.base + '/api/upload', { method: 'POST', headers: { 'X-AGM-Upload': token }, body: f });
+    return { status: r.status, ...(await r.json()) };
+  };
+  const pdf = Buffer.from('%PDF-1.4\n1 0 obj << >> endobj\ntrailer << >>\n%%EOF\n', 'latin1');
+  const jpeg = (w, h) => Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, h >> 8, h & 255, w >> 8, w & 255, 0x03, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1, 0xff, 0xd9]);
+  const AS = 'As a picture of p. 2: this device cannot page through the document';
+  const DEVICE = 'this device cannot open documents — ask for a picture';
+
+  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const hall = (await api(srv.base, 'POST', '/api/rooms', { name: 'Hall 5' }, { cookie: admin })).body.code;
+  const ctl = await page(admin, 'the admin page');
+  const ctlJoin = await joined(ctl, { roomCode: hall, as: 'account', docs: true });
+  const account = async (username, name, role) => {
+    const made = await api(srv.base, 'POST', '/api/users', { username, name, role, password: PASSWORD, halls: [hall] }, { cookie: admin });
+    assert.equal(made.status, 200, JSON.stringify(made.body));
+    return (await api(srv.base, 'POST', '/api/auth/login', { username, password: PASSWORD })).cookie;
+  };
+  // Backstage in Main: Tom, a Tech (the operator, canPush), and Sal, a Staff account who may only show (canShow).
+  const tom = await page(await account('tom', 'Tom Tech', 'tech'), 'Tom, the operator');
+  await joined(tom, { roomCode: hall, as: 'account' });
+  const sal = await page(await account('sal', 'Sal Staff', 'staff'), 'Sal, who may only show');
+  await joined(sal, { roomCode: hall, as: 'account' });
+  // Three Board pages: Gil's opens documents; Kim's says so in a word that is not `true`; Lou's says nothing.
+  const gil = await page(undefined, 'Gil, a current tablet');
+  await joined(gil, { roomCode: hall, name: 'Gil', role: 'board', docs: true });
+  const kim = await page(undefined, 'Kim, an older iPad');
+  const kimJoin = await joined(kim, { roomCode: hall, name: 'Kim', role: 'board', docs: 'true' });
+  const lou = await page(undefined, 'Lou, an older phone');
+  const louJoin = await joined(lou, { roomCode: hall, name: 'Lou', role: 'board', docs: undefined });
+  const status = () => act(ctl, 'page:status', { code: hall });
+  const st0 = await status();
+  assert.deepEqual([st0.board.pages, st0.board.nodocs], [3, 2], 'the Board: two of its three pages cannot open documents ' + JSON.stringify(st0.board));
+  const row = (st, name) => st.people.find((p) => p.name === name);
+  assert.deepEqual(['Gil', 'Kim', 'Lou'].map((n) => [row(st0, n).board, row(st0, n).nodocs]), [[true, undefined], [true, 1], [true, 1]], 'each person On stage, and their pages that cannot');
+  // A page that joins again on its own socket, now saying true, is counted again.
+  await joined(kim, { roomCode: hall, name: 'Kim', role: 'board', uid: kimJoin.identity, docs: true });
+  assert.equal((await status()).board.nodocs, 1);
+  await joined(kim, { roomCode: hall, name: 'Kim', role: 'board', uid: kimJoin.identity, docs: 1 });
+  assert.equal((await status()).board.nodocs, 2);
+
+  // The document, shared in Main, and its stand-in, a picture of p. 2 the pusher's page drew and uploaded, never posted.
+  const up = await upload(ctlJoin.uploadToken, 'Board pack.pdf', pdf, 'application/pdf');
+  assert.equal((await act(ctl, 'message', { type: 'file', url: up.url, filename: 'Board pack.pdf', mime: 'application/pdf' })).ok, true);
+  const pic = await upload(ctlJoin.uploadToken, 'Board pack p2.png', pngOf(40, 30), 'image/png');
+  assert.equal(pic.status, 200, JSON.stringify(pic));
+  const pushed = await act(ctl, 'page:push', { code: hall, to: 'board', content: { kind: 'doc', url: up.url, at: { page: 2 }, standin: { url: pic.url } } });
+  assert.equal(pushed.ok, true, JSON.stringify(pushed));
+  const docContent = { kind: 'doc', url: up.url, name: 'Board pack.pdf', at: { page: 2 }, download: false, standin: { url: pic.url } };
+  await until(() => [gil, kim, lou].every((s) => info(s).some((x) => x.seq === pushed.seq)), 4000, 'the Board\'s pages told the document');
+  for (const s of [gil, kim, lou]) assert.deepEqual(info(s).find((x) => x.seq === pushed.seq).content, docContent, s.who);
+  // Kept with its stand-in, which the hall keeps as a stage file named by the take.
+  const kept = () => JSON.parse(fs.readFileSync(path.join(srv.dataDir, 'pages.json'), 'utf8')).halls[hall];
+  await until(() => fs.existsSync(path.join(srv.dataDir, 'pages.json')) && kept().board.info.seq === pushed.seq, 4000, 'saved');
+  assert.deepEqual(kept().board.info.content.standin, { url: pic.url });
+  assert.deepEqual(Object.keys(kept().files || {}), [pic.url.slice(9)], 'the stand-in a stage file; the document is its message\'s');
+  // Each page says what it drew: the current tablet the document, the two others its stand-in, with its words: ✓ on all
+  // three, two as a picture.
+  assert.ok((await act(gil, 'page:report', { seq: pushed.seq, state: 'shown' })).ok);
+  assert.ok((await act(kim, 'page:report', { seq: pushed.seq, state: 'shown', words: AS })).ok);
+  assert.ok((await act(lou, 'page:report', { seq: pushed.seq, state: 'shown', words: AS })).ok);
+  const st1 = (await status()).board.info;
+  assert.deepEqual([st1.mark, st1.words, st1.on, st1.pages, st1.nodocs, st1.standin, st1.cannot], ['✓', 'On all 3 Board pages, 2 as a picture', 3, 3, 2, 2, undefined]);
+  // A stand-in is checked as a picture take is: over what the Board's devices draw, refused at its take; one that is no
+  // picture, refused in words.
+  const big = await upload(ctlJoin.uploadToken, 'p2 big.jpg', jpeg(8000, 6250), 'image/jpeg');
+  assert.equal(big.status, 200, JSON.stringify(big));
+  assert.deepEqual(await act(ctl, 'page:push', { code: hall, to: 'board', content: { kind: 'doc', url: up.url, at: { page: 2 }, standin: { url: big.url } } }), { ok: false, error: 'Too large for the Board\'s devices — send a region.' });
+  assert.deepEqual(await act(ctl, 'page:push', { code: hall, to: 'board', content: { kind: 'doc', url: up.url, standin: { url: up.url } } }), { ok: false, error: 'A document\'s stand-in is a picture of its place or what you see there: one of the two.' });
+  assert.deepEqual(await act(ctl, 'page:push', { code: hall, to: 'board', content: { kind: 'image', url: pic.url, standin: { url: pic.url } } }), { ok: false, error: 'Only a document has a stand-in.' });
+  // Its shape is its document's: a PDF's is a picture of its place, never words.
+  assert.deepEqual(await act(ctl, 'page:push', { code: hall, to: 'board', content: { kind: 'doc', url: up.url, standin: { snippet: { unit: 'text', text: 'p. 2' } } } }), { ok: false, error: 'A PDF\'s or a picture\'s stand-in is a picture of its place; any other document\'s is what you see there.' });
+
+  // Without one (a page that joined after the push, or none made): those two pages fail with their words, counted.
+  const bare = await act(ctl, 'page:push', { code: hall, to: 'board', content: { kind: 'doc', url: up.url, at: { page: 2 } } });
+  assert.equal(bare.ok, true, JSON.stringify(bare));
+  await until(() => [gil, kim, lou].every((s) => info(s).some((x) => x.seq === bare.seq)), 4000, 'told again');
+  assert.ok((await act(gil, 'page:report', { seq: bare.seq, state: 'shown' })).ok);
+  assert.ok((await act(kim, 'page:report', { seq: bare.seq, state: 'failed', words: DEVICE })).ok);
+  assert.ok((await act(lou, 'page:report', { seq: bare.seq, state: 'failed', words: DEVICE })).ok);
+  const st2all = await status();
+  const st2 = st2all.board.info;
+  assert.deepEqual([st2.mark, st2.words, st2.nodocs, st2.cannot, st2.standin], ['△', 'Couldn\'t show it on 2 of 3 pages: ' + DEVICE, 2, 2, undefined]);
+  // The console's read gives the file Show them a picture draws from to its pusher, the operator and the admin, on the
+  // Board's row and on each person's that could not open it; never to a seat that may only show and did not put it up,
+  // and never where every page showed it.
+  const FILE = { url: up.url, name: 'Board pack.pdf', at: { page: 2 } };
+  assert.deepEqual([st2.doc, row(st2all, 'Kim').info.doc, row(st2all, 'Kim').info.cannot, row(st2all, 'Lou').info.doc, row(st2all, 'Gil').info.doc], [FILE, FILE, 1, FILE, undefined]);
+  assert.deepEqual((await act(tom, 'page:status', { code: hall })).board.info.doc, FILE, 'the operator');
+  const salSees = await act(sal, 'page:status', { code: hall });
+  assert.deepEqual([salSees.ok, salSees.board.info.cannot, salSees.board.info.doc, row(salSees, 'Kim').info.doc], [true, 2, undefined, undefined], 'a seat that may only show, not its pusher');
+  assert.equal(st1.doc, undefined, 'a document every page showed carries none');
+  // A person take, as Show them a picture sends to each such person (the act is the pusher's page's, which the browser
+  // smoke drives): drawn over the Board's on their pages alone.
+  const before = new Map([gil, kim, lou].map((s) => [s, info(s).length]));
+  const toKim = await act(ctl, 'page:push', { code: hall, to: { uid: 'u:' + kimJoin.uid }, content: { kind: 'image', url: pic.url, from: { url: up.url, at: { page: 2 } } } });
+  assert.equal(toKim.ok, true, JSON.stringify(toKim));
+  await until(() => info(kim).some((x) => x.seq === toKim.seq), 4000, 'Kim told the picture');
+  await wait(300);
+  assert.deepEqual(info(kim).find((x) => x.seq === toKim.seq).content, { kind: 'image', url: pic.url, name: 'Board pack p2.png', from: { name: 'Board pack.pdf', type: 'pdf', at: { page: 2 } } });
+  assert.deepEqual([gil, lou].map((s) => info(s).slice(before.get(s)).some((x) => x.seq === toKim.seq)), [false, false], 'nobody else is told it');
+  const kimNow = row(await status(), 'Kim').info;
+  assert.deepEqual([kimNow.seq, kimNow.kind], [toKim.seq, 'image'], 'Kim\'s pages show the picture over the Board\'s document');
+  assert.deepEqual([row(await status(), 'Lou').info.seq], [bare.seq], 'Lou\'s still the Board\'s, until sent hers');
+  assert.equal(louJoin.ok, true);
 });

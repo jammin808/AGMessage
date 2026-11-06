@@ -211,6 +211,10 @@ const BESIDE = { ...INFO_SHOWN, seq: 10, arrive: 'side', words: 'In the side bar
 const BOARD_BESIDE = { ...BOARD_OPERATOR, beside: BESIDE };
 const BOARD_BESIDE_ONLY = { ...BOARD_MINE, info: null, beside: BESIDE };
 const BOARD_OP_ON = { ...BOARD_INFO, opOn: true };
+// A document this page put up that two of the Board's six pages could not open (no stand-in), and what Show them a picture
+// sends them (plan 4-§5.15.2).
+const DOC_INFO = { seq: 11, kind: 'doc', mark: '△', words: 'Couldn\'t show it on 2 of 6 pages: this device cannot open documents — ask for a picture', showing: 'Board pack.pdf at p. 12', arrive: 'over', op: true, mine: true, on: 4, pages: 6, nodocs: 2, cannot: 2, standin: 0 };
+const BOARD_DOC = { ...BOARD_MINE, info: DOC_INFO, nodocs: 2, standin: { said: 'a picture of p. 12' } };
 // The simple view's ⋯ sheet: standard text, dark, the screen not full, the hall as Leave names it; and at the bounds.
 const SHEET = { id: 'sheet', zoom: 1, dark: true, full: false, hall: 'Hall 2' };
 const SHEET_SMALLEST = { ...SHEET, zoom: 0.7, dark: false };
@@ -233,7 +237,7 @@ const PICK_INSIDE = { id: 'pick', units: [], copy: '', picture: 'inside', seen: 
 const PICK_ALONE = { ...PICK_WORDS, people: [] };
 // Every other unit: a sentence and items of a document's blocks, a range of a sheet's cells, and a slide.
 const PICK_MORE = { ...PICK_WORDS, units: [{ unit: 'sentence', size: '40 ch' }, { unit: 'item', size: '2 items' }, { unit: 'range', size: '4 cells' }, { unit: 'slide', size: '30 ch' }] };
-const HALL_OBJECTS = { compose: Object.values(COMPOSE), chip: [STAGE], header: [HEADER, HEADER_OFF, HEADER_UNTOLD, HEADER_ACCOUNT], take: [TAKE, TAKE_HOT, TAKE_FULL, TAKE_WEB, TAKE_HELD, TAKE_DOC, TAKE_DOC_PLAIN], card: [CARD, CARD_SIDE, CARD_DOC], past: [PAST, PAST_DOC], sheet: [SHEET, SHEET_SMALLEST, SHEET_FULL], board: [BOARD_CHAT, BOARD_MINE, BOARD_THEIRS, BOARD_EMPTY, BOARD_INFO, BOARD_OPERATOR, BOARD_BESIDE, BOARD_BESIDE_ONLY, BOARD_OP_ON], earlier: [EARLIER, EARLIER_NONE, QUOTE_EARLIER],
+const HALL_OBJECTS = { compose: Object.values(COMPOSE), chip: [STAGE], header: [HEADER, HEADER_OFF, HEADER_UNTOLD, HEADER_ACCOUNT], take: [TAKE, TAKE_HOT, TAKE_FULL, TAKE_WEB, TAKE_HELD, TAKE_DOC, TAKE_DOC_PLAIN], card: [CARD, CARD_SIDE, CARD_DOC], past: [PAST, PAST_DOC], sheet: [SHEET, SHEET_SMALLEST, SHEET_FULL], board: [BOARD_CHAT, BOARD_MINE, BOARD_THEIRS, BOARD_EMPTY, BOARD_INFO, BOARD_OPERATOR, BOARD_BESIDE, BOARD_BESIDE_ONLY, BOARD_OP_ON, BOARD_DOC], earlier: [EARLIER, EARLIER_NONE, QUOTE_EARLIER],
   pick: [PICK_WORDS, PICK_LONG, PICK_GUESS, PICK_CELL, PICK_REGION, PICK_INSIDE, PICK_ALONE, PICK_MORE] };
 
 // ---------------------------------------------------------------- the other pages' seats and objects, as their answers make them
@@ -279,6 +283,8 @@ const PAGE_OBJECTS = {
     keyed: { id: 'person:u-kim', uid: 'u-kim', name: 'Kim', role: 'research', key: 'u:u-kim', kind: 'clock' },
     // And a web page over their clock, which Take down hands back.
     keyedInfo: { id: 'person:u-kim', uid: 'u-kim', name: 'Kim', role: 'research', key: 'u:u-kim', kind: 'clock', info: INFO_SHOWN },
+    // In the console: a document on their pages that one of them could not open, and what Show them a picture sends.
+    keyedDoc: { id: 'person:u:u-kim', uid: 'u-kim', name: 'Kim', role: '', key: 'u:u-kim', kind: 'clock', where: 'console', info: { ...DOC_INFO, pages: 1, on: 0, nodocs: 1, cannot: 1 }, standin: { said: 'a picture of p. 12' } },
   },
   adminMsg: {
     text: { id: 'm1', type: 'text', text: 'Capex is on slide 14', from: from(ANA, 'research', 'Ana'), at, hall: 'Hall 2' },
@@ -374,6 +380,12 @@ test('the file types: the pages\' one copy of the types the stage shows and of t
   const layer = /const STAGE_TYPES = Object\.freeze\((\[[^\]]*\])\)/.exec(readSource(path.join(ROOT, 'public', 'pagelayer.mjs')));
   assert.ok(layer, 'pagelayer.mjs names the stage\'s types');
   assert.deepEqual(JSON.parse(layer[1].replace(/'/g, '"')), STAGE_TYPES);
+  // The stage's types a device that cannot open documents has no reader for (plan 4-§5.15.2): the catalogue's, and the take
+  // layer's own copy held to it; each a type the stage shows.
+  assert.deepEqual(plain(C.READER_EXT), ['pdf', 'xlsx', 'docx', 'pptx']);
+  const readers = /const READERS_NEEDED = Object\.freeze\((\[[^\]]*\])\)/.exec(readSource(path.join(ROOT, 'public', 'pagelayer.mjs')));
+  assert.ok(readers, 'pagelayer.mjs names the types it has no reader for without documents');
+  assert.deepEqual(JSON.parse(readers[1].replace(/'/g, '"')).sort(), plain(C.READER_EXT).sort());
   // No other page script names a table of its own: a type list is read from the catalogue's.
   for (const f of ['app.js', 'admin.js', 'admin-plus.js', 'halls.js', 'users.js', 'menus.js', 'docview.mjs']) {
     const src = readSource(path.join(ROOT, 'public', f));
@@ -490,7 +502,9 @@ test('one word for one act: "…" for an act that asks first or opens a dialog, 
 
 test('the facts: read from the server\'s answers, the link\'s words by its state, and nothing a page could name for itself', () => {
   const f = plain(C.facts({ role: 'director', uid: 'u1', uploadToken: '', canSendToStage: 1, stage: { status: 'connected' }, forwardable: 'yes', screens: { manage: true, displays: [{}, {}] }, connected: true }));
-  assert.deepEqual(f, { page: 'hall', role: 'board', view: 'full', uid: 'u1', post: true, viewer: false, pin: true, ask: false, respondHelp: false, waiting: { plain: [], priority: [] }, tapped: '', changing: '', files: false, canSendToStage: true, canPropose: false, stageWhy: '', ai: false, download: false, takeDownloads: true, canScreens: true, screensManage: true, screens: 2, forwardable: true, sends: false, targets: [], mayKnowCode: false, setsCode: false, admin: false, connected: true, support: '', canPush: false, stagewatch: true, fullscreen: false, canWeb: false, canShow: false });
+  assert.deepEqual(f, { page: 'hall', role: 'board', view: 'full', uid: 'u1', post: true, viewer: false, pin: true, ask: false, respondHelp: false, waiting: { plain: [], priority: [] }, tapped: '', changing: '', files: false, canSendToStage: true, canPropose: false, stageWhy: '', ai: false, download: false, takeDownloads: true, canScreens: true, screensManage: true, screens: 2, forwardable: true, sends: false, targets: [], mayKnowCode: false, setsCode: false, admin: false, connected: true, support: '', canPush: false, stagewatch: true, fullscreen: false, canWeb: false, canShow: false, docs: true });
+  // Whether this device opens documents (its own probe at load, plan 4-§5.15.2): only its probe's false says it cannot.
+  assert.deepEqual([C.facts({ docs: false }).docs, C.facts({ docs: true }).docs, C.facts({}).docs, C.facts({ docs: 0 }).docs], [false, true, true, true]);
   // Who may download (lib/pages.js mayDownload, as the server answers the seat): a seat backstage that is not a Viewer
   // account, and the admin's own page where it does not sit On stage; a take shown with Download ticked, On stage too,
   // never an observer or a Viewer account.
@@ -1174,6 +1188,8 @@ test('the other pages\' matrix: what each seat is shown on each object of the ad
   M.push(['person', 'techPush', { ...O.person.guest, key: 'u:u-kim', kind: 'clock', info: INFO_SHOWN }, ['person.mention', 'person.show', 'person.doc', 'person.chat', 'person.takeDown', 'person.withdraw']]);
   M.push(['person', 'staffShowWeb', { ...O.person.guest, role: 'board', key: 'u:u-kim', kind: 'clock', info: INFO_SHOWN }, ['person.mention', 'person.web', 'person.doc', 'person.takeDown', 'person.withdraw']]);
   M.push(['person', 'staffShowWeb', { ...O.person.guest, key: 'u:u-kim', kind: 'clock', info: INFO_SHOWN }, ['person.mention']]);
+  // A document on their pages that some of them could not open, in the console: Show them a picture (plan 4-§5.15.2).
+  M.push(['person', 'techPush', { ...O.person.guest, key: 'u:u-kim', kind: 'clock', where: 'console', info: DOC_INFO, standin: { said: 'a picture of p. 12' } }, ['person.show', 'person.doc', 'person.chat', 'person.takeDown', 'person.picture', 'person.withdraw']]);
   const facts = (seat) => PAGE[seat] || SEATS[seat];
   for (const [kind, seat, o, want] of M) assert.deepEqual(ids(kind, facts(seat), o), want, kind + ' · ' + seat + ' on ' + JSON.stringify(o).slice(0, 60));
   // Every act of these kinds is shown to some seat: none passes the matrix by its absence.
@@ -1500,6 +1516,23 @@ test('the Board chip: the show kinds as radio, the one the Board shows checked a
   const gone = plain(C.entry('board', 'board.withdraw').confirm(SEATS.adminPush, BOARD_INFO));
   assert.deepEqual([gone.title, gone.yes, gone.no, gone.danger], ['Withdraw it from the Board\'s pages?', 'Withdraw', 'Keep it', true]);
   assert.match(gone.words, /^“a web page on vote\.example\.com” goes from their pages and from Earlier now/);
+  // Show them a picture (plan 4-§5.15.2): on a document this page put up (`standin`, the console's: what goes) that some
+  // Board pages could not open (`info.cannot`), for the operator and a seat that may only show alike; never otherwise.
+  assert.deepEqual(menu('adminPush', BOARD_DOC).filter((i) => i !== '—').find((i) => i[0] === 'board.picture'), ['board.picture', 'Show them a picture of p. 12', '', false, '']);
+  assert.equal(plain(C.items('board', SEATS.adminPush, { ...BOARD_DOC, standin: { said: 'what is at slide 3' } })).find((i) => i.id === 'board.picture').label, 'Show them what is at slide 3');
+  assert.ok(ids('board', SEATS.staffShow, BOARD_DOC).includes('board.picture'), 'a seat that may only show');
+  for (const o of [{ ...BOARD_DOC, standin: null }, { ...BOARD_DOC, info: { ...DOC_INFO, cannot: 0 } }, { ...BOARD_DOC, info: { ...DOC_INFO, kind: 'image' } }, BOARD_INFO, BOARD_MINE]) {
+    assert.ok(!ids('board', SEATS.adminPush, o).includes('board.picture'), JSON.stringify(o.info || null));
+  }
+  for (const s of ['research', 'board', 'observer']) assert.ok(!ids('board', SEATS[s], BOARD_DOC).includes('board.picture'), s);
+  // A person in the console whose pages could not open a document: the same act, to them; never outside the console,
+  // without what it sends, or where every page of theirs showed it.
+  const kim = { id: 'person:u:u-kim', uid: 'u-kim', name: 'Kim', role: '', key: 'u:u-kim', kind: 'clock', where: 'console', info: { ...DOC_INFO, pages: 1, on: 0, nodocs: 1, cannot: 1 }, standin: { said: 'what is at slide 3' } };
+  assert.equal(plain(C.items('person', SEATS.adminPush, kim)).find((i) => i.id === 'person.picture').label, 'Show them what is at slide 3');
+  assert.ok(ids('person', SEATS.staffShow, { ...kim, role: 'board' }).includes('person.picture'), 'a seat that may only show');
+  for (const o of [{ ...kim, where: undefined }, { ...kim, standin: null }, { ...kim, info: { ...kim.info, cannot: 0 } }, { ...kim, info: INFO_SHOWN }]) {
+    assert.ok(!ids('person', SEATS.adminPush, o).includes('person.picture'), JSON.stringify([o.where, o.standin, o.info.cannot, o.info.kind]));
+  }
 });
 
 test('the Board chip for a seat that may only show (canShow): Take down over its own kind of take, the operator\'s disabled with why; a web page with its right; no show kind, no ↶ Back to; Screens & pages…', () => {

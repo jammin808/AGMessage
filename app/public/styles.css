@@ -2033,6 +2033,12 @@ h1[tabindex="-1"]:focus, h3[tabindex="-1"]:focus { outline: none; }
 .take-file-line { border-top: 1px solid var(--stage-dim); }
 .take-file-box { flex: 1 1 auto; min-height: 0; overflow: auto; padding: var(--sp-4); background: var(--c-surface); color: var(--c-ink); }
 .take-card-box .take-file-box { min-height: 12rem; }
+/* A document on a device that cannot open documents: its stand-in's words over it, or the words in its place. */
+.take-standin-words, .take-device { margin: 0; padding: var(--sp-2) var(--sp-3); font-size: var(--fs-md); font-weight: 600; overflow-wrap: anywhere; }
+.take-standin-words { border-bottom: 1px solid var(--stage-dim); }
+.take-device { padding: var(--sp-4); }
+/* The pusher's reader that finds what is at a document's place for its stand-in: laid out as a tablet's take, never seen. */
+.standin-reader { position: fixed; top: 0; left: -20000px; width: 1180px; height: 820px; overflow: auto; visibility: hidden; pointer-events: none; }
 .page-layer, .take-cards, .web-preview-box { -webkit-touch-callout: none; }
 body[data-view="simple"] .take-file .dv-bar .btn, body[data-view="simple"] .take-file .dv-n { min-height: var(--target-answer); min-width: var(--target-answer); }
 /* A quote in a take: drawn from its data on the take's black, in the stage's ink, its type the largest that fits (set on

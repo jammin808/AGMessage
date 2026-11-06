@@ -9,7 +9,9 @@
 // drawing. Nothing here holds a socket, and every node is built with the DOM and textContent.
 //
 //   render(box, content, ctx) → Promise<{state, words}>   the take drawn into box (what it held before let go first):
-//                                                          'shown' (a web page: 'opened'), or 'failed' and why
+//                                                          'shown' (a web page: 'opened'), or 'failed' and why (`said`:
+//                                                          its words drawn in the box too; `device`: this device could
+//                                                          not import pdf.js, so it opens no document from now on)
 //   clear(box)                                             what box holds let go: a document's reader destroyed, its
 //                                                          object URLs revoked, the box emptied
 //   card(content, ctx)        → element                   the take as a card in the side bar: its icon, its name, and its
@@ -34,6 +36,10 @@
 //     holds the box's menus (AGMessage's, Shift+right-click included) and hides it from print.
 //   - docview.mjs is imported with import() only, never statically, so a device that cannot load it loses documents and
 //     pictures alone, and says so.
+//   - On a device that cannot open documents (`ctx.docs` false: its probe at load, plan 4-§5.15.2) a document's stand-in
+//     is drawn in its place, with its words ("As a picture of p. 12: this device cannot page through the document"), and
+//     reported shown with them; with none, a PDF or an Office file says the device cannot open documents and fails, and
+//     nothing of it is fetched. A CSV, Markdown and text need no reader, and are drawn.
 //
 // Invariants for a quote:
 //   - Drawn from its data with the DOM and textContent alone, never as HTML: a paragraph in a <blockquote>, items in a list,
@@ -253,6 +259,68 @@ function failedSaid(kind, words) {
   if (/fetch/.test(w)) return 'the file could not be read';
   return w || 'the file could not be read';
 }
+/**
+ * The files a device that cannot open documents (`ctx.docs` false, plan 4-§5.15.2) has no reader for: a PDF (pdf.js) and
+ * the zipped Word, Excel and PowerPoint files (the document worker inflates them). A picture, a CSV, Markdown, text and an
+ * Excel 97-2003 workbook (not zipped) need neither, and it draws them as any device does. Its report's words, and what it
+ * draws in the document's place where there is no stand-in.
+ */
+const READERS_NEEDED = Object.freeze(['pdf', 'docx', 'xlsx', 'pptx']);
+const DEVICE = 'this device cannot open documents — ask for a picture';
+const DEVICE_SAID = 'This device cannot open documents — ask the backstage team to show you a picture.';
+/** What a stand-in says over it, and its report: "As a picture of p. 12: this device cannot page through the document". */
+function standinWords(content, ext, quote) {
+  const place = placeSaid(content.at, ext);
+  return 'As ' + (quote ? 'a quote' : 'a picture') + (place ? (quote ? ' from ' : ' of ') + place : '') + ': this device cannot page through the document';
+}
+/** A document's place-holder for a device that cannot open it and was given no stand-in: its words, its line; 'failed'. */
+function cannotOpen(box, content, ctx) {
+  const wrap = make('div', 'take-file');
+  wrap.dataset.kind = content.kind;
+  if (text(content.note)) wrap.append(make('p', 'take-file-note', content.note));
+  wrap.append(make('p', 'take-device', DEVICE_SAID), make('p', 'take-file-line', fileSaid(content, ctx)));
+  box.append(wrap);
+  return { state: 'failed', words: DEVICE, said: true };
+}
+/**
+ * A document's stand-in drawn in its place on a device that cannot open documents (plan 4-§5.15.2): a picture of the
+ * place (an upload of an image's type, drawn as a picture take's is) or what its pusher saw there (a quote's body, drawn as
+ * a quote is), under its words, the document's line below it. 'shown' with its words once it has drawn, else 'failed'.
+ */
+async function drawStandin(box, content, st, ext, ctx) {
+  const quote = !!st.snippet && typeof st.snippet === 'object';
+  const words = standinWords(content, ext, quote);
+  const wrap = make('div', 'take-file take-standin');
+  wrap.dataset.kind = content.kind;
+  if (text(content.note)) wrap.append(make('p', 'take-file-note', content.note));
+  const inner = make('div', 'take-file-box');
+  wrap.append(make('p', 'take-standin-words', words), inner, make('p', 'take-file-line', fileSaid(content, ctx)));
+  box.append(wrap);
+  noDrag(box);
+  if (quote) {
+    // Its source line names the document it stands in for, at the take's place: the pusher's reading of it, never typed.
+    const r = await drawQuote(inner, { ...st.snippet, kind: 'snippet', from: { name: text(content.name) || 'the document', type: ext, ...(content.at ? { at: content.at } : {}), ...(text(content.roomName) ? { roomName: content.roomName } : {}) } }, ctx);
+    // The quote's own fitting is let go with the box it was drawn into, as every drawing is (clear).
+    const fitted = views.get(inner);
+    views.delete(inner);
+    if (fitted) views.set(box, fitted);
+    if (!box.contains(wrap)) return { state: 'failed', words: 'closed' };
+    return r && r.state === 'shown' ? { state: 'shown', words } : { state: 'failed', words: (r && r.words) || 'it could not be drawn' };
+  }
+  const url = text(st.url);
+  const pext = extOf(url);
+  if (!UPLOAD.test(url) || !IMAGES.includes(pext)) return { state: 'failed', words: 'the file is not one of this hall\'s' };
+  let dv;
+  try { dv = await prepare(); } catch { return { state: 'failed', words: 'this page could not load the document reader — reload' }; }
+  if (!box.contains(wrap)) return { state: 'failed', words: 'closed' };
+  const seat = ctx && SEATS.includes(ctx.seat) ? ctx.seat : 'observer';
+  const view = dv.open(inner, { url }, { seat, name: text(content.name), ext: pext, ranged: true });
+  views.set(box, view);
+  const r = await view.ready;
+  if (views.get(box) !== view) return { state: 'failed', words: 'closed' };
+  noDrag(box);
+  return r && r.state === 'shown' ? { state: 'shown', words } : { state: 'failed', words: failedSaid('image', r && r.words) };
+}
 /** No picture in `box` is dragged out: each is draggable=false, and a drag that starts in the box is cancelled. */
 function noDrag(box) {
   for (const img of box.querySelectorAll('img')) img.setAttribute('draggable', 'false');
@@ -271,6 +339,13 @@ async function drawFile(box, content, ctx) {
   const ext = extOf(url);
   if (content.kind === 'doc' && content.withheld === true) return { state: 'failed', words: 'observers are shown pictures and quotes, not documents' };
   if (!UPLOAD.test(url) || !STAGE_TYPES.includes(ext) || (content.kind === 'image' && !IMAGES.includes(ext))) return { state: 'failed', words: 'the file is not one of this hall\'s' };
+  // A device that cannot open documents draws a document's stand-in where it has one, and says so where it has none for a
+  // file it has no reader for; nothing of the document is fetched, and pdf.js is never imported.
+  if (content.kind === 'doc' && ctx && ctx.docs === false) {
+    const st = content.standin && typeof content.standin === 'object' ? content.standin : null;
+    if (st) return drawStandin(box, content, st, ext, ctx);
+    if (READERS_NEEDED.includes(ext)) return cannotOpen(box, content, ctx);
+  }
   const wrap = make('div', 'take-file');
   wrap.dataset.kind = content.kind;
   if (text(content.note)) wrap.append(make('p', 'take-file-note', content.note));
@@ -281,6 +356,19 @@ async function drawFile(box, content, ctx) {
   let dv;
   try { dv = await prepare(); } catch { return { state: 'failed', words: 'this page could not load the document reader — reload' }; }
   if (!box.contains(wrap)) return { state: 'failed', words: 'closed' };
+  // A device that passed the documents' probe but cannot import pdf.js says so (`device`: the page then opens no document
+  // for the rest of its session) and draws, in this same box, what a device that cannot open documents draws: the take's
+  // stand-in where it carries one, else the words.
+  if (content.kind === 'doc' && ext === 'pdf') {
+    try { await dv.loadPdfJs(); } catch {
+      if (!box.contains(wrap)) return { state: 'failed', words: 'closed' };
+      wrap.remove();
+      const st = content.standin && typeof content.standin === 'object' ? content.standin : null;
+      const r = st ? await drawStandin(box, content, st, ext, ctx) : cannotOpen(box, content, ctx);
+      return { ...r, device: true };
+    }
+    if (!box.contains(wrap)) return { state: 'failed', words: 'closed' };
+  }
   const seat = ctx && SEATS.includes(ctx.seat) ? ctx.seat : 'observer';
   const view = dv.open(inner, { url }, { at: placeAt(content.at), seat, name: text(content.name), ext, ranged: true });
   views.set(box, view);

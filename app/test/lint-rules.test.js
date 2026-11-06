@@ -132,6 +132,38 @@ test('the page floor in the lint: a bare requestIdleCallback or cancelIdleCallba
   }
 });
 
+// Every page script and page module parses as ES2020 (eslint.config.mjs's ecmaVersion for app/public), whose newest syntax
+// Safari parses from 14, so every Board device parses what it is sent (plan 4-§5.15.2; docs/DEVICES.md): a class field, a
+// static block, a logical assignment, a numeric separator and a top-level await are each a parse error there, in a
+// script and in a module; their ES2020 forms pass; every page script of the tree passes as it stands.
+test('the ES2020 fence: newer syntax in a page script or module is a parse error, its ES2020 form passes, and every page script parses', async () => {
+  const repo = path.join(__dirname, '..', '..');
+  const eslint = new ESLint({ cwd: repo });
+  const found = async (code, file) => (await eslint.lintText(code, { filePath: path.join(repo, file) }))[0].messages.map((m) => (m.fatal ? 'parse' : m.ruleId));
+  const NEWER = {
+    'a class field': 'AGM.A = class { n = 1; };\n',
+    'a private field': 'AGM.A = class { #n = 1; get n() { return this.#n; } };\n',
+    'a static block': 'AGM.A = class { static { AGM.ready = true; } };\n',
+    'a logical assignment (||=)': 'AGM.x ||= 1;\n',
+    'a logical assignment (??=)': 'AGM.x ??= 1;\n',
+    'a numeric separator': 'AGM.x = 10_000;\n',
+  };
+  for (const [what, code] of Object.entries(NEWER)) {
+    assert.deepEqual(await found(code, 'app/public/planted.js'), ['parse'], what + ' in a page script');
+    assert.deepEqual(await found(code.replace(/^AGM\./gm, 'globalThis.AGM_'), 'app/public/planted.mjs'), ['parse'], what + ' in a page module');
+  }
+  assert.deepEqual(await found('const r = await fetch(\'/build.js\');\nexport default r;\n', 'app/public/planted.mjs'), ['parse'], 'a top-level await in a page module');
+  for (const code of ['AGM.x = AGM.y ?? 1;\n', 'AGM.x = AGM.y?.z;\n', 'AGM.x = 10n;\n', 'import(\'/pagelayer.mjs\').then(() => { AGM.x = 1; });\n', 'AGM.A = class { static n() { return 1; } };\n']) {
+    assert.deepEqual(await found(code, 'app/public/planted.js'), [], 'ES2020 passes: ' + code.trim());
+  }
+  assert.deepEqual(await found('export const u = import.meta.url;\n', 'app/public/planted.mjs'), [], 'import.meta (ES2020) passes in a module');
+  // Every page script and module of the tree parses at ES2020 (the vendored libraries are outside the lint).
+  const results = await eslint.lintFiles(['app/public/**/*.js', 'app/public/**/*.mjs']);
+  assert.ok(results.length > 20, 'the page scripts were read: ' + results.length);
+  assert.deepEqual(results.filter((r) => r.messages.some((m) => m.fatal)).map((r) => path.relative(repo, r.filePath)), [], 'none fails to parse');
+  assert.ok(results.every((r) => !/[\\/]vendor[\\/]/.test(r.filePath)), 'the vendored files are not linted');
+});
+
 // No page opens a native dialog (eslint.config.mjs's `no-alert` on every page script and page module): alert, confirm and
 // prompt pause the page's scripts, and a page paused 20 s drops its socket. A question is asked in place (AGM.ask).
 test('no native dialog in the lint: alert, confirm and prompt are refused on every page script and page module, however they are reached', async () => {

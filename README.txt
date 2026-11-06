@@ -617,9 +617,10 @@ PowerPoint file that takes more than 15 seconds to read says "This file
 took too long to read, so it is not shown." (open it in its own
 application instead); a PDF whose first page takes more than 20 seconds
 says the file took too long to read, on the panel and on a screen. On a
-device older than iPadOS 16.4 (or Chrome 103) a Word, Excel or
-PowerPoint file says "this device cannot open documents — ask for a
-picture".
+device older than iPadOS 16.4 (or Chrome 103) a PDF, Word, Excel or
+PowerPoint file says "This device cannot open documents — ask the
+backstage team to show you a picture." (a picture, a CSV, Markdown,
+text and an old Excel .xls still open).
 
 Screens (projector PC, lectern monitor, foyer TV)
 -------------------------------------------------
@@ -709,6 +710,20 @@ upload is shown, and a document never to an observer (observers are
 shown pictures and quotes). A very large picture is refused ("Too large
 for the Board's devices - send a region."), and so is a Word, Excel or
 PowerPoint file that fails the checks it had at upload.
+
+Older tablets and phones. A device that cannot open documents (an iPad
+before iPadOS 16.4, or Chrome before 103) says so as it joins. When you
+show the Board a document and some of its pages are such devices, the
+bar says so first ("2 of 6 Board pages are older devices: they get a
+picture of p. 12 in its place") and your page sends them a picture of
+that page (for a PDF) or what is at that place as a quote (Word, Excel,
+PowerPoint), drawn with "As a picture of p. 12: this device cannot page
+through the document". The Board chip then reads "4/4 (2 as a
+picture)". A tablet that joins after the document went cannot open it
+and says so; the Board's ... (or that person's, in People's pages)
+offers Show them a picture of p. 12, which sends it to that person
+alone. Download, quotes, pictures, web pages and
+Earlier work on every device.
 
 Shown by mistake? Withdraw it: the toast offers Take down and Withdraw
 for 10 seconds, and later the Board chip's (or the person's) Withdraw...

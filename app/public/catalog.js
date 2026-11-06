@@ -214,6 +214,12 @@
    */
   const STAGE_EXT = Object.freeze(['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'txt', 'md', 'csv', 'xlsx', 'xls', 'docx', 'pptx']);
   const TRANSFER_EXT = Object.freeze(['zip', 'mp4', 'm4a', 'mov', 'mp3', 'wav', 'odt', 'ods', 'odp']);
+  /**
+   * The stage's types a device that cannot open documents has no reader for (plan 4-§5.15.2): a PDF (pdf.js) and the zipped
+   * Word, Excel and PowerPoint files (the document worker inflates them). It is sent a stand-in for them; a picture, a CSV,
+   * Markdown, text and an Excel 97-2003 workbook (not zipped) it draws itself.
+   */
+  const READER_EXT = Object.freeze(STAGE_EXT.filter((x) => ['pdf', 'docx', 'xlsx', 'pptx'].includes(x)));
   const extOf = (u) => { const x = /\.([A-Za-z0-9]{1,5})$/.exec(String(u || '')); return x ? x[1].toLowerCase() : ''; };
   /** A file the stage may show: one AGMessage opens, of a type the stage shows. */
   const stageFile = (o) => opens(o) && STAGE_EXT.includes(extOf(o.url));
@@ -621,6 +627,12 @@
       // the operator's is theirs.
       { id: 'board.takeDown', label: 'Take down', icon: '⤵', group: '3_keep', verb: 'page:push', mode: 'now',
         may: (f) => f.canPush || f.canShow, fits: (f, o) => !!downOf(f, o), ready: (f, o) => downWhy(f, o) },
+      // Show them a picture (plan 4-§5.15.2): a document on the Board that some of its pages could not open (the console's
+      // read: `info.cannot`, pages that cannot open documents and were given no stand-in), sent to each such page's person as
+      // a take of their own at its place (`standin`, the console's: what goes, in words; there only where this page has the
+      // file to draw from: its pusher's own, or the read's for an operator and the admin).
+      { id: 'board.picture', label: (f, o) => 'Show them ' + (o.standin && o.standin.said ? o.standin.said : 'a picture'), icon: '📷', group: '3_keep', verb: 'page:push', mode: 'now',
+        may: (f) => f.canPush || f.canShow, fits: (f, o) => !!o.standin && !!o.info && o.info.kind === 'doc' && o.info.cannot > 0 },
       { id: 'board.screens', label: 'Screens & pages…', icon: '⧉', group: '4_manage', verb: 'display:list', mode: 'now', may: (f) => f.canPush || f.canShow, fits: () => true },
       // Withdraw, for a take shown by mistake: it goes from the Board's pages and from Earlier (Take down leaves it there),
       // for the operator any information, for a seat that may only show its own (another's offered disabled, as the server
@@ -748,6 +760,10 @@
       { id: 'person.takeDown', label: 'Take down', icon: '⤵', group: '2_send', verb: 'page:push', mode: 'now',
         may: (f) => f.canPush || f.canShow, fits: (f, o) => onHall(f) && full(f) && typeof o.key === 'string' && o.key.length > 0 && !!downOf(f, o) && (f.canPush || o.where === 'console' || o.role === 'board'),
         ready: (f, o) => downWhy(f, o) },
+      // Show them a picture (plan 4-§5.15.2): a document on their pages that some of them could not open, sent to them as a
+      // take of their own at its place, as on the Board chip (`standin`, the console's).
+      { id: 'person.picture', label: (f, o) => 'Show them ' + (o.standin && o.standin.said ? o.standin.said : 'a picture'), icon: '📷', group: '2_send', verb: 'page:push', mode: 'now',
+        may: (f) => f.canPush || f.canShow, fits: (f, o) => onHall(f) && full(f) && o.where === 'console' && typeof o.key === 'string' && o.key.length > 0 && !!o.standin && !!o.info && o.info.kind === 'doc' && o.info.cannot > 0 },
       // Chat view ▸: the admin's choice of the view a person's pages draw (By seat: the simple view On stage, the full view
       // elsewhere), for anyone seated in the room, a guest or an account, on the admin page and in the hall page's People
       // panel (the admin's own page, which is told each person's choice, `view`).
@@ -1038,6 +1054,9 @@
       // account backstage with stage.show or stage.web; for the support view, the person's): the Board chip with Take down,
       // and the console's people On stage.
       canShow: s.canShow === true,
+      // Whether this device opens documents (its probe at load, plan 4-§5.15.2): without it a document's card opens its
+      // stand-in, and a Look at a document says it cannot.
+      docs: s.docs !== false,
     });
   }
 
@@ -1163,6 +1182,6 @@
     return shown(kind, f, o).find((e) => e.key === k) || null;
   }
 
-  const catalog = Object.freeze({ GROUPS, REACTIONS, WORDS, FOLDS, SHOW_KINDS, FILE_KINDS, PICKED_KINDS, PICK_UNITS, STAGE_EXT, TRANSFER_EXT, CHAT_VIEWS, ZOOM_MIN, ZOOM_MAX, KINDS, supportWords, stageWhy, downOf, withdrawOf, facts, adminFacts, boardFacts, accountFacts, actorKey, entry, shown, ready, items, ids, inline, submenu, byKey, placeOf, lasted });
+  const catalog = Object.freeze({ GROUPS, REACTIONS, WORDS, FOLDS, SHOW_KINDS, FILE_KINDS, PICKED_KINDS, PICK_UNITS, STAGE_EXT, TRANSFER_EXT, READER_EXT, CHAT_VIEWS, ZOOM_MIN, ZOOM_MAX, KINDS, supportWords, stageWhy, downOf, withdrawOf, facts, adminFacts, boardFacts, accountFacts, actorKey, entry, shown, ready, items, ids, inline, submenu, byKey, placeOf, lasted });
   Object.assign(root.AGM = root.AGM || {}, { catalog });
 })(typeof window !== 'undefined' ? window : globalThis);

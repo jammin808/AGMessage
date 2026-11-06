@@ -2289,6 +2289,9 @@ io.on('connection', (socket) => {
     // What the page named its room by: an account's page and the support view its key, a guest's the guest code it typed.
     // A verb that names its own room so is read as the room it sits in (help:respond), and a guest is told that code alone.
     socket.data.joinedAs = code;
+    // Whether this page opens documents (plan 4-§5.15.2): its own probe's word at each join, `true` and nothing else. A page
+    // that cannot is sent a document's stand-in, and its pusher's console counts it.
+    socket.data.docs = !!args && args.docs === true;
     socket.join(r.code);
     // A page given no file's link (an observer's, a Viewer account's) is sent each file message without its address.
     for (const n of Array.from(socket.rooms)) if (n.startsWith(LINKLESS) && n !== LINKLESS + r.code) socket.leave(n);
@@ -3804,7 +3807,8 @@ function displaysChanged(code) {
  * the information beside it (in its side bar, beside the operator's), and `earlier` the newest of its Earlier entries, as
  * a page is told them (pages.earlierOf), their numbers in a word. `key` is
  * the person's (an account's `a:<id>`, every device of it; a guest's `u:<uid>`, that device); `board`, whether the person
- * sits On stage in the hall's Main room there. A page that has gone is among none: a room's seats are its pages open now.
+ * sits On stage in the hall's Main room there; `docs`, whether the page said at its join that it opens documents. A page
+ * that has gone is among none: a room's seats are its pages open now.
  */
 function hallPages(hall) {
   const out = [];
@@ -3815,7 +3819,10 @@ function hallPages(hall) {
       const info = pages.current(hall, key, { board, layer: 'info' });
       const beside = pages.current(hall, key, { board, layer: 'beside' });
       const earlier = pages.earlierSaid(hall, key, { board });
-      out.push({ sid, key, board, name, room: r, support, observer, seq: current.take ? current.take.seq : 0, answer: current.answer ? current.answer.state : null, current, info, beside, earlier });
+      // Whether the page opens documents (its join's probe, plan 4-§5.15.2): a page that cannot draws a document's stand-in.
+      const s = io.sockets.sockets.get(sid);
+      const docs = !!s && s.data.docs === true;
+      out.push({ sid, key, board, name, room: r, support, observer, seq: current.take ? current.take.seq : 0, answer: current.answer ? current.answer.state : null, current, info, beside, earlier, docs });
     };
     for (const [sid, u] of r.users) { const key = personKey(u.uid, !!u.acct); if (key) add(sid, key, main && u.role === 'board', u.name, false, u.role === 'observer'); }
     for (const sid of io.sockets.adapter.rooms.get(r.code) || []) {

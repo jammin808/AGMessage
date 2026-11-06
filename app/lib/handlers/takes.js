@@ -65,7 +65,7 @@
  * server's named effect (`viewChanged`), which reaches each page of theirs by its socket alone.
  */
 const { str } = require('../guard');
-const { cleanPage, askedOf, canShow, describePage, personKey, layerOf, fileOf, ARRIVALS, FILE_KINDS, STAGE_FULL } = require('../pages');
+const { cleanPage, askedOf, canShow, describePage, personKey, layerOf, filesOf, ARRIVALS, FILE_KINDS, STAGE_FULL } = require('../pages');
 const { mayChange } = require('../rbac');
 
 /** What the admin's support view is told of an act: it shows the person's page, and acts on nothing (as its doors say). */
@@ -280,20 +280,22 @@ function register(socket, conn, ctx) {
     if (!hall) return refused;
     let made = plan(hall, a);
     if (made.error) return { ok: false, error: made.error };
-    // A file it shows (a document's, a picture's, a holding slide's picture) is checked off the socket's turn at its first
-    // take, then everything is read again as it stands after the check.
-    if (made.shown) {
-      const why = await stageCheck(made.shown.url);
-      if (why) return { ok: false, error: why };
+    // Each file it shows (a document's and its stand-in picture's, a picture's, a holding slide's picture) is checked off
+    // the socket's turn at its first take, then everything is read again as it stands after the check.
+    if (made.shown.length) {
+      for (const f of made.shown) {
+        const why = await stageCheck(f.url);
+        if (why) return { ok: false, error: why };
+      }
       if (!store.get(hall.code)) return { ok: false, error: whyNot(null) };
       made = plan(hall, a);
       if (made.error) return { ok: false, error: made.error };
     }
     const { board, target, to, name, content, onStage, layer, arrive, aside, named, was, before, facts, shown, sent } = made;
     // A fresh upload it shows is kept by the hall as a stage file while a take names it (and a while after): the hall's
-    // stage holds a bound of them, past which a new one is refused.
-    const file = shown && shown.fresh ? shown.url.slice(9) : '';
-    if (file && !pages.fileRoom(hall.code, file)) return { ok: false, error: STAGE_FULL };
+    // stage holds a bound of them, past which a new one is refused; a document and its stand-in picture find room together.
+    const files = shown.filter((f) => f.fresh);
+    if (files.length && !pages.fileRoom(hall.code, files.map((f) => f.url.slice(9)))) return { ok: false, error: STAGE_FULL };
     // The operator's information (canPush) stays up: a researcher's side-bar push over it is kept beside it, superseding
     // nothing over the show.
     const op = conn.canPush(hall);
@@ -303,7 +305,11 @@ function register(socket, conn, ctx) {
     const by = { name: byName(), guest: conn.actor().t === 'code', ...(layer !== 'show' && op ? { op: true } : {}), ...(layer !== 'show' && whoKey ? { who: whoKey } : {}) };
     const take = pages.take(hall.code, to, content, by, { onStage, arrive, aside, slot: named, sent });
     if (!take) return { ok: false, error: content.kind === 'web' ? WEB_NOT_KEPT : NOT_KEPT };
-    if (file) { const up = freshUpload(file); stageDropped(pages.recordFile(hall.code, file, { at: up ? up.at : take.at, room: up ? up.room : hall.code, uid: up ? up.uid : '', name: shown.name }, take.at)); }
+    for (const f of files) {
+      const file = f.url.slice(9);
+      const up = freshUpload(file);
+      stageDropped(pages.recordFile(hall.code, file, { at: up ? up.at : take.at, room: up ? up.room : hall.code, uid: up ? up.uid : '', name: f.name }, take.at));
+    }
     tell(hall.code, before);
     const holding = holdingOf(hall.code);
     // In the audit's voice: whom, how many of the Board's pages it reached, what it shows in a few words (never a file's
@@ -328,6 +334,12 @@ function register(socket, conn, ctx) {
       if (book.size > PUSHED_KEEP) book.delete(book.keys().next().value);
     }
     return res;
+  }
+
+  /** Where a file this page shows in `hall` may come from (sourceOk), for this page: the rooms it reads and may share into. */
+  function sourceHere(hall) {
+    const me = conn.me();
+    return stageSource(hall, me ? me.uid : '', { reads: (r) => conn.canIn('hall.view', r) || r === conn.room(), files: (r) => conn.canIn('hall.post', r) && conn.canIn('hall.files', r) });
   }
 
   /**
@@ -389,8 +401,7 @@ function register(socket, conn, ctx) {
       const up = (layer === 'both' ? [was, info, beside] : layer === 'info' ? [info, beside] : [was]).filter(Boolean);
       if (!(up.length ? up : [null]).some((t) => (t ? t.seq : 0) === a.ifSeq)) return { error: NEWER };
     }
-    const me = conn.me();
-    const source = stageSource(hall, me ? me.uid : '', { reads: (r) => conn.canIn('hall.view', r) || r === conn.room(), files: (r) => conn.canIn('hall.post', r) && conn.canIn('hall.files', r) });
+    const source = sourceHere(hall);
     const facts = {
       stagewatch: !!linkFor(hall.code).base,
       source,
@@ -402,10 +413,9 @@ function register(socket, conn, ctx) {
     };
     const content = cleanPage(a.content, facts);
     if (content.error) return { error: content.error };
-    // The upload it shows, with its name and whether it is this pusher's fresh upload (kept as a stage file once taken).
-    const url = fileOf(content);
-    const src = url ? source(url) : null;
-    const shown = url ? { url, name: content.name || src.name || '', fresh: src.fresh === true } : null;
+    // The uploads it shows (a document's stand-in picture after the document), each with its name and whether it is this
+    // pusher's fresh upload (kept as a stage file once taken).
+    const shown = filesOf(content).map((url, i) => { const src = source(url); return { url, name: (i === 0 && content.name) || src.name || '', fresh: src.fresh === true }; });
     const onStage = [...new Set(seated.filter((p) => p.board).map((p) => p.key))];
     const aside = layer === 'info' && want.kind !== 'chat' && arrive === 'side' && !conn.canPush(hall) && (opOf(info) || !!opOn);
     // A push sent from a side room says so ("…, sent from Legal"): its key is kept to end it with that room's reset.
@@ -509,19 +519,33 @@ function register(socket, conn, ctx) {
       if (!people.has(p.key)) people.set(p.key, { key: p.key, name: p.name, room: store.isMain(p.room) ? 'Main' : p.room.name || '', list: [] });
       people.get(p.key).list.push(p);
     }
+    // Each target's status counts its pages that joined without documents (`nodocs`, lib/pages.js Pages.status); a person
+    // seated On stage on a page of theirs says so (`board`): a Board document they could not open is theirs to be sent a
+    // picture of.
     // Each target's show take, the information over it (`info`) and, while one is there, the information beside it
     // (`beside`, in their side bar beside the operator's).
     // Whether this asker put each information take up (`mine`): its pusher may withdraw it.
     const asker = socket.data.actor || conn.me() ? conn.actor() : null;
     const who = asker ? asker.t + ':' + asker.id : '';
+    // A document some of a target's pages could not open (plan 4-§5.15.2, 4-§7.7), for Show them a picture: the file
+    // ({url, name, at?}) told to its pusher, an operator (canPush) and the admin, and only where this asker may show that
+    // file itself (sourceOk), so no file's address reaches a page that could not already put it on the stage.
+    const pictures = conn.canPush(hall) || !!socket.data.isAdmin;
+    let source = null;
+    const docOf = (c, mine) => {
+      if (!(mine || pictures) || !isRecord(c) || typeof c.url !== 'string') return null;
+      if (!source) source = sourceHere(hall);
+      const s = source(c.url);
+      return isRecord(s) && !s.error ? { url: c.url, name: typeof c.name === 'string' ? c.name : '', ...(isRecord(c.at) ? { at: c.at } : {}) } : null;
+    };
     const both = (to, list, o) => {
-      const beside = pages.status(hall.code, to, list, { ...o, who, layer: 'beside' });
-      return { ...pages.status(hall.code, to, list, o), info: pages.status(hall.code, to, list, { ...o, who, layer: 'info' }), ...(beside.seq ? { beside } : {}) };
+      const beside = pages.status(hall.code, to, list, { ...o, who, layer: 'beside', docOf });
+      return { ...pages.status(hall.code, to, list, o), info: pages.status(hall.code, to, list, { ...o, who, layer: 'info', docOf }), ...(beside.seq ? { beside } : {}) };
     };
     answer({
       ok: true,
       board: both('board', boardOf(hall, seated, rooms), { hallHolding: holding }),
-      people: Array.from(people.values(), (x) => ({ uid: x.key, name: x.name, room: x.room, ...both(x.key, x.list, { name: x.name, hallHolding: holding }) })),
+      people: Array.from(people.values(), (x) => ({ uid: x.key, name: x.name, room: x.room, ...(x.list.some((p) => p.board) ? { board: true } : {}), ...both(x.key, x.list, { name: x.name, hallHolding: holding }) })),
       // Whether this asker's information pushes and Take downs hold stage.show (the admin's and a code guest's always; an
       // account's by its right in the hall): its console greys what the server would refuse.
       show: !socket.data.account || !!socket.data.isAdmin || conn.canIn('stage.show', hall),

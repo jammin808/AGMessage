@@ -243,6 +243,23 @@ its own on the pusher's page, so a target is never handed the original. A note i
   On stage too, by the take's number (`file:download {seq}`); without the tick: "This was shown without Download."
 - **Never a file for download only** (a transfer type, or a Word, Excel or PowerPoint file protected with a password):
   "That file is for download only: AGMessage does not open it.", as a document, a picture or a holding picture alike.
+- **A device that cannot open documents** (`docs/DEVICES.md` §8): a page says at its join whether it does (`docs: true`,
+  a probe), and `page:status` counts each target's pages that do not (`nodocs`). For such a page the pusher's page sends
+  a document with its **stand-in** (`standin`: `{url}`, a picture of a PDF's place drawn and uploaded as a page picture,
+  checked as a picture take and kept as a stage file named by the take; or `{snippet}`, what is at an Office file's place,
+  a quote's body by a quote's rules), saying so on its bar before it goes ("2 of 6 Board pages are older devices: they
+  get a picture of p. 12 in its place"). That page draws the stand-in under "As a picture of p. 12: this device cannot
+  page through the document" and reports `shown` with those words; the status counts it (`standin` and `standinAs`:
+  "On all 6 Board pages, 2 as a picture", the chip "✓ 6/6 (2 as a picture)"; "as a quote" for a quote). With none (a
+  page that joined after the push), a PDF or a zipped Office file says "This device cannot open documents — ask the
+  backstage team to show you a picture." and reports `failed` ("this device cannot open documents — ask for a
+  picture"), counted (`cannot`), and the console of the take's pusher, an operator or the admin offers **📷 Show them a
+  picture of p. 12** on the Board chip and on the person's row: a take of its own to each such person, drawn over the
+  Board's on their pages alone. For it, `page:status` gives those seats the file (`doc`: its address, name and place) on
+  a document some pages could not open, where each may show that file itself. Only a document carries a stand-in, in one
+  of the two shapes, a picture for a PDF or a picture and what is seen for any other type ("A document's stand-in is a
+  picture of its place or what you see there: one of the two.", "A PDF's or a picture's stand-in is a picture of its
+  place; any other document's is what you see there.", "Only a document has a stand-in.").
 
 ### A quote
 

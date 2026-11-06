@@ -28,7 +28,11 @@
  * A document or a picture shows a file the hall holds, from a place the stage may show it from (sourceOk, pure); a
  * fresh upload one names is kept as the hall's stage file while a take or Earlier names it and for the wait after
  * (`files`); a take shown by mistake is withdrawn, from its pages and Earlier, and kept by its number (`withdrawn`); a
- * reset or a deleted file ends the takes it names (endTakes).
+ * reset or a deleted file ends the takes it names (endTakes). A document may carry its stand-in (plan 4-§5.15.2), what a
+ * page that cannot open documents draws in its place: a picture of the place (an image upload, kept as a stage file named
+ * by the take, as the document is) or what its pusher sees there, as a quote's body. A take's status counts the pages
+ * that joined without documents (`nodocs`), those of them that drew the stand-in (`standin`, "as a picture") and those
+ * that could not show it (`cannot`).
  *
  * Stored in `pages.json` (one write lane, written only once this copy holds its data folder: `hold()`): the takes by
  * hall and layer, the persons' answers, each hall's Earlier list, stage files and withdrawn takes, and the guests' chat
@@ -43,6 +47,7 @@
  *   mayDownload(who, t)  : whether a seat may download a file shared in its room, or a take's (pure)
  *   placeOf(at, ext)     : a document's place made safe for its file's type (pure)
  *   fileOf(c)            : the upload a take's content shows (a document's, a picture's, a holding slide's), or '' (pure)
+ *   filesOf(c)           : every upload a take's content names: fileOf's, and a document's stand-in picture (pure)
  *   webUrl(v, selfHosts) : a web page's address made safe, {url, host}, or {error} (pure, fail closed)
  *   describePage(c, o)   : what a take shows, in a few words, in the console's voice or the audit's (pure)
  *   Pages.status(...)    : a take's status over the pages that hold it: a mark and its words, person first (pure)
@@ -88,6 +93,15 @@ const fileOf = (c) => {
   if (!isRecord(c)) return '';
   const url = FILE_KINDS.includes(own(c, 'kind')) ? own(c, 'url') : own(c, 'kind') === 'holding' ? own(c, 'image') : undefined;
   return typeof url === 'string' && guard.validUploadUrl(url) ? url : '';
+};
+/**
+ * Every upload a take's content names, by its address: fileOf's, and a document's stand-in picture, which the stage keeps
+ * while the take names it as it keeps the document.
+ */
+const filesOf = (c) => {
+  const main = fileOf(c);
+  const st = isRecord(c) && own(c, 'kind') === 'doc' && isRecord(own(c, 'standin')) ? own(c.standin, 'url') : undefined;
+  return [main, typeof st === 'string' && guard.validUploadUrl(st) ? st : ''].filter(Boolean);
 };
 /** A kind's layer: 'show' or 'info'; '' for `chat`, whose layers are its own (layersOf), and for anything else. */
 const layerOf = (kind) => (SHOW_LAYER.includes(kind) ? 'show' : INFO_LAYER.includes(kind) ? 'info' : '');
@@ -407,8 +421,9 @@ function fromOf(from, source) {
  * alone (`layer: 'info'`) or no layer (both): any other layer is refused, never widened to both. Missing facts refuse what
  * needs them: a web page's right is read before its address, a file's source before anything is kept of it.
  *
- * A document is {kind: 'doc', url, name, at?, download, note?, room?, roomName?}: the file whole, opened at a place of its
- * type (placeOf), `download` true only when sent as true, `note` the pusher's line above it. A picture is {kind: 'image',
+ * A document is {kind: 'doc', url, name, at?, download, note?, room?, roomName?, standin?}: the file whole, opened at a
+ * place of its type (placeOf), `download` true only when sent as true, `note` the pusher's line above it, `standin` what a
+ * page that cannot open documents draws in its place (standinOf; a `standin` on any other kind is refused). A picture is {kind: 'image',
  * url, name, from?, note?, room?, roomName?}: an image shared in AGMessage, and what it is a picture of (fromOf). There
  * is no region: a part of a page or a picture is drawn into a picture of its own on the pusher's page. `name`, `room` (a
  * side room's key the file belongs to, kept on this laptop alone) and `roomName` are the server's, from the file's source.
@@ -417,6 +432,7 @@ function fromOf(from, source) {
 function cleanPage(c, facts = {}) {
   const kind = isRecord(c) ? own(c, 'kind') : undefined;
   if (typeof kind !== 'string' || !KINDS.includes(kind)) return { error: KINDS_WORDS };
+  if (kind !== 'doc' && own(c, 'standin') !== undefined) return { error: STANDIN_KIND };
   switch (kind) {
     case 'chat': {
       const asked = askedOf(c);
@@ -457,6 +473,9 @@ function cleanPage(c, facts = {}) {
  */
 function cleanFile(kind, c, facts) {
   const f = isRecord(facts) ? facts : {};
+  // A document's stand-in by its shape first, so a wrong one is refused whatever else the take holds.
+  const st = kind === 'doc' ? standinOf(own(c, 'standin')) : {};
+  if (st.error) return st;
   const url = own(c, 'url');
   if (typeof url !== 'string' || !guard.validUploadUrl(url)) return { error: kind === 'image' ? IMAGE_WORDS : FILE_WORDS };
   const ext = guard.extOf(url);
@@ -471,11 +490,45 @@ function cleanFile(kind, c, facts) {
   if (kind === 'doc') {
     const p = placeOf(own(c, 'at'), ext);
     if (p.error) return p;
-    return { kind, url, name: src.name, ...(p.at ? { at: p.at } : {}), download: own(c, 'download') === true, ...said, ...room };
+    if (st.standin && !standinFits(st.standin, ext)) return { error: STANDIN_TYPE };
+    // A stand-in picture comes from where a picture shown on the stage may come from (sourceOk), as an `image` take's does.
+    if (st.standin && st.standin.url) {
+      const from = typeof f.source === 'function' ? f.source(st.standin.url) : null;
+      if (!isRecord(from) || from.error) return { error: isRecord(from) && from.error ? from.error : NOT_HELD };
+    }
+    return { kind, url, name: src.name, ...(p.at ? { at: p.at } : {}), download: own(c, 'download') === true, ...said, ...room, ...(st.standin ? { standin: st.standin } : {}) };
   }
   const from = fromOf(own(c, 'from'), f.source);
   if (from.error) return from;
   return { kind, url, name: src.name, ...(from.from ? { from: from.from } : {}), ...said, ...room };
+}
+
+/** A stand-in that is neither shape, or both; one of the other shape than its document's type; one on a take that is no document. */
+const STANDIN_WORDS = 'A document\'s stand-in is a picture of its place or what you see there: one of the two.';
+const STANDIN_TYPE = 'A PDF\'s or a picture\'s stand-in is a picture of its place; any other document\'s is what you see there.';
+const STANDIN_KIND = 'Only a document has a stand-in.';
+/**
+ * Whether a stand-in's shape is its document's (pure; plan 4-§5.15.2): a picture of the place ({url}) for a PDF or an image,
+ * what is seen there ({snippet}) for every other type.
+ */
+const standinFits = (st, ext) => (ext === 'pdf' || IMAGE_EXT.includes(ext)) === (isRecord(st) && st.url !== undefined);
+/**
+ * A document's stand-in as its pusher sent it, by its shape (pure; plan 4-§5.15.2), what a page that cannot open documents
+ * draws in the document's place: none ({}); {url}, a picture of the place, an upload of an image's type (where it may come
+ * from is read with the document, cleanFile); or {snippet}, what the pusher sees there, as a quote's body made safe by
+ * cleanSnippet's rules, its source the document's own, so a source, a note or a kind of its own is not read. Never both,
+ * never neither: {standin} or {error}, a fresh object.
+ */
+function standinOf(v) {
+  if (v === undefined) return {};
+  if (!isRecord(v)) return { error: STANDIN_WORDS };
+  const url = own(v, 'url');
+  const snippet = own(v, 'snippet');
+  if ((url === undefined) === (snippet === undefined)) return { error: STANDIN_WORDS };
+  if (url !== undefined) return typeof url === 'string' && guard.validUploadUrl(url) && IMAGE_EXT.includes(guard.extOf(url)) ? { standin: { url } } : { error: STANDIN_WORDS };
+  if (!isRecord(snippet)) return { error: STANDIN_WORDS };
+  const q = cleanSnippet(Object.fromEntries(Object.entries(snippet).filter(([k]) => k !== 'from' && k !== 'note' && k !== 'kind')), {});
+  return q.error ? q : { standin: { snippet: q } };
 }
 
 // ---------------------------------------------------------------- a quote (plan 4-§5.9.4)
@@ -803,8 +856,9 @@ function storedFile(c) {
   const said = note !== undefined ? { note } : {};
   if (kind === 'doc') {
     const p = storedPlace(own(c, 'at'), ext);
-    if (!p || typeof own(c, 'download') !== 'boolean') return null;
-    return { kind, url, name, ...(p.at ? { at: p.at } : {}), download: c.download, ...said, ...room };
+    const st = own(c, 'standin') === undefined ? {} : standinOf(c.standin);
+    if (!p || typeof own(c, 'download') !== 'boolean' || st.error || (st.standin && !standinFits(st.standin, ext))) return null;
+    return { kind, url, name, ...(p.at ? { at: p.at } : {}), download: c.download, ...said, ...room, ...(st.standin ? { standin: st.standin } : {}) };
   }
   const from = own(c, 'from');
   if (from === undefined) return { kind, url, name, ...said, ...room };
@@ -1333,15 +1387,15 @@ class Pages {
   // hall in use.
 
   /**
-   * The uploads a hall's takes now and its Earlier entries name, by their file names: a document's, a picture's and a
-   * holding slide's own picture (fileOf); `info` true, the information's alone (a document's, a picture's: what a take-down
-   * ends).
+   * The uploads a hall's takes now and its Earlier entries name, by their file names: a document's and its stand-in
+   * picture's, a picture's and a holding slide's own picture (filesOf); `info` true, the information's alone (a document's
+   * and its stand-in's, a picture's: what a take-down ends).
    */
   _namedIn(book, { info = false } = {}) {
     const out = new Set();
     const add = (t) => {
-      const url = t ? fileOf(t.content) : '';
-      if (url && (!info || FILE_KINDS.includes(t.content.kind))) out.add(url.slice(9));
+      if (!t || (info && !FILE_KINDS.includes(t.content.kind))) return;
+      for (const url of filesOf(t.content)) out.add(url.slice(9));
     };
     for (const s of SLOTS) add(own(book.board, s));
     for (const r of Object.values(book.people || {})) for (const s of SLOTS) add(own(r, s));
@@ -1360,13 +1414,16 @@ class Pages {
   /** Whether a stage file is in use at `now`: a take or Earlier names it, or nothing has for less than the wait. */
   _inUse(f, now) { return f.named === true || now - f.at < this.wait; }
   /**
-   * Whether a hall's stage may keep the upload `name` at `now` (a take naming it is refused otherwise: "… holds 200 files"):
-   * it holds it, it holds fewer than BOUNDS.stageFiles, or one it holds is in use no longer.
+   * Whether a hall's stage may keep the uploads `names` (one name, or the list one take names: a document and its stand-in
+   * picture) at `now`, all of them together (a take naming them is refused otherwise: "… holds 200 files"): those it does
+   * not hold yet fit under BOUNDS.stageFiles with as many it holds in use no longer let go.
    */
-  fileRoom(hall, name, now = Date.now()) {
+  fileRoom(hall, names, now = Date.now()) {
     const book = HALL.test(guard.str(hall)) ? own(this.halls, hall) : undefined;
     const files = book && isRecord(book.files) ? book.files : {};
-    return Object.hasOwn(files, name) || Object.keys(files).length < BOUNDS.stageFiles || Object.values(files).some((f) => !this._inUse(f, now));
+    const wanted = [...new Set(Array.isArray(names) ? names : [names])].filter((n) => !Object.hasOwn(files, n));
+    const over = Object.keys(files).length + wanted.length - BOUNDS.stageFiles;
+    return over <= 0 || Object.values(files).filter((f) => !this._inUse(f, now)).length >= over;
   }
   /**
    * The upload `name` a take of the hall named kept as a stage file ({at: its upload's time, room: the room it was made for,
@@ -1698,18 +1755,22 @@ class Pages {
    * Beside it (`beside`), a take put there is read as any other, from the reports on it ("In the side bar on …"); with
    * none, nothing is beside it (number 0). An information take says too, to an asker (`who`, an actor's kind and id),
    * whether it put it up (`mine`): its pusher may withdraw it; and who put it up (`by`, their name) and how long ago (`ago`,
-   * ms at `now`), so a researcher about to replace it is told whose it is and how fresh.
+   * ms at `now`), so a researcher about to replace it is told whose it is and how fresh. A document some of whose pages
+   * could not open it carries the file as `docOf(content, mine)` gives it to this asker (`doc`), where it gives one.
    */
-  status(hall, to, pages = [], { name = '', hallHolding = '', layer = 'show', who = '', now = Date.now() } = {}) {
+  status(hall, to, pages = [], { name = '', hallHolding = '', layer = 'show', who = '', now = Date.now(), docOf = null } = {}) {
     const list = Array.isArray(pages) ? pages : [];
-    const states = list.map((p) => ({ ...this.pageState(hall, p, layer), name: p.name }));
+    const states = list.map((p) => ({ ...this.pageState(hall, p, layer), name: p.name, docs: !isRecord(p) || p.docs !== false }));
     let take = null;
     if (to === 'board') take = this.current(hall, '', { board: true, layer }).take;
     else for (const p of list) { const t = this.current(hall, p.key, { board: p.board, layer }).take; if (t && (!take || t.seq > take.seq)) take = t; }
     const seq = take ? take.seq : 0;
     if (layer !== 'show' && (!take || take.content.kind === 'chat')) return { ...Pages.nothingOver(take, list.length, { board: to === 'board', name, beside: layer === 'beside' }), arrive: layer === 'beside' ? 'side' : 'over', op: false };
     const st = Pages.status(take, states.map((s) => (s.seq === seq ? s : { ...s, state: 'other' })), { board: to === 'board', name, hallHolding });
-    return layer !== 'show' ? { ...st, arrive: take.arrive === 'side' ? 'side' : 'over', op: take.by.op === true, ...(who ? { mine: take.by.who === who, by: take.by.name, ago: Number.isFinite(now) ? Math.max(0, now - take.at) : 0 } : {}) } : st;
+    // A document some of its pages could not open (`cannot`): the file, as `docOf` gives it to this asker ({url, name, at?},
+    // or nothing), for Show them a picture.
+    const doc = typeof docOf === 'function' && st.kind === 'doc' && st.cannot > 0 ? docOf(take.content, !!who && take.by.who === who) : null;
+    return layer !== 'show' ? { ...st, arrive: take.arrive === 'side' ? 'side' : 'over', op: take.by.op === true, ...(who ? { mine: take.by.who === who, by: take.by.name, ago: Number.isFinite(now) ? Math.max(0, now - take.at) : 0 } : {}), ...(isRecord(doc) ? { doc } : {}) } : st;
   }
 
   /**
@@ -1739,7 +1800,18 @@ class Pages {
     // `kind`, what it shows ('' for nothing), and `on`, how many of its pages show it now (a hand-back: are back on chat).
     const on = take ? list.filter((p) => p.state === 'shown' || p.state === 'opened').length : 0;
     const showing = describePage(take && take.content, { hallHolding, by: take && isRecord(take.by) ? take.by.name : '', sent: take && isRecord(take.sent) ? take.sent.name : '' });
-    const out = (mark, words) => ({ seq: take ? take.seq : 0, showing, kind: take && isRecord(take.content) ? take.content.kind : '', mark, words, pages: n, on });
+    // The pages that joined without documents (plan 4-§5.15.2): how many; on a document take, how many drew its stand-in
+    // (`standin`: shown "as a picture") and how many could not show it (`cannot`, which Send them a picture answers).
+    // Each said only where there are some.
+    const without = list.filter((p) => isRecord(p) && p.docs === false);
+    const doc = !!take && isRecord(take.content) && take.content.kind === 'doc';
+    const standin = doc && isRecord(take.content.standin) ? without.filter((p) => p.state === 'shown').length : 0;
+    const cannot = doc ? without.filter((p) => p.state === 'failed').length : 0;
+    // What the stand-in was drawn as (`standinAs`): a picture of the place, or a quote of what is there.
+    const as = standin ? (take.content.standin.url !== undefined ? 'picture' : 'quote') : '';
+    const counts = { ...(without.length ? { nodocs: without.length } : {}), ...(standin ? { standin, standinAs: as } : {}), ...(cannot ? { cannot } : {}) };
+    const out = (mark, words) => ({ seq: take ? take.seq : 0, showing, kind: take && isRecord(take.content) ? take.content.kind : '', mark, words, pages: n, on, ...counts });
+    const pictured = standin ? ', ' + standin + ' as a ' + as : '';
     if (!n) return out(MARKS.fault, board ? 'Nobody on the Board is online' : name ? name + ' has no page open in this hall' : 'No page of theirs is open in this hall');
     if (!take) return out(MARKS.off, 'Nothing shown yet');
     const of = (state) => list.filter((p) => p.state === state);
@@ -1769,7 +1841,7 @@ class Pages {
       const whose = name ? name + '\'s' : 'their';
       const where = board ? (n === 1 ? 'the 1 Board page' : 'all ' + n + ' Board pages') : n === 1 ? whose + ' page' : 'all ' + n + ' of ' + whose + ' pages';
       if (chat) return out(MARKS.off, 'Back to chat on ' + where);
-      return out(MARKS.ok, (take.arrive === 'side' ? 'In the side bar on ' : 'On ') + where);
+      return out(MARKS.ok, (take.arrive === 'side' ? 'In the side bar on ' : 'On ') + where + pictured);
     }
     const why = [];
     if (away) why.push(away + ' asleep or in another app');
@@ -1780,7 +1852,7 @@ class Pages {
     if (minimised.length) why.push(namesWords(minimised.map((p) => p.name)) + ' minimised it');
     const other = of('other').length;
     if (other) why.push(other + ' showing something else');
-    return out(MARKS.partly, seen + ' of ' + n + (chat ? ' back to chat · ' : ' showing · ') + why.join(' · '));
+    return out(MARKS.partly, seen + ' of ' + n + (chat ? ' back to chat · ' : ' showing' + pictured + ' · ') + why.join(' · '));
   }
 
   /** A guest's chat view ('' by their seat, 'simple' or 'full'), kept by their uid. */
@@ -1871,5 +1943,5 @@ class Pages {
 
 module.exports = {
   Pages, cleanPage, cleanSnippet, snippetText, askedOf, canShow, describePage, sourceOk, mayDownload, FOR_DOWNLOAD, placeOf, placeWords, webUrl, personKey, layerOf, layersOf, reportsOf, inViewOf, KINDS, LAYERS, SLOTS, SHOW_LAYER, INFO_LAYER,
-  FILE_KINDS, fileOf, ARRIVALS, EARLIER_TOLD, IMAGE_EXT, STAGE_TYPES, TRANSFER_ONLY, PLACES, UNITS, SNIPPET, REPORTS, ANSWERS, AGAIN_MS, VIEWS, MARKS, BOUNDS, WEB_MAX, STAGE_FULL,
+  FILE_KINDS, fileOf, filesOf, ARRIVALS, EARLIER_TOLD, IMAGE_EXT, STAGE_TYPES, TRANSFER_ONLY, PLACES, UNITS, SNIPPET, REPORTS, ANSWERS, AGAIN_MS, VIEWS, MARKS, BOUNDS, WEB_MAX, STAGE_FULL,
 };

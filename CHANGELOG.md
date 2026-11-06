@@ -5421,6 +5421,100 @@ Part 5 §0 and §16.3 and Part 7 §0.3 amend them, and §5.12's "On the Board's 
   (`page.push`'s words), `docs/ANALYSIS.md`, `docs/DEVICES.md` (the quotes' benches), `THIRD-PARTY-NOTICES.md` (the text
   layer's rules), `CLAUDE.md`.
 
+**Every stage feature works on the Board's mixture of devices** (the plan's Part 4, unit T, its §5.15 as Part 0 §0.8 C1
+and §0.4.10 amend it; the owner's answer 22, "Board will use a mixture of devices")
+- **The document floor, and a probe for it.** pdf.js's legacy build parses from Safari 16.4 and Chrome 103, and the
+  document worker inflates Office files with `DecompressionStream('deflate-raw')`, which arrived at the same versions.
+  The hall page makes one inside `try` as it loads and **joins with `docs: true` only when it can** (no user agent is read
+  and no syntax probed); the server keeps it per page, `true` and nothing else as yes (`socket.data.docs`). A device that
+  passes the probe yet cannot import pdf.js draws that document as a device below the floor does (its stand-in, or "this
+  device cannot open documents — ask for a picture"), opens no document for the rest of its tab's session (kept in
+  `sessionStorage`) and joins again at once without it.
+- **A document's stand-in** (`standin` on a `doc` take; `lib/pages.js` `standinOf`, pure, read by its shape before the
+  file): **a picture of the place** (`{url}`, an image upload of the pusher's, checked as a picture take is: where it may
+  come from, and 40 megapixels at its first take; kept as a stage file named by the take while it shows, `filesOf`) or
+  **what is at the place** (`{snippet}`, a quote's body by a quote's rules and bounds, its source the document's). Never
+  both, never neither ("A document's stand-in is a picture of its place or what you see there: one of the two."), on no
+  other kind ("Only a document has a stand-in."), and of its document's shape: a picture for a PDF or a picture, what is
+  seen for any other type ("A PDF's or a picture's stand-in is a picture of its place; any other document's is what you
+  see there."; a stored one of the other shape drops its take). A document and its stand-in, both fresh, find room on the
+  hall's stage together (`fileRoom` takes the take's files at once), so the two never take it past its 200 files.
+- **Made by the pusher's page only when a target needs it** (`app.js` `Show.whole`): where the console's read counts
+  pages of the target that joined without `docs` and the file needs a reader they lack (a PDF, or a zipped Word, Excel or
+  PowerPoint file: the catalogue's `READER_EXT`), a picture of a PDF's page is drawn and uploaded as a page picture is
+  (kept to show again; one kept from before whose file the stage let go, refused so, is drawn and uploaded again, once),
+  and an Office file's place is read as What I see reads it, in a reader laid out as a tablet's take and never seen, its
+  hidden parts left out. **The bar says so before it goes**: the Preview's ("…; 2 of 6 Board pages are older devices:
+  they get a picture of p. 12 in its place") and the short document bar's.
+- **On a page that cannot open documents** (`pagelayer.mjs`): the stand-in is drawn in the document's place under its
+  words ("As a picture of p. 12: this device cannot page through the document", "As a quote from slide 3: …", the quote
+  naming the document as its source) and reported `shown` with them; with none, a PDF or an Office file reads "This
+  device cannot open documents — ask the backstage team to show you a picture." and reports `failed`, and nothing of it
+  is fetched (pdf.js is never imported). A picture, a CSV, Markdown, text and an Excel 97-2003 workbook (not zipped)
+  need no reader, and are drawn. A side bar
+  card and a Look under Earlier draw the stand-in; a Look at a document without one, and the panel's Look at a PDF or an
+  Office file, read the device's words. ⬇ Download on a take shown with Download ticked works as on any device.
+- **Counted, page by page** (`Pages.status`, `page:status`): each target's pages without `docs` (`nodocs`), those that drew
+  the stand-in (`standin`, and `standinAs`: "On all 6 Board pages, 2 as a picture", "… 2 as a quote" for a quote, "4 of 6
+  showing, 1 as a picture · …") and those that could not show it (`cannot`), each said only where there are some; the
+  Board chip reads "✓ 6/6 (2 as a picture)", and each person row says whether its person sits On stage (`board`).
+  **📷 Show them a picture of p. 12** ("Show them what is at slide 3" for an Office file) is on the Board chip
+  (`board.picture`) and on each person's row in the console (`person.picture`) for a document some of their pages could
+  not open, as the plan's console row has it, for the take's pusher, an operator and the admin: the read gives the file
+  (`doc`: its address, name and place) to those seats alone, and only where the asker may show that file itself
+  (`sourceOk`), so no address reaches a page that could not already put it on the stage; the pusher's own page draws
+  from its own copy. From the Board chip it goes to each person On stage whose own read of that take counts a page that
+  could not open it, as a take of their own drawn over the Board's on their pages alone. The stage record that counts the
+  stand-ins in its `seen` is unit 30's, which reads this count.
+- **The ES2020 fence** (`eslint.config.mjs`, `ecmaVersion: 2020` for `app/public/**`): a class field, a private field, a
+  static block, a logical assignment, a numeric separator or a top-level await in a page script or module is a parse
+  error, so every Board device parses what it is sent (Safari parses ES2020 from 14). It found one: the simple view's
+  10 s wait written `10_000`, now `10000`.
+- **The device legs and the floor leg** (the browser smoke): every stage feature on three Board pages at 1180 × 820,
+  820 × 1180 and 390 × 844, each a mobile viewport with touch; and a Board page without `DecompressionStream`,
+  `requestIdleCallback` and `Promise.withResolvers`, as an iPad below the document floor (see Tests).
+- Choices where the plan left room: the console's act is worded **Show them a picture of p. 12**, not the plan's "Send
+  them a picture", since every act that puts something on people's pages says Show (the catalogue's words test and the
+  house's one word per thing); it sends a picture of a PDF's page, and for an Office file what is at its place as a quote
+  (no picture of an Office file's page is drawn, as the stand-in of such a file is a quote); a stand-in for a Word document
+  with no place is what is at its top; a page without `docs` draws a stand-in where a take carries one, whatever the
+  file's type, and the pusher sends one only for the types that need a reader; the counts ride on every status that has
+  some, the show's and the information's alike; a test's pages say `docs: true` unless a test says otherwise
+  (`test/takes.test.js` `invited`), so the statuses they compare read as before. Bench: no measurement this round
+  (`docs/DEVICES.md` §7: a document take's bytes and time to a phone through the tunnel, on D6 and D7, "not measured").
+- Rolling back: a stand-in kept in `pages.json` is a key an earlier build does not read; it reads the document without it.
+- Tests: `test/pages.test.js` (a stand-in of each shape cleaned, read from its source after the document's, every other
+  shape, both, neither, the other type's, one on each other kind, and a bad one before a bad file refused; kept, told,
+  read back and dropped when stored wrong or of the other type's shape; named as a stage file and let go after its wait;
+  two fresh files finding room together or not at the bound; the status's counts, said only where there are some, "as a
+  quote" for a quote, and the file `docOf` gives the asker), `test/takes.test.js` (end to end: `docs` yes only as `true`,
+  again on a rejoin; `page:status`'s `nodocs` for the Board and each person On stage; a PDF with its stand-in kept and its
+  picture a stage file; ✓ "On all 3 Board pages, 2 as a picture"; a stand-in over 40 megapixels, one that is no picture,
+  one on a picture and words for a PDF refused; without one, △ with the device's words and `cannot`; the read's `doc` for
+  the pusher (the admin) and an operator, on the Board's row and each person's that could not open it, and never for a
+  seat that may only show; a person's picture take reaching their pages alone, over the Board's, as Show them a picture
+  sends it: the act itself is the page's, which the floor leg drives),
+  `test/inputs.test.js` (a stand-in's every shape and a join's `docs`), `test/lint-rules.test.js` (each newer syntax a
+  parse error in a page script and a page module, its ES2020 form passing, and every page script of the tree parsing),
+  `test/catalog.test.js` (`board.picture` and `person.picture` for the operator and a seat that may only show, their
+  words, and absent otherwise; the facts' `docs`; the reader types held to the take layer's), `test/menus.test.js` (the
+  picture acts refused to a seat that may not), `test/modules.test.js` (`filesOf` among the takes module's pure helpers).
+  The browser smoke: the device legs (a quote in 28 px or more on a tablet and 20 px or more on a phone, a 25 × 10 table
+  scrolling inside its card at 390 px and no page scrolling sideways, a picture never dragged out with its menu the
+  page's, a PDF zoomed in and paged by a tap and ⬇ Download saving it whole on the phone, a Word document without its
+  hidden run or tracked deletion and found in, a workbook, a deck, a CSV and Markdown without what is hidden in them, a
+  JPEG 2000 page, a web page, each ✓ on all three; Earlier and a Look; 20 takes then Back to chat with no reload), the
+  floor leg (joined without `docs`; a document shown before it joined failing with its words and Show them a picture of
+  p. 1 reaching that page alone; the bar's words; a PDF's picture stand-in ✓ "(1 as a picture)", never dragged out, and
+  its Download saved whole; a Word document's quote stand-in ✓ "(1 as a quote)"; a Look with and without a stand-in;
+  quotes, pictures, web pages and Earlier; pdf.js never fetched, its network log from the page's first request; no
+  script error), and a Board page whose pdf.js import is refused on the way (it draws the stand-in, opens no document
+  again, kept across a reload, and is counted without `docs`).
+- The papers: `docs/DEVICES.md` (the matrix's rows, the ES2020 fence, §7's tunnel bench, §8 the stage on every row: the
+  document floor, the probe, the stand-in, each fallback, what every push proves and the walk's stage rows), `README.md`,
+  `README.txt` (older tablets and phones), `SECURITY.md` (a stand-in is checked as a picture or a quote; D1 and Fetch
+  Metadata), `docs/DISPLAYS.md`, `docs/ANALYSIS.md` (the page floor's fence), `CLAUDE.md`.
+
 **Fixed**
 - An upload whose stored path is no file (a folder in its place) is refused as one that could not be checked, on every
   platform. The archive's check opened it and, on Windows, read a folder as an empty file, so it was refused in the

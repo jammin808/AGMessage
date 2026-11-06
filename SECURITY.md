@@ -474,7 +474,8 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   record), with `nosniff` and the sandbox policy; a navigation to one (the address bar, a link, a frame, an embed or an
   object: Fetch Metadata's `Sec-Fetch-Mode: navigate`, or that destination) is answered 404, so the browser's own viewer
   and its Save are never offered. A browser that sends no Fetch Metadata (an iPad before 16.4 among them) is served, as
-  before. What a take shows is drawn from memory: fetched `no-store`, a picture through an object URL revoked when the
+  before: on such a device a file's address typed into its address bar opens it (the device matrix's D1,
+  `docs/DEVICES.md`). What a take shows is drawn from memory: fetched `no-store`, a picture through an object URL revoked when the
   take goes, a document's reader and its pdf.js document destroyed then (a PDF read by its pages' ranges alone); a
   picture on a file's card in the chat likewise, its object URL revoked as the card leaves the page.
 - **A download is the server's act, by a ticket per seat** (`file:download`, then `POST /uploads/:name/download`). A
@@ -518,6 +519,16 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   `no-store`, at most 25 MB. **A zip is never inflated by AGMessage**: a zip bomb harms only a machine that extracts it,
   as an email attachment would, so open a downloaded zip as you would an attachment. RTF, executables, scripts, HTML and
   SVG are not taken.
+- **A device that cannot open documents is shown a stand-in, never less checked.** A page says at its join whether it
+  opens documents (a probe, `docs`; the server reads `true` and nothing else as yes). For such a page the pusher's page
+  sends a document's stand-in with it: a picture of the place, an upload of the pusher's checked as a picture take is
+  (where it may come from, its pixels at its first take) and kept as a stage file named by the take; or what is at the
+  place as a quote's body, held to a quote's rules and bounds. Only a document carries one, in one of the two shapes,
+  the one its type takes; any other is refused in words. A document and its stand-in find room on the hall's stage
+  together, within its bound. The page is still told the document's address (its Download, where ticked, is the
+  server's ticket as on any device), and draws only the stand-in. For Show them a picture, the console's read gives a
+  document's address only to the take's pusher, an operator and the admin, and only where that seat may show the file
+  itself (the same check a push of it passes), so no seat learns an address it could not already put on the stage.
 - **What a Board tablet keeps: nothing AGMessage writes or offers.** On every seat's take layer, its cards and a Look,
   AGMessage's menu stands in for the browser's, Shift+right-click included (so "Save image as" is never offered), no
   picture is draggable, iOS's long-press "Save to Photos" is off, and printing leaves the stage out ("What is shown on

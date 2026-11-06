@@ -11,7 +11,7 @@ const path = require('path');
 const {
   Pages, cleanPage, askedOf, canShow, describePage, sourceOk, webUrl, personKey, layerOf, layersOf, reportsOf, inViewOf, KINDS, LAYERS, SHOW_LAYER, INFO_LAYER, ARRIVALS, EARLIER_TOLD,
   IMAGE_EXT, STAGE_TYPES, TRANSFER_ONLY, REPORTS, ANSWERS, AGAIN_MS, VIEWS, MARKS, BOUNDS, WEB_MAX, STAGE_FULL,
-  fileOf,
+  fileOf, filesOf,
 } = require('../lib/pages');
 const { cleanContent } = require('../lib/displays');
 const guard = require('../lib/guard');
@@ -1189,6 +1189,12 @@ test('the stage\'s files: kept while a take or Earlier names them and for the wa
   assert.equal(p.fileRoom(HALL, name(300), T + 300), false, '200 in use: no room');
   assert.equal(p.fileRoom(HALL, name(10), T + 300), true, 'one it holds');
   assert.equal(p.fileRoom(HALL, name(300), T + 10 + WAIT), true, 'the oldest past its wait');
+  // A take naming two fresh files (a document and its stand-in) finds room for both together: one in use no longer is not
+  // enough for two, two are.
+  assert.equal(p.fileRoom(HALL, [name(300), name(301)], T + 10 + WAIT), false, 'two new, one let go: no room');
+  assert.equal(p.fileRoom(HALL, [name(300), name(10)], T + 10 + WAIT), true, 'one new, one held');
+  assert.equal(p.fileRoom(HALL, [name(300), name(301)], T + 11 + WAIT), true, 'two new, two let go');
+  assert.equal(p.fileRoom(HALL, [name(300), name(300)], T + 10 + WAIT), true, 'the same file twice is one');
   assert.deepEqual(p.recordFile(HALL, name(300), { at: T + 10 + WAIT, room: HALL, uid: 'uana', name: 'p.png' }, T + 10 + WAIT), [name(10)]);
   assert.equal(Object.keys(files()).length, 200);
   assert.equal(STAGE_FULL, 'This hall\'s stage holds 200 files — take some down.');
@@ -1425,4 +1431,130 @@ test('a quote kept and told: its source by name and room, a web page\'s address 
   // What a page reports of a quote is what any drawn take reports.
   assert.deepEqual(reportsOf('snippet'), ['shown', 'hidden', 'failed', 'dismissed', 'minimised']);
   assert.equal(t1.content.kind, 'snippet');
+});
+
+// ---------------------------------------------------------------- the Board's devices (plan 4-§5.15.2)
+const STANDIN_PIC = '/uploads/1730000000000-abcdefghijkl-pack-p12.png';
+const STANDIN_WORDS = { error: 'A document\'s stand-in is a picture of its place or what you see there: one of the two.' };
+
+test('cleanPage: a document\'s stand-in is a picture of its place (an image of ours, from where a picture may come) or what its pusher sees there (a quote\'s body by its rules), the first for a PDF or a picture and the second for any other type; any other shape, both, the other type\'s, or one on another kind is refused', () => {
+  const facts = { source: held() };
+  // A picture of the place: an image upload, read from where a picture shown on the stage may come from.
+  assert.deepEqual(cleanPage({ kind: 'doc', url: PDF, at: { page: 12 }, standin: { url: STANDIN_PIC, name: 'x' } }, facts),
+    { kind: 'doc', url: PDF, name: 'Board pack.pdf', at: { page: 12 }, download: false, standin: { url: STANDIN_PIC } });
+  const asked = [];
+  cleanPage({ kind: 'doc', url: PDF, standin: { url: STANDIN_PIC } }, { source: (u) => { asked.push(u); return { name: 'n', room: '', roomName: '' }; } });
+  assert.deepEqual(asked, [PDF, STANDIN_PIC], 'the document\'s source, then the stand-in\'s');
+  const gone = { error: 'That file belongs to another room — send it from there.' };
+  assert.deepEqual(cleanPage({ kind: 'doc', url: PDF, standin: { url: STANDIN_PIC } }, { source: (u) => (u === STANDIN_PIC ? gone : { name: 'n', room: '', roomName: '' }) }), gone, 'a stand-in from a place it may not come from');
+  for (const url of [PDF, DOCX, '/uploads/a.png', 'https://example.com/a.png', 5, null, ['x']]) assert.deepEqual(cleanPage({ kind: 'doc', url: PDF, standin: { url } }, facts), STANDIN_WORDS, JSON.stringify(url));
+  // What the pusher sees there: a quote's body, made safe by its rules; its source, note and kind are the document's.
+  const seen = { unit: 'view', blocks: [{ kind: 'h', text: 'Results' }, { kind: 'p', text: '  Revenue up  ' }], from: { url: XLSX }, note: 'mine', kind: 'image' };
+  assert.deepEqual(cleanPage({ kind: 'doc', url: DOCX, standin: { snippet: seen } }, facts).standin,
+    { snippet: { kind: 'snippet', unit: 'view', blocks: [{ kind: 'h', text: 'Results' }, { kind: 'p', text: 'Revenue up' }] } });
+  assert.deepEqual(cleanPage({ kind: 'doc', url: XLSX, standin: { snippet: { unit: 'range', table: { rows: [['Q3', '4.2']], head: 0, side: 0 } } } }, facts).standin.snippet.table.rows, [['Q3', '4.2']]);
+  assert.deepEqual(cleanPage({ kind: 'doc', url: DOCX, standin: { snippet: { unit: 'view', blocks: [{ kind: 'p', text: 'x'.repeat(1201) }] } } }, facts), { error: 'Too long for the stage: 1,200 characters at most (this is 1,201)' }, 'over a bound, refused in words');
+  assert.deepEqual(cleanPage({ kind: 'doc', url: DOCX, standin: { snippet: { unit: 'region', text: 'x' } } }, facts).error, 'Choose what to send: a word, sentence, line, item, paragraph, cell, row, column, range, slide, selection, what you see or text.');
+  // Neither, both, or a shape that is none: refused, whatever else the take holds (read before its file).
+  for (const standin of [{}, { url: STANDIN_PIC, snippet: { unit: 'text', text: 'x' } }, null, 'x', 5, [STANDIN_PIC], { snippet: 'x' }, { snippet: [] }, { picture: STANDIN_PIC }]) {
+    assert.deepEqual(cleanPage({ kind: 'doc', url: PDF, standin }, facts), STANDIN_WORDS, JSON.stringify(standin));
+    assert.deepEqual(cleanPage({ kind: 'doc', url: 5, standin }, facts), STANDIN_WORDS, 'before its file: ' + JSON.stringify(standin));
+  }
+  // Its shape is its document's: a picture of the place for a PDF or a picture, what is seen there for any other type.
+  const TYPE_WORDS = { error: 'A PDF\'s or a picture\'s stand-in is a picture of its place; any other document\'s is what you see there.' };
+  const words = { snippet: { unit: 'text', text: 'Item 4' } };
+  assert.deepEqual(cleanPage({ kind: 'doc', url: DOCX, standin: { url: STANDIN_PIC } }, facts), TYPE_WORDS, 'a picture for a Word file');
+  assert.deepEqual(cleanPage({ kind: 'doc', url: XLSX, standin: { url: STANDIN_PIC } }, facts), TYPE_WORDS, 'a picture for a workbook');
+  assert.deepEqual(cleanPage({ kind: 'doc', url: PDF, standin: words }, facts), TYPE_WORDS, 'words for a PDF');
+  assert.deepEqual(cleanPage({ kind: 'doc', url: PIC, standin: words }, facts), TYPE_WORDS, 'words for a picture');
+  assert.deepEqual(cleanPage({ kind: 'doc', url: PIC, standin: { url: STANDIN_PIC } }, facts).standin, { url: STANDIN_PIC }, 'a picture for a picture');
+  assert.deepEqual(cleanPage({ kind: 'doc', url: '/uploads/1730000000000-abcdefghijkl-budget.csv', standin: words }, facts).standin, { snippet: { kind: 'snippet', unit: 'text', text: 'Item 4' } }, 'words for a CSV');
+  // Only a document has one.
+  for (const c of [{ kind: 'image', url: PIC }, { kind: 'snippet', unit: 'text', text: 'x' }, { kind: 'clock' }, { kind: 'chat', layer: 'info' }, { kind: 'web', url: 'https://vote.example.com/' }]) {
+    assert.deepEqual(cleanPage({ ...c, standin: { url: STANDIN_PIC } }, { ...facts, web: true }), { error: 'Only a document has a stand-in.' }, c.kind);
+  }
+});
+
+test('a document\'s stand-in is kept with its take, read back as it was, named by it as a stage file (filesOf) and gone with it; a stored one of the wrong shape drops the take', () => {
+  const WAIT = 60_000;
+  const file = path.join(folder(), 'pages.json');
+  const p = new Pages(file, { wait: WAIT });
+  p.hold();
+  const pic = { kind: 'doc', url: PDF, name: 'Board pack.pdf', at: { page: 12 }, download: false, standin: { url: STANDIN_PIC } };
+  const t = p.take(HALL, 'board', pic, { name: 'Ana' }, { at: 1000 });
+  assert.deepEqual(t.content, pic);
+  assert.deepEqual(p.told(t.content), pic, 'told to the Board\'s pages with its stand-in');
+  assert.deepEqual(p.told(t.content, { observer: true }), { kind: 'doc', name: 'Board pack.pdf', at: { page: 12 }, withheld: true }, 'an observer is told neither');
+  assert.deepEqual(filesOf(t.content), [PDF, STANDIN_PIC]);
+  assert.deepEqual(fileOf(t.content), PDF, 'the document\'s own file is still the one it shows');
+  assert.deepEqual([filesOf({ kind: 'image', url: PIC }), filesOf({ kind: 'holding' }), filesOf(null), filesOf({ kind: 'image', url: PIC, standin: { url: STANDIN_PIC } })], [[PIC], [], [], [PIC]]);
+  // The stand-in is a stage file named by the take: in use while it is up, and its wait starts once nothing names it.
+  p.recordFile(HALL, STANDIN_PIC.slice(9), { at: 900, room: HALL, uid: 'uana', name: 'pack p12.png' }, 1000);
+  assert.ok(p.stageInUse(10 * WAIT).has(STANDIN_PIC.slice(9)));
+  assert.equal(p.namesUrl(HALL, STANDIN_PIC), true);
+  const quoted = { kind: 'doc', url: DOCX, name: 'Minutes.docx', download: false, standin: { snippet: { kind: 'snippet', unit: 'view', blocks: [{ kind: 'p', text: 'Item 4: approved' }] } } };
+  p.take(HALL, 'board', quoted, { name: 'Ana' }, { at: 2000 });
+  p.withdraw(HALL, t.seq, { at: 3000 });
+  assert.ok(!p.stageInUse(3000 + WAIT).has(STANDIN_PIC.slice(9)), 'withdrawn: let go after its wait');
+  p.flush();
+  const back = new Pages(file);
+  assert.deepEqual(back.current(HALL, '', { board: true, layer: 'info' }).take.content, quoted, 'read back whole');
+  // A stored stand-in of the wrong shape, or one on another kind, drops the take.
+  const bad = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const take = (content) => ({ info: { seq: 1, content, by: { name: 'A' }, at: 1 } });
+  bad.halls[HALL].people = { [ANA]: take({ ...pic, standin: { url: PDF } }), [BEN]: take({ ...pic, standin: { url: STANDIN_PIC, snippet: quoted.standin.snippet } }), [CY]: take({ ...pic, standin: { snippet: { unit: 'view', blocks: 5 } } }),
+    'u:udiguest00001': take({ ...pic, standin: quoted.standin }), 'u:uedguest00001': take({ ...quoted, standin: { url: STANDIN_PIC } }) };
+  fs.writeFileSync(file, JSON.stringify(bad));
+  assert.deepEqual(Object.keys(new Pages(file).halls[HALL].people), [], 'each dropped: of no shape, of both, or of the other type\'s');
+});
+
+test('status counts the pages that cannot open documents: how many, those that drew a document\'s stand-in (✓, "as a picture" or "as a quote") and those that could not show it, with the file for the asker docOf gives it to; said only where there are some', () => {
+  const doc = { seq: 4, content: { kind: 'doc', url: PDF, name: 'Board pack.pdf', at: { page: 12 }, download: false, standin: { url: STANDIN_PIC } }, by: { name: 'Ana' }, at: 1 };
+  const bare = { ...doc, content: { ...doc.content, standin: undefined } };
+  delete bare.content.standin;
+  const page = (state, docs = true, words = '') => ({ state, docs, words, name: 'Ben', at: 1 });
+  const AS = 'As a picture of p. 12: this device cannot page through the document';
+  // Six Board pages, two that cannot open documents and drew the stand-in: ✓ on all six, two as a picture.
+  const six = [page('shown'), page('shown'), page('shown'), page('shown'), page('shown', false, AS), page('shown', false, AS)];
+  assert.deepEqual(Pages.status(doc, six, { board: true }), { seq: 4, showing: 'Board pack.pdf at p. 12', kind: 'doc', mark: MARKS.ok, words: 'On all 6 Board pages, 2 as a picture', pages: 6, on: 6, nodocs: 2, standin: 2, standinAs: 'picture' });
+  // A Word file's stand-in is what is seen at its place: counted as a quote, and said so.
+  const quoted = { ...doc, content: { kind: 'doc', url: DOCX, name: 'Minutes.docx', download: false, standin: { snippet: { kind: 'snippet', unit: 'text', text: 'Item 4' } } } };
+  const asQuote = Pages.status(quoted, six, { board: true });
+  assert.deepEqual([asQuote.words, asQuote.standin, asQuote.standinAs], ['On all 6 Board pages, 2 as a quote', 2, 'quote']);
+  // One of them still drawing: sending; one out of view: partly, the picture still counted.
+  assert.equal(Pages.status(doc, [...six.slice(0, 5), page('waiting', false)], { board: true }).mark, MARKS.waiting);
+  assert.deepEqual(Pages.status(doc, [...six.slice(0, 5), page('hidden', false)], { board: true }).words, '5 of 6 showing, 1 as a picture · 1 asleep or in another app');
+  // No stand-in: the pages that cannot open it say so, and are counted as such (Send them a picture answers them).
+  const DEVICE = 'this device cannot open documents — ask for a picture';
+  const failed = Pages.status(bare, [page('shown'), page('failed', false, DEVICE)], { board: true });
+  assert.deepEqual([failed.mark, failed.words, failed.nodocs, failed.cannot, failed.standin], [MARKS.couldNot, 'Couldn\'t show it on 1 of 2 pages: ' + DEVICE, 1, 1, undefined]);
+  // Every page opens documents: nothing counted, the shape as before; a page that cannot, on a take that is no document,
+  // is counted as such and nothing more.
+  assert.deepEqual(Object.keys(Pages.status(doc, [page('shown')], { board: true })), ['seq', 'showing', 'kind', 'mark', 'words', 'pages', 'on']);
+  const quote = { seq: 5, content: { kind: 'snippet', unit: 'text', text: 'x' }, by: { name: 'Ana' }, at: 1 };
+  assert.deepEqual(Pages.status(quote, [page('shown', false)], { board: true }), { seq: 5, showing: '❝ a quote typed by Ana (1 character)', kind: 'snippet', mark: MARKS.ok, words: 'On the 1 Board page', pages: 1, on: 1, nodocs: 1 });
+  assert.equal(Pages.status(null, [page('waiting', false)], { board: true }).nodocs, 1, 'nothing shown yet: the count all the same');
+  // Read from the store: each page's `docs` as the server knows it.
+  const p = store();
+  const t = p.take(HALL, 'board', doc.content, { name: 'Ana' });
+  p.report(HALL, 'ben', { key: BEN, board: true, seq: t.seq, state: 'shown' });
+  p.report(HALL, 'cy', { key: CY, board: true, seq: t.seq, state: 'shown', words: AS });
+  const st = p.status(HALL, 'board', [{ sid: 'ben', key: BEN, board: true, name: 'Ben', docs: true }, { sid: 'cy', key: CY, board: true, name: 'Cy', docs: false }], { layer: 'info' });
+  assert.deepEqual([st.mark, st.words, st.nodocs, st.standin], [MARKS.ok, 'On all 2 Board pages, 1 as a picture', 1, 1]);
+  assert.equal(p.status(HALL, 'board', [{ sid: 'ben', key: BEN, board: true, name: 'Ben' }], { layer: 'info' }).nodocs, undefined, 'a page with no word of it opens documents');
+  // A document some pages could not open carries its file as `docOf` gives it to the asker (told whether it put it up),
+  // for Show them a picture; none where it gives none, where every page showed it, or in another layer.
+  const b2 = p.take(HALL, 'board', bare.content, { name: 'Ana', who: 'account:aana' });
+  p.report(HALL, 'ben', { key: BEN, board: true, seq: b2.seq, state: 'shown' });
+  p.report(HALL, 'cy', { key: CY, board: true, seq: b2.seq, state: 'failed', words: DEVICE });
+  const two = [{ sid: 'ben', key: BEN, board: true, name: 'Ben', docs: true }, { sid: 'cy', key: CY, board: true, name: 'Cy', docs: false }];
+  const asked = [];
+  const docOf = (c, mine) => { asked.push(mine); return mine ? { url: c.url, name: c.name, at: c.at } : null; };
+  assert.deepEqual(p.status(HALL, 'board', two, { layer: 'info', who: 'account:aana', docOf }).doc, { url: PDF, name: 'Board pack.pdf', at: { page: 12 } });
+  assert.equal(p.status(HALL, 'board', two, { layer: 'info', who: 'account:bben', docOf }).doc, undefined, 'none given to this asker');
+  assert.deepEqual(asked, [true, false]);
+  assert.equal(p.status(HALL, 'board', two, { layer: 'show', who: 'account:aana', docOf }).doc, undefined, 'the show layer holds no document');
+  p.report(HALL, 'cy', { key: CY, board: true, seq: b2.seq, state: 'shown' });
+  assert.equal(p.status(HALL, 'board', two, { layer: 'info', who: 'account:aana', docOf }).doc, undefined, 'every page showed it');
+  assert.deepEqual(asked, [true, false], 'asked only where a page could not open it');
 });

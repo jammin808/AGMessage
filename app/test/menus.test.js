@@ -212,6 +212,8 @@ test('every act hidden from a seat by its rights is refused by the server as tha
       // A file shown whole (📺 Show the Board ▸ The document…, Show them a document…).
       if (e.id === 'msg.stage' || e.id === 'file.stage') return { code: hallA, to: 'board', content: { kind: 'doc', url: o.url } };
       if (e.id === 'person.doc') return { code: hallA, to: { uid: o.key }, content: { kind: 'doc', url: '/uploads/1700000000000-abcdefghijkl-capex.pdf' } };
+      // Show them a picture: a picture of a document's place, to the person (the Board chip's sends one to each).
+      if (e.id === 'person.picture' || e.id === 'board.picture') return { code: hallA, to: { uid: o.key || 'u:none' }, content: { kind: 'image', url: '/uploads/1700000000000-abcdefghijkl-capex-p1.png' } };
       if (e.id.startsWith('person.')) return { code: hallA, to: { uid: o.key }, content: e.id === 'person.web' ? web : { kind: e.id === 'person.chat' ? 'chat' : 'blank' } };
       if (e.id === 'board.takeDown') return { code: hallA, to: 'board', ...down };
       return { code: hallA, to: 'board', content: e.id === 'board.back' ? o.mine.previous : e.id === 'board.web' ? web : { kind: e.id.slice('board.'.length) }, ...(e.id === 'board.back' ? { ifSeq: o.seq } : {}) };

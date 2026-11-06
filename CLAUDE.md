@@ -126,7 +126,9 @@ reliability (`docs/DESIGN.md` says which practice lives where). Every build is v
   than it is reached through its helper (`AGM.openDialog`, `AGM.awake`, `AGM.idle` in `app/public/common.js`) or its
   fallback, never bare, and no page reads the user agent; a stylesheet rule above the floor follows the one it falls back
   to. `theme-init.js` stays ES5 and first on every page with people, and a page script stops below the floor before it
-  asks the server anything or opens a socket. ESLint, `test/resilience.test.js` and `test/pagefloor.test.js` hold it.
+  asks the server anything or opens a socket. Every page script and module parses as ES2020 (no class field, static
+  block, `||=`, numeric separator or top-level await). ESLint, `test/resilience.test.js` and `test/pagefloor.test.js`
+  hold it.
 - **Test fixtures that look like keys** carry `// secret-scan: fixture` on their line.
 - **A test reads the checkout's text through `readSource`** (`test/helpers.js`: LF line ends on a Windows checkout too)
   **and takes a free port from `freePort` (TCP) or `freeUdpPort` (UDP)**, never a picker of its own; `agm/test-helpers`
@@ -215,6 +217,7 @@ A sentence and the files; the detail is the code's and the CHANGELOG's. A test n
 | The pages | `app/public/` (`index` sign-in and codes, `halls` the board, `users` accounts and audit, `app` a hall, `admin`, `display`) |
 | The browser libraries the pages load, byte for byte as published, their list, licences and notices; the SBOM's vendored part | `app/public/vendor/`, `VENDOR.json`, `THIRD-PARTY-NOTICES.md`, `licenses/`, `tools/vendor-sbom.js`, `tools/vendor-audit.js`; test `vendor` |
 | The page floor (Safari 14.1, Chrome 84): its probe, the helpers for what a browser may lack, every page's one toast | `app/public/theme-init.js`, `app/public/common.js`, `docs/DEVICES.md`; test `pagefloor` |
+| The document floor (Safari 16.4, Chrome 103): the hall page's probe at its join, a document's stand-in for a device below it, made by the pusher's page and drawn in the document's place, and Show them a picture | `app/public/app.js` (`DOCS`, `Show`), `app/public/pagelayer.mjs`, `app/lib/pages.js`, `docs/DEVICES.md`; tests `pages`, `takes`, the browser smoke |
 | Every status's mark: one table, each mark one meaning and one colour, drawn by name as one status chip or a status line; the server's marks named from it | `app/public/common.js` (`AGM.MARKS`), `app/lib/pages.js`, `app/lib/displays.js`, `eslint.config.mjs`; tests `modules`, `catalog`, `lint-rules` |
 | The hall page's header: the room's name, its status, Help and a ⋯ at every width, the switcher under it | `app/public/app.html`, `app/public/app.js`, `app/public/catalog.js` (kind `header`) |
 | The Board's chat view (the simple view): the chat first, one response place per screen, its ⋯ sheet, laid out by the screen's size and dark first; the admin's Chat view for a person | `app/public/app.js` (`Simple`), `app/public/styles.css`, `app/public/theme-init.js`, `app/public/catalog.js` (kind `sheet`), `app/lib/handlers/takes.js` (`admin:setView`), `docs/DEVICES.md`; tests `takes`, `catalog`, `pagefloor`, the browser smoke |

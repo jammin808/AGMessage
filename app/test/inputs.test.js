@@ -15,11 +15,13 @@ const EVENTS = [...new Set(handlerFiles().flatMap((f) => [...readSource(path.joi
 // Not sent from the admin socket: they start cloudflared or make a new certificate — real work, not an argument check.
 const ADMIN_SKIP = new Set(['admin:tunnelStart', 'admin:tunnelStop', 'admin:renewCertificate']);
 const NULLS = { roomCode: null, code: null, id: null, messageId: null, text: null, content: null, seq: null, targetRoom: null, socketId: null, line: null, state: null, hall: null, cid: null, on: null, heldMs: null, until: null, codeOn: null, newCode: null, keepGuests: null, sendFrom: null, sendBack: null, to: null, replyTo: null, uid: null, kind: null, url: null, again: null, ifSeq: null, view: null, beforeSeq: null, layer: null, arrive: null, role: null, at: null, from: null, note: null, download: null, takeDown: null,
-  unit: null, items: null, table: null, rows: null, blocks: null, title: null, cut: null, more: null, ordered: null, start: null, head: null, side: null, ref: null, focus: null, lines: null, web: null };
+  unit: null, items: null, table: null, rows: null, blocks: null, title: null, cut: null, more: null, ordered: null, start: null, head: null, side: null, ref: null, focus: null, lines: null, web: null,
+  standin: null, docs: null };
 // An object whose toString is not a function: String() throws on it, so a handler must never call String() on input.
 const U = { toString: 1 };
 const UNCONVERTIBLE = { roomCode: U, code: U, id: U, messageId: U, name: U, text: U, caption: U, options: [U], content: { kind: 'message', text: U }, seq: U, targetRoom: U, line: U, state: U, hall: U, words: U, destination: U, urgency: U, image: U, token: U, url: U, cid: U, heldMs: U, until: U, sendFrom: [U], sendBack: [U], to: U, replyTo: U, uid: U, kind: U, again: U, ifSeq: U, view: U, beforeSeq: U, layer: U, arrive: U, role: U, at: { page: U, approx: U }, from: { url: U }, note: U, download: U, takeDown: U,
-  unit: U, items: [U], table: { rows: [[U]] }, blocks: [U], title: U, cut: U, more: { rows: U }, ordered: U, start: U, ref: U, focus: [U], lines: [U], web: U };
+  unit: U, items: [U], table: { rows: [[U]] }, blocks: [U], title: U, cut: U, more: { rows: U }, ordered: U, start: U, ref: U, focus: [U], lines: [U], web: U,
+  standin: { url: U, snippet: U }, docs: U };
 const SHAPES = [null, 7, 'x', true, [], {}, NULLS, { code: {}, id: [], roomCode: 5, messageId: {}, content: 'x', text: {} }, UNCONVERTIBLE];
 
 // Each send: with an answer callback (the server may answer it) or without; either way at most 400 ms is waited.
@@ -83,7 +85,7 @@ test('client values are read by their type: a value String() cannot convert reac
   assert.ok((await emit(ctl, 'room:update', { code: legal, sendFrom: [hall] })).ok);
   const ref = (await emit(guest, 'room:sendTargets', {})).targets[0].ref;
   const cases = [
-    [anon, 'join', { roomCode: U }], [anon, 'join', { roomCode: hall, name: U, role: 'research' }],
+    [anon, 'join', { roomCode: U }], [anon, 'join', { roomCode: hall, name: U, role: 'research' }], [anon, 'join', { roomCode: hall, name: 'Dee', role: 'observer', docs: U }],
     [anon, 'display:list', { code: U }], [anon, 'display:take', { id: U }], [anon, 'help:respond', { code: U }],
     [guest, 'message', { type: 'text', text: U }], [guest, 'message', { type: 'file', url: U, caption: U }],
     [guest, 'message', { type: 'action', text: 'Go?', options: [U, 'Yes'] }], [guest, 'forward', { messageId: U, targetRoom: U }],
@@ -124,6 +126,10 @@ test('client values are read by their type: a value String() cannot convert reac
     [ctl, 'page:push', { code: hall, to: 'board', content: { kind: 'snippet', unit: 'word', text: 'Capex', from: { url: U } } }],
     [ctl, 'page:push', { code: hall, to: 'board', content: { kind: 'snippet', unit: 'word', text: 'Capex', from: { local: true, name: U, at: { page: U } } } }],
     [ctl, 'page:push', { code: hall, to: 'board', content: { kind: 'snippet', unit: 'word', text: 'Capex', from: { web: U } } }],
+    // A document's stand-in, each shape by type: its picture's address, the quote's body it carries, read before its file.
+    [ctl, 'page:push', { code: hall, to: 'board', content: { kind: 'doc', url: U, standin: { snippet: { unit: U } } } }],
+    [ctl, 'page:push', { code: hall, to: 'board', content: { kind: 'doc', url: '/uploads/1730000000000-abcdefghijkl-a.pdf', standin: { url: U } } }],
+    [ctl, 'page:push', { code: hall, to: 'board', content: { kind: 'doc', url: '/uploads/1730000000000-abcdefghijkl-a.pdf', standin: { snippet: { unit: 'view', blocks: [U] } } } }],
     // A take withdrawn, its hall and its number by type; the admin's delete of a file on people's pages, its answer by type.
     [ctl, 'page:withdraw', { code: U, seq: U }], [ctl, 'page:withdraw', { code: hall, seq: U }], [ctl, 'page:withdraw', U],
     [ctl, 'admin:deleteMessage', { roomCode: hall, messageId: U, takeDown: U }],
@@ -157,6 +163,8 @@ test('client values are read by their type: a value String() cannot convert reac
     if (ev === 'page:withdraw') return arg.code === hall ? 'Withdraw names the take it withdraws.' : 'No such hall.';
     if (arg.code === U) return 'No such hall.';
     if (arg.cid === U) return 'That act\'s id could not be read.';
+    // A document's stand-in is read by its shape before its file: a picture's address that is no string, or the quote's body by its rules.
+    if (arg.content && arg.content.kind === 'doc' && arg.content.standin) return arg.content.standin.url === U ? 'A document\'s stand-in is a picture of its place or what you see there: one of the two.' : quoteWords(arg.content.standin.snippet);
     if (arg.content && arg.content.kind === 'doc') return arg.content.url === U ? 'A document or a picture is a file shared in AGMessage.' : KINDS;
     if (arg.content && arg.content.kind === 'image') return 'A picture is a PNG, JPEG, GIF or WebP shared in AGMessage.';
     if (arg.content && arg.content.kind === 'snippet') return quoteWords(arg.content);

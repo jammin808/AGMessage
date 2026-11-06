@@ -4027,6 +4027,282 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       for (const t of [desk, cy]) { await t.send('Page.navigate', { url: 'about:blank' }); t.close(); }
     }
 
+    // ---------------- The Board's devices (unit T): every stage feature on the device legs, and the floor leg ----------------
+    // A hall of its own: the operator from a socket (its files uploaded fresh), the admin account's page backstage as the
+    // pusher whose page makes a document's stand-in, and the Board on three device legs (a mobile viewport with touch, at
+    // 1180 × 820, 820 × 1180 and 390 × 844), each a device of its own; then a Board page on the floor leg: a browser without
+    // DecompressionStream, requestIdleCallback and Promise.withResolvers, as an iPad below the document floor.
+    {
+      const dvHall = (await (await fetch(base + '/api/rooms', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ name: 'Devices hall' }) })).json()).code;
+      const dvOp = await connect(base, cookie);
+      // An act asked again while the server says this address is busy (the smoke's many pages share one address).
+      const asked = async (ev, args) => { let r = null; for (let i = 0; i < 60; i++) { r = await emit(dvOp, ev, args); if (!(r && r.busy)) return r; await sleep(Math.min(2000, (r && r.retryMs) || 500)); } return r; };
+      const dvJoin = await asked('join', { roomCode: dvHall, name: 'Desk', role: 'research', docs: true });
+      const fresh = async (name, type, bytes) => {
+        for (let i = 0; i < 8; i++) {
+          const fd = new FormData();
+          fd.append('file', new Blob([bytes], { type }), name);
+          const r = await fetch(base + '/api/upload', { method: 'POST', headers: { 'X-AGM-Upload': dvJoin.uploadToken }, body: fd });
+          if (r.status !== 429) return (await r.json()).url;
+          await sleep(2500);
+        }
+        return '';
+      };
+      const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      const pdfUrl = await fresh('board pack.pdf', 'application/pdf', fixture('board-pack-tagged.pdf'));
+      // A Word file with a hidden run and a tracked deletion, neither of which a Board page draws.
+      const docxUrl = await fresh('minutes.docx', DOCX_TYPE, officeZip(wordParts({ body: '<w:p><w:r><w:t>Item 4: approved</w:t></w:r><w:del w:id="1" w:author="Ana" w:date="2026-11-01T09:00:00Z"><w:r><w:delText> DELETEDRUN</w:delText></w:r></w:del></w:p>'
+        + '<w:p><w:r><w:t>Item 5: deferred</w:t></w:r><w:r><w:rPr><w:vanish/></w:rPr><w:t> HIDDENRUN</w:t></w:r></w:p>' })));
+      const picUrl = await fresh('stage plan.png', 'image/png', pngOf(64, 48));
+      // A workbook with a hidden column, row and sheets; a deck with a hidden shape and slide; a CSV; Markdown with a comment;
+      // a PDF whose page is a JPEG 2000 picture.
+      const xlsxUrl = await fresh('budget.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', officeZip(workbookParts()));
+      const pptxUrl = await fresh('results.pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', officeZip(deckParts([
+        { xml: deckSlide(deckShape('Q3 results', { ph: 'title' }) + deckShape(['Revenue up', 'Costs flat'], { ph: 'body' }) + deckShape('HIDDENSHAPE', { hidden: true })) },
+        { xml: deckSlide(deckShape('HIDDENSLIDE', { ph: 'title' }), '0') }])));
+      const csvUrl = await fresh('budget.csv', 'text/csv', Buffer.from('Item,Cost\r\nPlant,4\r\nStaff,2\r\n'));
+      const mdUrl = await fresh('notes.md', 'text/markdown', Buffer.from('# Notes\n\nVisible <!-- SECRETCOMMENT --> words\n'));
+      const jpxUrl = await fresh('picture-jpx.pdf', 'application/pdf', fixture('jpeg2000.pdf'));
+      const push = (content, to = 'board') => asked('page:push', { code: dvHall, to, content });
+      // The Board's information as the operator's console reads it, once it reads `mark` (its pages all said), or as it stands.
+      const boardInfo = async (seq, mark = '✓') => {
+        let info = null;
+        for (let i = 0; i < 80; i++) { const st = await asked('page:status', { code: dvHall }); info = st && st.ok ? st.board.info : null; if (info && info.seq === seq && info.mark === mark) return info; await sleep(250); }
+        return info;
+      };
+      // The venue's web page, answered by the browser itself (agm-web.invalid: a page of a few words).
+      const WEB = 'https://agm-web.invalid/vote';
+      const answerWeb = async (t) => {
+        t.on('Fetch.requestPaused', (p) => { t.send('Fetch.fulfillRequest', { requestId: p.requestId, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'text/html; charset=utf-8' }], body: Buffer.from('<!doctype html><title>Vote</title><p>Vote now</p>').toString('base64') }); });
+        await t.send('Fetch.enable', { patterns: [{ urlPattern: 'https://agm-web.invalid/*', requestStage: 'Request' }] });
+      };
+      // The pusher: the admin account's page backstage (the operator), whose console reads where the Board's pages stand.
+      const desk = await edge.tab(`${base}/app.html?code=${dvHall}&as=account&role=research`);
+      await desk.until(`typeof joined !== 'undefined' && joined && F.canPush && F.docs`, 10000);
+      desk.expectFailure(/\/api\/upload$/);   // the uploads' rate may turn a picture away: the page waits it out
+      // The device legs: a Board page each, a mobile viewport with touch, opening documents (its probe at load).
+      const LEGS = [[1180, 820], [820, 1180], [390, 844]];
+      const legs = [];
+      for (const [w, h] of LEGS) {
+        const tab = await edge.tab(`${base}/app.html?code=${dvHall}&name=${encodeURIComponent('Leg ' + w)}&role=board&invite=${inviteOf(dataDir, dvHall)}`, { metrics: { width: w, height: h, phone: true }, alone: true });
+        await answerWeb(tab);
+        legs.push({ w, h, tab });
+      }
+      for (const l of legs) await l.tab.until(`typeof joined !== 'undefined' && joined`, 10000);
+      const legFacts = await Promise.all(legs.map((l) => l.tab.eval(`JSON.stringify({ w: innerWidth, touch: navigator.maxTouchPoints > 0, coarse: matchMedia('(pointer: coarse)').matches, docs: F.docs, view: F.view })`).then(JSON.parse)));
+      const st0 = await asked('page:status', { code: dvHall });
+      report(legFacts.every((f, i) => f.w === LEGS[i][0] && f.touch && f.docs === true && f.view === 'simple') && st0.board.pages === 3 && !st0.board.nodocs,
+        `the device legs: three Board pages at 1180 × 820, 820 × 1180 and 390 × 844, each a mobile viewport with touch, each opening documents by its probe (none counted without), in the simple view (${JSON.stringify({ legFacts, pages: st0.board.pages, nodocs: st0.board.nodocs || 0 })})`);
+
+      // What a leg's layer draws now, as a person sees it: its kind, a quote's type and whether a table scrolls inside its
+      // card, a picture drawn and never dragged out (a right-click or a long press's menu taken by the page), a document's
+      // page and kind, a web page's frame; and whether the page itself scrolls sideways.
+      const LEG_READ = `(() => { const l = document.getElementById('pageLayer'); const b = document.getElementById('layerBox'); if (l.hidden) return '';
+        const q = b.querySelector('.take-quote'); const s = q && q.querySelector('.take-quote-scroll'); const img = b.querySelector('img'); const v = b.querySelector('.dv'); const f = b.querySelector('iframe');
+        let menu = null; if (img) { const e = new MouseEvent('contextmenu', { bubbles: true, cancelable: true }); img.dispatchEvent(e); menu = e.defaultPrevented; }
+        return JSON.stringify({ kind: l.dataset.kind, px: q ? Math.round(parseFloat(getComputedStyle(q).fontSize)) : 0, scrolls: !!s && s.scrollWidth > s.clientWidth, unit: q ? q.dataset.unit : '',
+          img: !!img && img.complete && img.naturalWidth > 0, drag: img ? img.getAttribute('draggable') : null, menu, doc: v ? v.dataset.kind : '', page: (b.querySelector('.dv-n') || {}).value || '',
+          canvas: !!b.querySelector('canvas.pdf-page:not(.pdf-page-pending)'), words: (b.querySelector('.dv-body') || {}).textContent || '', frame: f ? f.getAttribute('src') : '',
+          pageW: Math.round((b.querySelector('.dv-page') || { getBoundingClientRect: () => ({ width: 0 }) }).getBoundingClientRect().width), found: (b.querySelector('.dv-found') || {}).textContent || '',
+          jpx: (() => { const c = b.querySelector('.dv-page[data-page="1"] canvas'); if (!c || !c.width || c.classList.contains('pdf-page-pending')) return null; const p = c.getContext('2d').getImageData(Math.floor(c.width * ${JPX_YELLOW.x}), Math.floor(c.height * ${JPX_YELLOW.y}), 1, 1).data; return [p[0], p[1], p[2]]; })(),
+          wide: document.documentElement.scrollWidth <= document.documentElement.clientWidth }); })()`;
+      const onLegs = async (ok, ms = 20000) => Promise.all(legs.map(async (l) => JSON.parse(await l.tab.until(`(() => { const r = ${LEG_READ}; return r && (${ok})(JSON.parse(r)) && r; })()`, ms) || await l.tab.eval(LEG_READ) || 'null')));
+      const legRows = {};
+      // A quote: its words in the largest type that fits, 28 px or more on a tablet and 20 px or more on a phone; ✓.
+      const para = await push({ kind: 'snippet', unit: 'paragraph', text: 'The board approves the budget for 2027, with the changes tabled this morning.' });
+      legRows.quote = await onLegs('(r) => r.kind === "snippet" && r.px > 0');
+      const paraInfo = await boardInfo(para.seq);
+      // A 25 × 10 table: at 390 px it scrolls sideways inside its card, its type 20 px or more, and the page does not scroll.
+      const wideRows = Array.from({ length: 25 }, (_, r) => Array.from({ length: 10 }, (__, c) => (r === 0 ? 'Quarter ' + (c + 1) : String((r + 1) * (c + 7) * 1000))));
+      const table = await push({ kind: 'snippet', unit: 'range', table: { rows: wideRows, head: 1, side: 0, ref: 'A1:J25' } });
+      legRows.table = await onLegs('(r) => r.kind === "snippet" && r.unit === "range"');
+      const tableInfo = await boardInfo(table.seq);
+      // A picture: drawn, never draggable, its menu the page's.
+      const pic = await push({ kind: 'image', url: picUrl });
+      legRows.picture = await onLegs('(r) => r.kind === "image" && r.img');
+      const picInfo = await boardInfo(pic.seq);
+      // A PDF at its place, shown with Download ticked: its page box, zoomed in by a tap on +, paged on by a tap on Next; on
+      // the phone, ⬇ Download saves the file whole and the page stays.
+      const pdf = await push({ kind: 'doc', url: pdfUrl, at: { page: 1 }, download: true });
+      legRows.pdf = await onLegs('(r) => r.kind === "doc" && r.doc === "pdf" && r.canvas && r.page === "1"');
+      const pdfInfo = await boardInfo(pdf.seq);
+      for (const l of legs) await l.tab.eval(`document.querySelector('#layerBox .dv-zoom .btn[aria-label="Zoom in"]').click()`);
+      legRows.zoomed = await Promise.all(legs.map(async (l, i) => JSON.parse(await l.tab.until(`(() => { const r = JSON.parse(${LEG_READ} || 'null'); return r && r.pageW > ${legRows.pdf[i] ? legRows.pdf[i].pageW : 0} && JSON.stringify(r); })()`, 8000) || 'null')));
+      for (const l of legs) await l.tab.eval(`document.querySelector('#layerBox .dv-next').click()`);
+      legRows.paged = await onLegs('(r) => r.page === "2"', 8000);
+      const phone = legs[2];
+      await edge.browserSend('Browser.setDownloadBehavior', { behavior: 'allowAndName', downloadPath: dlDir, eventsEnabled: true, browserContextId: phone.tab.context });
+      const phoneBefore = new Set(downloads.keys());
+      await phone.tab.until(`!!document.querySelector('#layerActs [data-action="take.download"]')`, 5000);
+      await phone.tab.eval(`(() => { window.__stays = true; document.querySelector('#layerActs [data-action="take.download"]').click(); return true; })()`);
+      let phoneSaved = null;
+      for (const end = Date.now() + 15000; Date.now() < end && !phoneSaved; await sleep(100)) phoneSaved = [...downloads].find(([g, d]) => !phoneBefore.has(g) && d.state === 'completed');
+      const phoneStays = await phone.tab.eval(`window.__stays === true && !document.getElementById('pageLayer').hidden`);
+      // A Word document, drawn without its hidden run or its tracked deletion, and found in.
+      const docx = await push({ kind: 'doc', url: docxUrl });
+      legRows.docx = await onLegs('(r) => r.kind === "doc" && r.doc === "word" && r.words.includes("Item 4: approved")');
+      const docxInfo = await boardInfo(docx.seq);
+      for (const l of legs) await l.tab.eval(`(() => { const q = document.querySelector('#layerBox .dv-q'); q.value = 'deferred'; q.form.requestSubmit(); return true; })()`);
+      legRows.found = await onLegs('(r) => r.found === "1 of 1"', 8000);
+      // A workbook, a deck, a CSV and Markdown, each drawn without what is hidden in it; a JPEG 2000 page drawn.
+      const xlsx = await push({ kind: 'doc', url: xlsxUrl });
+      legRows.xlsx = await onLegs('(r) => r.kind === "doc" && r.doc === "book" && r.words.includes("Total")');
+      const xlsxInfo = await boardInfo(xlsx.seq);
+      const pptx = await push({ kind: 'doc', url: pptxUrl });
+      legRows.pptx = await onLegs('(r) => r.kind === "doc" && r.doc === "deck" && r.words.includes("Revenue up")');
+      const pptxInfo = await boardInfo(pptx.seq);
+      const csv = await push({ kind: 'doc', url: csvUrl });
+      legRows.csv = await onLegs('(r) => r.kind === "doc" && r.doc === "csv" && r.words.includes("Plant")');
+      const csvInfo = await boardInfo(csv.seq);
+      const md = await push({ kind: 'doc', url: mdUrl });
+      legRows.md = await onLegs('(r) => r.kind === "doc" && r.doc === "md" && r.words.includes("Visible")');
+      const mdInfo = await boardInfo(md.seq);
+      const jpx = await push({ kind: 'doc', url: jpxUrl, at: { page: 1 } });
+      legRows.jpx = await onLegs('(r) => r.kind === "doc" && r.doc === "pdf" && !!r.jpx && r.jpx[0] > 200 && r.jpx[1] > 150 && r.jpx[2] < 110');
+      const jpxInfo = await boardInfo(jpx.seq);
+      // A web page: its frame, opened (◇: AGMessage cannot see inside it).
+      const web = await push({ kind: 'web', url: WEB });
+      legRows.web = await onLegs('(r) => r.kind === "web" && !!r.frame');
+      const webInfo = await boardInfo(web.seq, '◇');
+      for (const l of legs) await l.tab.shot(path.join(OUT, `board-devices-${l.w}x${l.h}.png`));
+      const tablet = (r, i) => LEGS[i][0] >= 600;
+      const legsOk = legRows.quote.every((r, i) => !!r && r.px >= (tablet(r, i) ? 28 : 20) && r.wide)
+        && legRows.table.every((r, i) => !!r && r.px >= 20 && r.wide && (tablet(r, i) || r.scrolls))
+        && legRows.picture.every((r) => !!r && r.drag === 'false' && r.menu === true && r.wide)
+        && legRows.pdf.every((r) => !!r && r.wide) && legRows.zoomed.every((r) => !!r && r.wide) && legRows.paged.every((r) => !!r && r.page === '2')
+        && !!phoneSaved && phoneSaved[1].name === 'board pack.pdf' && fs.readFileSync(path.join(dlDir, phoneSaved[0])).equals(fixture('board-pack-tagged.pdf')) && phoneStays === true
+        && legRows.docx.every((r) => !!r && r.words.includes('Item 5: deferred') && !r.words.includes('HIDDENRUN') && !r.words.includes('DELETEDRUN') && r.wide) && legRows.found.every((r) => !!r && r.found === '1 of 1')
+        && legRows.xlsx.every((r) => !!r && r.words.includes('Cost') && !/SECRETCOL|SECRETROW|VERYHIDDEN|JUSTHIDDEN/.test(r.words) && r.wide)
+        && legRows.pptx.every((r) => !!r && r.words.includes('Q3 results') && !/HIDDENSHAPE|HIDDENSLIDE/.test(r.words) && r.wide)
+        && legRows.csv.every((r) => !!r && r.words.includes('Staff') && r.wide) && legRows.md.every((r) => !!r && r.words.includes('words') && !r.words.includes('SECRETCOMMENT') && r.wide)
+        && legRows.jpx.every((r) => !!r && r.wide) && legRows.web.every((r) => !!r && r.frame.startsWith(WEB) && r.wide)
+        && [paraInfo, tableInfo, picInfo, pdfInfo, docxInfo, xlsxInfo, pptxInfo, csvInfo, mdInfo, jpxInfo].every((i) => !!i && i.mark === '✓' && i.on === 3 && i.pages === 3) && !!webInfo && webInfo.mark === '◇';
+      report(legsOk, `the stage on the device legs: a quote in 28 px or more on a tablet and 20 px or more on a phone; a 25 × 10 table scrolling inside its card at 390 px, the page never sideways; a picture never dragged out, its menu the page's; a PDF at its page, zoomed in by a tap and paged on by one, saved whole on the phone by ⬇ Download with the page staying; a Word document without its hidden run or tracked deletion, found in; a workbook, a deck, a CSV and Markdown without what is hidden in them; a JPEG 2000 page drawn; a web page's frame; each ✓ on all 3 (the web page ◇) (${JSON.stringify({ legRows: Object.fromEntries(Object.entries(legRows).map(([k, v]) => [k, v.map((r) => r && { ...r, words: (r.words || '').slice(0, 60) })])), saved: phoneSaved ? phoneSaved[1].name : '', phoneStays, marks: [paraInfo, tableInfo, picInfo, pdfInfo, docxInfo, xlsxInfo, pptxInfo, csvInfo, mdInfo, jpxInfo, webInfo].map((i) => i && [i.mark, i.on, i.pages]) })})`);
+
+      // Earlier and Look on every leg: the picture, under Earlier now, drawn again in a Look on that page alone.
+      const looks = await Promise.all(legs.map(async (l) => {
+        await l.tab.eval(`act('past', 'past.look', Takes.pastObject(${pic.seq}), {})`);
+        const r = await l.tab.until(`document.getElementById('webPreview').open && (() => { const img = document.querySelector('#webPreviewBox img'); return img && img.complete && img.naturalWidth > 0 && JSON.stringify({ what: document.getElementById('webPreviewWhat').textContent, earlier: Takes.earlier() }); })()`, 8000);
+        await l.tab.eval(`document.getElementById('webPreview').close()`);
+        return JSON.parse(r || 'null');
+      }));
+      // Many takes in a row, then Back to chat: the page still draws, and nothing reloaded it.
+      for (const l of legs) await l.tab.eval(`(() => { window.__still = true; return true; })()`);
+      for (let i = 1; i <= 20; i++) await push({ kind: 'snippet', unit: 'text', text: 'Take ' + i + ' of 20' });
+      await onLegs('(r) => r.kind === "snippet"', 10000);
+      const last = await push({ kind: 'chat' });
+      const many = await Promise.all(legs.map((l) => l.tab.until(`document.getElementById('pageLayer').hidden && window.__still === true && performance.getEntriesByType('navigation').length === 1 && 'kept'`, 10000)));
+      report(looks.every((r) => !!r && r.what === 'Look' && r.earlier >= 1) && last.ok && many.every((x) => x === 'kept'),
+        `on every leg a picture under Earlier is drawn again in a Look; 20 takes in a row and then Back to chat leave each page drawing, never reloaded (${JSON.stringify({ looks, many })})`);
+
+      // ---- The floor leg: a Board page below the document floor (no DecompressionStream), with no requestIdleCallback and
+      // no Promise.withResolvers, every request it makes logged.
+      const BELOW_DOCS = `(() => { delete window.DecompressionStream; delete window.requestIdleCallback; delete window.cancelIdleCallback; delete Promise.withResolvers; })();`;
+      // A document the pusher shows before that page joins: it is given no stand-in (no page then needed one).
+      const deskShows = (args) => desk.eval(`(() => { Show.whole(${args}); return true; })()`);
+      const deskRead = async (ok, ms = 15000) => { for (const end = Date.now() + ms; Date.now() < end; await sleep(250)) { await desk.eval(`Console.read()`); const v = await desk.eval(`(() => { const b = Console.board(); return JSON.stringify({ seq: b.info ? b.info.seq : 0, kind: b.info ? b.info.kind : '', mark: b.info ? b.info.mark : '', cannot: b.info ? b.info.cannot : 0, standin: b.info ? b.info.standin : 0, nodocs: b.nodocs, offer: AGM.catalog.ids('board', F, b).includes('board.picture') ? AGM.catalog.items('board', F, b).find((i) => i.id === 'board.picture').label : '', chip: document.getElementById('boardOver').textContent }); })()`); if (ok(JSON.parse(v))) return JSON.parse(v); } return JSON.parse(await desk.eval(`JSON.stringify({ chip: document.getElementById('boardOver').textContent })`)); };
+      await deskRead((v) => v.seq === 0 || v.kind === '');
+      await deskShows(`{ url: ${codeLiteral(pdfUrl)}, name: 'board pack.pdf' }, { page: 1 }, false, 'board'`);
+      const early = await (async () => { let info = null; for (let i = 0; i < 80; i++) { const st = await asked('page:status', { code: dvHall }); info = st && st.ok ? st.board.info : null; if (info && info.kind === 'doc' && info.mark === '✓') return info; await sleep(250); } return info; })();
+      // Opened blank, so every request its page makes is logged from its first: the log, then the page.
+      const floor = await edge.tab('about:blank', { init: BELOW_DOCS, metrics: { width: 1180, height: 820, phone: true }, alone: true });
+      const fetched = [];
+      floor.on('Network.requestWillBeSent', (p) => fetched.push(p.request.url));
+      await floor.send('Network.enable');
+      await answerWeb(floor);
+      await floor.send('Page.navigate', { url: `${base}/app.html?code=${dvHall}&name=Floor&role=board&invite=${inviteOf(dataDir, dvHall)}` });
+      await floor.until(`typeof joined !== 'undefined' && joined`, 10000);
+      await edge.browserSend('Browser.setDownloadBehavior', { behavior: 'allowAndName', downloadPath: dlDir, eventsEnabled: true, browserContextId: floor.context });
+      const floorFacts = await floor.eval(`JSON.stringify({ docs: F.docs, probe: typeof DecompressionStream, idle: typeof requestIdleCallback, resolvers: typeof Promise.withResolvers })`);
+      const FLOOR_READ = `(() => { const l = document.getElementById('pageLayer'); const b = document.getElementById('layerBox'); if (l.hidden) return '';
+        const img = b.querySelector('img'); const q = b.querySelector('.take-quote');
+        let menu = null; if (img) { const e = new MouseEvent('contextmenu', { bubbles: true, cancelable: true }); img.dispatchEvent(e); menu = e.defaultPrevented; }
+        return JSON.stringify({ kind: l.dataset.kind, standin: (b.querySelector('.take-standin-words') || {}).textContent || '', device: (b.querySelector('.take-device') || {}).textContent || '',
+          img: !!img && img.complete && img.naturalWidth > 0, drag: img ? img.getAttribute('draggable') : null, menu, quote: q ? (q.querySelector('.take-quote-body') || q).textContent : '', source: (b.querySelector('.take-quote-line') || {}).textContent || '',
+          line: (b.querySelector('.take-file-line') || {}).textContent || '', pdf: !!b.querySelector('.dv[data-kind="pdf"]'), frame: !!b.querySelector('iframe') }); })()`;
+      const floorShows = async (ok, ms = 15000) => JSON.parse(await floor.until(`(() => { const r = ${FLOOR_READ}; return r && (${ok})(JSON.parse(r)) && r; })()`, ms) || await floor.eval(FLOOR_READ) || 'null');
+      // Joined after the push, with no stand-in: it says this device cannot open documents and fails; the console offers
+      // Show them a picture of p. 1, which sends a picture to that page's person alone, drawn over the Board's document.
+      const noStandin = await floorShows('(r) => r.kind === "doc" && !!r.device');
+      const offered = await deskRead((v) => v.kind === 'doc' && v.cannot === 1 && !!v.offer);
+      await desk.eval(`act('board', 'board.picture', Console.board(), {})`);
+      const sent = await floorShows('(r) => r.kind === "image" && r.img', 20000);
+      const legsKeep = await Promise.all(legs.map((l) => l.tab.eval(LEG_READ).then((r) => (r ? JSON.parse(r).kind : 'chat'))));
+      report(floorFacts === JSON.stringify({ docs: false, probe: 'undefined', idle: 'undefined', resolvers: 'undefined' }) && !!early && early.mark === '✓'
+        && !!noStandin && noStandin.device === 'This device cannot open documents — ask the backstage team to show you a picture.' && !noStandin.pdf
+        && offered.mark === '△' && offered.nodocs === 1 && offered.offer === 'Show them a picture of p. 1' && !!sent && legsKeep.every((k) => k === 'doc'),
+        `the floor leg: a page with no DecompressionStream joins without docs; a document shown before it joined (no stand-in) draws the words "This device cannot open documents — ask the backstage team to show you a picture." and fails, the console offering Show them a picture of p. 1, which reaches that page alone as a picture over the Board's document (${JSON.stringify({ floorFacts, noStandin, offered, sent, legsKeep })})`);
+
+      // Shown now, with the page counted: the pusher's bar says so before it goes, and the document goes with a picture of its
+      // place as its stand-in, which this page draws with its words, ✓ "as a picture"; ⬇ Download on it, ticked, downloads.
+      const said = await desk.eval(`Show.olderWords('board', 'pdf', { page: 1 })`);
+      await deskShows(`{ url: ${codeLiteral(pdfUrl)}, name: 'board pack.pdf' }, { page: 1 }, true, 'board'`);
+      const withPicture = await floorShows('(r) => r.kind === "doc" && !!r.standin && r.img');
+      const pictured = await deskRead((v) => v.kind === 'doc' && v.standin === 1 && v.mark === '✓');
+      const floorBar = await floor.until(`(() => { const a = [...document.querySelectorAll('#layerActs [data-action]')].map((b) => b.dataset.action); return a.includes('take.download') && JSON.stringify(a); })()`, 5000);
+      const before = new Set(downloads.keys());
+      await floor.eval(`document.querySelector('#layerActs [data-action="take.download"]').click()`);
+      let saved = null;
+      for (const end = Date.now() + 15000; Date.now() < end && !saved; await sleep(100)) saved = [...downloads].find(([g, d]) => !before.has(g) && d.state === 'completed');
+      report(said === '1 of 4 Board pages is an older device: it gets a picture of p. 1 in its place'
+        && !!withPicture && withPicture.standin === 'As a picture of p. 1: this device cannot page through the document' && withPicture.line === 'board pack.pdf · p. 1' && !withPicture.pdf && withPicture.drag === 'false' && withPicture.menu === true
+        && pictured.chip.includes('(1 as a picture)') && !!floorBar && !!saved && saved[1].name === 'board pack.pdf' && fs.readFileSync(path.join(dlDir, saved[0])).equals(fixture('board-pack-tagged.pdf')),
+        `the floor leg: the pusher's bar says "1 of 4 Board pages is an older device: it gets a picture of p. 1 in its place"; the document goes with that picture as its stand-in, drawn with its words, never dragged out, its menu the page's, ✓ on the console "(1 as a picture)"; ⬇ Download on it, ticked, saves the file whole (${JSON.stringify({ said, withPicture, pictured, floorBar, saved: saved ? saved[1].name : '' })})`);
+
+      // A Word document: its stand-in is what is at its place, as a quote, drawn with its words.
+      await deskShows(`{ url: ${codeLiteral(docxUrl)}, name: 'minutes.docx' }, null, false, 'board'`);
+      const wordStandin = await floorShows('(r) => r.kind === "doc" && !!r.standin && r.quote.includes("Item 4: approved")');
+      const wordMark = await deskRead((v) => v.kind === 'doc' && v.standin === 1 && v.mark === '✓' && v.chip.includes('(1 as a quote)'));
+      // A Look at the first document (no stand-in) under Earlier reads its words; quotes, pictures, web pages and Earlier draw.
+      await floor.eval(`act('past', 'past.look', Takes.pastObject(${early ? early.seq : 0}), {})`);
+      const look = await floor.until(`document.getElementById('webPreview').open && (() => { const p = document.querySelector('#webPreviewBox .take-device'); return p && p.textContent; })()`, 8000);
+      await floor.eval(`document.getElementById('webPreview').close()`);
+      // A Look at the document shown with its stand-in draws the stand-in.
+      await floor.eval(`act('past', 'past.look', Takes.pastObject(${pictured.seq || 0}), {})`);
+      const lookStandin = await floor.until(`document.getElementById('webPreview').open && (() => { const w = document.querySelector('#webPreviewBox .take-standin-words'); const img = document.querySelector('#webPreviewBox img'); return w && img && img.complete && img.naturalWidth > 0 && w.textContent; })()`, 8000);
+      await floor.eval(`document.getElementById('webPreview').close()`);
+      const q = await push({ kind: 'snippet', unit: 'paragraph', text: 'The floor leg reads a quote.' });
+      const floorQuote = await floorShows('(r) => r.kind === "snippet"');
+      const p2 = await push({ kind: 'image', url: picUrl });
+      const floorPic = await floorShows('(r) => r.kind === "image" && r.img');
+      const w2 = await push({ kind: 'web', url: WEB });
+      const floorWeb = await floorShows('(r) => r.kind === "web" && r.frame');
+      const floorEarlier = await floor.eval(`Takes.earlier()`);
+      const pdfFetched = fetched.filter((u) => /\/vendor\/pdf\.(worker\.)?min\.mjs/.test(u));
+      await floor.shot(path.join(OUT, 'board-devices-floor.png'));
+      report(!!wordStandin && wordStandin.standin === 'As a quote: this device cannot page through the document' && wordStandin.source === 'Quoted by Ana Admin · minutes.docx' && !/HIDDENRUN|DELETEDRUN/.test(wordStandin.quote) && wordMark.mark === '✓' && wordMark.chip.includes('(1 as a quote)')
+        && look === 'This device cannot open documents — ask the backstage team to show you a picture.' && lookStandin === 'As a picture of p. 1: this device cannot page through the document'
+        && q.ok && !!floorQuote && p2.ok && !!floorPic && floorPic.img && floorPic.drag === 'false' && floorPic.menu === true && w2.ok && !!floorWeb && floorWeb.frame && floorEarlier >= 3 && pdfFetched.length === 0 && floor.problems.length === 0,
+        `the floor leg: a Word document's stand-in is what is at its place as a quote, without its hidden run or tracked deletion, with its words and the document named, ✓ "(1 as a quote)"; under Earlier a Look at a document with no stand-in reads the device's words, and one with a stand-in draws it; quotes, pictures (never dragged out, the page's menu), web pages and Earlier draw; pdf.js is never fetched; no script error (${JSON.stringify({ wordStandin, wordMark: wordMark.mark, look, lookStandin, floorQuote: !!floorQuote, floorPic: !!floorPic, floorWeb: !!floorWeb, floorEarlier, pdfFetched, problems: floor.problems.slice(0, 3) })})`);
+
+      // ---- A Board page that opens documents by its probe, yet cannot import pdf.js (its module refused on the way): it draws
+      // the document as a page that cannot open documents does (here the stand-in made for the floor leg's page), opens none
+      // for the rest of its session, and joins again without docs, counted; a reload in its tab keeps it so.
+      const probe = await edge.tab('about:blank', { metrics: { width: 820, height: 1180, phone: true }, alone: true });
+      probe.expectFailure(/\/vendor\/pdf\.min\.mjs$/);
+      await probe.hold('*/vendor/pdf.min.mjs*', 0, true);
+      await probe.send('Page.navigate', { url: `${base}/app.html?code=${dvHall}&name=Probe&role=board&invite=${inviteOf(dataDir, dvHall)}` });
+      const probeJoined = await probe.until(`typeof joined !== 'undefined' && joined && F.docs === true && 'docs'`, 10000);
+      await deskRead((v) => v.nodocs === 1);
+      await deskShows(`{ url: ${codeLiteral(pdfUrl)}, name: 'board pack.pdf' }, { page: 1 }, false, 'board'`);
+      const PROBE_READ = `(() => { const b = document.getElementById('layerBox'); const w = b.querySelector('.take-standin-words'); const img = b.querySelector('img');
+        let kept = ''; try { kept = sessionStorage.getItem('agm.noDocs'); } catch { kept = 'blocked'; }
+        return w && img && img.complete && img.naturalWidth > 0 && JSON.stringify({ words: w.textContent, docs: F.docs, kept, pdf: !!b.querySelector('.dv[data-kind="pdf"]') }); })()`;
+      const probeShows = JSON.parse(await probe.until(PROBE_READ, 20000) || 'null');
+      const probeMark = await deskRead((v) => v.kind === 'doc' && v.nodocs === 2 && v.standin === 2 && v.mark === '✓', 20000);
+      await probe.send('Page.reload');
+      const probeAgain = await probe.until(`typeof joined !== 'undefined' && joined && F.docs === false && 'kept'`, 10000);
+      const probeCounted = (await asked('page:status', { code: dvHall })).board.nodocs;
+      report(probeJoined === 'docs' && !!probeShows && probeShows.words === 'As a picture of p. 1: this device cannot page through the document' && probeShows.docs === false && probeShows.kept === '1' && !probeShows.pdf
+        && probeMark.mark === '✓' && probeMark.nodocs === 2 && probeMark.standin === 2 && probeAgain === 'kept' && probeCounted === 2,
+        `a Board page that passes the documents' probe but cannot import pdf.js draws the document's stand-in with its words, opens no document for the rest of its session (kept in its tab), and joins again without docs: counted, ✓ on the console with 2 as a picture, and still so after a reload (${JSON.stringify({ probeJoined, probeShows, probeMark, probeAgain, probeCounted })})`);
+
+      const devProblems = [['desk', desk], ['probe', probe], ...legs.map((l) => ['leg ' + l.w, l.tab])].flatMap(([n, t]) => t.problems.map((p) => n + ': ' + p));
+      report(devProblems.length === 0, `the devices hall's pages: no console error and no CSP violation${devProblems.length ? ' — ' + devProblems.slice(0, 4).join(' | ') : ''}`);
+      dvOp.close();
+      for (const t of [desk, floor, probe, ...legs.map((l) => l.tab)]) { await t.send('Page.navigate', { url: 'about:blank' }); t.close(); }
+    }
+
     // The header's countdown chip is its own door (the account's: the speaker's screen and the countdown on its screens).
     await hallView.until(`!document.getElementById('stageChip').hidden && document.getElementById('stageChip').getAttribute('role') === 'button'`, 8000);
     const stageDoors = await selfDoors(hallView, 'chip', `document.getElementById('stageChip')`, 'stageNow');

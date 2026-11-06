@@ -134,13 +134,16 @@ export default [
   // for it (`window.requestIdleCallback` behind AGM.idle is a member, not the bare global), and no page reads the user
   // agent, so a fallback is chosen by what the browser has, never by what it calls itself. No page opens a native alert,
   // confirm or prompt: it pauses the page's scripts, and a page paused 20 s drops its socket (measured; the plan's 5-§16.1);
-  // a question is asked in place (AGM.ask) and words go to the page's toast.
+  // a question is asked in place (AGM.ask) and words go to the page's toast. Every page script and module parses as
+  // ES2020, whose newest syntax Safari parses from 14: a class field, a static block, `||=`, a numeric separator or a
+  // top-level await is a parse error here, so each Board device parses what it is sent (the vendored files are ignored
+  // above: pdf.js's legacy build sets the document floor, docs/DEVICES.md).
   {
     files: ['app/public/**/*.js'],
-    languageOptions: { sourceType: 'script', globals: { ...globals.browser, io: 'readonly', pdfjsLib: 'readonly', mammoth: 'readonly', XLSX: 'readonly', AGM: 'writable' } },
+    languageOptions: { ecmaVersion: 2020, sourceType: 'script', globals: { ...globals.browser, io: 'readonly', pdfjsLib: 'readonly', mammoth: 'readonly', XLSX: 'readonly', AGM: 'writable' } },
     rules: { 'agm/no-unescaped-html': 'error', 'no-alert': 'error', ...pageFloor },
   },
-  { files: ['app/public/**/*.mjs'], languageOptions: { sourceType: 'module', globals: { ...globals.browser } }, rules: { 'agm/no-unescaped-html': 'error', 'no-alert': 'error', ...pageFloor } },
+  { files: ['app/public/**/*.mjs'], languageOptions: { ecmaVersion: 2020, sourceType: 'module', globals: { ...globals.browser } }, rules: { 'agm/no-unescaped-html': 'error', 'no-alert': 'error', ...pageFloor } },
   { files: ['app/public/**/*.js', 'app/public/**/*.mjs'], ignores: ['app/public/common.js', 'app/public/display.js'], rules: marksFromTable },
   // The pure cores the page's document worker loads as classic scripts, also loadable by require: the archive check's
   // (zipcore.js, the server's too, through lib/zipcheck.js), a picture's size from its header (imagecore.js, the
