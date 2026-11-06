@@ -56,6 +56,8 @@ const ON_STAGE_WORDS = {
   'page:push': 'Do that from a backstage page.',
   // A person's chat view is the admin's to choose, whatever the seat: refused as every seat but the admin is.
   'admin:setView': 'Not admin',
+  // So is a person's clock or countdown, and its lock.
+  'admin:setClock': 'Not admin',
   // A take is withdrawn from a backstage page (the Board chip's, a person's Withdraw…).
   'page:withdraw': 'Do that from a backstage page.',
   // On stage a file of the room is a Look: only a take shown with Download ticked is downloaded there.
@@ -230,6 +232,8 @@ test('every act hidden from a seat by its rights is refused by the server as tha
     'page:report': (o) => ({ seq: o.seq, state: 'dismissed' }),
     // The person's chat view, the admin's (Chat view ▸ in the People panel).
     'admin:setView': (o) => ({ roomCode: hallA, socketId: o.socketId, view: 'full' }),
+    // The person's clock or countdown, and its lock: the admin's (Clock or countdown ▸, Lock it on their devices).
+    'admin:setClock': (o, e) => ({ roomCode: hallA, socketId: o.socketId, ...(e.id === 'person.clockLock' ? { show: 'time', locked: true } : { show: 'stage' }) }),
     // The room's earlier messages, read back from its newest change.
     'history:before': () => ({ beforeSeq: 1 }),
   };
@@ -328,12 +332,13 @@ test('the join\'s forwardable is the forward picker\'s rule: a hall to send to, 
   // its own, `canShow`, the information over its show, `over`, its Earlier, `earlier`, and the information beside the
   // operator's in its side bar, `beside`; then the chat view it draws,
   // `view`; then, on a first open, whether the room holds earlier messages, `more`, what a page keeps in view from before
-  // its newest, `older`, and its files, `files`).
+  // its newest, `older`, and its files, `files`; then whether the page is "the admin", `theAdmin`, and the clock or
+  // countdown the admin chose for this person, `clock`, last).
   const anaB = await open();
   await join(anaB, hallB, 'Ana', 'research', { uid: first.identity });
   const again = await join(anaA, hallA, 'Ana', 'research', { uid: first.identity });
-  assert.deepEqual([again.forwardable, await rooms(anaA), Object.keys(again).slice(-24), again.sends, again.admin, again.page, again.canPush, again.canWeb, again.canShow, again.over, again.earlier, again.beside, again.view, again.more, again.older, again.files], [true, [hallB],
-    ['forwardable', 'main', 'guestCode', 'codeOn', 'setsCode', 'build', 'hall', 'hallName', 'rooms', 'sends', 'admin', 'page', 'canPush', 'now', 'tz', 'canWeb', 'canShow', 'over', 'earlier', 'beside', 'view', 'more', 'older', 'files'], false, false, null, false, false, false, null, [], null, 'full', false, [], []]);
+  assert.deepEqual([again.forwardable, await rooms(anaA), Object.keys(again).slice(-26), again.sends, again.admin, again.page, again.canPush, again.canWeb, again.canShow, again.over, again.earlier, again.beside, again.view, again.more, again.older, again.files, again.theAdmin, again.clock], [true, [hallB],
+    ['forwardable', 'main', 'guestCode', 'codeOn', 'setsCode', 'build', 'hall', 'hallName', 'rooms', 'sends', 'admin', 'page', 'canPush', 'now', 'tz', 'canWeb', 'canShow', 'over', 'earlier', 'beside', 'view', 'more', 'older', 'files', 'theAdmin', 'clock'], false, false, null, false, false, false, null, [], null, 'full', false, [], [], false, { show: null, locked: false }]);
   // On stage, nothing leaves the room: false, though the same person sits backstage in B.
   const beaA = await open();
   const bea = await join(beaA, hallA, 'Bea', 'board', { invite: inviteOf(srv.dataDir, hallA) });
@@ -464,6 +469,7 @@ test('every act of the admin page, the halls board and the Accounts page hidden 
     'admin:resetRoom': (o) => ({ roomCode: o.code }), 'admin:deleteRoom': (o) => ({ roomCode: o.code, purgeFiles: true }),
     'admin:setRole': (o) => ({ roomCode: hallA, socketId: o.socketId, role: 'observer' }), 'admin:linkRoom': (o) => ({ socketId: o.socketId, targetRoom: hallB }),
     'admin:setView': (o) => ({ roomCode: hallA, socketId: o.socketId, view: 'full' }),
+    'admin:setClock': (o, e) => ({ roomCode: hallA, socketId: o.socketId, ...(e.id === 'person.clockLock' ? { show: 'time', locked: true } : { show: 'stage' }) }),
     'admin:unlinkRoom': (o) => ({ socketId: o.socketId, targetRoom: o.linkedRooms[0] }), 'admin:settings': () => ({ stagewatchUrl: 'http://127.0.0.1:9' }),
     'admin:kick': (o) => ({ socketId: o.socketId }), 'admin:deleteMessage': (o) => ({ roomCode: hallA, messageId: o.id }),
     'nodes:link': (o) => ({ id: o.id, token: 'not-the-token' }), 'nodes:unlink': (o) => ({ id: o.id }), 'nodes:acceptCertificate': (o) => ({ id: o.id, fingerprint: '0123456789abcdef' }),

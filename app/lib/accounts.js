@@ -27,6 +27,7 @@ const { WriteLane, readJsonWithBak } = require('./resilience');
 const { customAlphabet } = require('./ids');
 const { cleanText } = require('./guard');
 const rbac = require('./rbac');
+const views = require('./views');
 
 const SCRYPT = Object.freeze({ logN: 15, r: 8, p: 3, keylen: 32 });
 const USERNAME = /^[a-z0-9][a-z0-9._-]{1,31}$/;
@@ -180,8 +181,9 @@ class Accounts {
   activeAdmins() { let n = 0; for (const a of this.users.values()) if (a.role === 'admin' && !a.disabled) n++; return n; }
 
   /**
-   * What a page may know about an account: never its hash. Its side rooms (`rooms`), its On stage halls (`board`) and its
-   * chat view (`view`: '' by its seat, 'simple' or 'full') last, each as stored: none when never set.
+   * What a page may know about an account: never its hash. Its side rooms (`rooms`), its On stage halls (`board`), its
+   * chat view (`view`: '' by its seat, 'simple' or 'full') and the clock or countdown the admin chose for it (`clock`:
+   * {show, locked}, lib/views.js) last, each as stored: none when never set.
    */
   static view(a) {
     if (!a) return null;
@@ -190,6 +192,7 @@ class Accounts {
       grant: a.grant || [], revoke: a.revoke || [], disabled: !!a.disabled, mustChange: !!a.mustChange,
       createdAt: a.createdAt, lastLoginAt: a.lastLoginAt || 0, pwSetAt: a.pwSetAt || 0, rights: rbac.rightsView(a),
       rooms: Array.isArray(a.rooms) ? a.rooms : [], board: Array.isArray(a.board) ? a.board : [], view: isView(a.view) ? a.view : '',
+      clock: views.clockOf(a.clock),
     };
   }
   list() { return Array.from(this.users.values()).map(Accounts.view).sort((x, y) => x.username.localeCompare(y.username)); }
@@ -233,7 +236,8 @@ class Accounts {
    * Set fields an admin may change (checked by the caller with rbac.mayChange). Returns the names of the fields that
    * now hold something else: a field sent as it already is is no change (no reconnect, no audit row). Side rooms and On
    * stage halls are lists of keys, compared as sets; the chat view is '' (by the seat), 'simple' or 'full', and any other
-   * value changes nothing (the caller refuses it with words).
+   * value changes nothing (the caller refuses it with words); the clock or countdown is what its change makes over the
+   * one kept (lib/views.js cleanClock), and one it refuses changes nothing (the caller refuses it with words).
    */
   update(id, change) {
     const a = this.get(id);
@@ -247,6 +251,13 @@ class Accounts {
     if (isView(change.view) && change.view !== (isView(a.view) ? a.view : '')) {
       if (change.view) a.view = change.view; else delete a.view;
       changed.push('view');
+    }
+    if ('clock' in change) {
+      const next = views.cleanClock(change.clock, views.clockOf(a.clock));
+      if (!next.error && !views.sameClock(next, a.clock)) {
+        if (views.noClock(next)) delete a.clock; else a.clock = next;
+        changed.push('clock');
+      }
     }
     if ('allHalls' in change) {
       const next = typeof change.allHalls === 'boolean' ? change.allHalls : undefined;

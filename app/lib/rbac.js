@@ -159,16 +159,17 @@ const seesRoom = (account, scope) => canIn(account, 'hall.view', scope);
 
 /**
  * What nobody sets on their own account: its role and rights, its halls, its side rooms and On stage halls (`rooms`,
- * `board`), and its chat view, which another person who manages accounts chooses for it.
+ * `board`), and its chat view and clock or countdown, which another person who manages accounts chooses for it (a person
+ * chooses their own clock on their device, never on the account).
  */
-const NOT_ONES_OWN = Object.freeze(['role', 'grant', 'revoke', 'disabled', 'allHalls', 'halls', 'rooms', 'board', 'view']);
+const NOT_ONES_OWN = Object.freeze(['role', 'grant', 'revoke', 'disabled', 'allHalls', 'halls', 'rooms', 'board', 'view', 'clock']);
 /** A right as a refusal names it: what was sent, when it is a name, cut short; never a value made into one. */
 const rightWords = (c) => (typeof c === 'string' ? c.slice(0, 40) : 'one that is not a name');
 
 /**
  * Whether `actor` may make `change` to `target` (an account; null when creating). Returns null when allowed, else the
  * reason in words. `change` holds only the fields being set: role, grant, revoke, disabled, halls, allHalls, rooms,
- * board, view.
+ * board, view, clock (a clock widens nothing; its lock is the admin's, which the caller asks).
  */
 function mayChange(actor, target, change, { activeAdmins = 1 } = {}) {
   if (!can(actor, 'users.manage')) return 'You may not manage accounts.';

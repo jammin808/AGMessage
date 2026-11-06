@@ -1877,6 +1877,27 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     report(!!kimGiven && kimNow === JSON.stringify({ rooms: [pressKey], board: [code], view: 'simple' }) && kimCell === 'GONE01 (Main); Smoke AGM (Main, Press) · On stage' && kimShown === JSON.stringify([true, true, 'simple'])
       && linkedTicks === JSON.stringify([[false, false], [true, true]]) && !!kimUntouched,
       `a room, an On stage seat and a chat view are given on the Accounts page, said on the row, and an untouched Save of them changes nothing; On stage goes and comes with its hall (${kimNow}; "${kimCell}"; ${kimShown}; ${linkedTicks})`);
+    // Clock or countdown and Lock it on their devices beside Chat view: their choice first, Lock disabled with why until a
+    // choice is made; the countdown chosen and locked, saved with the pages told and none closed, kept, and shown again;
+    // "Applies in the simple view." while Chat view is Full.
+    const CLOCK_FIELDS = `JSON.stringify({ shown: !document.getElementById('uClockRow').hidden, options: [...document.getElementById('uClock').options].map((o) => o.textContent), show: document.getElementById('uClock').value,
+      locked: document.getElementById('uClockLock').checked, disabled: document.getElementById('uClockLock').disabled, why: document.getElementById('uClockLockWhy').textContent, words: document.getElementById('uClockWords').textContent })`;
+    await users.eval(`(${KIM_TR}).querySelector('button').click()`);
+    await users.until(`document.getElementById('userDialog').open && !!${TREE}`);
+    const clockFirst = JSON.parse(await users.eval(CLOCK_FIELDS));
+    await users.eval(`(() => { const c = document.getElementById('uClock'); c.value = 'stage'; c.dispatchEvent(new Event('change')); const l = document.getElementById('uClockLock'); l.click(); const t = document.getElementById('agmToast'); if (t) t.textContent = ''; document.getElementById('userSave').click(); return true; })()`);
+    const clockSaved = await users.until(`(document.getElementById('agmToast') || {}).textContent === 'Saved — their open pages draw it now.' && !document.getElementById('userDialog').open && 'saved'`, 5000);
+    const clockKept = await users.eval(`AGM.api('GET', '/api/users').then((r) => JSON.stringify(r.users.find((u) => u.username === 'kim').clock))`);
+    await users.eval(`(${KIM_TR}).querySelector('button').click()`);
+    await users.until(`document.getElementById('userDialog').open && !!${TREE}`);
+    await users.eval(`(() => { const v = document.getElementById('uView'); v.value = 'full'; v.dispatchEvent(new Event('change')); return true; })()`);
+    const clockAgain = JSON.parse(await users.eval(CLOCK_FIELDS));
+    await users.eval(`document.getElementById('userDialog').close('cancel')`);
+    const clockCleared = await users.eval(`AGM.api('PATCH', '/api/users/' + (${KIM_TR}).dataset.key, { clock: null }).then((r) => JSON.stringify(r.user && r.user.clock))`);
+    report(clockFirst.shown && JSON.stringify(clockFirst.options) === JSON.stringify(['Their choice (the clock at first)', 'Time of day', 'Stagewatch countdown', 'Off']) && clockFirst.show === '' && clockFirst.disabled && clockFirst.why === 'Choose one to lock it.'
+      && clockSaved === 'saved' && clockKept === JSON.stringify({ show: 'stage', locked: true }) && clockAgain.show === 'stage' && clockAgain.locked && !clockAgain.disabled && clockAgain.words === 'Applies in the simple view.'
+      && clockCleared === JSON.stringify({ show: null, locked: false }),
+      `the Accounts page's Clock or countdown beside Chat view: their choice first and Lock disabled with why; the countdown chosen and locked, saved (pages told, none closed) and kept (${clockKept}); shown again, "Applies in the simple view." with Chat view Full (${JSON.stringify({ clockFirst, clockAgain })})`);
     // On stage is a seat the account takes: while the rights ticked hold no Send messages (a Viewer) a seat is not offered,
     // with the server's words; a role that posts is offered it; unticking every hall ticks the hall of each seat ticked.
     await users.until(`!document.getElementById('userDialog').open`);
@@ -1902,8 +1923,8 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     // open the same menu by right-click, ⋯ and Shift+F10; an account's Edit is its bar.
     const KIM_ROW = `[...document.querySelectorAll('#userRows > tr[data-key]')].find((tr) => tr.textContent.includes('kim'))`;
     const accountDoors = await doorsOf(users, 'account', KIM_ROW, `AGM.page.object('account', (${KIM_ROW}).dataset.key)`, { ...PAGE_DOORS_HALLS, hit: 'td strong' });
-    report(doorsInStep(accountDoors) && accountDoors.want === JSON.stringify(['account.edit', 'account.password', 'account.signout', 'account.disable', 'account.remove']),
-      `an account's row: right-click = ⋯ = Shift+F10 = Edit…, New one-time password…, Sign out everywhere…, Turn off…, Remove…, Edit in its bar (${accountDoors.want}; ${accountDoors.right} / ${accountDoors.dots} / ${accountDoors.key}; ${accountDoors.inline})`);
+    report(doorsInStep(accountDoors) && accountDoors.want === JSON.stringify(['account.edit', 'account.password', 'account.signout', 'account.clock', 'account.clockLock', 'account.disable', 'account.remove']),
+      `an account's row: right-click = ⋯ = Shift+F10 = Edit…, New one-time password…, Sign out everywhere…, Clock or countdown ▸, Lock it on their devices, Turn off…, Remove…, Edit in its bar (${accountDoors.want}; ${accountDoors.right} / ${accountDoors.dots} / ${accountDoors.key}; ${accountDoors.inline})`);
     // Remove…, asked in place inside the page and answered "Keep it": the account stays.
     await users.eval(`(${KIM_ROW}).querySelector('.obj-more').click()`);
     await users.until(`!!document.querySelector('.agm-menu [data-action="account.remove"]')`, 3000);
@@ -3830,7 +3851,11 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       await phone.until(`typeof joined !== 'undefined' && joined`, 10000);
       const wide = Array.from({ length: 25 }, (_, r) => Array.from({ length: 10 }, (__, c) => (r === 0 ? 'Quarter ' + (c + 1) : String((r + 1) * (c + 7) * 1000))));
       const wideTake = await desk.eval(`new Promise((r) => socket.emit('page:push', { code: HALL_KEY, to: 'board', content: { kind: 'snippet', unit: 'range', table: { rows: ${JSON.stringify(wide)}, head: 1, side: 0, ref: 'A1:J25' } } }, r))`);
-      const phoneTable = await phone.until(`(() => { const q = document.querySelector('#layerBox .take-quote[data-unit="range"]'); const s = q && q.querySelector('.take-quote-scroll'); return q && s && JSON.stringify({ px: parseFloat(getComputedStyle(q).fontSize), scrolls: s.scrollWidth > s.clientWidth, page: document.documentElement.scrollWidth <= document.documentElement.clientWidth, num: document.querySelectorAll('#layerBox .take-quote-num').length }); })()`, 10000);
+      // Read once the layer is shown and two frames have passed: a quote drawn while the layer was still hidden is fitted
+      // again as its box gets its size (pagelayer.mjs drawQuote's ResizeObserver), never read before that.
+      const phoneTable = await phone.until(`new Promise((done) => { const q = document.querySelector('#layerBox .take-quote[data-unit="range"]'); const s = q && q.querySelector('.take-quote-scroll');
+        if (!q || !s || document.getElementById('pageLayer').hidden) { done(null); return; }
+        requestAnimationFrame(() => requestAnimationFrame(() => done(JSON.stringify({ px: parseFloat(getComputedStyle(q).fontSize), scrolls: s.scrollWidth > s.clientWidth, page: document.documentElement.scrollWidth <= document.documentElement.clientWidth, num: document.querySelectorAll('#layerBox .take-quote-num').length })))); })`, 10000);
       const pt = JSON.parse(phoneTable || 'null');
       report(!!wideTake && wideTake.ok && !!pt && pt.px >= 20 && pt.scrolls && pt.page && pt.num === 240 && cell.drawn.px >= 28,
         `a 25 × 10 table on a phone: its type 20 px or more, it scrolls sideways inside its card and the page does not, its numbers set to the right; on a tablet a quote's type is 28 px or more (${JSON.stringify({ wideTake: wideTake && wideTake.ok, pt, tablet: cell.drawn.px })})`);
@@ -4931,17 +4956,37 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const viewWords = await admin.eval(`[...document.querySelector('#usersTbody .view-select').options].map((o) => o.textContent).join(' · ')`);
     report(!!viewSid && viewFull === 'full' && keptFull === 'full' && viewSeat === 'by seat' && keptSeat === '' && viewWords === 'By seat · Simple · Full',
       `the admin page's Chat view select (${viewWords}; the heads ${viewHeads}) sets a backstage guest's view, which the server keeps (${keptFull}), and By seat again (${JSON.stringify(keptSeat)})`);
+    // The same guest's Clock or countdown in the row (its select is Clock or countdown ▸, its tick Lock it on their devices):
+    // Lock disabled with why while the choice is theirs; the countdown chosen, then locked, each kept by the server and
+    // said back in the row, live; then their choice again, unlocked.
+    // The lock's reason is drawn under it and read with it (aria-describedby), and the tick is named for its person.
+    const CLOCK_CELL = (sid) => `(() => { const tr = document.querySelector('#usersTbody tr[data-key=' + JSON.stringify(${codeLiteral(sid)}) + ']'); if (!tr) return null; const sel = tr.querySelector('.clock-select'), box = tr.querySelector('.clock-lock-box');
+      const why = tr.querySelector('.clock-why'); const said = !why.hidden && why.getClientRects().length > 0 ? why.textContent : '';
+      return JSON.stringify({ show: sel.value, locked: box.checked, disabled: box.disabled, why: said, describes: box.getAttribute('aria-describedby') === why.id && !!why.id, name: box.getAttribute('aria-label'), options: [...sel.options].map((o) => o.textContent) }); })()`;
+    const keptClock = (sid) => admin.eval(`new Promise((r) => socket.emit('admin:watchRoom', { roomCode: ${codeLiteral(code)} }, (a) => { const u = a && a.ok && a.users.find((x) => x.socketId === ${codeLiteral(sid)}); r(u ? JSON.stringify(u.clock) : null); }))`);
+    const clockBefore = viewSid ? JSON.parse(await admin.eval(CLOCK_CELL(viewSid)) || 'null') : null;
+    await admin.eval(`(() => { const tr = document.querySelector('#usersTbody tr[data-key=' + JSON.stringify(${codeLiteral(viewSid || '')}) + ']'); const sel = tr.querySelector('.clock-select'); sel.value = 'stage'; sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    const clockChosen = viewSid && await admin.until(`(() => { const c = ${CLOCK_CELL(viewSid)}; return c && JSON.parse(c).show === 'stage' && !JSON.parse(c).disabled && c; })()`, 5000);
+    await admin.eval(`(() => { const tr = document.querySelector('#usersTbody tr[data-key=' + JSON.stringify(${codeLiteral(viewSid || '')}) + ']'); tr.querySelector('.clock-lock-box').click(); return true; })()`);
+    const clockLocked = viewSid && await admin.until(`(() => { const c = ${CLOCK_CELL(viewSid)}; return c && JSON.parse(c).locked && c; })()`, 5000);
+    const keptLocked = viewSid ? await keptClock(viewSid) : null;
+    await admin.eval(`new Promise((r) => socket.emit('admin:setClock', { roomCode: ${codeLiteral(code)}, socketId: ${codeLiteral(viewSid || '')}, show: null, locked: false }, r))`);
+    const clockBack = viewSid && await admin.until(`(() => { const c = ${CLOCK_CELL(viewSid)}; return c && JSON.parse(c).show === '' && !JSON.parse(c).locked && JSON.parse(c).disabled && c; })()`, 5000);
+    report(!!clockBefore && clockBefore.show === '' && clockBefore.disabled && clockBefore.why === 'Choose one to lock it.' && clockBefore.describes && /^Lock it on their devices for \S/.test(clockBefore.name || '')
+      && JSON.stringify(clockBefore.options) === JSON.stringify(['Their choice (the clock at first)', 'Time of day', 'Stagewatch countdown', 'Off'])
+      && !!clockChosen && JSON.parse(clockChosen).why === '' && !!clockLocked && keptLocked === JSON.stringify({ show: 'stage', locked: true }) && !!clockBack,
+      `the admin page's Clock or countdown cell: Their choice first, Lock named for the person and disabled with why drawn under it until a choice is made; the countdown chosen and locked, each kept by the server and said back in the row; their choice again, unlocked (${JSON.stringify({ clockBefore, clockChosen, clockLocked, keptLocked, clockBack })})`);
     // The admin page in the copy deck's words, watching a hall; then every page read says no old word in its chrome.
     const adminDeck = JSON.parse(await admin.eval(`JSON.stringify({
       tagline: document.querySelector('#loginPanel .tagline').textContent, newHall: document.getElementById('newSessionBtn').textContent,
       halls: document.querySelector('.admin-sidebar h3').textContent, none: document.getElementById('noRooms').textContent,
       code: document.querySelector('#roomHeader span.muted').textContent, clear: AGM.catalog.entry('adminRoom', 'adminRoom.clear').label,
       close: AGM.catalog.entry('adminRoom', 'adminRoom.remove').label(ADMIN_F, roomObject('${code}')), closing: AGM.catalog.entry('adminRoom', 'adminRoom.remove').confirm(ADMIN_F, roomObject('${code}')).title.slice(0, 11),
-      people: document.querySelector('#usersSection h3').textContent, view: document.querySelectorAll('.admin-users th')[2].textContent, forward: document.querySelectorAll('.admin-users th')[3].textContent,
+      people: document.querySelector('#usersSection h3').textContent, view: document.querySelectorAll('.admin-users th')[2].textContent, clock: document.querySelectorAll('.admin-users th')[3].textContent, forward: document.querySelectorAll('.admin-users th')[4].textContent,
       local: document.querySelector('#tunnelOffState p').textContent.trim().split('\\n')[0], empty: [...document.querySelectorAll('#adminEmpty p')].map((p) => p.textContent) })`));
     report(JSON.stringify(adminDeck) === JSON.stringify({
       tagline: 'Halls, rooms and people, for the admin.', newHall: 'New hall', halls: 'Halls', none: 'No halls yet. Choose New hall to make one.', code: 'Code',
-      clear: 'Clear messages…', close: 'Close hall…', closing: 'Close hall ', people: 'People in this room', view: 'Chat view', forward: 'May forward to',
+      clear: 'Clear messages…', close: 'Close hall…', closing: 'Close hall ', people: 'People in this room', view: 'Chat view', clock: 'Clock or countdown', forward: 'May forward to',
       local: 'AGMessage is reachable only on the venue\'s network now.',
       empty: ['Choose a hall on the left, or New hall.', 'Each room has a 6-character guest code: share it with the people who join without an account.'],
     }), `the admin page says hall, room and code: New hall, Halls, Code, Clear messages…, Close hall…, People in this room, Chat view, May forward to (${JSON.stringify(adminDeck)})`);
@@ -6214,16 +6259,16 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       // The ⋯ sheet: Text size, Theme, Leave the hall (no Full screen row where the device has no Fullscreen API: headless
       // Chromium's probe reads it); Leave asks in place and Stay keeps the page; the footer names the person and the seat.
       await meg.eval(`document.getElementById('headerMore').click()`);
-      const sheet = await meg.until(`(() => { const s = document.getElementById('bvSheet'); return !s.hidden && JSON.stringify({ rows: [...s.querySelectorAll('.bv-sheet-row')].map((r) => [...r.children].map((c) => c.textContent.trim()).join(' ')), foot: document.getElementById('bvSheetFoot').textContent, focus: s.contains(document.activeElement), full: F.fullscreen }); })()`, 3000);
+      const sheet = await meg.until(`(() => { const s = document.getElementById('bvSheet'); return !s.hidden && JSON.stringify({ rows: [...s.querySelectorAll('.bv-sheet-row')].map((r) => [...r.children].map((c) => c.textContent.trim()).join(' ')), foot: document.getElementById('bvSheetFoot').textContent, focus: s.contains(document.activeElement), full: F.fullscreen, stage: F.stagewatch }); })()`, 3000);
       await meg.eval(`document.querySelector('#bvSheet [data-action="sheet.leave"]').click()`);
       const leaveAsk = await meg.until(`(() => { const a = document.querySelector('.agm-ask'); return a && a.textContent.replace(/\\s+/g, ' '); })()`, 3000);
       await meg.eval(`[...document.querySelectorAll('.agm-ask button')].find((b) => b.textContent === 'Stay').click()`);
       const stayed = await meg.until(`!document.querySelector('.agm-ask') && location.pathname === '/app.html' && joined && 'stayed'`, 3000);
       const awake = await meg.eval(`JSON.stringify(Simple.awakeState())`);
       const sheetRows = sheet ? JSON.parse(sheet) : null;
-      report(!!sheetRows && JSON.stringify(sheetRows.rows) === JSON.stringify(['Text size Aa− 100% Aa+', 'Theme Light Dark', ...(sheetRows.full ? ['Full screen'] : []), 'Leave the hall…']) && sheetRows.foot === 'Margaret 1180dark · On stage' && sheetRows.focus
+      report(!!sheetRows && JSON.stringify(sheetRows.rows) === JSON.stringify(['Text size Aa− 100% Aa+', 'Clock or countdown Time of day Countdown Off' + (sheetRows.stage ? '' : ' This hall has no Stagewatch linked.'), 'Theme Light Dark', ...(sheetRows.full ? ['Full screen'] : []), 'Leave the hall…']) && sheetRows.foot === 'Margaret 1180dark · On stage' && sheetRows.focus
         && /Leave Board hall\?\s*You'll stop getting messages from backstage\./.test(leaveAsk || '') && stayed === 'stayed' && awake !== 'null',
-        `the ⋯ sheet holds Text size, Theme, Full screen where the device has it, and Leave the hall (asked in place: "${leaveAsk}"; Stay keeps the page), its footer the person and the seat, and the screen's wake lock was asked through AGM.awake (${JSON.stringify({ sheet, awake })})`);
+        `the ⋯ sheet holds Text size, Clock or countdown, Theme, Full screen where the device has it, and Leave the hall (asked in place: "${leaveAsk}"; Stay keeps the page), its footer the person and the seat, and the screen's wake lock was asked through AGM.awake (${JSON.stringify({ sheet, awake })})`);
       await press(meg, 'Escape');
       // Text size scales the whole chat: the words, the answers, Answer in words…, the response, and the strip; the header
       // stays as it is.
@@ -6366,6 +6411,140 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       };
       report(Object.keys(floorWant).every((k) => floorRuns[k] === floorWant[k]), `the floor leg: no Fullscreen API, no Full screen row and no ⛶ (the fact is false); the sheet says why the device may sleep, by cause (${JSON.stringify(floorRuns)})`);
       bvAdmin.close();
+    }
+
+    // ---------------- The clock or countdown (unit 20b): chosen on the tablet and by the admin, who may lock it ----------------
+    // A hall of its own, a fresh Board tablet (nothing chosen anywhere), the admin's socket (the laptop's token: "the
+    // admin"), and a Stagewatch linked part way through, its frames sent by the test.
+    {
+      const ckHall = (await (await fetch(base + '/api/rooms', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ name: 'Clock hall' }) })).json()).code;
+      const ckAdmin = await connect(base, cookie);
+      const kay = await edge.tab(`${base}/app.html?code=${ckHall}&name=Kay&role=board&invite=${inviteOf(dataDir, ckHall)}`, { metrics: { width: 1180, height: 820, phone: true }, alone: true });
+      await kay.until(`typeof joined !== 'undefined' && joined && document.body.dataset.view === 'simple'`, 10000);
+      // What a readout draws, read as a person sees it: shown or not, its mark, its digits (their element, role and words),
+      // the line under them (its role, a sibling of the digits' line, never inside a live region), its edge's colour and the
+      // digits' ink against the --c-ink token, and whether it reads stale.
+      const RO = (id) => `(() => { const r = document.getElementById('${id}'); const t = r.querySelector('.bv-ro-time'); const s = r.querySelector('.bv-ro-strip'); const probe = document.createElement('span'); probe.style.color = 'var(--c-ink)'; r.appendChild(probe); const ink = getComputedStyle(probe).color; probe.remove();
+        const line = r.querySelector('.bv-ro-line');
+        return JSON.stringify({ shown: !r.hidden && r.getClientRects().length > 0 || (!!line && line.getClientRects().length > 0), mark: (r.querySelector('.bv-ro-icon') || {}).textContent || '', tag: t ? t.tagName : '', role: t ? t.getAttribute('role') : null, time: t ? t.textContent : '', datetime: t ? t.getAttribute('datetime') : null,
+          line: s && !s.hidden ? s.textContent : '', lineRole: s ? s.getAttribute('role') : null, apart: !!s && !!line && s.parentNode === line.parentNode && !line.contains(s) && !(t && t.closest('[role="status"]')),
+          edge: getComputedStyle(r).borderLeftColor, digits: t ? getComputedStyle(t).color : '', ink, stale: r.classList.contains('stale') }); })()`;
+      const ro = async (tab, id = 'bvReadout') => JSON.parse(await tab.eval(RO(id)) || 'null');
+      const sheetOpen = async (tab) => { await tab.eval(`(() => { if (document.getElementById('bvSheet').hidden) document.getElementById('headerMore').click(); return true; })()`); await tab.until(`!document.getElementById('bvSheet').hidden`, 3000); };
+      const choose = async (tab, value) => { await sheetOpen(tab); await tab.eval(`document.querySelector('#bvSheet [data-action="sheet.clock"][data-value="${value}"]').click(); true`); };
+      const CLOCK_ROW = `(() => { const r = [...document.querySelectorAll('#bvSheet .bv-sheet-row')].find((x) => x.dataset.action === 'sheet.clock'); return r ? JSON.stringify({ words: [...r.children].map((c) => c.textContent.trim()).join(' '), controls: [...r.querySelectorAll('button')].map((b) => b.textContent + ':' + b.getAttribute('aria-pressed')) }) : null; })()`;
+      // A fresh tablet, with nothing chosen: 🕐 HH:MM, a <time> with no role and no seconds (owner answer B3).
+      const fresh = await ro(kay);
+      // Off: no readout at all.
+      await choose(kay, 'off');
+      const off = await kay.until(`document.getElementById('bvReadout').hidden && localStorage.getItem('agm.clock') === 'off' && 'off'`, 3000);
+      // Countdown with no Stagewatch linked: --:-- and why, the sheet saying so under the choice.
+      await choose(kay, 'stage');
+      const noLink = await kay.until(`!document.getElementById('bvReadout').hidden && document.querySelector('#bvReadout .bv-ro-time').textContent === '--:--' && ${RO('bvReadout')}`, 3000);
+      const noLinkRow = await kay.eval(CLOCK_ROW);
+      // Linked: Stagewatch's countdown in its words, the title and its line under the digits, its colour the edge.
+      const ckSw = await fakeStagewatch({ name: 'Lectern timer' });
+      const linked = await emit(ckAdmin, 'hall:configure', { code: ckHall, stagewatchUrl: ckSw.url, stagewatchKey: KEY });
+      await kay.until(`pageFacts.stage && pageFacts.stage.status === 'connected'`, 10000);
+      ckSw.frame({ text: '4:30', mode: 'countdown', phase: 'normal', title: 'Q&A', message: 'Wrap up in 2 minutes', color: '#16A34A' });
+      await kay.until(`document.querySelector('#bvReadout .bv-ro-time').textContent === '4:30 left'`, 8000);
+      const normal = await ro(kay);
+      ckSw.frame({ text: '-0:30', phase: 'overtime', message: 'Please wrap up now' });
+      await kay.until(`document.querySelector('#bvReadout .bv-ro-time').textContent === '0:30 over'`, 8000);
+      const over = await ro(kay);
+      ckSw.frame({ text: '0:45', phase: 'wrapup', message: '' });
+      await kay.until(`document.querySelector('#bvReadout .bv-ro-time').textContent === 'Wrap up · 0:45 left'`, 8000);
+      const wrapup = await ro(kay);
+      ckSw.frame({ text: '4:30', phase: 'normal', message: 'Wrap up in 2 minutes' });
+      await kay.until(`document.querySelector('#bvReadout .bv-ro-time').textContent === '4:30 left'`, 8000);
+      // The take layer's bar draws the same readout.
+      const up = await emit(ckAdmin, 'page:push', { code: ckHall, to: 'board', content: { kind: 'clock' } });
+      await kay.until(`!document.getElementById('pageLayer').hidden`, 8000);
+      const bar = await ro(kay, 'layerReadout');
+      await emit(ckAdmin, 'page:push', { code: ckHall, to: 'board', content: { kind: 'chat' } });
+      await kay.until(`document.getElementById('pageLayer').hidden`, 8000);
+      report(fresh && fresh.shown && fresh.mark === '🕐' && fresh.tag === 'TIME' && fresh.role === null && /^\d\d:\d\d$/.test(fresh.time) && fresh.datetime === fresh.time && fresh.line === ''
+        && off === 'off' && !!noLink && JSON.parse(noLink).line === 'No Stagewatch linked' && JSON.parse(noLink).stale && /This hall has no Stagewatch linked\.$/.test(JSON.parse(noLinkRow || '{}').words || '')
+        && !!linked && linked.ok && normal.mark === '⏱' && normal.time === '4:30 left' && normal.role === 'timer' && normal.tag === 'SPAN' && normal.line === 'Q&A · Wrap up in 2 minutes' && normal.lineRole === 'status' && normal.apart && !normal.stale
+        && normal.edge === 'rgb(22, 163, 74)' && normal.digits === normal.ink
+        && over.mark === '▲' && over.time === '0:30 over' && !/[-−]/.test(over.time) && over.line === 'Q&A · Please wrap up now'
+        && wrapup.mark === '▲' && wrapup.time === 'Wrap up · 0:45 left' && wrapup.line === 'Q&A'
+        && !!up && up.ok && bar && bar.shown && bar.time === '4:30 left' && bar.role === 'timer' && bar.line === 'Q&A · Wrap up in 2 minutes' && bar.lineRole === null,
+        `the clock or countdown on a Board tablet: nothing chosen, 🕐 HH:MM in a <time> with no role and no seconds (B3); Off draws none; the countdown with no Stagewatch reads --:-- No Stagewatch linked and the sheet says so; linked, ⏱ "4:30 left" with its digits a timer and the title and Stagewatch's line a sibling status, Stagewatch's green its edge and the digits ink; ▲ "0:30 over" with no minus sign; ▲ "Wrap up · 0:45 left"; the take layer's bar draws the same (${JSON.stringify({ fresh, off, noLink, noLinkRow, normal, over, wrapup, bar })})`);
+
+      // Locked by the admin while the sheet is open: the row is the admin's choice in words, with no control, and the
+      // readout draws it whatever the device chose; unlocked, the choices are back with the device's checked, live.
+      const kaySid = (await emit(ckAdmin, 'admin:watchRoom', { roomCode: ckHall })).users.find((u) => u.name === 'Kay').socketId;
+      await sheetOpen(kay);
+      const locked = await emit(ckAdmin, 'admin:setClock', { roomCode: ckHall, socketId: kaySid, show: 'time', locked: true });
+      const lockedRow = await kay.until(`(() => { const r = ${CLOCK_ROW}; return r && !JSON.parse(r).controls.length && r; })()`, 5000);
+      const lockedRo = await kay.until(`document.querySelector('#bvReadout .bv-ro-icon').textContent === '🕐' && ${RO('bvReadout')}`, 5000);
+      const sheetStill = await kay.eval(`JSON.stringify({ open: !document.getElementById('bvSheet').hidden, rows: [...document.querySelectorAll('#bvSheet .bv-sheet-row')].map((r) => r.dataset.action || (r.querySelector('[data-action]') || { dataset: {} }).dataset.action || '') })`);
+      const unlocked = await emit(ckAdmin, 'admin:setClock', { roomCode: ckHall, socketId: kaySid, locked: false });
+      const unlockedRow = await kay.until(`(() => { const r = ${CLOCK_ROW}; return r && JSON.parse(r).controls.length === 3 && r; })()`, 5000);
+      const unlockedRo = await kay.until(`document.querySelector('#bvReadout .bv-ro-time').textContent === '4:30 left' && 'countdown'`, 5000);
+      await press(kay, 'Escape');
+      report(!!locked && locked.ok && JSON.parse(lockedRow || '{}').words === 'Clock or countdown: Time of day Set by the admin for you.' && !!lockedRo && JSON.parse(lockedRo).tag === 'TIME'
+        && JSON.parse(sheetStill).open && JSON.stringify(JSON.parse(sheetStill).rows.slice(0, 3)) === JSON.stringify(['sheet.size', 'sheet.clock', 'sheet.theme']) && JSON.parse(sheetStill).rows.at(-1) === 'sheet.leave' && !!unlocked && unlocked.ok && JSON.stringify(JSON.parse(unlockedRow || '{}').controls) === JSON.stringify(['Time of day:false', 'Countdown:true', 'Off:false']) && unlockedRo === 'countdown',
+        `locked by the admin while the sheet is open, the row says "Clock or countdown: Time of day" and "Set by the admin for you." with no control, and the time of day is drawn over the device's countdown; unlocked, the three choices are back with the device's Countdown checked, and the countdown drawn, live (${JSON.stringify({ lockedRow, lockedRo, sheetStill, unlockedRow, unlockedRo })})`);
+
+      // The admin's support view of Kay mirrors her device's choice, and follows it: Off on her tablet, none there.
+      const kayUid = await kay.eval('MY_UID');
+      const support = await edge.tab(`${base}/app.html?code=${ckHall}&name=Kay&role=board&adminView=1&viewOf=${kayUid}`);
+      await support.until(`typeof joined !== 'undefined' && joined && document.body.dataset.view === 'simple'`, 10000);
+      const mirrored = await support.until(`Clock.shown() === 'stage' && document.querySelector('#bvReadout .bv-ro-time') && document.querySelector('#bvReadout .bv-ro-time').textContent === '4:30 left' && 'stage'`, 10000);
+      await choose(kay, 'off');
+      const followed = await support.until(`Clock.shown() === 'off' && document.getElementById('bvReadout').hidden && 'off'`, 5000);
+      report(mirrored === 'stage' && followed === 'off' && support.problems.length === 0,
+        `the admin's support view draws the device's choice as relayed (the countdown), and follows it to Off (${JSON.stringify({ mirrored, followed })})`);
+      support.close();
+
+      // At 600 px wide or less (a phone): the digits on the header's first row with the hall's name, Help and ⋯, Stagewatch's
+      // colour their edge; the title and its line on a second row only while Stagewatch has a line; down 5 s or more, that
+      // row is "Offline · reconnecting" alone. A link up with no time yet draws --:-- with the title, never "offline".
+      const pip = await edge.tab(`${base}/app.html?code=${ckHall}&name=Pip&role=board&invite=${inviteOf(dataDir, ckHall)}`, { metrics: PHONE, alone: true });
+      await pip.until(`typeof joined !== 'undefined' && joined && document.body.dataset.view === 'simple'`, 10000);
+      await choose(pip, 'stage');
+      await press(pip, 'Escape');
+      await pip.until(`!!document.querySelector('#bvReadout .bv-ro-time') && document.querySelector('#bvReadout .bv-ro-time').textContent === '4:30 left'`, 8000);
+      const PHONE_ROWS = `(() => { const h = document.getElementById('helpBtn').getBoundingClientRect(), t = document.querySelector('.app-title').getBoundingClientRect(), line = document.querySelector('#bvReadout .bv-ro-line'), d = line.getBoundingClientRect();
+        const s = document.querySelector('#bvReadout .bv-ro-strip'), w = document.getElementById('connWords'); const sr = s.getBoundingClientRect(), wr = w.getBoundingClientRect();
+        const mid = (r) => (r.top + r.bottom) / 2; const row1 = (r) => r.height > 0 && Math.abs(mid(r) - mid(h)) < h.height / 2; const under = Math.max(h.bottom, t.bottom, d.bottom) - 1;
+        return JSON.stringify({ digits: row1(d), name: row1(t), line: sr.height > 0 ? s.textContent : '', lineUnder: sr.height > 0 && sr.top >= under, words: wr.height > 0 ? w.textContent : '', wordsUnder: wr.height > 0 && wr.top >= under,
+          edge: getComputedStyle(line).borderLeftColor, time: document.querySelector('#bvReadout .bv-ro-time').textContent, stale: document.getElementById('bvReadout').classList.contains('stale'), scroll: document.documentElement.scrollWidth <= document.documentElement.clientWidth }); })()`;
+      const rows = async () => JSON.parse(await pip.eval(PHONE_ROWS) || 'null');
+      const withLine = await rows();
+      ckSw.frame({ title: '', message: '' });
+      await pip.until(`document.querySelector('#bvReadout .bv-ro-strip').hidden`, 8000);
+      const noLine = await rows();
+      ckSw.frame({ title: 'Q&A', message: 'Wrap up in 2 minutes' });
+      await pip.until(`!document.querySelector('#bvReadout .bv-ro-strip').hidden`, 8000);
+      await pip.eval(`drawConnection({ back: false, connected: false, dot: true, stopped: false }); true`);
+      const downRows = await rows();
+      await pip.eval(`drawConnection({ back: true, connected: false, dot: false, stopped: false }); true`);
+      const backRows = await rows();
+      ckSw.frame({ text: '' });
+      await pip.until(`document.querySelector('#bvReadout .bv-ro-time').textContent === '--:--'`, 8000);
+      const noTime = await rows();
+      ckSw.frame({ text: '4:30' });
+      await pip.until(`document.querySelector('#bvReadout .bv-ro-time').textContent === '4:30 left'`, 8000);
+      report(!!withLine && withLine.digits && withLine.name && withLine.line === 'Q&A · Wrap up in 2 minutes' && withLine.lineUnder && withLine.words === '' && withLine.edge === 'rgb(22, 163, 74)' && withLine.scroll
+        && !!noLine && noLine.digits && noLine.name && noLine.line === '' && noLine.scroll
+        && !!downRows && downRows.digits && downRows.words === 'Offline · reconnecting' && downRows.wordsUnder && downRows.line === '' && downRows.scroll
+        && !!backRows && backRows.words === '' && backRows.line === 'Q&A · Wrap up in 2 minutes' && backRows.lineUnder
+        && !!noTime && noTime.time === '--:--' && noTime.line === 'Q&A · Wrap up in 2 minutes' && !noTime.stale && pip.problems.length === 0,
+        `on a phone the countdown's digits sit on the header's first row with the hall's name, Help and ⋯ (Stagewatch's green their edge), the title and its line on a second row only while there is one, and down 5 s that row is "Offline · reconnecting" alone; a link up with no time yet draws --:-- with the title, never "offline" (${JSON.stringify({ withLine, noLine, downRows, backRows, noTime })})`);
+      pip.close();
+
+      // The link down: --:-- "Stagewatch offline", never a confident stale time.
+      await choose(kay, 'stage');
+      await press(kay, 'Escape');
+      await ckSw.close();
+      const down = await kay.until(`document.querySelector('#bvReadout .bv-ro-time').textContent === '--:--' && ${RO('bvReadout')}`, 20000);
+      report(!!down && JSON.parse(down).line === 'Stagewatch offline' && JSON.parse(down).stale && kay.problems.length === 0,
+        `with the link down the countdown reads --:-- "Stagewatch offline", never a stale time; no script error on the tablet (${down}${kay.problems.length ? ' — ' + kay.problems.slice(0, 3).join(' | ') : ''})`);
+      kay.close();
+      ckAdmin.close();
     }
 
     // Oli's page, untouched since "First new" arrived 30 s or more ago and every message since: its New divider is

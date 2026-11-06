@@ -1,6 +1,7 @@
 // Accounts and the audit log. An admin (or anyone given users.manage) adds people with a role, their halls and rooms
 // (each hall's Main room with its On stage seat, its side rooms set in under it: a side room is given without its hall),
-// their chat view and any exception to the role's rights, drawn in three groups; a new person gets a one-time password
+// their chat view, the clock or countdown their simple view draws (and an admin's lock on it), and any exception to the
+// role's rights, drawn in three groups; a new person gets a one-time password
 // shown once. Someone who is not an admin is offered only the rights, halls and rooms they hold themselves (the server's
 // `giveable`, `giveableRooms`). The audit log reads newest first, each row with its mark, and checks its own chain on
 // demand; a mark is always a shape beside its colour.
@@ -127,10 +128,13 @@
     return parts.join('; ') || 'None';
   }
 
-  /** An account as the catalogue reads it: its id, name, whether it is off, why this viewer may not change it, whether it is one's own. */
+  /**
+   * An account as the catalogue reads it: its id, name, whether it is off, why this viewer may not change it, whether it is
+   * one's own, the clock or countdown chosen for it, and its Chat view (beside Full, the clock applies in the simple view).
+   */
   function accountObject(id) {
     const u = data && data.users.find((x) => x.id === id);
-    return u ? { id: u.id, name: u.name, username: u.username, disabled: !!u.disabled, locked: u.locked || '', self: u.id === meId } : null;
+    return u ? { id: u.id, name: u.name, username: u.username, disabled: !!u.disabled, locked: u.locked || '', self: u.id === meId, clock: AGM.catalog.adminClockOf(u), view: typeof u.view === 'string' ? u.view : '' } : null;
   }
   /** The accounts, each kept by its id and drawn again in place: its words, its Edit and its ⋯. */
   function renderUsers() {
@@ -195,6 +199,7 @@
     sel.disabled = self;
     $('uView').value = u && (u.view === 'simple' || u.view === 'full') ? u.view : '';
     $('uView').disabled = self;
+    drawClockFields(u, self);
     drawTree(u, self);
     $('uAll').disabled = self || !mayGive.allHalls();
     $('uAll').checked = (self || !$('uAll').disabled) && (u ? u.rights.allHalls : roleOf(sel.value).allHalls);
@@ -333,6 +338,38 @@
   });
   $('uAll').addEventListener('change', () => { $('uAll').dataset.touched = '1'; hallsForSeats(); });
 
+  // ---------------------------------------------------------------- the editor's clock or countdown
+  // An account field beside Chat view (the catalogue's account.clock and account.clockLock, in its words): the choice is
+  // whoever manages the account's; Lock it on their devices an admin account's alone, and only on a choice, so Their
+  // choice on a locked clock (which takes the lock off with it) is too. An account is made with none (Their choice), so a
+  // new one draws no row.
+  const clockSelect = $('uClock');
+  for (const [v, label] of AGM.catalog.ADMIN_CLOCKS) { const o = document.createElement('option'); o.value = v; o.textContent = label; clockSelect.appendChild(o); }
+  /** The editor's clock as the catalogue reads it: the account's, with the choice and lock the form holds now. */
+  const clockInForm = () => ({ ...(accountObject(editing ? editing.id : '') || {}), clock: { show: clockSelect.value || null, locked: $('uClockLock').checked } });
+  function drawClockLock() {
+    const why = editing ? AGM.catalog.ready('account', 'account.clockLock', F, clockInForm()) : true;
+    $('uClockLock').disabled = isSelf(editing) || why !== true;
+    // A lock on no choice goes with it: the box shows what would be kept (only a viewer who may take a lock off reaches
+    // Their choice on a locked clock).
+    if (!clockSelect.value) $('uClockLock').checked = false;
+    $('uClockLockWhy').textContent = isSelf(editing) ? '' : why === true ? '' : why;
+    $('uClockWords').textContent = $('uView').value === 'full' ? AGM.catalog.WORDS.clockApplies : 'What the simple view shows beside the hall\'s name. Their choice: what they pick on their device, the time of day until they do.';
+  }
+  function drawClockFields(u, self) {
+    $('uClockRow').hidden = !u;
+    const c = AGM.catalog.adminClockOf(u || {});
+    // The choices as the catalogue draws them for this account: Their choice on a locked clock the lock's alone.
+    const choices = (u && AGM.catalog.submenu('account', 'account.clock', F, accountObject(u.id))) || [];
+    for (const opt of clockSelect.options) { const v = choices.find((x) => x.value === opt.value); opt.disabled = !!(v && v.disabled); }
+    clockSelect.value = c.show || '';
+    clockSelect.disabled = self;
+    $('uClockLock').checked = c.locked;
+    drawClockLock();
+  }
+  clockSelect.addEventListener('change', drawClockLock);
+  $('uView').addEventListener('change', drawClockLock);
+
   /** The form as a change: role, halls, side rooms, On stage halls, chat view, and the rights that differ from the role's (grant / revoke). */
   function formChange() {
     if (isSelf(editing)) return { name: $('uName').value.trim() };
@@ -351,6 +388,9 @@
       rooms: ticked('t-room').concat(kept('rooms', listedRoom)),
       board: ticked('t-board').concat(kept('board', listedHall)),
       view: $('uView').value,
+      // The clock or countdown, on an account already made (one is made with none): the choice, and the lock as the form
+      // holds it (a box this viewer may not change holds the account's, so it asks no change of it).
+      ...(editing ? { clock: { show: clockSelect.value || null, locked: $('uClockLock').checked } } : {}),
       grant: caps.filter((c) => !role.caps.includes(c)),
       revoke: role.caps.filter((c) => !caps.includes(c)),
     };
@@ -372,7 +412,7 @@
       if (!r.ok) { sayIn(lateWords(r) + r.error); return; }
       if (inEditor()) $('userDialog').close();
       if (r.password) showSecret(r.user.name, r.password);
-      else say(lateWords(r) + (was ? 'Saved — ' + (r.changed.length ? 'their open pages reconnect with the new rights.' : 'nothing changed.') : 'Added.'));
+      else say(lateWords(r) + (was ? 'Saved — ' + (!r.changed.length ? 'nothing changed.' : r.changed.every((f) => f === 'view' || f === 'clock') ? 'their open pages draw it now.' : 'their open pages reconnect with the new rights.') : 'Added.'));
       load();
     };
     if (was) http('PATCH', '/api/users/' + encodeURIComponent(was.id), change, done, sayIn);
@@ -400,7 +440,16 @@
     'account.signout': (o) => accountAct(o, 'POST', '/signout', {}, (r, late) => say(late + o.name + ' is signed out on every device.')),
     'account.disable': (o) => accountAct(o, 'PATCH', '', { disabled: !o.disabled }, (r, late) => say(late + (o.disabled ? o.name + ' is turned on.' : o.name + ' is turned off — signed out everywhere.'))),
     'account.remove': (o) => accountAct(o, 'DELETE', '', undefined, (r, late) => say(late + o.name + '\'s account is removed.')),
+    // The clock or countdown chosen for the account ('' their own choice), and its lock: saved at once, its pages told live.
+    'account.clock': (o, c) => { if (typeof c.value === 'string') accountAct(o, 'PATCH', '', { clock: AGM.catalog.clockChange(c.value) }, (r, late) => say(late + clockSaid(o, r.user))); },
+    'account.clockLock': (o) => accountAct(o, 'PATCH', '', { clock: { locked: !o.clock.locked } }, (r, late) => say(late + clockSaid(o, r.user))),
   });
+  /** What an account's clock or countdown is now, in the admin's words: "Kim's clock or countdown: Time of day, locked on their devices." */
+  function clockSaid(o, user) {
+    const c = AGM.catalog.adminClockOf(user || {});
+    const label = (AGM.catalog.ADMIN_CLOCKS.find(([v]) => v === (c.show || '')) || ['', ''])[1];
+    return o.name + '\'s clock or countdown: ' + label + (c.locked ? ', locked on their devices.' : '.');
+  }
   // The editor's own buttons are doors to the same acts, asked in place inside the editor.
   for (const [btn, id] of [['resetBtn', 'account.password'], ['signOutAllBtn', 'account.signout'], ['disableBtn', 'account.disable'], ['removeBtn', 'account.remove']]) {
     $(btn).addEventListener('click', () => {

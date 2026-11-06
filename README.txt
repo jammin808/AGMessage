@@ -64,12 +64,13 @@ First time on a new laptop
    seat (it then sits On stage in that hall's Main room, reads and writes
    messages there and nothing else, answers none of that hall's help
    requests, even from the halls board, but marks its own sorted; and it
-   is backstage everywhere else), and a chat view (by its seat, simple or
-   full). Only someone who holds that room or hall themselves gives it,
-   nobody sets them on their own account, and each change is an audit row
-   (user.update). A chat view changed alone reaches the person's open
-   pages without closing them; any other change reconnects them. The
-   halls board lists the rooms each person may enter.
+   is backstage everywhere else), a chat view (by its seat, simple or
+   full) and a clock or countdown (below). Only someone who holds that
+   room or hall themselves gives it, nobody sets them on their own
+   account, and each change is an audit row (user.update). A chat view or
+   a clock changed alone reaches the person's open pages without closing
+   them; any other change reconnects them. The halls board lists the
+   rooms each person may enter.
    On the Accounts page, Edit... shows "Halls and rooms": each hall's
    Main room ("Hall 2 - Main room and hall rights") with "On stage
    (Board member)" beside it, and its other rooms set in under it (tick
@@ -78,8 +79,10 @@ First time on a new laptop
    On stage is offered only to someone who may send messages (a Viewer
    reads only: "Reads only: On stage needs Send messages.").
    "Every hall's Main room" never reaches a hall's other rooms. Chat view
-   is beside the role, and the rights are in three groups: In the room,
-   Show, Run AGMessage. A row reads "Hall 2 (Main, Legal) · On stage".
+   is beside the role, with Clock or countdown and Lock it on their
+   devices under it (an account already made), and the rights are in
+   three groups: In the room, Show, Run AGMessage. A row reads "Hall 2
+   (Main, Legal) · On stage".
    To put several people into one room at once: the room's ⋯ ->
    Members... (on the admin page, or in the hall's Set up; on a hall's
    Main room, Board members... for who sits On stage: who goes into the
@@ -246,8 +249,13 @@ Every day of the event
   picks another. Your Priority messages: press Priority before Send; it
   is off again after each send. A Priority message you scrolled away from
   waits in a strip above the chat. The view starts in Dark.
-  The ... (top right) holds Text size (Aa- and Aa+), Theme (Light or
-  Dark), Full screen (where the device has it) and Leave the hall.
+  Beside the hall's name: the time of day, until you or the admin choose
+  Stagewatch's countdown ("4:30 left", then "Wrap up", then "0:30 over";
+  "--:--" when Stagewatch is offline or not linked) or Off.
+  The ... (top right) holds Text size (Aa- and Aa+), Clock or countdown
+  (Time of day, Countdown or Off, kept on this device: unless the admin
+  has locked it, when it says "Set by the admin for you."), Theme (Light
+  or Dark), Full screen (where the device has it) and Leave the hall.
   On an iPad mini, or with the tablet further away than an arm's length,
   press Aa+ in ... -> Text size.
   If ... says the device may sleep, open AGMessage with https:// (trust
@@ -258,6 +266,15 @@ Every day of the event
   view in the admin page's people list (beside Seat), in the person's ...
   in the hall page's People list, or on the Accounts page for an account.
   By seat is Simple On stage and Full everywhere else.
+- Beside it, the admin chooses their Clock or countdown (Their choice -
+  the clock at first -, Time of day, Stagewatch countdown or Off) and may
+  tick Lock it on their devices, so the device's own choice is not
+  offered: in the same three places (the admin page's people list, the
+  person's ... in People, the Accounts page). The choice applies in the
+  simple view. Only an admin locks it: the token at the laptop or an
+  account whose role is Admin; a manager given Manage settings or Manage
+  accounts may choose, never lock. Every change, lock and unlock is an
+  audit row (person.clock for a guest, user.update for an account).
 - A browser signed in to an account opens its halls from the halls board,
   never with a code: a code link opened there says so and offers "Open your
   halls" or "Sign out". To join as a guest on that device, sign out first.

@@ -1014,6 +1014,13 @@ html[data-theme="dark"] .doc-panel.priority .doc-panel-header {
 .admin-users th { background: #f6f8fb; font-size: .78rem; letter-spacing: .04em; color: var(--muted); text-transform: uppercase; }
 .admin-users tr:last-child td { border-bottom: 0; }
 .role-select { padding: .3rem .5rem; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
+/* A person's Clock or countdown cell: the admin's choice, its lock under it, and where it applies. The people's table
+   scrolls within its section on a narrow screen, never the page */
+.admin-users-section { position: relative; max-width: 100%; overflow-x: auto; }
+.clock-select { max-width: 11rem; }
+.clock-lock { display: flex; align-items: center; gap: var(--sp-1); margin-top: var(--sp-1); font-size: var(--fs-sm); color: var(--c-ink); }
+.clock-why, .clock-applies { display: block; margin-top: 2px; }
+.clock-why[hidden], .clock-applies[hidden] { display: none; }
 
 .admin-users-section, .admin-messages-section { margin-top: 1.2rem; }
 .admin-users-section h3, .admin-messages-section h3 {
@@ -1752,6 +1759,7 @@ dialog:not([open]) { display: none; }
 .agm-backdrop { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: var(--z-dialog); background: rgba(8, 12, 24, .55); }
 .agm-dialog h2 { margin: 0 0 .8rem; font-size: 1.2rem; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 .8rem; }
+.form-grid[hidden] { display: none; }
 @media (max-width: 560px) { .form-grid { grid-template-columns: 1fr; } }
 fieldset.field { border: 1px solid var(--border); border-radius: var(--radius); padding: .5rem .8rem .7rem; }
 fieldset.field legend { font-weight: 600; font-size: .85rem; padding: 0 .3rem; }
@@ -2193,7 +2201,30 @@ body[data-view="simple"] #researchCompose, body[data-view="simple"] .compose-to,
 body[data-view="simple"] .msg .reactions, body[data-view="simple"] .msg .seen-line, body[data-view="simple"] .sys.presence,
 body[data-view="simple"] .msg > header .msg-acts, body[data-view="simple"] .action-responses,
 body[data-view="simple"] .docs-files, body[data-view="simple"] #docExpandRail { display: none; }
-body[data-view="simple"] .stage-chip { font-size: var(--fs-readout); }
+/* The clock or countdown (app.js Clock) is the simple view's: the countdown's chip is the full view's */
+body[data-view="simple"] .stage-chip { display: none; }
+/* The hall's name gives way first: the readout, Help and the ⋯ keep their room on the row */
+body[data-view="simple"] .app-bar .app-title { flex: 1 1 0; }
+/* The clock or countdown after the hall's name, before Help: 18 px, never larger than the body text, on no fill of its own,
+   its digits ink and Stagewatch's colour its 3 px left edge alone (none, or Stagewatch's white: --c-border). Two lines on a
+   tablet (the digits, then the title and Stagewatch's line); nothing moves but the minute and Stagewatch's own digits. */
+.bv-readout { display: none; }
+body[data-view="simple"] .bv-readout { display: flex; flex-direction: column; justify-content: center; flex: 0 1 auto; min-width: 0;
+  padding: 2px var(--sp-3) 2px 10px; border-left: 3px solid var(--bv-sw, var(--c-border)); color: var(--c-ink); }
+body[data-view="simple"] .bv-readout[hidden] { display: none; }
+.bv-ro-line { display: flex; align-items: baseline; gap: var(--sp-2); white-space: nowrap; }
+.bv-ro-icon { font-size: var(--fs-md); }
+.bv-ro-icon.soon { color: var(--c-warn); }
+.bv-ro-time { font-size: var(--fs-readout); font-weight: 600; font-variant-numeric: tabular-nums; color: var(--c-ink); }
+.bv-ro-strip { max-width: 22rem; font-size: var(--fs-md); color: var(--c-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bv-ro-strip[hidden] { display: none; }
+/* No live time: --:-- and why, in muted ink, never a confident stale time */
+.bv-readout.stale .bv-ro-time, .bv-readout.stale .bv-ro-strip { color: var(--c-ink-muted); }
+/* On the take layer's bar, the same readout on the stage's ground: its ink, and no live time in the stage's muted ink
+   (--stage-dim, 6:1 or more on --stage), as the take's own stale time is */
+body[data-view="simple"] .layer-readout { flex: 0 1 auto; }
+.layer-readout .bv-ro-time, .layer-readout .bv-ro-strip { color: var(--stage-ink); }
+.layer-readout.stale .bv-ro-time, .layer-readout.stale .bv-ro-strip { color: var(--stage-dim); }
 /* Help keeps its word whole: the hall's name gives way first */
 body[data-view="simple"] .app-bar .app-meta > .help-btn { flex: none; white-space: nowrap; }
 /* A phone's header is one row; down 5 s or more, "Offline · reconnecting" is its second row, under the name, Help and ⋯
@@ -2202,6 +2233,16 @@ body[data-view="simple"] .app-bar .app-meta > .help-btn { flex: none; white-spac
   body[data-view="simple"][data-down="1"] .app-bar { flex-wrap: wrap; }
   body[data-view="simple"][data-down="1"] .app-bar .app-meta { display: contents; }
   body[data-view="simple"][data-down="1"] .app-bar .app-status { order: 9; flex: 0 0 100%; }
+  /* The readout's digits on row 1, Stagewatch's colour their edge; its title and line on a row of their own under the
+     name, Help and ⋯, only while Stagewatch has a line */
+  body[data-view="simple"] .app-bar .bv-readout:not([hidden]) { display: contents; }
+  body[data-view="simple"] .app-bar .bv-ro-line { padding: 4px 4px 4px 8px; border-left: 3px solid var(--bv-sw, var(--c-border)); }
+  body[data-view="simple"][data-ro-line="1"] .app-bar { flex-wrap: wrap; }
+  body[data-view="simple"][data-ro-line="1"] .app-bar .app-meta { display: contents; }
+  body[data-view="simple"] .app-bar .bv-ro-strip { order: 10; flex: 0 0 100%; max-width: none; padding: 4px 0; border-top: 1px solid var(--c-border); }
+  /* Row 2 holds one thing: while the page itself is down, "Offline · reconnecting" (a countdown's line would only say
+     Stagewatch is offline too) */
+  body[data-view="simple"][data-down="1"] .app-bar .bv-ro-strip { display: none; }
 }
 
 /* The two tabs under 900 px wide, while something is shown: Chat, and 📺 Shown to you · n */
@@ -2342,6 +2383,13 @@ body[data-view="simple"] .reply-chip .reply-cancel { min-height: var(--target-to
 .bv-sheet-btn[aria-disabled="true"] { cursor: default; }
 .bv-sheet-wide { flex: 1 1 auto; text-align: left; border: 0; padding-left: 0; font-weight: 600; }
 .bv-sheet-awake { margin: 0; padding: var(--sp-3) 0; border-bottom: 1px solid var(--c-border); color: var(--c-ink); }
+/* The clock or countdown's row: its choices, and under them what is true of them (no Stagewatch linked); while the admin
+   holds it, their choice as words and why, with no control */
+.bv-sheet-wrap { flex-wrap: wrap; padding: var(--sp-1) 0; }
+.bv-sheet-col { flex-direction: column; align-items: stretch; justify-content: center; gap: 2px; padding: var(--sp-2) 0; }
+.bv-sheet-locked, .bv-sheet-why, .bv-sheet-note { margin: 0; }
+.bv-sheet-why, .bv-sheet-note { font-size: var(--fs-sm); color: var(--c-ink-muted); }
+.bv-sheet-note { flex: 0 0 100%; padding-bottom: var(--sp-1); }
 .bv-sheet-foot { margin: 0; padding: var(--sp-3) 0 var(--sp-1); font-size: var(--fs-sm); color: var(--c-ink-muted); }
 @media (max-width: 600px) {
   .bv-sheet { top: auto; right: 0; bottom: 0; left: 0; width: auto; max-width: none; max-height: 100vh; max-height: 100dvh; border-radius: var(--radius-md) var(--radius-md) 0 0; padding-bottom: max(var(--sp-2), env(safe-area-inset-bottom)); }

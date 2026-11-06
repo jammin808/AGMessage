@@ -808,7 +808,7 @@ test('a person\'s chat view: the join\'s view by the seat, the admin\'s choice f
   const tomPage = await page(tom.cookie, 'Tom backstage');
   await joined(tomPage, { roomCode: hall, as: 'account' });
   assert.deepEqual([gilJoin.view, riaJoin.view, beaJoin.view], ['simple', 'full', 'simple']);
-  assert.deepEqual(Object.keys(gilJoin).slice(-4), ['view', 'more', 'older', 'files'], 'the join\'s view, appended at its end before a first open\'s bounds');
+  assert.deepEqual(Object.keys(gilJoin).slice(-6), ['view', 'more', 'older', 'files', 'theAdmin', 'clock'], 'the join\'s view, appended before a first open\'s bounds, and the clock or countdown after them');
 
   // The admin page reads the room's people, with the view the admin chose for each ('' by the seat).
   const ctl = await page(admin, 'the admin page');
@@ -893,6 +893,202 @@ test('a person\'s chat view: the join\'s view by the seat, the admin\'s choice f
   assert.deepEqual(await act(gil, 'react', { messageId: said.id, emoji: '👍', on: true }), { ok: true });
   const reacted = (await emit(ctl, 'admin:watchRoom', { roomCode: hall })).messages.find((m) => m.id === said.id).reactions;
   assert.deepEqual(reacted.map((r) => [r.name, r.emoji, r.role]), [['Gil', '👍', 'board']]);
+});
+
+// The clock or countdown (plan 7-§17.3): the admin's choice for a person and its lock, kept for a guest by their uid
+// (pages.json) and for an account on it (accounts.json), told live to every page of theirs and their support view and
+// nobody else; the lock the admin's alone (theAdmin), on the socket and over HTTP; an account reached as the Accounts page
+// reaches it; one audit row each, the lock with it; nothing closed; the device's own choice relayed to the support view alone.
+test('the clock or countdown: the admin\'s choice and lock for a guest or an account, kept, told live to their pages and support view alone, the lock the admin\'s alone, one row each, nothing closed; the device\'s choice to the support view alone', { timeout: 120_000 }, async (t) => {
+  const srv = await startServer();
+  t.after(() => stopServer(srv.child));
+  const sockets = [];
+  t.after(() => sockets.forEach((s) => s.close()));
+  const heard = new Map();
+  const page = async (cookie, who) => {
+    const s = await connect(srv.base, cookie);
+    sockets.push(s);
+    heard.set(s, []);
+    s.onAny((ev, ...args) => heard.get(s).push([ev, args[0]]));
+    s.who = who;
+    return s;
+  };
+  const clocks = (s) => heard.get(s).filter(([ev]) => ev === 'clock').map(([, v]) => v);
+  const joined = async (s, args) => { const r = await emit(s, 'join', invited(srv.dataDir, args)); assert.equal(r.ok, true, s.who + ': ' + JSON.stringify(r)); return r; };
+  const rows = (action) => fs.readFileSync(path.join(srv.dataDir, 'audit.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((e) => e.action === action).map((e) => [e.target, e.words]);
+  const kept = () => { try { return JSON.parse(fs.readFileSync(path.join(srv.dataDir, 'pages.json'), 'utf8')).views; } catch { return null; } };
+  const onAccount = (username) => { try { return JSON.parse(fs.readFileSync(path.join(srv.dataDir, 'accounts.json'), 'utf8')).users.find((u) => u.username === username); } catch { return null; } };
+  const NONE = { show: null, locked: false };
+  const ADMIN_LOCK = 'Only an admin may lock the clock or countdown.';
+
+  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const hall = (await api(srv.base, 'POST', '/api/rooms', { name: 'Hall 2' }, { cookie: admin })).body.code;
+  const account = async (username, name, role, extra) => {
+    const made = await api(srv.base, 'POST', '/api/users', { username, name, role, password: PASSWORD, ...extra }, { cookie: admin });
+    assert.equal(made.status, 200, JSON.stringify(made.body));
+    return { id: made.body.user.id, user: made.body.user, cookie: (await api(srv.base, 'POST', '/api/auth/login', { username, password: PASSWORD })).cookie };
+  };
+  // An account is made with no clock (create neither picks nor stores one): their choice.
+  const bea = await account('bea', 'Bea Board', 'staff', { halls: [hall], board: [hall], clock: { show: 'off', locked: true } });
+  assert.deepEqual(bea.user.clock, NONE, 'made with none, whatever the make asked');
+  assert.equal(Object.hasOwn(onAccount('bea'), 'clock'), false, 'and none kept');
+  const tom = await account('tom', 'Tom Tech', 'tech', { halls: [hall] });
+  // An account a manager may reach (no more rights or halls than the manager's), whose clock holds no lock.
+  const cy = await account('cy', 'Cy Crew', 'staff', { halls: [hall] });
+  // A manager given settings.manage alone (the admin page's gate admits it, it manages no account), and one given
+  // users.manage too: neither is "the admin".
+  const max = await account('max', 'Max Manager', 'staff', { halls: [hall], grant: ['settings.manage'] });
+  const mo = await account('mo', 'Mo Manager', 'staff', { halls: [hall], grant: ['settings.manage', 'users.manage'] });
+
+  // The join's clock, last: none chosen.
+  const gil = await page(undefined, 'Gil On stage');
+  const gilJoin = await joined(gil, { roomCode: hall, name: 'Gil', role: 'board' });
+  const gil2 = await page(undefined, 'Gil\'s second device');
+  await joined(gil2, { roomCode: hall, name: 'Gil', role: 'board', uid: gilJoin.identity });
+  const ria = await page(undefined, 'Ria backstage');
+  const riaJoin = await joined(ria, { roomCode: hall, name: 'Ria', role: 'research' });
+  const beaPage = await page(bea.cookie, 'Bea On stage');
+  const beaJoin = await joined(beaPage, { roomCode: hall, as: 'account' });
+  const tomPage = await page(tom.cookie, 'Tom backstage');
+  await joined(tomPage, { roomCode: hall, as: 'account' });
+  // The admin's own account seated in the hall, which a manager may not reach.
+  const anaPage = await page(admin, 'Ana in the hall');
+  const anaJoin = await joined(anaPage, { roomCode: hall, as: 'account' });
+  assert.deepEqual([gilJoin.clock, riaJoin.clock, beaJoin.clock, Object.keys(gilJoin).at(-1), Object.keys(beaJoin).at(-1)], [NONE, NONE, NONE, 'clock', 'clock']);
+  assert.deepEqual([gilJoin.theAdmin, beaJoin.theAdmin, anaJoin.theAdmin], [false, false, true], 'the join says which page is "the admin"');
+
+  // The admin page reads the room's people with the clock the admin chose for each, beside their chat view; no other
+  // page's list says either.
+  const ctl = await page(admin, 'the admin page');
+  const watched = await emit(ctl, 'admin:watchRoom', { roomCode: hall });
+  const sid = (name) => watched.users.find((u) => u.name === name).socketId;
+  assert.ok(watched.users.every((u) => u.view === '' && JSON.stringify(u.clock) === JSON.stringify(NONE)), JSON.stringify(watched.users));
+  assert.ok(riaJoin.users.every((u) => !('clock' in u) && !('view' in u)), 'a guest\'s list says neither');
+  const gilView = await page(admin, 'the admin\'s view of Gil');
+  const gilViewJoin = await joined(gilView, { roomCode: hall, name: 'Gil', role: 'board', adminView: true, viewOf: gilJoin.uid });
+  assert.deepEqual([gilViewJoin.clock, gilViewJoin.theAdmin], [NONE, false], 'the support view is told the person\'s, and is not the admin');
+  const lists = (s) => heard.get(s).filter(([ev]) => ev === 'users').map(([, v]) => v);
+  const clockIn = (s, name) => { const l = lists(s).at(-1) || []; const u = l.find((x) => x.name === name); return u ? u.clock : undefined; };
+  await wait(300);
+  const others = [gil, gil2, ria, beaPage, tomPage];
+  const before = others.map((s) => lists(s).length);
+
+  // A guest's: told to both of Gil's devices and the admin's view of him, nobody else; kept by his uid; one row.
+  assert.deepEqual(await act(ctl, 'admin:setClock', { roomCode: hall, socketId: sid('Gil'), show: 'stage' }), { ok: true, clock: { show: 'stage', locked: false } });
+  await until(() => [gil, gil2, gilView].every((s) => clocks(s).length === 1), 4000, 'Gil\'s pages told');
+  assert.deepEqual([clocks(gil), clocks(gil2), clocks(gilView), clocks(ria), clocks(beaPage), clocks(tomPage), clocks(anaPage)],
+    [[{ show: 'stage', locked: false }], [{ show: 'stage', locked: false }], [{ show: 'stage', locked: false }], [], [], [], []]);
+  await until(() => JSON.stringify(clockIn(ctl, 'Gil')) === JSON.stringify({ show: 'stage', locked: false }), 4000, 'the admin page\'s people rows say Gil\'s clock');
+  await wait(300);
+  assert.deepEqual(others.map((s) => lists(s).length), before, 'no other page is sent its people list for a clock');
+  assert.ok(others.every((s) => lists(s).every((l) => l.every((u) => !('clock' in u)))), 'only the admin\'s list says a clock');
+  await until(() => kept() && kept()['u:' + gilJoin.uid], 4000, 'pages.json keeps it');
+  assert.deepEqual(kept()['u:' + gilJoin.uid].clock, { show: 'stage', locked: false });
+  // Locked, as it stands (no row, nobody told), and unlocked.
+  assert.deepEqual(await act(ctl, 'admin:setClock', { roomCode: hall, socketId: sid('Gil'), locked: true }), { ok: true, clock: { show: 'stage', locked: true } });
+  assert.deepEqual(await act(ctl, 'admin:setClock', { roomCode: hall, socketId: sid('Gil'), show: 'stage', locked: true }), { ok: true, already: true, clock: { show: 'stage', locked: true } });
+  await until(() => clocks(gil).length === 2 && clocks(gilView).length === 2, 4000, 'the lock told');
+  await until(() => kept()['u:' + gilJoin.uid].clock.locked === true, 4000, 'pages.json keeps the lock');
+  // A page that joins again is told it: a reload keeps it.
+  const gil3 = await page(undefined, 'Gil, reloaded');
+  assert.deepEqual((await joined(gil3, { roomCode: hall, name: 'Gil', role: 'board', uid: gilJoin.identity })).clock, { show: 'stage', locked: true });
+  gil3.close();
+  assert.deepEqual(await act(ctl, 'admin:setClock', { roomCode: hall, socketId: sid('Gil'), locked: false }), { ok: true, clock: { show: 'stage', locked: false } });
+  // Their choice again: the record goes, its view had none.
+  assert.deepEqual(await act(ctl, 'admin:setClock', { roomCode: hall, socketId: sid('Gil'), show: null }), { ok: true, clock: NONE });
+  await until(() => clocks(gil).length === 4, 4000, 'Gil told each');
+  assert.deepEqual(clocks(gil).map((c) => [c.show, c.locked]), [['stage', false], ['stage', true], ['stage', false], [null, false]]);
+  await until(() => kept() && !kept()['u:' + gilJoin.uid], 4000, 'pages.json keeps none for Gil');
+  // What may not be: a choice that is none, a lock on their choice, a person not in the room; nothing kept, nobody told.
+  assert.deepEqual(await act(ctl, 'admin:setClock', { roomCode: hall, socketId: sid('Ria'), show: 'tiny' }), { ok: false, error: 'Choose Off, Time of day or Countdown.' });
+  assert.deepEqual(await act(ctl, 'admin:setClock', { roomCode: hall, socketId: sid('Ria'), locked: true }), { ok: false, error: 'Choose one to lock it.' });
+  assert.deepEqual(await act(ctl, 'admin:setClock', { roomCode: hall, socketId: 'nobody', show: 'time' }), { ok: false, error: 'That person is not in this room now.' });
+  assert.deepEqual(clocks(ria), []);
+
+  // An account's: kept on the account, its pages told, none closed; its row the Accounts page's words.
+  assert.deepEqual(await act(ctl, 'admin:setClock', { roomCode: hall, socketId: sid('Bea Board'), show: 'time', locked: true }), { ok: true, clock: { show: 'time', locked: true } });
+  await until(() => clocks(beaPage).length === 1, 4000, 'Bea\'s page told');
+  await until(() => { const a = onAccount('bea'); return !!a && !!a.clock; }, 4000, 'accounts.json keeps it');
+  assert.deepEqual(onAccount('bea').clock, { show: 'time', locked: true });
+  assert.deepEqual((await api(srv.base, 'GET', '/api/users', undefined, { cookie: admin })).body.users.find((u) => u.username === 'bea').clock, { show: 'time', locked: true }, 'the Accounts list carries it');
+  // The Accounts page's PATCH: told live, nothing closed.
+  const patched = await api(srv.base, 'PATCH', '/api/users/' + bea.id, { clock: { show: 'off' } }, { cookie: admin });
+  assert.deepEqual([patched.status, patched.body.changed, patched.body.user.clock], [200, ['clock'], { show: 'off', locked: true }]);
+  await until(() => clocks(beaPage).length === 2, 4000, 'the PATCH told Bea\'s page');
+  assert.deepEqual(clocks(beaPage).at(-1), { show: 'off', locked: true });
+  // A clock and a view in one PATCH end no socket either.
+  assert.deepEqual((await api(srv.base, 'PATCH', '/api/users/' + bea.id, { view: 'full', clock: { show: 'stage' } }, { cookie: admin })).body.changed, ['view', 'clock']);
+  await until(() => clocks(beaPage).length === 3, 4000, 'and told it');
+  assert.deepEqual((await api(srv.base, 'PATCH', '/api/users/' + bea.id, { view: '' }, { cookie: admin })).body.changed, ['view']);
+  // Nobody sets their own, in the words a role or a right is refused in.
+  const own = await api(srv.base, 'PATCH', '/api/users/' + anaJoin.uid, { clock: { show: 'time' } }, { cookie: admin });
+  assert.deepEqual([own.status, own.body.error], [403, 'Nobody changes their own role, rights or halls — ask another admin.']);
+  // A users.manage holder who is not an admin: the choice, never the lock.
+  const moLock = await api(srv.base, 'PATCH', '/api/users/' + bea.id, { clock: { locked: false } }, { cookie: mo.cookie });
+  assert.deepEqual([moLock.status, moLock.body.error], [403, ADMIN_LOCK]);
+  const moNull = await api(srv.base, 'PATCH', '/api/users/' + bea.id, { clock: null }, { cookie: mo.cookie });
+  assert.deepEqual([moNull.status, moNull.body.error], [403, ADMIN_LOCK], 'clearing a lock is a change of it');
+  const moPick = await api(srv.base, 'PATCH', '/api/users/' + bea.id, { clock: { show: 'time', locked: true } }, { cookie: mo.cookie });
+  assert.deepEqual([moPick.status, moPick.body.changed, moPick.body.user.clock], [200, ['clock'], { show: 'time', locked: true }], 'a choice, the lock named as it stands');
+  // A lock put on a clock that holds none is a change of it too, refused whole: the account keeps its own choice.
+  const moAdds = await api(srv.base, 'PATCH', '/api/users/' + cy.id, { clock: { show: 'time', locked: true } }, { cookie: mo.cookie });
+  assert.deepEqual([moAdds.status, moAdds.body.error], [403, ADMIN_LOCK]);
+  assert.equal(Object.hasOwn(onAccount('cy'), 'clock'), false, 'and nothing kept');
+  // Their choice as every door sends it ({show: null, locked: false}): on a locked clock a change of the lock (the
+  // manager's refused), on one that holds no lock the choice alone (the manager's taken).
+  const moTheirs = await api(srv.base, 'PATCH', '/api/users/' + bea.id, { clock: { show: null, locked: false } }, { cookie: mo.cookie });
+  assert.deepEqual([moTheirs.status, moTheirs.body.error], [403, ADMIN_LOCK]);
+  const moCy = await api(srv.base, 'PATCH', '/api/users/' + cy.id, { clock: { show: 'off' } }, { cookie: mo.cookie });
+  assert.deepEqual([moCy.status, moCy.body.changed, moCy.body.user.clock], [200, ['clock'], { show: 'off', locked: false }]);
+  const moCyTheirs = await api(srv.base, 'PATCH', '/api/users/' + cy.id, { clock: { show: null, locked: false } }, { cookie: mo.cookie });
+  assert.deepEqual([moCyTheirs.status, moCyTheirs.body.changed, moCyTheirs.body.user.clock], [200, ['clock'], NONE]);
+  // What is no clock: refused in words, never thrown.
+  for (const clock of [{ show: 'tiny' }, { toString: 1 }, 'time', { show: 'time', colour: 'red' }]) {
+    const r = await api(srv.base, 'PATCH', '/api/users/' + bea.id, { clock }, { cookie: admin });
+    assert.deepEqual([r.status, r.body.error], [400, 'Choose Off, Time of day or Countdown.'], JSON.stringify(clock));
+  }
+  const unlockedNone = await api(srv.base, 'PATCH', '/api/users/' + bea.id, { clock: { show: null } }, { cookie: admin });
+  assert.deepEqual([unlockedNone.status, unlockedNone.body.error], [400, 'Choose one to lock it.']);
+  await wait(300);
+  assert.deepEqual(onAccount('bea').clock, { show: 'time', locked: true }, 'unchanged by each refusal');
+  await wait(300);
+  assert.ok(heard.get(beaPage).every(([ev]) => ev !== 'account:changed') && beaPage.connected, 'a clock-only change ends no socket');
+
+  // On the socket: a page of the admin page's gate that is not "the admin" (settings.manage alone) may choose a guest's,
+  // never lock it, and reaches no account; one that manages accounts too reaches no admin's.
+  const maxPage = await page(max.cookie, 'Max on the admin page');
+  const moPage = await page(mo.cookie, 'Mo on the admin page');
+  assert.deepEqual(await act(maxPage, 'admin:setClock', { roomCode: hall, socketId: sid('Gil'), show: 'time', locked: true }), { ok: false, error: ADMIN_LOCK });
+  assert.deepEqual(await act(maxPage, 'admin:setClock', { roomCode: hall, socketId: sid('Gil'), show: 'time' }), { ok: true, clock: { show: 'time', locked: false } });
+  assert.deepEqual(await act(maxPage, 'admin:setClock', { roomCode: hall, socketId: sid('Bea Board'), show: 'off' }), { ok: false, error: 'You may not manage accounts.' });
+  assert.deepEqual(await act(moPage, 'admin:setClock', { roomCode: hall, socketId: sid('Ana Admin'), show: 'off' }), { ok: false, error: 'Only an admin may make or change an admin.' });
+  assert.deepEqual(await act(moPage, 'admin:setClock', { roomCode: hall, socketId: sid('Bea Board'), locked: false }), { ok: false, error: ADMIN_LOCK });
+  assert.deepEqual(await act(tomPage, 'admin:setClock', { roomCode: hall, socketId: sid('Gil'), show: 'off' }), { ok: false, error: 'Not admin' });
+  assert.deepEqual(onAccount('bea').clock, { show: 'time', locked: true }, 'unchanged by the refusals');
+  // Their choice as every door sends it, on a clock the admin locked: the lock goes with the choice, so it is the admin's
+  // (the manager's refused, the admin's taken whole in one act and one row).
+  assert.deepEqual(await act(ctl, 'admin:setClock', { roomCode: hall, socketId: sid('Gil'), locked: true }), { ok: true, clock: { show: 'time', locked: true } });
+  assert.deepEqual(await act(maxPage, 'admin:setClock', { roomCode: hall, socketId: sid('Gil'), show: null, locked: false }), { ok: false, error: ADMIN_LOCK });
+  assert.deepEqual(await act(maxPage, 'admin:setClock', { roomCode: hall, socketId: sid('Gil'), show: 'stage' }), { ok: true, clock: { show: 'stage', locked: true } }, 'the choice alone, the lock as it stands');
+  assert.deepEqual(await act(ctl, 'admin:setClock', { roomCode: hall, socketId: sid('Gil'), show: null, locked: false }), { ok: true, clock: NONE });
+
+  // One row each: set, lock and unlock, the lock in the words; the account's in the Accounts page's words; no code, no text.
+  const name = 'Gil (guest) → clock: ';
+  assert.deepEqual(rows('person.clock'), [[hall, name + 'countdown'], [hall, name + 'countdown, locked'], [hall, name + 'countdown, unlocked'], [hall, name + 'their choice'], [hall, name + 'time of day'],
+    [hall, name + 'time of day, locked'], [hall, name + 'countdown, locked'], [hall, name + 'their choice, unlocked']]);
+  assert.deepEqual(rows('user.update').filter(([, w]) => /clock/.test(w)), [['bea', 'clock → time of day (locked)'], ['bea', 'clock → off (locked)'], ['bea', 'view → full; clock → countdown (locked)'], ['bea', 'clock → time of day (locked)'],
+    ['cy', 'clock → off'], ['cy', 'clock → their choice']]);
+  assert.ok(rows('person.clock').concat(rows('user.update')).every(([, w]) => !w.includes(hall) && !w.includes(gilJoin.identity || '\u0000')), 'no code and no identity in the words');
+
+  // The device's own choice: relayed from the person's page to the admin's support view of them, and to nobody else (not
+  // their other device); from the support view, to nobody; one that is none of the three, to nobody.
+  const pushes = (s) => heard.get(s).filter(([ev, v]) => ev === 'userState:push' && v && v.key === 'clock').map(([, v]) => v);
+  gil.emit('userState:push', { key: 'clock', value: 'off' });
+  await until(() => pushes(gilView).length === 1, 4000, 'the support view told');
+  gilView.emit('userState:push', { key: 'clock', value: 'time' });
+  gil2.emit('userState:push', { key: 'clock', value: 'tiny' });
+  await wait(600);
+  assert.deepEqual([pushes(gilView), pushes(gil), pushes(gil2), pushes(ria)], [[{ key: 'clock', value: 'off' }], [], [], []]);
 });
 
 // Two layers, and who may show what (plan 4-§5.9.1, §5.9.2.2): information (a web page, until the document, picture and

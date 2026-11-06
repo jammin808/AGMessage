@@ -385,9 +385,10 @@ test('accounts: side rooms, On stage halls and a chat view are kept as given, ea
   const plain = (await accounts.create({ username: 'sam', role: 'staff', password: pw })).account;
   assert.deepEqual(['rooms', 'board', 'view'].filter((f) => f in plain), []);
   assert.deepEqual((await accounts.create({ username: 'lou', role: 'staff', view: 'tiny', password: pw })).account.view, undefined, 'a view that is none of the three is not kept');
-  // What a page is told: the three last, as stored, an account without them told none.
+  // What a page is told: the three last, as stored, an account without them told none; then the clock or countdown the
+  // admin chose for it, none at first.
   const shown = acc.Accounts.view(accounts.get(made.account.id));
-  assert.deepEqual([Object.keys(shown).slice(-3), shown.rooms, shown.board, shown.view, shown.rights.rooms], [['rooms', 'board', 'view'], ['LGQ4MZP8'], ['HALLA1'], 'simple', ['LGQ4MZP8']]);
+  assert.deepEqual([Object.keys(shown).slice(-4), shown.rooms, shown.board, shown.view, shown.rights.rooms, shown.clock], [['rooms', 'board', 'view', 'clock'], ['LGQ4MZP8'], ['HALLA1'], 'simple', ['LGQ4MZP8'], { show: null, locked: false }]);
   assert.deepEqual(['rooms', 'board', 'view'].map((f) => acc.Accounts.view(plain)[f]), [[], [], '']);
   // An untouched editor's lists, in any order or case, are no change; a list that now holds something else, a view now
   // another, is; a view that is none of the three changes nothing (the route refuses it in words).
@@ -1494,7 +1495,7 @@ test('an account is given side rooms, On stage halls and a chat view: each entry
   const kim = await post({ username: 'kim', role: 'tech', halls: [hallA], rooms: [LEGAL.toLowerCase(), LEGAL], board: [hallA], view: 'simple' });
   assert.equal(kim.status, 200, JSON.stringify(kim.body));
   const u = kim.body.user;
-  assert.deepEqual([u.rooms, u.board, u.view, u.rights.rooms, u.rights.board, Object.keys(u).slice(-3)], [[LEGAL], [hallA], 'simple', [LEGAL], [hallA], ['rooms', 'board', 'view']]);
+  assert.deepEqual([u.rooms, u.board, u.view, u.rights.rooms, u.rights.board, Object.keys(u).slice(-4)], [[LEGAL], [hallA], 'simple', [LEGAL], [hallA], ['rooms', 'board', 'view', 'clock']]);
   assert.deepEqual(wordsOf(srv.dataDir, 'user.create').find((r) => r[0] === 'kim'), ['kim', 'role tech, halls ' + hallA + '; rooms → Legal (Hall A) ' + LEGAL + '; board → On stage in ' + hallA + '; view → simple']);
   const plain = await post({ username: 'sam', role: 'staff', halls: [hallA] });
   assert.deepEqual([plain.body.user.rooms, plain.body.user.board, plain.body.user.view, wordsOf(srv.dataDir, 'user.create').find((r) => r[0] === 'sam')[1]], [[], [], '', 'role staff, halls ' + hallA], 'none of the three, none said');

@@ -101,8 +101,29 @@ an account's page, only where the Accounts page would let that account change it
 `settings.manage` alone sets a guest's and is refused an account's, "You may not manage accounts."). A guest's is kept by
 their uid in `pages.json` (a device's, as their identity is), an account's on the account; each of the person's pages,
 and the admin's view of them, is told it at once, and nothing is closed. The join's answer says the view a page draws
-(`view`, its last key), and the admin's people list each person's choice (`view`, '' by the seat), sent again to the
-admin's pages, and to no other page, as a choice is made there or on the Accounts page. `/api/halls` gives each hall's row the seat the account joins its Main room with (`seat`) and
+(`view`), and the admin's people list each person's choice (`view`, '' by the seat), sent again to the
+admin's pages, and to no other page, as a choice is made there or on the Accounts page.
+
+**The clock or countdown, beside Chat view.** What the simple view draws after the hall's name is the person's own choice
+on their device (⋯ → Clock or countdown, kept on that device alone), the time of day until they make one, unless the
+admin has chosen for them: **Clock or countdown** (Their choice (the clock at first), Time of day, Stagewatch countdown,
+Off) and **Lock it on their devices**, which keeps the admin's choice there whatever the device chose. It is an account
+field like Chat view, drawn once in the Accounts page's editor (an account already made: one is made with none,
+`POST /api/users` ignores `clock`) and in the account's ⋯ (`PATCH /api/users/:id {clock: {show, locked}}`), and set for
+anyone seated in a room, a guest too, on the admin page's people rows (a Clock or countdown column beside Seat and Chat
+view, "Applies in the simple view." beside a person whose Chat view is Full, as Clock or countdown ▸ says it on its line
+in a menu) and in the person's ⋯ in the hall page's People panel (`admin:setClock {roomCode, socketId, show?, locked?}`,
+as `admin:setView` is). Whoever sets the chat view sets the choice; **only an admin locks it**: on the admin page and the
+hall page the laptop's token, or an account whose role is admin; on the Accounts page an account whose role is admin (the
+PATCH is the signed-in account's act). A manager given `settings.manage` or `users.manage` may choose, is refused the lock
+("Only an admin may lock the clock or countdown."), and its pages draw Lock disabled with those words; a lock on their
+choice is refused ("Choose one to lock it."). Their choice takes a lock off with it, so every door sends it as
+`{show: null, locked: false}`: on a locked clock it is an admin's alone, drawn disabled for a manager. Nobody sets their
+own. A guest's is kept by their uid in `pages.json` beside their chat view, an account's on the account
+(`clock`, told last on its row); each of the person's pages and the admin's view of them is told it at once (`clock`),
+nothing is closed, and the admin's people list carries it (`clock`) beside `view`. The join's answer says the admin's
+choice as its last key (`clock`). The device's own choice is the device's: told to the admin's support view of the
+person alone, never kept on the server, never audited. `/api/halls` gives each hall's row the seat the account joins its Main room with (`seat`) and
 the hall's side rooms it may enter (`rooms`, each with its key, name, people, guest code where it may know it, whether the
 code admits and its seat there), and lists apart the side rooms it may enter in a hall it does not see, by that hall's
 name and never its key; the halls board does the same (`rooms` on each row, `yourRooms` apart). Each way in carries that
@@ -525,7 +546,10 @@ renamed, "name → Media"; a hall's Main room renamed is `hall.update`, as its S
 On stage halls and chat view (`user.create` and `user.update`: "rooms → Legal (Hall 2) LGQ4MZP8", each room by its name,
 its hall's and its key, never a guest code; "board → On stage in H7K2QA"; "view → simple", "view → by seat", from the Accounts page or the admin's Chat view alike), a guest's chat view set by the
 admin (`person.view`, by the hall's key: "Rita (guest) → simple view", "… → the view by their seat"; one row for each
-change, none for one that changes nothing), the admin's reads of a
+change, none for one that changes nothing), the clock or countdown the admin chose and its lock (a guest's `person.clock`,
+by the hall's key: "Rita (guest) → clock: countdown, locked", "… → clock: countdown, unlocked", "… → clock: their
+choice"; an account's `user.update`: "clock → time of day (locked)", "clock → their choice"; every lock and unlock a
+row, none for a choice as it stands, none for a device's own choice), the admin's reads of a
 side room its account is not given (`room.read`, once each: a page entered, never a resume; a watch begun; a transcript;
 a person's view opened; the AI asked for its minutes, its messages handed to it whatever it answers; the laptop's token is given none, so its reads always write one; never
 what was read), a room's guest code switched or renewed (`room.code`, by the room's key: "code on", "code off (3 guest

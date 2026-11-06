@@ -67,6 +67,17 @@
         <label class="field"><span>Chat view</span><select id="uView"><option value="">By seat</option><option value="simple">Simple</option><option value="full">Full</option></select>
           <small class="hint">By seat: Simple where they sit On stage, Full everywhere else.</small></label>
       </div>
+      <!-- The clock or countdown the simple view draws beside the hall's name, an account field like Chat view (users.js; the
+           catalogue's account.clock and account.clockLock): their choice on their device unless an admin locks it. An
+           account is made without one: the row is drawn once the account is there. -->
+      <div class="form-grid" id="uClockRow">
+        <label class="field"><span>Clock or countdown</span><select id="uClock"></select>
+          <small class="hint" id="uClockWords">What the simple view shows beside the hall's name. Their choice: what they pick on their device, the time of day until they do.</small></label>
+        <div class="field">
+          <label class="check"><input type="checkbox" id="uClockLock" /> Lock it on their devices</label>
+          <small class="hint" id="uClockLockWhy"></small>
+        </div>
+      </div>
       <!-- Each hall's Main room (the hall itself, with its rights) and its On stage seat, its side rooms set in under it; a
            side room is given without its hall. -->
       <fieldset class="field">

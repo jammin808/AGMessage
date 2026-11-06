@@ -217,7 +217,8 @@ const BOARD_OP_ON = { ...BOARD_INFO, opOn: true };
 const DOC_INFO = { seq: 11, kind: 'doc', mark: '△', words: 'Couldn\'t show it on 2 of 6 pages: this device cannot open documents — ask for a picture', showing: 'Board pack.pdf at p. 12', arrive: 'over', op: true, mine: true, on: 4, pages: 6, nodocs: 2, cannot: 2, standin: 0 };
 const BOARD_DOC = { ...BOARD_MINE, info: DOC_INFO, nodocs: 2, standin: { said: 'a picture of p. 12' } };
 // The simple view's ⋯ sheet: standard text, dark, the screen not full, the hall as Leave names it; and at the bounds.
-const SHEET = { id: 'sheet', zoom: 1, dark: true, full: false, hall: 'Hall 2' };
+// Its clock or countdown: the time of day drawn (none chosen, B3), the hall with a Stagewatch.
+const SHEET = { id: 'sheet', zoom: 1, clock: { show: 'time', locked: false }, stage: true, dark: true, full: false, hall: 'Hall 2' };
 const SHEET_SMALLEST = { ...SHEET, zoom: 0.7, dark: false };
 const SHEET_FULL = { ...SHEET, zoom: 2.2, full: true };
 // The room's earlier messages: Show earlier while the server holds some (`more`), none once it holds none; a reply's Show
@@ -262,10 +263,10 @@ const PAGE = {
   boardUsers: C.boardFacts({ canManageUsers: true, connected: true }),
   // The Accounts page: an admin, a manager (users.manage, audit.read), one who reads the log alone, and the admin with the
   // log kept to Ana's entries.
-  accountsAdmin: C.accountFacts({ account: { id: 'a-root', ...caps('users.manage', 'audit.read', 'audit.export') }, admin: true }),
+  accountsAdmin: C.accountFacts({ account: { id: 'a-root', role: 'admin', ...caps('users.manage', 'audit.read', 'audit.export') }, admin: true }),
   accountsManager: C.accountFacts({ account: { id: 'a-mia', ...caps('users.manage', 'audit.read') }, admin: false }),
   auditor: C.accountFacts({ account: { id: 'a-aud', ...caps('audit.read') } }),
-  filtered: C.accountFacts({ account: { id: 'a-root', ...caps('users.manage', 'audit.read', 'audit.export') }, admin: true, filter: { by: 'actor', value: 'account:a-ana' } }),
+  filtered: C.accountFacts({ account: { id: 'a-root', role: 'admin', ...caps('users.manage', 'audit.read', 'audit.export') }, admin: true, filter: { by: 'actor', value: 'account:a-ana' } }),
 };
 const ENTRY = { seq: 12, at, action: 'user.update', actor: { t: 'account', id: 'a-ana', name: 'Ana' }, target: 'kim', words: 'role → tech', mark: 'intact' };
 const PAGE_OBJECTS = {
@@ -343,7 +344,7 @@ const PAGE_OBJECTS = {
     sideCrew: { code: 'LGQ4MZP8', id: 'h5', state: 'coming', canRespond: true, canOpen: false, hall: 'Hall 2 › Legal', room: 'Legal', category: 'Vision' },
   },
   account: {
-    other: { id: 'a-kim', name: 'Kim Tech', username: 'kim', disabled: false, locked: '', self: false },
+    other: { id: 'a-kim', name: 'Kim Tech', username: 'kim', disabled: false, locked: '', self: false, clock: { show: 'time', locked: false } },
     off: { id: 'a-kim', name: 'Kim Tech', username: 'kim', disabled: true, locked: '', self: false },
     locked: { id: 'a-root', name: 'Root Admin', username: 'root', disabled: false, locked: 'Only an admin may change an admin\'s account.', self: false },
     self: { id: 'a-root', name: 'Root Admin', username: 'root', disabled: false, locked: '', self: true },
@@ -503,7 +504,9 @@ test('one word for one act: "…" for an act that asks first or opens a dialog, 
 
 test('the facts: read from the server\'s answers, the link\'s words by its state, and nothing a page could name for itself', () => {
   const f = plain(C.facts({ role: 'director', uid: 'u1', uploadToken: '', canSendToStage: 1, stage: { status: 'connected' }, forwardable: 'yes', screens: { manage: true, displays: [{}, {}] }, connected: true }));
-  assert.deepEqual(f, { page: 'hall', role: 'board', view: 'full', uid: 'u1', post: true, viewer: false, pin: true, ask: false, respondHelp: false, waiting: { plain: [], priority: [] }, tapped: '', changing: '', files: false, canSendToStage: true, canPropose: false, stageWhy: '', ai: false, download: false, takeDownloads: true, canScreens: true, screensManage: true, screens: 2, forwardable: true, sends: false, targets: [], mayKnowCode: false, setsCode: false, admin: false, connected: true, support: '', canPush: false, stagewatch: true, fullscreen: false, canWeb: false, canShow: false, docs: true });
+  assert.deepEqual(f, { page: 'hall', role: 'board', view: 'full', uid: 'u1', post: true, viewer: false, pin: true, ask: false, respondHelp: false, waiting: { plain: [], priority: [] }, tapped: '', changing: '', files: false, canSendToStage: true, canPropose: false, stageWhy: '', ai: false, download: false, takeDownloads: true, canScreens: true, screensManage: true, screens: 2, forwardable: true, sends: false, targets: [], mayKnowCode: false, setsCode: false, admin: false, connected: true, support: '', canPush: false, stagewatch: true, fullscreen: false, canWeb: false, canShow: false, docs: true, theAdmin: false });
+  // Whether this page is "the admin" (the join's theAdmin), whose alone is the clock or countdown's lock: true alone says so.
+  assert.deepEqual([C.facts({ theAdmin: true }).theAdmin, C.facts({ theAdmin: 'yes' }).theAdmin, C.facts({ theAdmin: 1 }).theAdmin, C.facts({}).theAdmin], [true, false, false, false]);
   // Whether this device opens documents (its own probe at load, plan 4-§5.15.2): only its probe's false says it cannot.
   assert.deepEqual([C.facts({ docs: false }).docs, C.facts({ docs: true }).docs, C.facts({}).docs, C.facts({ docs: 0 }).docs], [false, true, true, true]);
   // Who may download (lib/pages.js mayDownload, as the server answers the seat): a seat backstage that is not a Viewer
@@ -766,8 +769,8 @@ test('the simple view\'s second door: a tap brings a message\'s own row, Got it 
 
 test('the simple view\'s ⋯ sheet: Text size, Theme, Full screen only where the device has it, Leave asked in place; none in the full view; the support view acts on none', () => {
   const shown = (f, o) => plain(C.shown('sheet', f, o)).map((e) => e.id);
-  assert.deepEqual(shown(SEATS.boardSimple, SHEET), ['sheet.size', 'sheet.theme', 'sheet.leave'], 'a device without the Fullscreen API: no Full screen row');
-  assert.deepEqual(shown(SEATS.boardSimpleFull, SHEET), ['sheet.size', 'sheet.theme', 'sheet.fullscreen', 'sheet.leave']);
+  assert.deepEqual(shown(SEATS.boardSimple, SHEET), ['sheet.size', 'sheet.clock', 'sheet.theme', 'sheet.leave'], 'a device without the Fullscreen API: no Full screen row');
+  assert.deepEqual(shown(SEATS.boardSimpleFull, SHEET), ['sheet.size', 'sheet.clock', 'sheet.theme', 'sheet.fullscreen', 'sheet.leave']);
   assert.deepEqual([shown(SEATS.board, SHEET), shown(SEATS.boardFull, SHEET), shown(SEATS.research, SHEET)], [[], [], []], 'the full view has its header\'s ⋯');
   assert.deepEqual(ids('sheet', SEATS.boardSimpleFull, SHEET), [], 'no menu: the sheet draws its rows');
   // Text size steps by a tenth between the page's bounds; the theme is one of two, the one drawn checked.
@@ -776,6 +779,12 @@ test('the simple view\'s ⋯ sheet: Text size, Theme, Full screen only where the
   assert.deepEqual(sub('sheet.size', SHEET_SMALLEST).map((v) => v.disabled), ['The text is as small as it goes.', '']);
   assert.deepEqual(sub('sheet.size', SHEET_FULL).map((v) => v.disabled), ['', 'The text is as large as it goes.']);
   assert.deepEqual(sub('sheet.theme', SHEET).map((v) => [v.value, v.checked]), [['light', false], ['dark', true]]);
+  // The clock or countdown: Time of day · Countdown · Off, the one drawn checked; while the admin holds it, no choice acts
+  // and the row says whose it is.
+  assert.deepEqual(sub('sheet.clock', SHEET).map((v) => [v.value, v.label, v.checked]), [['time', 'Time of day', true], ['stage', 'Countdown', false], ['off', 'Off', false]]);
+  assert.deepEqual(sub('sheet.clock', { ...SHEET, clock: { show: 'off', locked: false } }).map((v) => v.checked), [false, false, true]);
+  assert.equal(C.ready('sheet', 'sheet.clock', SEATS.boardSimple, SHEET), true);
+  assert.equal(C.ready('sheet', 'sheet.clock', SEATS.boardSimple, { ...SHEET, clock: { show: 'stage', locked: true } }), 'Set by the admin for you.');
   assert.deepEqual(sub('sheet.theme', SHEET_SMALLEST).map((v) => [v.value, v.checked]), [['light', true], ['dark', false]]);
   assert.deepEqual([SHEET, SHEET_FULL].map((o) => C.entry('sheet', 'sheet.fullscreen').label(SEATS.boardSimpleFull, o)), ['Full screen', 'Leave full screen']);
   // Leave asks in place, in the sheet's words; it is not a danger (it loses nothing).
@@ -795,6 +804,74 @@ test('Chat view ▸: the admin\'s choice of the view a person\'s pages draw, By 
   // The hall page: the admin's own page, in the full view, on a person of the People panel (a sender's name has no page).
   assert.deepEqual([SEATS.admin, SEATS.research, SEATS.boardSimple, SEATS.support].map((f) => plain(C.shown('person', f, row)).some((x) => x.id === 'person.chatView')), [true, false, false, false]);
   assert.equal(plain(C.shown('person', SEATS.admin, { ...row, socketId: '' })).some((x) => x.id === 'person.chatView'), false, 'a sender carries no page');
+});
+
+test('the clock or countdown: AGM.clockFor draws the admin\'s locked choice, else the device\'s, else the admin\'s, else the time of day (B3)', () => {
+  const clockFor = AGM.clockFor;
+  // Locked: the admin's, whatever the device chose.
+  assert.equal(clockFor({ admin: { show: 'time', locked: true }, device: 'stage' }), 'time');
+  assert.equal(clockFor({ admin: { show: 'off', locked: true }, device: 'time' }), 'off');
+  // Unlocked: the device's own choice wins on that device.
+  assert.equal(clockFor({ admin: { show: 'time', locked: false }, device: 'off' }), 'off');
+  // No device choice: the admin's.
+  assert.equal(clockFor({ admin: { show: 'stage', locked: false } }), 'stage');
+  assert.equal(clockFor({ admin: { show: 'stage', locked: false }, device: null }), 'stage');
+  // Nothing chosen anywhere: the time of day (owner answer B3).
+  assert.equal(clockFor({}), 'time');
+  assert.equal(clockFor({ admin: { show: null, locked: false } }), 'time');
+  assert.equal(clockFor(null), 'time');
+  // The device's Off with nothing from the admin: Off.
+  assert.equal(clockFor({ admin: { show: null, locked: false }, device: 'off' }), 'off');
+  // Read by type: a device value that is none is no choice; a lock on no choice holds nothing.
+  assert.equal(clockFor({ admin: { show: 'stage', locked: false }, device: 'tiny' }), 'stage');
+  assert.equal(clockFor({ admin: { show: null, locked: true }, device: 'off' }), 'off');
+  assert.equal(clockFor({ admin: { show: { toString: 1 }, locked: true }, device: 'stage' }), 'stage');
+});
+
+test('Clock or countdown ▸ and Lock it on their devices: the admin\'s choice for a person (Their choice first), its lock the admin\'s alone and only on a choice; where Chat view is', () => {
+  const values = (f, o) => plain(C.submenu('person', 'person.clock', f, o)).map((v) => [v.value, v.label, v.checked]);
+  assert.deepEqual(values(PAGE.admin, { socketId: 's-kim', uid: 'u-kim', name: 'Kim' }),
+    [['', 'Their choice (the clock at first)', true], ['time', 'Time of day', false], ['stage', 'Stagewatch countdown', false], ['off', 'Off', false]]);
+  assert.deepEqual(values(PAGE.admin, { socketId: 's-kim', uid: 'u-kim', name: 'Kim', clock: { show: 'stage', locked: true } }).map((v) => v[2]), [false, false, true, false]);
+  const pick = C.entry('person', 'person.clock');
+  const lock = C.entry('person', 'person.clockLock');
+  assert.deepEqual([pick.verb, pick.mode, pick.group, lock.verb, lock.mode, lock.group], ['admin:setClock', 'now', '4_manage', 'admin:setClock', 'now', '4_manage']);
+  // The lock is a toggle, checked as it stands.
+  assert.deepEqual([{}, { clock: { show: 'time', locked: false } }, { clock: { show: 'time', locked: true } }].map((c) => lock.checked(PAGE.admin, c)), [false, false, true]);
+  const lockItem = (f, o) => plain(C.items('person', f, o)).find((i) => i.id === 'person.clockLock');
+  const locked = lockItem(PAGE.admin, { socketId: 's-kim', name: 'Kim', clock: { show: 'time', locked: true } });
+  assert.deepEqual([locked.role, locked.checked, locked.disabled, locked.label], ['menuitemcheckbox', true, '', 'Lock it on their devices']);
+  // The hall page: the admin's own page, in the full view, on a person of the People panel (a sender carries no page); a
+  // page that is the admin's but not "the admin" (an admin page of a manager) draws the lock disabled with the server's words.
+  const row = { id: 'person:u-kim', uid: 'u-kim', name: 'Kim', role: 'board', key: 'u:u-kim', socketId: 's-kim', view: '', clock: { show: 'time', locked: false } };
+  const hall = (f) => plain(C.shown('person', f, row)).map((x) => x.id).filter((id) => /^person\.clock/.test(id));
+  assert.deepEqual([SEATS.admin, SEATS.research, SEATS.boardSimple, SEATS.support].map(hall), [['person.clock', 'person.clockLock'], [], [], []]);
+  const theAdmin = seat({ role: 'research', uid: 'a-root', admin: true, theAdmin: true, account: { role: 'admin' } });
+  assert.deepEqual([C.ready('person', 'person.clockLock', SEATS.admin, row), C.ready('person', 'person.clockLock', theAdmin, row)], ['Only an admin may lock the clock or countdown.', true]);
+  assert.equal(C.ready('person', 'person.clockLock', theAdmin, { ...row, clock: { show: null, locked: false } }), 'Choose one to lock it.');
+  // The Accounts page's: the same choices and lock, an account field, never on one's own, the lock the admin's alone.
+  assert.deepEqual(plain(C.submenu('account', 'account.clock', PAGE.accountsAdmin, PAGE_OBJECTS.account.other)).map((v) => [v.value, v.checked]), [['', false], ['time', true], ['stage', false], ['off', false]]);
+  assert.deepEqual(['account.clock', 'account.clockLock'].map((id) => C.entry('account', id).verb), ['http:PATCH /api/users/:id', 'http:PATCH /api/users/:id']);
+  // On the Accounts page the lock is an admin account's (the PATCH's rule), whatever "the admin" the page was told: the
+  // laptop's token beside a manager's account locks nothing there.
+  const tokenBesideManager = C.accountFacts({ account: { id: 'a-mia', role: 'staff', ...caps('users.manage') }, admin: true });
+  assert.deepEqual([C.ready('account', 'account.clockLock', tokenBesideManager, PAGE_OBJECTS.account.other), C.ready('account', 'account.clockLock', PAGE.accountsAdmin, PAGE_OBJECTS.account.other)],
+    ['Only an admin may lock the clock or countdown.', true]);
+  // Their choice takes a lock off with the choice it held: on a locked clock it is the lock's alone, drawn disabled with
+  // the server's words for anyone else, on every door; on a clock with no lock it is anyone's who chooses.
+  const lockedTime = { clock: { show: 'time', locked: true } };
+  const theirs = (kind, id, f, o) => plain(C.submenu(kind, id, f, o)).find((v) => v.value === '').disabled;
+  assert.deepEqual([theirs('person', 'person.clock', SEATS.admin, { ...row, ...lockedTime }), theirs('person', 'person.clock', theAdmin, { ...row, ...lockedTime }), theirs('person', 'person.clock', SEATS.admin, row),
+    theirs('account', 'account.clock', PAGE.accountsManager, { ...PAGE_OBJECTS.account.other, ...lockedTime }), theirs('account', 'account.clock', PAGE.accountsAdmin, { ...PAGE_OBJECTS.account.other, ...lockedTime })],
+  ['Only an admin may lock the clock or countdown.', '', '', 'Only an admin may lock the clock or countdown.', '']);
+  assert.ok(plain(C.submenu('person', 'person.clock', SEATS.admin, { ...row, ...lockedTime })).filter((v) => v.value !== '').every((v) => v.disabled === ''), 'every other choice stays anyone\'s who chooses');
+  // What each door sends: a choice alone, or Their choice with the lock off.
+  assert.deepEqual(plain(['', 'time', 'stage', 'off'].map(C.clockChange)), [{ show: null, locked: false }, { show: 'time' }, { show: 'stage' }, { show: 'off' }]);
+  // Beside a person or an account whose Chat view is Full, Clock or countdown ▸ says on its line where it applies; nowhere else.
+  const note = (kind, f, o) => (plain(C.items(kind, f, o)).find((i) => i.id === kind + '.clock') || {}).note;
+  assert.deepEqual([note('person', theAdmin, { ...row, view: 'full' }), note('person', theAdmin, row), note('person', PAGE.admin, { socketId: 's-kim', name: 'Kim', view: 'full' }),
+    note('account', PAGE.accountsAdmin, { ...PAGE_OBJECTS.account.other, view: 'full' }), note('account', PAGE.accountsAdmin, PAGE_OBJECTS.account.other)],
+  ['Applies in the simple view.', undefined, 'Applies in the simple view.', 'Applies in the simple view.', undefined]);
 });
 
 test('Got it: the simple view\'s answer to backstage, held, rank 1, "Got all N" for N plain messages waiting', () => {
@@ -1070,7 +1147,10 @@ test('the other pages\' facts: read from the server\'s answers, and nothing a pa
   assert.deepEqual(plain(C.boardFacts({ canManageHalls: true, canDrive: 1, connected: true, isAdmin: true, canManageUsers: true })), { page: 'halls', manageHalls: true, admin: true, manageUsers: true, canDrive: true, connected: true, support: '' });
   assert.deepEqual(plain(C.boardFacts({ canManageHalls: true, isAdmin: 'yes', canManageUsers: 1 })), { page: 'halls', manageHalls: true, admin: false, manageUsers: false, canDrive: false, connected: false, support: '' }, 'the admin and Members… only on a true');
   assert.deepEqual(plain(C.accountFacts({ account: { id: 'a-1', rights: { caps: ['users.manage', 'audit.read', 'audit.export'] } }, admin: true, filter: { by: 'actor', value: 'account:a-2', words: 'x' } })),
-    { page: 'accounts', uid: 'a-1', manageUsers: true, auditRead: true, auditExport: true, theAdmin: true, filter: { by: 'actor', value: 'account:a-2' }, connected: true, support: '' });
+    { page: 'accounts', uid: 'a-1', manageUsers: true, auditRead: true, auditExport: true, theAdmin: true, adminRole: false, filter: { by: 'actor', value: 'account:a-2' }, connected: true, support: '' });
+  // The clock or countdown's lock is changed by the PATCH as the account signed in: an admin by its role, whatever the
+  // page's other answers say ("the admin" by the laptop's token beside a manager's account is not).
+  assert.deepEqual([C.accountFacts({ account: { role: 'admin' } }).adminRole, C.accountFacts({ account: { role: 'staff' }, admin: true }).adminRole, C.accountFacts({}).adminRole], [true, false, false]);
   assert.deepEqual([C.accountFacts({ account: { rights: { caps: ['audit.export'] } } }).auditExport, C.accountFacts({ filter: { by: 'role', value: 'x' } }).filter, C.accountFacts({}).connected],
     [false, null, true], 'an export reads every entry (audit.read as well); a filter of no known kind is none; HTTP has no connection to lose');
 });
@@ -1103,8 +1183,10 @@ test('the other pages\' matrix: what each seat is shown on each object of the ad
     ['adminRoom', 'boardCrew', O.adminRoom.side, []],
     // A person: a code guest's seat is the admin's to set; an account's follows its rights (no Seat).
     // Chat view ▸ first, for every person seated here, a guest's or an account's.
-    ['person', 'admin', O.person.guest, ['person.chatView', 'person.seat', 'person.forward', 'person.view', 'person.kick']],
-    ['person', 'admin', O.person.account, ['person.chatView', 'person.forward', 'person.unforward', 'person.view', 'person.kick']],
+    // Clock or countdown ▸ and Lock it on their devices beside it, for the same people.
+    ['person', 'admin', O.person.guest, ['person.chatView', 'person.clock', 'person.clockLock', 'person.seat', 'person.forward', 'person.view', 'person.kick']],
+    ['person', 'admin', O.person.account, ['person.chatView', 'person.clock', 'person.clockLock', 'person.forward', 'person.unforward', 'person.view', 'person.kick']],
+    ['person', 'manager', O.person.guest, ['person.chatView', 'person.clock', 'person.clockLock', 'person.seat', 'person.forward', 'person.view', 'person.kick']],
     ['person', 'notAdmin', O.person.guest, []],
     ['adminMsg', 'admin', O.adminMsg.text, ['adminMsg.copy', 'adminMsg.delete']],
     // A file of the watched room: ⬇ Download, the server's act by a ticket, as on the hall page.
@@ -1169,7 +1251,9 @@ test('the other pages\' matrix: what each seat is shown on each object of the ad
     ['help', 'boardCrew', O.help.sideCrew, ['help.resolve']],
     // An account: Edit, a new one-time password and Sign out everywhere; Turn off and Remove last, never on one's own;
     // a locked row keeps Edit alone (disabled, with its reason); one who reads only the log is shown none.
-    ['account', 'accountsAdmin', O.account.other, ['account.edit', 'account.password', 'account.signout', 'account.disable', 'account.remove']],
+    // The clock or countdown chosen for the account and its lock, account fields, never on one's own.
+    ['account', 'accountsAdmin', O.account.other, ['account.edit', 'account.password', 'account.signout', 'account.clock', 'account.clockLock', 'account.disable', 'account.remove']],
+    ['account', 'accountsManager', O.account.other, ['account.edit', 'account.password', 'account.signout', 'account.clock', 'account.clockLock', 'account.disable', 'account.remove']],
     ['account', 'accountsAdmin', O.account.self, ['account.edit', 'account.password', 'account.signout']],
     ['account', 'accountsManager', O.account.locked, ['account.edit']],
     ['account', 'auditor', O.account.other, []],
@@ -1234,6 +1318,13 @@ test('the other pages: what may be done but not now is shown, disabled, with the
   assert.deepEqual(why('laptop', 'adminOffline', O.laptop.two), { 'laptop.refresh': C.WORDS.offline, 'laptop.copy': '' });
   // The Accounts page has no socket: nothing there is refused for a connection.
   assert.deepEqual(Object.values(why('account', 'accountsAdmin', O.account.other)).filter(Boolean), []);
+  // Lock it on their devices is the admin's alone, and only on a choice: a manager's page shows it disabled with the
+  // server's words, and on an account whose choice is theirs, so does the admin's.
+  assert.equal(why('account', 'accountsManager', O.account.other)['account.clockLock'], 'Only an admin may lock the clock or countdown.');
+  assert.equal(why('account', 'accountsAdmin', O.account.off)['account.clockLock'], 'Choose one to lock it.');
+  assert.equal(why('person', 'manager', O.person.guest)['person.clockLock'], 'Only an admin may lock the clock or countdown.');
+  assert.equal(why('person', 'admin', O.person.guest)['person.clockLock'], 'Choose one to lock it.');
+  assert.equal(why('person', 'admin', { ...O.person.guest, clock: { show: 'stage', locked: true } })['person.clockLock'], '', 'a choice locked: the admin unlocks it');
 });
 
 test('the other pages: the inline bar, the asks and their words, the caps and the keys', () => {

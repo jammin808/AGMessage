@@ -21,6 +21,9 @@
         <span id="whoami" class="whoami"></span>
       </div>
       <div class="app-meta">
+        <!-- The simple view's clock or countdown (app.js, Clock): the time of day by default, Stagewatch's countdown with its
+             title and line under it, or nothing; text, never a control. The full view keeps the countdown's chip. -->
+        <div class="bv-readout" id="bvReadout" hidden></div>
         <span class="app-status">
           <span class="status-chip conn-chip" id="connChip"><span class="chip-mark" id="connDot" role="img" aria-label="Connecting" title="Connecting">◷</span><span class="conn-words" id="connWords" hidden>Offline · reconnecting</span></span>
           <span class="status-chip stage-chip" id="stageChip" hidden title="Live from Stagewatch"><b id="stageTime">--:--</b> <span id="stageTitle"></span></span>
@@ -292,6 +295,8 @@
   <section class="page-layer" id="pageLayer" role="dialog" aria-modal="false" aria-labelledby="layerWhat" tabindex="-1" hidden>
     <div class="layer-bar" id="layerBar">
       <span class="layer-what" id="layerWhat">Shown to you</span>
+      <!-- The simple view's clock or countdown, as its header draws it (app.js, Clock) -->
+      <span class="bv-readout layer-readout" id="layerReadout" hidden></span>
       <span class="layer-new" id="layerNew" role="status"></span>
       <span class="layer-acts" id="layerActs"></span>
     </div>

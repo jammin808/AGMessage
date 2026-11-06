@@ -282,9 +282,11 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   **Answer in words…**; once answered it reads "You answered Yes · 14:10 · Change". A 🔥 message out of view is held in a
   strip above the chat (and on a take's strip, with Got it beside Open chat); "↓ 3 new · 1 question" below a chat scrolled
   up; "○ Nobody backstage is online" when no one backstage has been in the room for 10 s. The composer is **🔥 Priority**,
-  "Message everyone here…" and Send, and keeps its words when a send is refused. The header holds the hall's name, Help
-  and ⋯, whose sheet holds Text size, Theme, Full screen (where the device offers it), why the device may sleep, and Leave
-  the hall, asked in place. It **starts in Dark** until the person chooses Light, and paints dark before its first frame
+  "Message everyone here…" and Send, and keeps its words when a send is refused. The header holds the hall's name, the
+  **time of day by default, or Stagewatch's countdown** ("⏱ 4:30 left" with its title and line, ▲ near the end and
+  "0:30 over" past it, "--:--" with why when it is not live), set on the tablet or by the admin, who may lock it (or Off),
+  then Help and ⋯, whose sheet holds Text size, Clock or countdown, Theme, Full screen (where the device offers it), why
+  the device may sleep, and Leave the hall, asked in place. It **starts in Dark** until the person chooses Light, and paints dark before its first frame
   on a device last used there; the admin's support view never turns it light. It works on iPads old and new, Android
   tablets and phones, upright or sideways: the Shown to you column at 900 px wide or more and two tabs, Chat and 📺 Shown
   to you, below; 22 px text on a tablet and 20 px on a phone. Only Tab, Enter and Escape act on it, and it opens no menu.

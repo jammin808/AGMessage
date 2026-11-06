@@ -375,11 +375,14 @@ function personObject(sid) {
   return { ...u, hall: hallName(), linkedNames, main: watchedIsMain() };
 }
 const hallName = () => (currentRoom ? currentRoom.title || roomNameForCode(currentRoom.code) || currentRoom.code : '');
-/** The people, drawn in place by their page's id: Name, Seat (a code guest's select; an account's follows its rights), Chat view, May forward to, and the ⋯. */
+/**
+ * The people, drawn in place by their page's id: Name, Seat (a code guest's select; an account's follows its rights), Chat
+ * view, Clock or countdown (the admin's choice and its lock), May forward to, and the ⋯.
+ */
 function renderUsers(users) {
   const tb = document.getElementById('usersTbody');
   if (!users.length) {
-    tb.innerHTML = '<tr><td colspan="5" class="muted">No-one has joined yet.</td></tr>';
+    tb.innerHTML = '<tr><td colspan="6" class="muted">No-one has joined yet.</td></tr>';
     ADMIN.refresh();
     return;
   }
@@ -392,12 +395,12 @@ function renderUsers(users) {
       tr = document.createElement('tr');
       tr.dataset.key = u.socketId;
       tr.className = 'person-row';
-      for (let i = 0; i < 5; i++) tr.appendChild(document.createElement('td'));
+      for (let i = 0; i < 6; i++) tr.appendChild(document.createElement('td'));
       const bar = document.createElement('span');
       bar.className = 'obj-bar';
       tr.lastElementChild.appendChild(bar);
     }
-    const [nameTd, seatTd, viewTd, linksTd] = tr.children;
+    const [nameTd, seatTd, viewTd, clockTd, linksTd] = tr.children;
     const nameHtml = `<strong>${escapeHtml(u.name)}</strong>`;
     if (nameTd.innerHTML !== nameHtml) nameTd.innerHTML = nameHtml;
     // A code guest's seat is set here; an account's follows its rights, which are set on the Accounts page.
@@ -413,6 +416,7 @@ function renderUsers(users) {
     const viewNow = typeof u.view === 'string' ? u.view : '';
     if (!viewSel) viewTd.innerHTML = `<select class="view-select" aria-label="Chat view of ${escapeHtml(u.name)}">${chatViewOptionsHtml(viewNow)}</select>`;
     else if (document.activeElement !== viewSel) viewSel.value = viewNow;
+    drawClockCell(clockTd, u);
     const linksHtml = (u.linkedRooms || []).map((rm) => {
       const nm = roomNameForCode(rm);
       const labelHtml = nm
@@ -430,6 +434,41 @@ function renderUsers(users) {
   ADMIN.refresh();
 }
 const usersTbody = document.getElementById('usersTbody');
+/**
+ * A person's Clock or countdown cell: the admin's choice (Clock or countdown ▸ in the row's ⋯ is the same act, its choices
+ * as the catalogue draws them: Their choice on a locked clock is the admin's alone), Lock it on their devices named for the
+ * person (the admin's alone, and only on a choice: disabled, with the server's words drawn under it), and, beside a person
+ * whose Chat view is Full, that it applies in the simple view. Drawn in place: a control being used keeps its focus.
+ */
+let clockCells = 0;
+function drawClockCell(td, u) {
+  const c = AGM.catalog.adminClockOf(u);
+  if (!td.querySelector('.clock-select')) {
+    td.innerHTML = `<select class="clock-select" aria-label="Clock or countdown of ${escapeHtml(u.name)}">${clockOptionsHtml()}</select>` +
+      `<label class="clock-lock"><input type="checkbox" class="clock-lock-box"> Lock it on their devices</label>` +
+      '<small class="muted clock-why" hidden></small><small class="muted clock-applies" hidden></small>';
+    // The lock's reason, when it has one, is read with it as well as drawn under it.
+    const whyEl = td.querySelector('.clock-why');
+    whyEl.id = 'clockWhy' + (++clockCells);
+    td.querySelector('.clock-lock-box').setAttribute('aria-describedby', whyEl.id);
+  }
+  const sel = td.querySelector('.clock-select');
+  const choices = AGM.catalog.submenu('person', 'person.clock', ADMIN_F, u) || [];
+  for (const opt of sel.options) { const v = choices.find((x) => x.value === opt.value); opt.disabled = !!(v && v.disabled); }
+  if (document.activeElement !== sel) sel.value = c.show || '';
+  const box = td.querySelector('.clock-lock-box');
+  box.checked = c.locked;
+  // Named for its person, as the row's selects are: every row's tick is not one "Lock it on their devices".
+  box.setAttribute('aria-label', 'Lock it on their devices for ' + u.name);
+  const why = AGM.catalog.ready('person', 'person.clockLock', ADMIN_F, u);
+  box.disabled = why !== true;
+  const whyEl = td.querySelector('.clock-why');
+  whyEl.textContent = why === true ? '' : why;
+  whyEl.hidden = why === true;
+  const applies = td.querySelector('.clock-applies');
+  applies.hidden = u.view !== 'full';
+  applies.textContent = AGM.catalog.WORDS.clockApplies;
+}
 /** A seat as its select's value: the server's word, On stage's older name read as On stage. */
 const seatValue = (role) => (role === 'director' ? 'board' : role);
 const seatSelect = (sid) => document.querySelector('#usersTbody > tr[data-key="' + CSS.escape(sid) + '"] .role-select');
@@ -456,6 +495,24 @@ usersTbody.addEventListener('change', (e) => {
   sel.value = typeof o.view === 'string' ? o.view : '';
   const get = () => personObject(tr.dataset.key);
   ADMIN.act('person', 'person.chatView', o, { value: want, anchor: sel, node: tr, opener: sel, get, gone: 'That person has left the hall.' });
+});
+// A person's clock or countdown chosen in its select is the catalogue's Clock or countdown ▸ with that value; the lock's
+// tick is Lock it on their devices. Each shows what the server keeps until it answers.
+usersTbody.addEventListener('change', (e) => {
+  const sel = e.target.closest('.clock-select, .clock-lock-box');
+  const tr = sel && sel.closest('tr[data-key]');
+  const o = tr && personObject(tr.dataset.key);
+  if (!o) return;
+  const get = () => personObject(tr.dataset.key);
+  const c = AGM.catalog.adminClockOf(o);
+  if (sel.classList.contains('clock-select')) {
+    const want = sel.value;
+    sel.value = c.show || '';
+    ADMIN.act('person', 'person.clock', o, { value: want, anchor: sel, node: tr, opener: sel, get, gone: 'That person has left the hall.' });
+  } else {
+    sel.checked = c.locked;
+    ADMIN.act('person', 'person.clockLock', o, { anchor: sel, node: tr, opener: sel, get, gone: 'That person has left the hall.' });
+  }
 });
 // A link's × takes back that one hall: the catalogue's No longer forward into ▸, as unticking it in the menu is.
 usersTbody.addEventListener('click', (e) => {
@@ -638,11 +695,24 @@ function escapeHtml(s) {
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[c]));
 }
+/** The admin's clock or countdown for a person of the watched room (admin:setClock): said once the server has it. */
+function setClock(o, change) {
+  AGM.outbox.now('admin:setClock', { roomCode: currentRoom.code, socketId: o.socketId, ...change }, (res) => {
+    if (!res || !res.ok) { say((res && res.error) || 'Not changed.', true); return; }
+    const k = AGM.catalog.adminClockOf({ clock: res.clock });
+    const label = (AGM.catalog.ADMIN_CLOCKS.find(([v]) => v === (k.show || '')) || ['', ''])[1];
+    say(o.name + '\'s clock or countdown' + (res.already ? ' is already: ' : ': ') + label + (k.locked ? ', locked on their devices.' : '.'));
+  });
+}
 /** Whether the watched room is a hall's Main room (a side room has no stage: no seat there is On stage). */
 function watchedIsMain() { return !currentRoom || currentRoom.main !== false; }
 /** The chat views a person's pages may draw, in the catalogue's words (By seat, Simple, Full), the one chosen selected. */
 function chatViewOptionsHtml(current) {
   return AGM.catalog.CHAT_VIEWS.map(([v, label]) => '<option value="' + escapeHtml(v) + '"' + (v === current ? ' selected' : '') + '>' + escapeHtml(label) + '</option>').join('');
+}
+/** The admin's clock or countdown choices, in the catalogue's words ('' their own choice). */
+function clockOptionsHtml() {
+  return AGM.catalog.ADMIN_CLOCKS.map(([v, label]) => '<option value="' + escapeHtml(v) + '">' + escapeHtml(label) + '</option>').join('');
 }
 /** The seat picker's options, the person's own selected: On stage only in a hall's Main room. */
 function roleOptionsHtml(current) {
@@ -796,6 +866,10 @@ Object.assign(ADMIN_RUN, {
       if (sel) sel.value = typeof o.view === 'string' ? o.view : '';
     });
   },
+  // The person's clock or countdown ('' their own choice) and its lock: said once the server has it; the row follows the
+  // people list it sends.
+  'person.clock': (o, c) => { if (typeof c.value === 'string') setClock(o, AGM.catalog.clockChange(c.value)); },
+  'person.clockLock': (o) => setClock(o, { locked: !AGM.catalog.adminClockOf(o).locked }),
   // A hall ticked already is unticked: that is No longer forward into ▸, its own act.
   'person.forward': (o, c) => {
     if (!c.value) return;

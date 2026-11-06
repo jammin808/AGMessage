@@ -12080,7 +12080,9 @@ Where those texts predate the owner's ask, the ask wins.
 - **§3.3 (`join`):** the answer appends **`clock`** (`{show, locked}`, §17.3, unit 20b), then **`pins`** (this
   person's pinned ids in this room, §17.5, unit 20c), then **`onStage`** (`{screens, people, clears,
   countdownScreens?}`, §17.6, unit 20d), in the order their units land, after every key the design and the addenda
-  append. `uploadToken` is `null` for a Board seat, and `sends` is `false` while
+  append. Unit 20b also puts **`theAdmin`** (whether the page is "the admin", §17.6's predicate, by which §17.1's
+  `person` doors draw the lock disabled on another page the admin page's gate admits) just before `clock`; `clock`,
+  `pins` and `onStage` stay the last three. `uploadToken` is `null` for a Board seat, and `sends` is `false` while
   On stage (§4.2 below). The socket records its seat in `socket.data.seat`.
 - **§4.2 (`room:send`, owner answer B2):** from an On stage socket, `room:send` in both forms, a new message and an
   existing one (and so **Send back**, which is the same path), is refused first, whatever its type: "Messages from On

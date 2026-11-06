@@ -2323,3 +2323,35 @@ test('linkCheck: every try answered is ok, with the middle and the longest round
   assert.equal(readings.linkCheck(null, 4000).ok, false);
   assert.equal(readings.linkCheck([10, -1, Number.NaN, '5'], 5000).words, 'The internet link answered 1 of 4 tries: remote phones may not join.', 'only a time is an answer');
 });
+
+// ---------------------------------------------------------------- the clock or countdown (lib/views.js, pure)
+const views = require('../lib/views');
+test('cleanClock: the admin\'s choice over the one kept, each field by type; unknown words, wrong types, {toString: 1} and a lock on their choice refused in words', () => {
+  const WORDS = 'Choose Off, Time of day or Countdown.';
+  assert.deepStrictEqual([...views.CLOCK_SHOWS], ['off', 'time', 'stage']);
+  // Each field taken, each left out kept from `was` (none kept: their choice, unlocked).
+  assert.deepStrictEqual(views.cleanClock({ show: 'time' }), { show: 'time', locked: false });
+  assert.deepStrictEqual(views.cleanClock({ show: 'stage', locked: true }), { show: 'stage', locked: true });
+  assert.deepStrictEqual(views.cleanClock({ locked: true }, { show: 'off', locked: false }), { show: 'off', locked: true });
+  assert.deepStrictEqual(views.cleanClock({ show: 'time' }, { show: 'stage', locked: true }), { show: 'time', locked: true }, 'a new choice keeps the lock');
+  assert.deepStrictEqual(views.cleanClock({}, { show: 'stage', locked: true }), { show: 'stage', locked: true }, 'nothing named: as it was');
+  assert.deepStrictEqual(views.cleanClock({ show: null, locked: false }, { show: 'stage', locked: true }), { show: null, locked: false }, 'their choice again, unlocked');
+  assert.deepStrictEqual(views.cleanClock(null, { show: 'stage', locked: true }), { show: null, locked: false }, 'null clears the choice and its lock');
+  // A lock holds a choice: none on their choice.
+  assert.deepStrictEqual(views.cleanClock({ locked: true }), { error: 'Choose one to lock it.' });
+  assert.deepStrictEqual(views.cleanClock({ show: null }, { show: 'time', locked: true }), { error: 'Choose one to lock it.' });
+  // Unknown words, wrong types, unknown keys and values no String() can convert: refused in the one set of words, never thrown.
+  for (const c of [{ show: 'countdown' }, { show: 'Time' }, { show: 7 }, { show: ['time'] }, { locked: 'yes' }, { locked: 1 }, { show: 'time', colour: 'red' },
+    { toString: 1 }, { show: { toString: 1 } }, 'time', 7, true, [], ['time'], undefined]) {
+    assert.deepStrictEqual(views.cleanClock(c), { error: WORDS }, JSON.stringify(c));
+  }
+  assert.deepStrictEqual(views.clockAsked(JSON.parse('{"__proto__": {"show": "time"}}')), { error: WORDS }, 'a key a parse makes its own is refused');
+  // A store's clock read back whole, else none; words for the audit row, the lock's included.
+  assert.deepStrictEqual([views.clockOf({ show: 'time', locked: true }), views.clockOf({ show: null, locked: true }), views.clockOf('stage'), views.clockOf(undefined)],
+    [{ show: 'time', locked: true }, { show: null, locked: false }, { show: null, locked: false }, { show: null, locked: false }]);
+  assert.deepStrictEqual([views.clockWords({ show: 'stage', locked: true }), views.clockWords({ show: 'time', locked: false }), views.clockWords({ show: 'off', locked: false }), views.clockWords(null)],
+    ['countdown', 'time of day', 'off', 'their choice']);
+  assert.deepStrictEqual([views.lockWords({ show: 'time', locked: true }, null), views.lockWords({ show: 'time', locked: false }, { show: 'time', locked: true }), views.lockWords({ show: 'time', locked: false }, null)],
+    ['locked', 'unlocked', '']);
+  assert.ok(views.sameClock({ show: 'time', locked: false }, { show: 'time', locked: false }) && !views.sameClock({ show: 'time', locked: false }, { show: 'time', locked: true }) && views.noClock(undefined));
+});

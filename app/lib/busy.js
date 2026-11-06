@@ -51,8 +51,8 @@ const INPUT = new Set([
   // A take on people's pages, and what a page says of one: the person's Back to chat, Minimise and Show again, and its
   // page's reports while a take is up on it, which a show running on the Board's tablets is; a take withdrawn.
   'page:push', 'page:report', 'page:withdraw',
-  // The admin's choice of the view a person's pages draw: an admin's act.
-  'admin:setView',
+  // The admin's choice of the view a person's pages draw, and of their clock or countdown: an admin's acts.
+  'admin:setView', 'admin:setClock',
   // A download asked for: a person's act on a file; and a file's confidential mark set or removed.
   'file:download', 'file:mark',
 ]);

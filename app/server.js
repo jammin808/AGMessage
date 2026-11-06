@@ -50,6 +50,7 @@ const { AuditLog, keysFrom, wordsWithList } = require('./lib/audit');
 const { Exporter } = require('./lib/auditexport');
 const { Archiver } = require('./lib/auditarchive');
 const rbac = require('./lib/rbac');
+const views = require('./lib/views');
 const { mountAccounts } = require('./lib/http-accounts');
 const board = require('./lib/board');
 const stagelines = require('./lib/stagelines');
@@ -165,6 +166,8 @@ const USER_STATE = {
   stageCollapsed: (v) => (typeof v === 'boolean' ? v : undefined),
   split: (v) => (v && typeof v === 'object' && typeof v.pct === 'number' && v.pct >= 0 && v.pct <= 100 && typeof v.vertical === 'boolean' ? { pct: v.pct, vertical: v.vertical } : undefined),
   doc: (v) => (v === null ? null : v && typeof v === 'object' && typeof v.messageId === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(v.messageId) ? { messageId: v.messageId } : undefined),
+  // The clock or countdown chosen on the person's device (one of three), relayed to the admin's support view alone.
+  clock: (v) => (views.CLOCK_SHOWS.includes(v) ? v : undefined),
 };
 /** A page's `userState:push`, as it is relayed: `{key, value}` rebuilt from a known key and a value of its type, or null. */
 function userStateOf(payload) {
@@ -1010,8 +1013,9 @@ function roomUserSummary(room, { links = false } = {}) {
     socketId: sid, uid: u.uid, name: u.name, role: u.role,
     ...(links ? { linkedRooms: u.linkedRooms instanceof Set ? Array.from(u.linkedRooms) : [] } : {}),
     account: !!u.acct,
-    // The admin's list alone: the chat view the admin chose for the person ('' by their seat), its Chat view's choice.
-    ...(links ? { view: chosenView(personKey(u.uid, !!u.acct)) } : {}),
+    // The admin's list alone: the chat view the admin chose for the person ('' by their seat), its Chat view's choice,
+    // and the clock or countdown the admin chose ({show, locked}: show null for their own choice).
+    ...(links ? { view: chosenView(personKey(u.uid, !!u.acct)), clock: chosenClock(personKey(u.uid, !!u.acct)) } : {}),
   }));
 }
 /** Who is in the room changed: its people list goes to every page in it once per 100 ms at most (`frames.people`). */
@@ -2661,6 +2665,13 @@ io.on('connection', (socket) => {
       // (`more`: Show earlier asks for them), the older ones a page keeps in view however old (`older`: pinned, help not
       // resolved, questions not answered), and every file of the room (`files`), so its lists are whole.
       ...(opened ? { more: opened.more, older: opened.older.map(ops.forPage).map(marked).map(seen), files: opened.files.map((f) => (pages.isConfidential(f.url) ? { ...f, confidential: true } : f)).map(seen === ops.linkless ? (f) => { const { url, ...rest } = f; return rest; } : (f) => f) } : {}),
+      // Whether this page is "the admin" (theAdmin: the host token, or an account whose role is admin; never the support
+      // view), whose alone is the clock or countdown's lock: another page the admin page's gate admits draws Lock disabled.
+      theAdmin: theAdmin() && !isAdminView,
+      // The clock or countdown the admin chose for this person ({show, locked}: show null for their own choice; the
+      // support view, the person's it shows), told again live (`clock`). The page draws what wins over it with the
+      // device's own choice (AGM.clockFor), which the server never reads.
+      clock: chosenClock(isAdminView ? (socket.data.viewOf ? socket.data.viewOf.key : '') : personKey(id, !!acct)),
     });
 
     if (!isAdminView) {
@@ -2955,8 +2966,11 @@ io.on('connection', (socket) => {
     const sent = socket.data.adminView ? { ...state, support: true } : state;
     // The file a person opens on their own panel (`doc`) follows them one way only (plan 4-§4.6.3): to their other pages
     // and to the admin's support view of them; the support view opens nothing on a person's panel (the admin shows a
-    // person something only by a take, which is confirmed).
-    const to = state.key === 'doc' ? (p) => !socket.data.adminView && p.id !== socket.id && (p.data.adminView ? p.data.userName === me.name : p.data.uid === me.uid) : syncPeer;
+    // person something only by a take, which is confirmed). The clock or countdown chosen on a device (`clock`) is that
+    // device's own (plan 7-§17.3): told to the admin's support view of the person alone, never to their other devices.
+    const to = state.key === 'doc' ? (p) => !socket.data.adminView && p.id !== socket.id && (p.data.adminView ? p.data.userName === me.name : p.data.uid === me.uid)
+      : state.key === 'clock' ? (p) => !socket.data.adminView && p.id !== socket.id && !!p.data.adminView && p.data.userName === me.name
+        : syncPeer;
     try { for (const p of await io.in(room.code).fetchSockets()) if (to(p)) p.emit('userState:push', sent); } catch { /* ignore */ }
   });
 
@@ -4441,11 +4455,18 @@ const SIGNED_OUT = 'Signed out — sign in again to carry on.';
 /**
  * An account changed (role, rights, halls, rooms, On stage halls, password, turned off, removed): every socket it has
  * open is told and closed, so its next connection is judged by the rights it has now — never by the ones it had. Its chat
- * view alone is no right: each of its pages in a room is told the view it draws now (`view`), none is closed, and the
- * admin's people rows of those rooms say the new choice.
+ * view and its clock or countdown are no rights: a change of those alone tells each of its pages in a room the view it
+ * draws now (`view`) and the admin's clock (`clock`), none is closed, and the admin's people rows of those rooms say the
+ * new choice. `what` names the fields changed, by commas.
  */
+const NO_RIGHTS = ['view', 'clock'];
 function accountChanged(id, what) {
-  if (what === 'view') { viewChanged(personKey(id, true)); return undefined; }
+  const fields = String(what).split(',');
+  if (fields.every((f) => NO_RIGHTS.includes(f))) {
+    if (fields.includes('view')) viewChanged(personKey(id, true));
+    if (fields.includes('clock')) clockChanged(personKey(id, true));
+    return undefined;
+  }
   return endSockets((s) => s.data.accountId === id, what, 'Your account was changed by an admin — reconnecting with your current rights.');
 }
 /**
@@ -4488,6 +4509,34 @@ function viewChanged(key) {
     const theirs = account ? s.data.accountId === id : !s.data.accountId && s.data.uid === id;
     if (theirs && !s.data.adminView) { s.emit('view', { view: drawnView(chosen, s.data.seat) }); told++; rooms.add(s.data.userRoom); }
     else if (s.data.adminView && s.data.viewOf && s.data.viewOf.key === key) { s.emit('view', { view: drawnView(chosen, seatHeld(s.data.userRoom, s.data.viewOf.uid)) }); told++; }
+  }
+  for (const code of rooms) usersChanged(code);
+  return told;
+}
+
+/** The clock or countdown the admin chose for a person, by their key ('a:<account id>', 'u:<uid>'): {show, locked}. */
+function chosenClock(key) {
+  if (typeof key !== 'string') return { ...views.CLOCK_NONE };
+  if (key.startsWith('a:')) { const a = accounts.get(key.slice(2)); return views.clockOf(a && a.clock); }
+  return key.startsWith('u:') ? pages.clockOf(key.slice(2)) : { ...views.CLOCK_NONE };
+}
+/**
+ * The admin's clock or countdown for a person changed (`key`, as viewChanged's): each of their pages seated in a room, and
+ * the admin's view of that person, is told it (`clock {show, locked}`), live, and draws what wins over it with the device's
+ * own choice (public/catalog.js AGM.clockFor); nothing is closed and no other page is told. The admin's people rows of each
+ * room a page of theirs sits in say the new choice (usersChanged). The number of pages told.
+ */
+function clockChanged(key) {
+  const clock = chosenClock(key);
+  const account = key.startsWith('a:');
+  const id = key.slice(2);
+  let told = 0;
+  const rooms = new Set();
+  for (const [, s] of io.sockets.sockets) {
+    if (!s.data || !s.data.userRoom) continue;
+    const theirs = account ? s.data.accountId === id : !s.data.accountId && s.data.uid === id;
+    if (theirs && !s.data.adminView) { s.emit('clock', clock); told++; rooms.add(s.data.userRoom); }
+    else if (s.data.adminView && s.data.viewOf && s.data.viewOf.key === key) { s.emit('clock', clock); told++; }
   }
   for (const code of rooms) usersChanged(code);
   return told;
@@ -6049,7 +6098,7 @@ function firstWrites() {
 // room's op or a room's broadcast.
 const { ctx, takesCtx } = contexts({
   store, apply, systemMessage, readSend, messageOf, uploadOnDisk, fileCopy, tickets, makeMessageId, removeUnused, fileNamesOf, audit, accounts, boardDirty, newSideRoom, renameRoom, roomNameRefused, newGuestCode, guestPagesOf, sendGuestsOut, codeChanged, invitesFor, settings, sendersOf, sendsInto, setRoomSends, linkFor, stagePayload,
-  pages, stageRecord, hallPages, takeSends, holdingOf, pagesChanged, pageHidden, selfHosts, tellWebRights, viewChanged, stageSource, stageCheck, freshUpload, stageDropped, io,
+  pages, stageRecord, hallPages, takeSends, holdingOf, pagesChanged, pageHidden, selfHosts, tellWebRights, viewChanged, clockChanged, stageSource, stageCheck, freshUpload, stageDropped, io,
   marked, fileMarked, inUseRooms, markShared, markFresh, markRefusal, markedTakes, screensShowing, madeUrls,
 });
 

@@ -16,6 +16,7 @@
 const { Accounts, passwordProblem, temporaryPassword, isView, NO_MATCH } = require('./accounts');
 const rbac = require('./rbac');
 const guard = require('./guard');
+const views = require('./views');
 
 const COOKIE = 'agm_s';
 const TUNNEL_ADMIN = 'Accounts with admin rights work on the venue network, not through the tunnel (an admin can allow it in Settings).';
@@ -209,7 +210,8 @@ function mountAccounts(app, o) {
    * typed wrong is said, never kept to open a room made later, and an On stage hall it adds is one the account as changed
    * would sit On stage in (it reaches the hall and may post there); an entry already on the account passes, so a Save that
    * sends its lists back as they are changes nothing. Its halls keep 0.5.1's rule: a hall's key is taken as given. The
-   * chat view is '' (by the seat), 'simple' or 'full'.
+   * chat view is '' (by the seat), 'simple' or 'full'; the clock or countdown is one lib/views.js cleanClock makes over
+   * the account's.
    */
   function listsRefusal(change, target) {
     for (const [field, what] of [['halls', 'halls'], ['board', 'On stage halls'], ['rooms', 'rooms']]) {
@@ -235,6 +237,7 @@ function mountAccounts(app, o) {
       if (!rooms.has(k)) return halls.has(k) ? k + ' is a hall: its Main room comes with the hall.' : 'No such room: ' + guard.cleanText(k, 40) + '.';
     }
     if ('view' in change && !isView(change.view)) return 'A chat view is By seat (\'\'), Simple (\'simple\') or Full (\'full\').';
+    if ('clock' in change) { const c = views.cleanClock(change.clock, views.clockOf(target && target.clock)); if (c.error) return c.error; }
     return '';
   }
 
@@ -287,18 +290,22 @@ function mountAccounts(app, o) {
   app.patch('/api/users/:id', signedIn('users.manage'), (req, res) => {
     const target = accounts.get(req.params.id);
     if (!target) return res.status(404).json({ ok: false, error: 'No such account.' });
-    const change = pick(req.body || {}, ['name', 'role', 'grant', 'revoke', 'halls', 'allHalls', 'disabled', 'rooms', 'board', 'view']);
+    const change = pick(req.body || {}, ['name', 'role', 'grant', 'revoke', 'halls', 'allHalls', 'disabled', 'rooms', 'board', 'view', 'clock']);
     const refusal = rbac.mayChange(req.agm.account, target, change, { activeAdmins: accounts.activeAdmins() });
     if (refusal) return res.status(403).json({ ok: false, error: refusal });
+    // The clock or countdown's lock is the admin's alone (an account whose role is admin): whoever manages the account may
+    // choose for it, and a change that names the lock as it stands changes no lock.
+    const wasClock = views.clockOf(target.clock);
+    if ('clock' in change && locksClock(change.clock, wasClock) && req.agm.account.role !== 'admin') return res.status(403).json({ ok: false, error: views.CLOCK_ADMIN });
     const wrong = listsRefusal(change, target);
     if (wrong) return res.status(400).json({ ok: false, error: wrong });
     const changed = accounts.update(target.id, change);
     if (changed.length) {
-      // A change of the chat view alone is said to the account's pages, which stay open (a view is no right); any other
-      // change ends them, so their next connection is judged by the account as it is now.
+      // A change of the chat view or the clock alone is said to the account's pages, which stay open (neither is a right);
+      // any other change ends them, so their next connection is judged by the account as it is now.
       onAccountChanged(target.id, changed.join(','));
       const named = sideRooms();
-      audit.write(actorOf(req.agm), 'user.update', target.username, changed.map((f) => f + ' → ' + describe(f, target, named)).join('; '), guard.clientIp(req));
+      audit.write(actorOf(req.agm), 'user.update', target.username, changed.map((f) => f + ' → ' + (f === 'clock' ? clockChangeWords(target.clock, wasClock) : describe(f, target, named))).join('; '), guard.clientIp(req));
     }
     res.json({ ok: true, user: Accounts.view(target), changed });
   });
@@ -439,6 +446,13 @@ function roomWords(a, named) {
   return list.join(', ') || 'none';
 }
 const VIEW_WORDS = { '': 'by seat', simple: 'simple', full: 'full' };
+/** Whether a change of the clock (`asked`, as sent) moves its lock from where `was` holds it: a boolean that is not it. */
+const locksClock = (asked, was) => (asked === null ? was.locked : !!asked && typeof asked === 'object' && typeof asked.locked === 'boolean' && asked.locked !== was.locked);
+/** An account's clock as an audit row says its change: the choice, and the lock where it holds or was just taken off. */
+function clockChangeWords(now, was) {
+  const lock = views.lockWords(now, was);
+  return views.clockWords(now) + (lock ? ' (' + lock + ')' : '');
+}
 /** What a field of an account holds now, in an audit row's words: never a password, a token or a guest code. */
 function describe(field, a, named = new Map()) {
   switch (field) {

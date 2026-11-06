@@ -5955,6 +5955,93 @@ shares no file, so it marks none, as Part 7 amends §5.14)
 - The papers: `README.md`, `README.txt`, `docs/ACCOUNTS.md`, `docs/DISPLAYS.md`, `docs/DESIGN.md`, `docs/NODES.md`,
   `docs/SHOWBUS.md`, `docs/ANALYSIS.md` (the contexts and the inputs fence), `SECURITY.md`, `CLAUDE.md`.
 
+**The clock or countdown, chosen on the tablet and by the admin, who may lock it** (the plan's Part 7, unit 20b, its
+§17.3 with §17.1's `sheet` and `person` rows, as Part 7 §0.1-§0.3 amend Part 1 §1.8, §1.10, §2.7, §3.3 and §6, Part 5
+§14.2, §14.4, §15.5, §16.2 and §16.7 and Part 4 §5.9.11; the owner's ask of 2026-10-26, "the local and admin option to
+include the current time of day or StageWatch data for showing countdowns as a secondary object", and answers "Yes, the
+admin may lock the clock/countdown setting" and B3, "Clock on by default"; "the admin" read as Part 0 §0.8 C14's one
+predicate)
+- **The simple view shows the time of day** after the hall's name, before Help, until the Board member or the admin
+  chooses the countdown or Off (B3): 🕐 14:12, a `<time>` with no role, hours and minutes by AGMessage's clock and zone (the
+  join's `now` and `tz`; a browser that does not know the zone, its own), drawn again on the minute. **Stagewatch's
+  countdown** is ⏱ **4:30 left** with the title and Stagewatch's line under it ("Q&A · Wrap up in 2 minutes"), in
+  Stagewatch's own phase: ▲ **0:45 left** near the end, ▲ **Wrap up · 0:45 left**, ▲ **0:30 over** past it (the minus sign
+  dropped: "over" says it), Stagewatch's text alone in any other mode; its digits are a `role="timer"` named by their own
+  words ("4:30 left"), its title and line a sibling `role="status"`, never nested; Stagewatch's colour is the readout's
+  3 px left edge alone (its white, or none: the border's), the digits ink. Live only while the hall's Stagewatch is
+  connected (or viewing), its frame fresh and the page connected; otherwise **--:-- Stagewatch offline**, never a confident
+  stale time, and with no Stagewatch linked **--:-- No Stagewatch linked** (the device may still choose it, and the sheet
+  says "This hall has no Stagewatch linked."). A link that is up with no time yet (its first moment, or a frame with none)
+  draws --:-- with the title and its line, as a screen does, never "offline". A confidential line reads as the hall's frame
+  carries it to that room. On a phone the digits are on the header's first row and the title and line take a row of their
+  own, only while Stagewatch has one; down 5 s or more that row is "Offline · reconnecting" alone. The take layer's bar
+  draws the same readout in the simple view (its line no live region of its own: the page has one; no live time in the
+  stage's muted ink). The full view keeps its countdown chip, which the simple view no longer draws.
+- **Which one is drawn** is one pure function, `AGM.clockFor({admin, device})` (`public/catalog.js`): the admin's choice
+  while it is locked; else the device's own; else the admin's; else the time of day. The server never reads a device's
+  choice: it sends the admin's whatever the device stored, and the page draws what wins.
+- **On the device:** ⋯ → **Clock or countdown**: Time of day · Countdown · Off, kept in `agm.clock` on that device alone
+  and drawn at once; never sent to the person's other devices, and relayed only to the admin's support view of them
+  (`userState` `clock`, one of the three, which the server relays to no other page; the support view draws it and acts on
+  none of it, R8). **Locked**, the row is the admin's choice in words, "Clock or countdown: Countdown", with "Set by the
+  admin for you." and no control; a lock set or taken off while the sheet is open redraws that row in place, the sheet's
+  rows and their order kept, the device's choice checked again on unlock.
+- **The admin's choice** is `{show, locked}`: `show` Off, the time of day, the countdown, or none ("Their choice (the clock
+  at first)"), and `locked` keeping it on the person's devices; a lock on their choice is refused ("Choose one to lock
+  it."), and anything else in "Choose Off, Time of day or Countdown." (`lib/views.js` `cleanClock`, pure, in the module
+  fence's pure set: an unknown word, a field of the wrong type, a key of another name, `{toString: 1}`: a refusal, never a
+  throw). A guest's is kept by their uid in `pages.json`'s `views` beside their chat view (one record a guest, within its
+  5,000), an account's in `accounts.json` beside `view`; an account is made without one (`POST /api/users` ignores
+  `clock`), and `Accounts.view` tells it last.
+- **Three doors, one act.** The admin page's people rows (a **Clock or countdown** column beside Seat and Chat view: the
+  choice, **Lock it on their devices** named for the person with why it cannot be ticked drawn under it, and "Applies in
+  the simple view." beside a person whose Chat view is Full; on a narrow screen the people's table scrolls within its
+  section, never the page), the hall page's People panel (the person's ⋯, the admin's own page, full view) and their ⋯ on
+  the admin page: **Clock or countdown ▸** (with "Applies in the simple view." on its line beside a Full chat view) and
+  **Lock it on their devices**, `admin:setClock {roomCode, socketId, show?, locked?}` (the takes module, behind the admin
+  page's gate). The Accounts page's editor: **Clock or countdown** and **Lock it on their devices** beside Chat view, once
+  per account, never in a hall's row, and the same two in the account's ⋯ (`PATCH /api/users/:id {clock}`). **The lock is
+  the admin's alone**: on a page with a socket the laptop's token or an account whose role is admin (the join's
+  `theAdmin`, before `clock`), on the Accounts page an account whose role is admin (the PATCH's own rule: the token's
+  cookie beside a manager's account locks nothing there, and its Lock is drawn so); a manager granted `settings.manage` (or
+  `users.manage`) may choose and is refused the lock, "Only an admin may lock the clock or countdown.", and its pages draw
+  Lock disabled with those words. **Their choice takes a lock off with it** (a lock holds a choice): every door sends it
+  as `{show: null, locked: false}`, so on a locked clock it is the lock's alone, drawn disabled with the lock's words for
+  anyone else, and the admin's one act clears both. On the socket an account is reached as the Accounts page reaches it
+  (`rbac.mayChange`: "You may not manage accounts.", "Only an admin may make or change an admin."), and nobody sets their
+  own (the self-change words).
+- **Told live, nothing closed.** The join's answer appends `clock` (the admin's, `{show: null, locked: false}` when unset;
+  the support view's, the person's) as its last key; a change is told as `clock {show, locked}` to every page of the
+  person's and the admin's view of them, and to no other page; a change of the chat view or the clock alone reloads no
+  page of an account's. The admin's people list carries `clock` beside `view` (only the admin's), sent again to the admin's
+  pages where the person sits.
+- **Audited, every lock and unlock:** `person.clock` for a guest ("Rita (guest) → clock: countdown, locked", "… → clock:
+  countdown, unlocked", "… → clock: their choice"), `user.update` for an account ("clock → time of day (locked)"); a choice
+  as it stands writes none, and the device's own choice is no row (a person's act on their own page).
+- **Rolling back:** 0.5.1 keeps the accounts' `clock` and ignores it; it reads no `pages.json`.
+- Tests: `test/catalog.test.js` (`clockFor` case by case; the sheet's row, its choices and its lock; Clock or countdown ▸
+  and Lock it on their devices on the admin page, the People panel and the Accounts page, the lock disabled with the
+  server's words for a manager and on their choice, by the PATCH's rule on the Accounts page; Their choice on a locked
+  clock the lock's alone; "Applies in the simple view." on a Full chat view's line; the hall page's `theAdmin`), `test/units.test.js` (`cleanClock`: unknown
+  words, wrong types, a lock on their choice, `{toString: 1}`), `test/pages.test.js` (a guest's clock beside their view, one
+  record, its bound, and records of the wrong shape dropped as they are read), `test/takes.test.js` (end to end: a guest's in
+  `pages.json` and an account's in `accounts.json`, read from the files; told to every page of the person and their support
+  view and nobody else; the admin's list alone carrying `clock` and `view`; the join's `clock` its last key; the PATCH on
+  oneself refused; a `users.manage` manager refused the lock, taking it off or putting one on a clock that holds none, and
+  given the choice; a `settings.manage` manager refused the lock on the socket, given a guest's choice and refused an
+  account's; Their choice on a locked clock refused to a manager and taken whole from the admin; a clock-only change
+  ending no socket; one row each for set, lock and unlock; the device's choice relayed to the support view alone), `test/accounts.test.js` (the account
+  view's last keys), `test/menus.test.js` (`admin:setClock` refused to every seat but the admin's, and the join's keys),
+  `test/inputs.test.js` (`show`, `locked`, and `admin:setClock`'s typed cases), `test/modules.test.js` (`lib/views.js` in
+  the pure set; `clockChanged` in the contexts), and the browser smoke (a fresh tablet's 🕐 HH:MM, Off, the countdown
+  unlinked, linked, near the end and over, its edge and ink, the take layer's bar, the lock and unlock with the sheet open,
+  the support view mirroring the device, the link down; on a phone, the digits on the header's first row, the line's own
+  row only while there is one and the offline words alone there while the page is down, and --:-- with the title while
+  the link is up with no time; the sheet's rows; the admin page's Clock or countdown cell, its tick's name and why, and the
+  Accounts page's fields). The smoke reads a quote's table on a phone once the take layer is shown and two frames have
+  passed, so a fit its box's first size sets off is never read before it runs.
+- The papers: `README.md`, `README.txt`, `docs/ACCOUNTS.md`, `docs/ANALYSIS.md` (the pure set), `CLAUDE.md`.
+
 **Fixed**
 - An upload whose stored path is no file (a folder in its place) is refused as one that could not be checked, on every
   platform. The archive's check opened it and, on Windows, read a folder as an empty file, so it was refused in the

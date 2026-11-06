@@ -234,7 +234,10 @@ function rejoin() {
     factsChanged({ role: (them && them.role) || res.role || ROLE, uid: MY_UID, account: res.account || null, uploadToken: UPLOAD_TOKEN, canSendToStage: CAN_STAGE, canPropose: CAN_PROPOSE, ai: AI_ON, stage: res.stage || null,
       forwardable: them ? them.forwardable === true : !!res.forwardable, name: NAME,
       guestCode: typeof res.guestCode === 'string' ? res.guestCode : '', codeOn: !!res.codeOn, setsCode: !!res.setsCode, sends: them ? them.sends === true : !!res.sends, ...((them ? them.sends : res.sends) ? {} : { targets: [] }), admin: res.admin === true,
-      canPush: them ? them.canPush === true : res.canPush === true, canWeb: them ? them.canWeb === true : res.canWeb === true, canShow: them ? them.canShow === true : res.canShow === true });
+      canPush: them ? them.canPush === true : res.canPush === true, canWeb: them ? them.canWeb === true : res.canWeb === true, canShow: them ? them.canShow === true : res.canShow === true,
+      theAdmin: res.theAdmin === true });
+    // The admin's clock or countdown for this person, and AGMessage's clock and zone, before the view draws it.
+    Clock.joined(res);
     // The chat view, before a message is drawn with it: the support view draws the person's.
     Simple.setView(them ? them.view : res.view);
     drawChips();
@@ -328,7 +331,7 @@ function hallQuiet(t) {
 }
 AGM.reconnect.build.when(hallQuiet, { stays: (words) => AGM.toast(words) });
 // Down: an act on something is refused at once (it would otherwise be sent late), and every door says so.
-socket.on('disconnect', () => factsChanged({ connected: false }));
+socket.on('disconnect', () => { factsChanged({ connected: false }); Clock.draw(); });
 
 /**
  * The page's facts changed: each object's bar is drawn again where what it offers changed, and an open menu keeps its
@@ -721,6 +724,7 @@ const stageKey = (v) => (v ? v.status || '' : 'off') + '|' + !!(v && v.desk);
 socket.on('stage', (v) => {
   renderStage(v);
   factsChanged({ stage: v || null });
+  Clock.draw();
   Takes.stage(v || null);
   const key = stageKey(v);
   if (!joined || key === STAGE_KEY) return;
@@ -1869,10 +1873,11 @@ const personOf = (p) => {
   if (!p || typeof p.uid !== 'string' || !p.uid) return null;
   // An AI's line (the Minutes) is no person's page: no key, so no act on what pages show is offered on it.
   const key = p.ai ? '' : (p.account || p.acct ? 'a:' : 'u:') + p.uid;
-  // A row of the room's people also carries its page (`socketId`) and, on the admin's own page, the chat view the admin
-  // chose for them (`view`): Chat view ▸ reads both; a message's sender carries neither.
+  // A row of the room's people also carries its page (`socketId`) and, on the admin's own page, the chat view and the
+  // clock or countdown the admin chose for them (`view`, `clock`): Chat view ▸ and Clock or countdown ▸ read them; a
+  // message's sender carries none.
   return { id: 'person:' + p.uid, uid: p.uid, name: String(p.name || ''), role: p.role || '', key, kind: key ? Console.kindOf(key) : '',
-    socketId: typeof p.socketId === 'string' ? p.socketId : '', view: typeof p.view === 'string' ? p.view : '', ...(key ? Console.takesOf(key) : {}) };
+    socketId: typeof p.socketId === 'string' ? p.socketId : '', view: typeof p.view === 'string' ? p.view : '', clock: AGM.catalog.adminClockOf(p), ...(key ? Console.takesOf(key) : {}) };
 };
 const personHeader = (p) => p.name + ' · ' + roleLabel(p.role);
 /**
@@ -3190,6 +3195,15 @@ peopleList.addEventListener('click', (e) => {
 });
 AGM.menu.door(peopleList, personDoor);
 AGM.roving(peopleList, { item: 'li[data-key]' });
+/** The admin's clock or countdown for a person of the room (admin:setClock), said once the server has it. */
+function setClock(p, change) {
+  AGM.outbox.now('admin:setClock', { roomCode: ROOM, socketId: p.socketId, ...change }, (r) => {
+    if (!r || !r.ok) { AGM.toast((r && r.error) || 'Not changed.', true); return; }
+    AGM.toast(p.name + '\'s clock or countdown: ' + clockSaid(r.clock) + (r.already ? ' already.' : '.'));
+  });
+}
+/** The admin's choice in its words: "Stagewatch countdown, locked", "Their choice". */
+const clockSaid = (c) => { const k = AGM.catalog.adminClockOf({ clock: c }); return (AGM.catalog.ADMIN_CLOCKS.find(([v]) => v === (k.show || '')) || ['', ''])[1].replace(/ \(.*\)$/, '') + (k.locked ? ', locked' : ''); };
 Object.assign(RUN, {
   // The admin's choice of the view this person's pages draw: told to their pages at once, and their row redrawn.
   'person.chatView': (p, { value }) => {
@@ -3199,6 +3213,13 @@ Object.assign(RUN, {
       AGM.toast(p.name + '\'s pages draw ' + (value === 'simple' ? 'the simple view' : value === 'full' ? 'the full view' : 'the view of their seat') + (r.already ? ' already.' : ' now.'));
     });
   },
+  // The admin's clock or countdown for this person ('' their own choice, which takes a lock off with it) and its lock:
+  // told to their pages at once.
+  'person.clock': (p, { value }) => {
+    if (typeof value !== 'string') return;
+    setClock(p, AGM.catalog.clockChange(value));
+  },
+  'person.clockLock': (p) => setClock(p, { locked: !p.clock.locked }),
   // @ Mention: the person's name in the composer, where the cursor is, and the focus there to go on writing.
   'person.mention': (p) => {
     const field = composerField({ text: true });
@@ -3942,6 +3963,8 @@ if (typeof socket !== 'undefined') {
 socket.on('userState:request', () => {
   pushUserState('theme', document.documentElement.dataset.theme || 'light');
   pushUserState('zoom', currentZoom);
+  // This device's own clock or countdown, for the admin's support view (the server tells it nobody else).
+  if (Clock.own()) pushUserState('clock', Clock.own());
   if (docPanel.classList.contains('collapsed')) {
     pushUserState('stageCollapsed', true);
   }
@@ -3969,6 +3992,9 @@ socket.on('userState:push', ({ key, value, support } = {}) => {
       applyTheme(value);
     } else if (key === 'zoom' && typeof value === 'number') {
       setZoom(value);
+    } else if (key === 'clock') {
+      Clock.relayed(value);
+      Simple.sheetChanged();
     } else if (key === 'stageCollapsed' && typeof value === 'boolean') {
       setStageCollapsed(value);
     } else if (key === 'split' && value && typeof value.pct === 'number') {
@@ -6904,6 +6930,151 @@ const ToStagewatch = (function () {
   return { open };
 })();
 
+// ---------------- The clock or countdown: the simple view's secondary object (plan 7-§17.3) ----------------
+// What the simple view draws after the hall's name, and on the take layer's bar: the time of day (🕐 14:12, a <time>, by
+// AGMessage's clock and zone, hours and minutes, drawn again on the minute), Stagewatch's countdown (its digits a timer, its
+// title and Stagewatch's line under them, in Stagewatch's own words for its phase, its colour the readout's edge alone;
+// --:-- with why whenever its time is not live), or nothing. Which one is AGM.clockFor's, from the admin's choice for this
+// person (the join's `clock`, then each `clock` the server tells) and this device's own (`agm.clock`, chosen in the sheet
+// and kept on this device alone; the support view's, the person's as their device relays it, never its own). It is text,
+// never a control; the full view keeps its countdown chip.
+const Clock = (function () {
+  const KEY = 'agm.clock';
+  const SHOWS = ['off', 'time', 'stage'];
+  /** Stagewatch's phases near the end or past it: the readout's ▲, its words saying which. */
+  const SOON = ['warning', 'wrapup', 'overtime'];
+  const head = document.getElementById('bvReadout');
+  const bar = document.getElementById('layerReadout');
+  let admin = { show: null, locked: false };
+  // This device's own choice, as stored; the support view holds none of its own until the person's page relays theirs.
+  let device = null;
+  if (!ADMIN_VIEW) { try { const v = localStorage.getItem(KEY); device = SHOWS.includes(v) ? v : null; } catch { /* storage blocked: none chosen here */ } }
+  let offset = 0;      // AGMessage's clock against this device's
+  let tz = '';
+  let fmt = null;
+  let tick = null;
+  let drawnKey = '';
+  const shown = () => AGM.clockFor({ admin, device });
+  /** The time of day by AGMessage's clock, in its zone (a browser that does not know the zone, its own): "14:12". */
+  function timeNow() {
+    if (!fmt) {
+      const o = { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' };
+      try { fmt = new Intl.DateTimeFormat([], tz ? { ...o, timeZone: tz } : o); } catch { fmt = new Intl.DateTimeFormat([], o); }
+    }
+    const parts = fmt.formatToParts(new Date(Date.now() + offset));
+    const part = (t) => (parts.find((x) => x.type === t) || { value: '00' }).value;
+    return part('hour') + ':' + part('minute');
+  }
+  /**
+   * The countdown as Stagewatch says it: live only while the link is connected (or viewing), its frame fresh and this page
+   * connected (the screen page's rule); then its phase's words and mark and its own digits, the title and its line under
+   * them, its colour the edge (none for its white, which is no colour). Not live, --:-- and why. Live with no time yet (a
+   * link's first moment, or a frame that carries none), --:-- with the title and its line, as the screen page draws it:
+   * never "offline" for a link that is up.
+   */
+  function stageNow() {
+    const v = pageFacts.stage;
+    if (!v || v.status === 'off') return { mark: '⏱', time: '--:--', line: 'No Stagewatch linked', live: false, edge: '' };
+    const live = (v.status === 'connected' || v.status === 'viewing') && !v.stale && socket.connected;
+    if (!live) return { mark: '⏱', time: '--:--', line: 'Stagewatch offline', live: false, edge: '' };
+    if (!v.text) return { mark: '⏱', time: '--:--', line: [v.title, v.message].filter(Boolean).join(' · '), live: true, edge: '' };
+    const text = String(v.text);
+    const soon = SOON.includes(v.phase);
+    let time = text;
+    if (v.mode === 'countdown') {
+      if (v.phase === 'overtime') time = text.replace(/^[-−]/, '') + ' over';
+      else if (v.phase === 'wrapup') time = 'Wrap up · ' + text + ' left';
+      else time = text + ' left';
+    }
+    const edge = /^#[0-9A-Fa-f]{6}$/.test(v.color || '') && !/^#ffffff$/i.test(v.color) ? v.color : '';
+    return { mark: v.mode === 'countdown' && soon ? AGM.mark('soon') : '⏱', soon: v.mode === 'countdown' && soon, time, line: [v.title, v.message].filter(Boolean).join(' · '), live: true, edge };
+  }
+  /**
+   * One readout drawn: its parts made once for what it shows and their words written only when they change, so a screen
+   * reader hears the title and the line (the header's status region) once, and the digits (a timer) only when asked.
+   * `live` is false on the take layer's copy: one status region on the page.
+   */
+  function fill(el, what, o, live) {
+    if (el.dataset.what !== what) {
+      el.textContent = '';
+      el.dataset.what = what;
+      const line = document.createElement('span');
+      line.className = 'bv-ro-line';
+      const mark = document.createElement('span');
+      mark.className = 'bv-ro-icon';
+      mark.setAttribute('aria-hidden', 'true');
+      const time = document.createElement(what === 'time' ? 'time' : 'span');
+      time.className = 'bv-ro-time';
+      // A timer named by its own words ("4:30 left", "0:30 over"), read when asked, never every second.
+      if (what === 'stage') time.setAttribute('role', 'timer');
+      line.append(mark, time);
+      el.appendChild(line);
+      if (what === 'stage') {
+        const strip = document.createElement('span');
+        strip.className = 'bv-ro-strip';
+        if (live) strip.setAttribute('role', 'status');
+        el.appendChild(strip);
+      }
+    }
+    const mark = el.querySelector('.bv-ro-icon');
+    const time = el.querySelector('.bv-ro-time');
+    if (mark.textContent !== o.mark) mark.textContent = o.mark;
+    mark.classList.toggle('soon', !!o.soon);
+    if (time.textContent !== o.time) time.textContent = o.time;
+    if (what === 'time') time.setAttribute('datetime', o.time);
+    const strip = el.querySelector('.bv-ro-strip');
+    if (strip) { if (strip.textContent !== o.line) strip.textContent = o.line; strip.hidden = !o.line; }
+    el.classList.toggle('stale', what === 'stage' && !o.live);
+    el.style.setProperty('--bv-sw', o.edge || 'var(--c-border)');
+  }
+  /** Each readout as it should be now, the minute's redraw asked where the time of day is drawn. */
+  function draw() {
+    const simple = F.view === 'simple' && !outOf;
+    const what = shown();
+    const o = !simple || what === 'off' ? null : what === 'time' ? { mark: '🕐', time: timeNow(), line: '', live: true, edge: '' } : stageNow();
+    for (const [el, live] of [[head, true], [bar, false]]) {
+      el.hidden = !o;
+      if (o) fill(el, what, o, live);
+    }
+    // A phone's header draws Stagewatch's line on a row of its own, only while there is one (styles.css).
+    document.body.dataset.roLine = o && what === 'stage' && o.line ? '1' : '0';
+    const key = o ? what : '';
+    if (key !== drawnKey) { drawnKey = key; clearTimeout(tick); tick = null; }
+    if (key === 'time' && !tick) {
+      const now = Date.now() + offset;
+      tick = setTimeout(() => { tick = null; draw(); }, 60000 - (now % 60000) + 50);
+    }
+  }
+  return {
+    draw,
+    shown,
+    locked: () => admin.locked === true,
+    /** The join's answer: AGMessage's clock and zone, and the admin's choice for this person. */
+    joined(res) {
+      if (Number.isFinite(res.now)) offset = res.now - Date.now();
+      if (typeof res.tz === 'string' && res.tz !== tz) { tz = res.tz; fmt = null; }
+      this.admin(res.clock);
+    },
+    /** The admin's choice for this person, as the server tells it ({show, locked}): drawn at once, the sheet's row in place. */
+    admin(c) {
+      admin = AGM.catalog.adminClockOf({ clock: c });
+      draw();
+    },
+    /** This device's own choice, made in its sheet: kept on this device, told to the admin's support view alone, drawn now. */
+    choose(v) {
+      if (!SHOWS.includes(v) || ADMIN_VIEW) return;
+      device = v;
+      try { localStorage.setItem(KEY, v); } catch { /* storage blocked: this page's own run keeps it */ }
+      pushUserState('clock', v);
+      draw();
+    },
+    /** The person's device's choice, relayed to the support view (and only there): drawn as theirs. */
+    relayed(v) { if (ADMIN_VIEW && SHOWS.includes(v)) { device = v; draw(); } },
+    /** This device's own choice, for the support view's ask (userState:request): none where none was made. */
+    own: () => (ADMIN_VIEW ? null : device),
+  };
+})();
+
 // ---------------- The Board's chat view: the simple view ----------------
 // The view a person's page draws is the server's (the join's `view`, then each `view` it tells): the simple view for a
 // seat On stage unless the admin chose Full, the full view elsewhere. The simple view is the chat first and compact:
@@ -6982,6 +7153,7 @@ const Simple = (function () {
     drawStrip();
     drawEmpty();
     Takes.redraw();
+    Clock.draw();
   }
 
   /**
@@ -7207,8 +7379,11 @@ const Simple = (function () {
   const rowsEl = $('bvSheetRows');
   const sheetOpen = () => !sheetEl.hidden;
   const fullNow = () => document.fullscreenElement || document.webkitFullscreenElement || null;
-  /** The sheet as the catalogue reads it: the text size, the theme, the screen full or not, the hall as Leave names it. */
-  const sheetObject = () => ({ id: 'sheet', zoom: currentZoom, dark: root.dataset.theme === 'dark', full: !!fullNow(), hall: HALL_NAME || ROOM_NAME || 'this hall' });
+  /**
+   * The sheet as the catalogue reads it: the text size, the clock or countdown drawn and whether the admin holds it (and
+   * whether the hall has a Stagewatch for a countdown), the theme, the screen full or not, the hall as Leave names it.
+   */
+  const sheetObject = () => ({ id: 'sheet', zoom: currentZoom, clock: { show: Clock.shown(), locked: Clock.locked() }, stage: F.stagewatch, dark: root.dataset.theme === 'dark', full: !!fullNow(), hall: HALL_NAME || ROOM_NAME || 'this hall' });
   function button(id, label, value, extra) {
     const b = document.createElement('button');
     b.type = 'button';
@@ -7228,9 +7403,15 @@ const Simple = (function () {
     r.append(l, ...parts);
     return r;
   }
+  /** The clock or countdown's choices in the sheet's words. */
+  const CLOCK_SAID = Object.fromEntries(AGM.catalog.CLOCKS);
   function drawSheet() {
     const o = sheetObject();
     const shown = AGM.catalog.shown('sheet', F, o);
+    // Drawn again in place (R5): the rows keep their ids and order, and the focus stays on the control it was on, else in
+    // the sheet, where the control it was on is no longer drawn (a choice the admin has just locked).
+    const was = sheetEl.contains(document.activeElement) ? document.activeElement : null;
+    const wasAt = was && was.dataset ? [was.dataset.action, was.dataset.value] : null;
     rowsEl.textContent = '';
     for (const e of shown) {
       if (e.id === 'sheet.size') {
@@ -7243,6 +7424,30 @@ const Simple = (function () {
       } else if (e.id === 'sheet.theme') {
         const vals = AGM.catalog.submenu('sheet', e.id, F, o) || [];
         rowsEl.appendChild(row(e.label, ...vals.map((v) => button(e.id, v.label, v.value, (b) => b.setAttribute('aria-pressed', String(!!v.checked))))));
+      } else if (e.id === 'sheet.clock' && o.clock.locked) {
+        // Locked by the admin: their choice as words, and no control, so nothing looks choosable that is not.
+        const r = document.createElement('div');
+        r.className = 'bv-sheet-row bv-sheet-col';
+        const said = document.createElement('p');
+        said.className = 'bv-sheet-locked';
+        const l = document.createElement('span');
+        l.className = 'bv-sheet-label';
+        l.textContent = e.label + ':';
+        said.append(l, ' ' + (CLOCK_SAID[o.clock.show] || ''));
+        const why = document.createElement('p');
+        why.className = 'bv-sheet-why';
+        why.textContent = AGM.catalog.WORDS.clockLocked;
+        r.append(said, why);
+        r.dataset.action = e.id;
+        rowsEl.appendChild(r);
+      } else if (e.id === 'sheet.clock') {
+        const vals = AGM.catalog.submenu('sheet', e.id, F, o) || [];
+        const r = row(e.label, ...vals.map((v) => button(e.id, v.label, v.value, (b) => b.setAttribute('aria-pressed', String(!!v.checked)))));
+        r.classList.add('bv-sheet-wrap');
+        r.dataset.action = e.id;
+        // The countdown may still be chosen with no Stagewatch: it says so, and draws --:-- with why.
+        if (!o.stage) { const n = document.createElement('p'); n.className = 'bv-sheet-note'; n.textContent = AGM.catalog.WORDS.noClockStage; r.appendChild(n); }
+        rowsEl.appendChild(r);
       } else {
         const label = typeof e.label === 'function' ? e.label(F, o) : e.label;
         const r = document.createElement('div');
@@ -7266,6 +7471,11 @@ const Simple = (function () {
       if (why !== true) { b.setAttribute('aria-disabled', 'true'); b.title = why; }
     }
     $('bvSheetFoot').textContent = [NAME, roleLabel(F.role)].filter(Boolean).join(' · ');
+    if (was && !sheetEl.contains(document.activeElement)) {
+      const same = wasAt && [...rowsEl.querySelectorAll('button[data-action]')].find((b) => b.dataset.action === wasAt[0] && b.dataset.value === wasAt[1]);
+      const first = same || rowsEl.querySelector('button');
+      if (first) first.focus();
+    }
   }
   function openSheet() {
     if (!isSimple() || outOf) return;
@@ -7298,6 +7508,8 @@ const Simple = (function () {
   }, true);
   Object.assign(RUN, {
     'sheet.size': (o, { value }) => { if (typeof value === 'number' && Number.isFinite(value)) setZoom(currentZoom + value); drawSheet(); fitPlaceholder(); },
+    // This device's own clock or countdown: drawn at once, kept here alone (Clock).
+    'sheet.clock': (o, { value }) => { Clock.choose(value); drawSheet(); },
     'sheet.theme': (o, { value }) => {
       if (value !== 'light' && value !== 'dark') return;
       try { localStorage.setItem('agm.theme', value); } catch { /* storage blocked: this page only */ }
@@ -7328,7 +7540,12 @@ const Simple = (function () {
   });
 
   return { setView, waits, said, tap, change, people: drawAlone, sheet, layout, isSimple, awakeState: () => awake,
+    // What the sheet draws changed from elsewhere (the admin's clock or countdown): its rows drawn again in place, if open.
+    sheetChanged: () => { if (sheetOpen()) drawSheet(); },
     // The sheet as an ask from it reads it: its object while it is open, null once it is closed (its ask goes with it).
     sheetNow: () => (sheetOpen() ? sheetObject() : null) };
 })();
 socket.on('view', (v) => { if (v && typeof v.view === 'string') Simple.setView(v.view); });
+// The admin's clock or countdown for this person changed: drawn at once, the sheet's row in place; their device's own
+// choice still wins unless the admin locked theirs (AGM.clockFor).
+socket.on('clock', (c) => { Clock.admin(c); Simple.sheetChanged(); });

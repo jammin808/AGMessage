@@ -65,10 +65,17 @@
  * A chat view (plan 1-§6): `admin:setView {roomCode, socketId, view}`, the admin's, sets the view a person's pages draw
  * (By seat, Simple or Full), kept for a guest by their uid and for an account on it, and tells their pages by the
  * server's named effect (`viewChanged`), which reaches each page of theirs by its socket alone.
+ *
+ * The clock or countdown (plan 7-§17.3): `admin:setClock {roomCode, socketId, show?, locked?}` sets the admin's choice
+ * for a person's simple view (lib/views.js: Off, the time of day, Stagewatch's countdown, or null for their own choice)
+ * and its lock, kept as their chat view is, and tells their pages and the admin's view of them by the named effect
+ * `clockChanged`. Whoever sets a chat view sets the choice; the lock is "the admin's" alone (conn.theAdmin: the host token,
+ * or an account whose role is admin, never a manager granted settings.manage).
  */
 const { str } = require('../guard');
 const { cleanPage, askedOf, canShow, describePage, personKey, layerOf, filesOf, ARRIVALS, FILE_KINDS, STAGE_FULL } = require('../pages');
 const { mayChange } = require('../rbac');
+const { clockAsked, cleanClock, clockOf, sameClock, clockWords, lockWords, CLOCK_ADMIN } = require('../views');
 
 /** What the admin's support view is told of an act: it shows the person's page, and acts on nothing (as its doors say). */
 const SUPPORT = 'This is someone else\'s view — act from your own page.';
@@ -157,7 +164,7 @@ const pagesWords = (n) => n + ' page' + (n === 1 ? '' : 's');
  * @param {object} ctx    the takes context, frozen: none of lib/gate.js `ROOM_SENDS` (`contexts`)
  */
 function register(socket, conn, ctx) {
-  const { store, audit, accounts, linkFor, sendersOf, pages, stageRecord, tickets, hallPages, takeSends, holdingOf, pagesChanged, pageHidden, selfHosts, viewChanged, stageSource, stageCheck, freshUpload, stageDropped, inUseRooms, screensShowing, markFresh, madeUrls, sendTo } = ctx;
+  const { store, audit, accounts, linkFor, sendersOf, pages, stageRecord, tickets, hallPages, takeSends, holdingOf, pagesChanged, pageHidden, selfHosts, viewChanged, clockChanged, stageSource, stageCheck, freshUpload, stageDropped, inUseRooms, screensShowing, markFresh, madeUrls, sendTo } = ctx;
 
   const write = (action, target, words) => audit.write(conn.actor(), action, target, words, socket.data.ip);
   /**
@@ -684,6 +691,49 @@ function register(socket, conn, ctx) {
     }
     viewChanged(key);
     answer({ ok: true, view });
+  });
+
+  // The admin's choice of a person's clock or countdown (plan 7-§17.3), from the admin page's people rows or the hall page's
+  // People panel: `show` (Off, the time of day, Stagewatch's countdown, or null for their own choice) and `locked`, each
+  // left out kept, for the person seated on `socketId` in the room `roomCode` names, resolved as their chat view is. What
+  // is asked is read by type first; then, before anything is written, a change of the lock needs the admin (theAdmin), and
+  // an account reached from an account's page only where the Accounts page would let that account change it; then the
+  // clock it makes (a lock on no choice refused). A guest's is kept by their uid (pages.json), an account's on the account
+  // (accounts.json). Every page of the person's, and the admin's view of them, is told the admin's clock now (`clock`),
+  // live, nothing closed; the admin's people rows are drawn again; one row says it, the lock with it. As it stands
+  // already: said so, no row.
+  socket.on('admin:setClock', (args, ack) => {
+    if (!conn.gate(ack, { joined: false, bucket: conn.writes, admin: true })) return;
+    const answer = conn.ok(ack);
+    const a = isRecord(args) ? args : {};
+    const asked = clockAsked({ ...(Object.hasOwn(a, 'show') ? { show: a.show } : {}), ...(Object.hasOwn(a, 'locked') ? { locked: a.locked } : {}) });
+    if (asked.error) return answer({ ok: false, error: asked.error });
+    const own = conn.room();
+    const room = own && keyOf(a.roomCode) === keyOf(socket.data.joinedAs) ? own : store.room(keyOf(a.roomCode));
+    const target = room ? room.users.get(str(a.socketId)) : undefined;
+    if (!target) return answer({ ok: false, error: NOT_IN_ROOM });
+    const key = personKey(target.uid, !!target.acct);
+    if (!key) return answer({ ok: false, error: NOT_IN_ROOM });
+    const account = target.acct ? accounts.get(target.uid) : null;
+    if (target.acct && !account) return answer({ ok: false, error: NOT_IN_ROOM });
+    const was = account ? clockOf(account.clock) : pages.clockOf(target.uid);
+    if (Object.hasOwn(asked, 'locked') && asked.locked !== was.locked && !conn.theAdmin()) return answer({ ok: false, error: CLOCK_ADMIN });
+    const actor = socket.data.account;
+    const refusal = account && actor ? mayChange(actor, account, { clock: asked }, { activeAdmins: accounts.activeAdmins() }) : null;
+    if (refusal) return answer({ ok: false, error: refusal });
+    const next = cleanClock(asked, was);
+    if (next.error) return answer({ ok: false, error: next.error });
+    if (sameClock(next, was)) return answer({ ok: true, already: true, clock: next });
+    const lock = lockWords(next, was);
+    if (account) {
+      if (!accounts.update(account.id, { clock: next }).length) return answer({ ok: true, already: true, clock: next });
+      write('user.update', account.username, 'clock → ' + clockWords(next) + (lock ? ' (' + lock + ')' : ''));
+    } else {
+      if (!pages.setClock(target.uid, next)) return answer({ ok: false, error: NOT_IN_ROOM });
+      write('person.clock', room.hall, target.name + ' (guest) → clock: ' + clockWords(next) + (lock ? ', ' + lock : ''));
+    }
+    clockChanged(key);
+    answer({ ok: true, clock: next });
   });
 }
 

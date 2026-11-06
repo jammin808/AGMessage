@@ -855,7 +855,7 @@ test('a first open carries the newest 200 messages, what a page keeps in view fr
     assert.deepEqual(j.files, [{ id: picture, filename: 'stage.png', mime: 'image/png' }], 'every file of the room, its message held or not, and no link for an observer');
     assert.ok(!j.history.some((m) => m.id === quoted) && j.history.at(-1).id === reply && j.history.at(-1).replyTo.id === quoted && !j.history.at(-1).replyTo.gone, 'a reply whose quoted message is earlier than the window');
     assert.deepEqual(j.history.find((m) => m.id === toDoomed).replyTo, { id: doomed, name: 'Chair', snippet: 'Is the lectern mic on?', gone: true }, 'a reply whose quoted message has gone says so');
-    assert.deepEqual(Object.keys(j).slice(-3), ['more', 'older', 'files'], 'appended at the end of the answer');
+    assert.deepEqual(Object.keys(j).slice(-5), ['more', 'older', 'files', 'theAdmin', 'clock'], 'appended at the end of the answer, before the clock or countdown\'s');
     assert.equal(j.seq, now.at(-1).seq);
 
     // Read back from the window's oldest, a page at a time, until nothing is left: every message once, in order. A change

@@ -35,8 +35,8 @@
  * that could not show it (`cannot`).
  *
  * Stored in `pages.json` (one write lane, written only once this copy holds its data folder: `hold()`): the takes by
- * hall and layer, the persons' answers, each hall's Earlier list, stage files and withdrawn takes, and the guests' chat
- * views; each bounded, the oldest going first; and, once there are any, the confidential marks (`marks`, one record a
+ * hall and layer, the persons' answers, each hall's Earlier list, stage files and withdrawn takes, and what the admin
+ * chose for each guest (`views`: their chat view and their clock or countdown, lib/views.js); each bounded, the oldest going first; and, once there are any, the confidential marks (`marks`, one record a
  * file by its upload's name, gone with the file) and the holds on Stagewatch frames that carry a confidential line
  * (`holds`, one a link, by MAC and id, never text: stepHold). A record of
  * the wrong shape is dropped when it is read. The reports are the run's alone: never saved, and a page that goes takes
@@ -66,6 +66,7 @@
 const { WriteLane, readJsonWhole } = require('./resilience');
 const guard = require('./guard');
 const { clockOf } = require('./tunnelend');
+const views = require('./views');
 
 /**
  * The kinds a take may be: back to the chat; Stagewatch's countdown; AGMessage's clock; a holding slide (the picture given,
@@ -1387,10 +1388,14 @@ class Pages {
     const data = isRecord(read.data) ? read.data : {};
     // The guests' views, in the order they were set (the oldest first), as the store writes them: the file's order is the
     // order set, never the laptop's clock, so the bound lets the oldest go at no cost and a clock stepped back moves none.
+    // Each holds what the admin chose for that guest: a chat view, the clock or countdown, or both (lib/views.js).
     this.views = new Map();
     if (isRecord(data.views)) {
       for (const [k, v] of Object.entries(data.views)) {
-        if (/^u:/.test(k) && GUEST.test(k.slice(2)) && isRecord(v) && VIEWS.includes(v.view) && v.view && Number.isFinite(v.at)) this.views.set(k, { view: v.view, at: v.at });
+        if (!/^u:/.test(k) || !GUEST.test(k.slice(2)) || !isRecord(v) || !Number.isFinite(v.at)) continue;
+        const view = VIEWS.includes(v.view) && v.view ? v.view : '';
+        const clock = views.isClock(v.clock) && !views.noClock(v.clock) ? views.clockOf(v.clock) : null;
+        if (view || clock) this.views.set(k, { ...(view ? { view } : {}), ...(clock ? { clock } : {}), at: v.at });
       }
     }
     this.halls = {};
@@ -2198,16 +2203,44 @@ class Pages {
   /** A guest's chat view ('' by their seat, 'simple' or 'full'), kept by their uid. */
   viewOf(uid) {
     const v = this.views.get('u:' + guard.str(uid));
-    return v ? v.view : '';
+    return v && v.view ? v.view : '';
   }
 
   /** Set a guest's chat view ('' or null: by their seat again). False when the uid or the view is not one kept. */
   setView(uid, view, at = Date.now()) {
     const v = view === null ? '' : view;
     if (!GUEST.test(guard.str(uid)) || !VIEWS.includes(v) || !Number.isFinite(at)) return false;
+    return this._setChoice(uid, 'view', v || null, at);
+  }
+
+  /** The clock or countdown the admin chose for a guest ({show, locked}; none chosen: {show: null, locked: false}), by their uid. */
+  clockOf(uid) {
+    const v = this.views.get('u:' + guard.str(uid));
+    return views.clockOf(v && v.clock);
+  }
+
+  /**
+   * Set the clock or countdown the admin chose for a guest: a whole clock (lib/views.js cleanClock's), or null (or the
+   * one nobody chose) for none, their own choice again. False when the uid or the clock is not one kept.
+   */
+  setClock(uid, clock, at = Date.now()) {
+    const c = clock === null ? views.CLOCK_NONE : clock;
+    if (!GUEST.test(guard.str(uid)) || !views.isClock(c) || !Number.isFinite(at)) return false;
+    return this._setChoice(uid, 'clock', views.noClock(c) ? null : views.clockOf(c), at);
+  }
+
+  /**
+   * One of a guest's choices (`field`: their chat view or their clock) set to `value`, or taken out (null), the rest of
+   * theirs kept: the record moves to the end, as the one set last, and goes once it holds nothing.
+   */
+  _setChoice(uid, field, value, at) {
     const k = 'u:' + uid;
-    const had = this.views.delete(k);
-    if (v) this.views.set(k, { view: v, at });
+    const had = this.views.get(k);
+    const next = { ...(had || {}) };
+    delete next.at;
+    if (value === null) delete next[field]; else next[field] = value;
+    this.views.delete(k);
+    if (Object.keys(next).length) this.views.set(k, { ...next, at });
     else if (!had) return true;
     this._trimViews();
     this.save();

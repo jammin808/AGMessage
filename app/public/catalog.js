@@ -68,6 +68,13 @@
     linkCert: 'Stagewatch\'s certificate changed — nothing can be sent until an admin accepts it (Halls → Set up, or Admin → Show network).',
     noAi: 'AI drafts are off: no Anthropic API key — add one under ✨ AI drafts.',
     aiOff: 'AI drafts are off: they need an Anthropic key (admin) and the internet. Everything else works without them.',
+    // The clock or countdown (plan 7-§17.3): the sheet's words while the admin holds it, and Lock it on their devices'
+    // reasons, as the server refuses them (lib/views.js).
+    clockLocked: 'Set by the admin for you.',
+    clockAdmin: 'Only an admin may lock the clock or countdown.',
+    clockChoose: 'Choose one to lock it.',
+    noClockStage: 'This hall has no Stagewatch linked.',
+    clockApplies: 'Applies in the simple view.',
   });
   /** The support view's words (R8): every door the person has, drawn, and none of them acts. */
   const supportWords = (name) => 'This is ' + name + '\'s view — act from your own page.';
@@ -275,6 +282,37 @@
   const SEATS_SIDE = Object.freeze([['research', 'Member'], ['observer', 'Observer']]);
   /** The chat views the admin chooses between, in the Accounts page's words: '' by the person's seat. */
   const CHAT_VIEWS = Object.freeze([['', 'By seat'], ['simple', 'Simple'], ['full', 'Full']].map((x) => Object.freeze(x)));
+  /** The clock or countdown a device chooses in its sheet (lib/views.js CLOCK_SHOWS), in the sheet's words. */
+  const CLOCKS = Object.freeze([['time', 'Time of day'], ['stage', 'Countdown'], ['off', 'Off']].map((x) => Object.freeze(x)));
+  /** The admin's choice for a person, in the admin's words: '' their own (the server's null), the time of day until they make one. */
+  const ADMIN_CLOCKS = Object.freeze([['', 'Their choice (the clock at first)'], ['time', 'Time of day'], ['stage', 'Stagewatch countdown'], ['off', 'Off']].map((x) => Object.freeze(x)));
+  const isClockShow = (v) => CLOCKS.some((x) => x[0] === v);
+  /** The admin's choice a person's row or account carries (`clock`: {show, locked}), read by type: none chosen where it says none. */
+  const adminClockOf = (o) => {
+    const c = o && o.clock && typeof o.clock === 'object' ? o.clock : {};
+    const show = isClockShow(c.show) ? c.show : null;
+    return { show, locked: show !== null && c.locked === true };
+  };
+  /**
+   * Whether this page may change a clock's lock as the server it asks decides: on the Accounts page an account whose role
+   * is admin (the PATCH's rule, `adminRole`), on a page with a socket "the admin" (`theAdmin`, the socket's rule).
+   */
+  const locksClocks = (f) => (f.page === 'accounts' ? f.adminRole === true : f.theAdmin === true);
+  /** Lock it on their devices, now: the admin's alone, and only on a choice; true, or why not in the server's words. */
+  const clockLockWhy = (f, o) => (!locksClocks(f) ? WORDS.clockAdmin : adminClockOf(o).show === null ? WORDS.clockChoose : true);
+  /**
+   * The admin's choices as a submenu: radio items, the one the admin holds now checked ('' for their own). Their choice
+   * takes a lock off with the choice it held (a lock holds a choice), so on a locked clock it is the admin's alone, drawn
+   * disabled with the server's words elsewhere; every door sends it as {show: null, locked: false}.
+   */
+  const adminClocks = (f, o) => {
+    const c = adminClockOf(o);
+    return ADMIN_CLOCKS.map(([value, label]) => ({ value, label, role: 'menuitemradio', checked: (c.show || '') === value, disabled: value === '' && c.locked && !locksClocks(f) ? WORDS.clockAdmin : '' }));
+  };
+  /** What a door sends for the admin's choice `value` ('' their own): their own takes the lock off with it. */
+  const clockChange = (value) => (value ? { show: value } : { show: null, locked: false });
+  /** Clock or countdown's line under it beside a person whose Chat view is Full: it applies in the simple view. */
+  const clockNote = (f, o) => (o && o.view === 'full' ? WORDS.clockApplies : '');
   const seatOf = (role) => (role === 'director' ? 'board' : role);
   /**
    * The ask before a room's guest code is switched off (the design's three-way choice): the guest pages in with it stay
@@ -617,12 +655,17 @@
         may: (f) => f.takeDownloads, fits: (f, o) => o.kind === 'doc' && o.download === true },
     ],
     // The simple view's ⋯ sheet: what is set once a session, each a row of its own, never a menu (the simple view has
-    // none). `zoom` (the text size), `dark` (the theme), `full` (the device's screen is full now), `hall` (as Leave's ask
-    // names it). Full screen only where the device has the Fullscreen API (`fullscreen`, a probe at load). Leave asks in
+    // none). `zoom` (the text size), `clock` (the clock or countdown drawn, and whether the admin holds it), `dark` (the
+    // theme), `full` (the device's screen is full now), `hall` (as Leave's ask names it). Full screen only where the device has the Fullscreen API (`fullscreen`, a probe at load). Leave asks in
     // place: it loses nothing, but a Board member who leaves stops getting messages from backstage.
     sheet: [
       { id: 'sheet.size', label: 'Text size', icon: 'Aa', group: '3_keep', verb: 'local', mode: 'local', may: () => true, fits: (f) => !full(f),
         submenu: (f, o) => [{ value: -0.1, label: 'Aa−' }, { value: 0.1, label: 'Aa+' }].map((v) => ({ ...v, disabled: (v.value < 0 ? o.zoom <= ZOOM_MIN : o.zoom >= ZOOM_MAX) ? 'The text is as ' + (v.value < 0 ? 'small' : 'large') + ' as it goes.' : '' })) },
+      // Clock or countdown: this device's own choice (kept on it alone), the one drawn checked (`clock`: {show, locked}, as
+      // AGM.clockFor reads it); while the admin holds it (`locked`), no choice: the sheet says the admin's as words.
+      { id: 'sheet.clock', label: 'Clock or countdown', icon: '🕐', group: '3_keep', verb: 'local', mode: 'local', may: () => true, fits: (f) => !full(f),
+        ready: (f, o) => (o.clock && o.clock.locked === true ? WORDS.clockLocked : true),
+        submenu: (f, o) => CLOCKS.map(([value, label]) => ({ value, label, role: 'menuitemradio', checked: !!o.clock && o.clock.show === value })) },
       { id: 'sheet.theme', label: 'Theme', icon: '🌙', group: '3_keep', verb: 'local', mode: 'local', may: () => true, fits: (f) => !full(f),
         submenu: (f, o) => [['light', 'Light'], ['dark', 'Dark']].map(([value, label]) => ({ value, label, role: 'menuitemradio', checked: (value === 'dark') === !!o.dark })) },
       { id: 'sheet.fullscreen', label: (f, o) => (o.full ? 'Leave full screen' : 'Full screen'), icon: '⛶', group: '3_keep', verb: 'local', mode: 'local', may: () => true, fits: (f) => !full(f) && f.fullscreen },
@@ -795,6 +838,14 @@
       { id: 'person.chatView', label: 'Chat view', icon: '🗔', group: '4_manage', verb: 'admin:setView', mode: 'now',
         may: (f) => f.admin, fits: (f, o) => (onAdmin(f) || (onHall(f) && full(f))) && typeof o.socketId === 'string' && o.socketId.length > 0,
         submenu: (f, o) => CHAT_VIEWS.map(([value, label]) => ({ value, label, role: 'menuitemradio', checked: (typeof o.view === 'string' ? o.view : '') === value })) },
+      // Clock or countdown ▸: the admin's choice of what the person's simple view draws beside the hall's name (their own
+      // choice first, the clock until they make one), where Chat view is, on anyone seated in the room (`clock`: the admin's
+      // own page is told each person's); Lock it on their devices keeps it there whatever their device chose, the admin's
+      // alone (`theAdmin`: an admin page of a manager granted settings.manage draws it disabled), and only on a choice.
+      { id: 'person.clock', label: 'Clock or countdown', icon: '🕐', group: '4_manage', verb: 'admin:setClock', mode: 'now', note: clockNote,
+        may: (f) => f.admin, fits: (f, o) => (onAdmin(f) || (onHall(f) && full(f))) && typeof o.socketId === 'string' && o.socketId.length > 0, submenu: adminClocks },
+      { id: 'person.clockLock', label: 'Lock it on their devices', icon: '🗝', group: '4_manage', verb: 'admin:setClock', mode: 'now', checked: (f, o) => adminClockOf(o).locked,
+        may: (f) => f.admin, fits: (f, o) => (onAdmin(f) || (onHall(f) && full(f))) && typeof o.socketId === 'string' && o.socketId.length > 0, ready: clockLockWhy },
       { id: 'person.seat', label: 'Seat', icon: '💺', group: '4_manage', verb: 'admin:setRole', mode: 'now',
         may: (f) => f.admin, fits: (f, o) => onAdmin(f) && !o.account,
         submenu: (f, o) => (o.main === false ? SEATS_SIDE : SEATS).map(([value, label]) => ({ value, label, role: 'menuitemradio', checked: seatOf(o.role) === value })) },
@@ -964,7 +1015,9 @@
     ],
 
     // ------------------------------------------------------------ the Accounts page (accountFacts)
-    // A person's account: `id`, `name`, `disabled`, `locked` (why this viewer may not change it, or ''), `self`.
+    // A person's account: `id`, `name`, `disabled`, `locked` (why this viewer may not change it, or ''), `self`, `clock`
+    // (the clock or countdown the admin chose for it: an account field, beside its Chat view in the editor) and `view`
+    // (its Chat view: '' by seat, 'simple' or 'full').
     account: [
       { id: 'account.edit', label: 'Edit…', icon: '🖊', key: 'Enter', group: '4_manage', inline: () => 1, verb: 'http:PATCH /api/users/:id', mode: 'now',
         may: (f) => f.manageUsers, fits: () => true, ready: (f, o) => o.locked || true },
@@ -974,6 +1027,12 @@
       { id: 'account.signout', label: 'Sign out everywhere…', icon: '📴', group: '4_manage', verb: 'http:POST /api/users/:id/signout', mode: 'now',
         may: (f, o) => f.manageUsers && !o.locked, fits: () => true,
         confirm: (f, o) => ({ title: 'Sign ' + o.name + ' out everywhere?', words: 'Every page ' + o.name + ' has open closes, on every device. ' + o.name + ' can sign in again with their password.', yes: 'Sign out', no: 'Cancel' }) },
+      // The clock or countdown the admin chooses for the account's simple view, and its lock (an admin account's alone,
+      // `adminRole`), as on a person's row: saved at once, the account's pages told live, none closed. Nobody sets their own.
+      { id: 'account.clock', label: 'Clock or countdown', icon: '🕐', group: '4_manage', verb: 'http:PATCH /api/users/:id', mode: 'now', note: clockNote,
+        may: (f, o) => f.manageUsers && !o.locked, fits: (f, o) => !o.self, submenu: adminClocks },
+      { id: 'account.clockLock', label: 'Lock it on their devices', icon: '🗝', group: '4_manage', verb: 'http:PATCH /api/users/:id', mode: 'now', checked: (f, o) => adminClockOf(o).locked,
+        may: (f, o) => f.manageUsers && !o.locked, fits: (f, o) => !o.self, ready: clockLockWhy },
       { id: 'account.disable', label: (f, o) => (o.disabled ? 'Turn on' : 'Turn off…'), icon: '⏻', group: '9_danger', verb: 'http:PATCH /api/users/:id', mode: 'now',
         may: (f, o) => f.manageUsers && !o.locked, fits: (f, o) => !o.self,
         confirm: (f, o) => (o.disabled ? null : { title: 'Turn ' + o.name + '\'s account off?', words: o.name + ' is signed out everywhere and cannot sign in until it is turned on again. Their messages stay.', yes: 'Turn off', no: 'Keep it on', danger: true }) },
@@ -1086,6 +1145,9 @@
       // Whether this device opens documents (its probe at load, plan 4-§5.15.2): without it a document's card opens its
       // stand-in, and a Look at a document says it cannot.
       docs: s.docs !== false,
+      // Whether this page is "the admin" (the join's `theAdmin`: the host token, or an account whose role is admin), whose
+      // alone is the clock or countdown's lock on a person of the People panel.
+      theAdmin: s.theAdmin === true,
     });
   }
 
@@ -1120,6 +1182,8 @@
       page: 'accounts', uid: s.account && typeof s.account.id === 'string' ? s.account.id : '',
       manageUsers: caps.includes('users.manage'), auditRead: caps.includes('audit.read'),
       auditExport: caps.includes('audit.read') && caps.includes('audit.export'), theAdmin: !!s.admin,
+      // Whether the account signed in is an admin by its role: the clock or countdown's lock is changed by the PATCH as it.
+      adminRole: !!s.account && s.account.role === 'admin',
       filter, connected: true, support: '',
     });
   }
@@ -1153,6 +1217,9 @@
       disabled: r === true ? '' : r, held: r === true && e.mode === 'hold' && !f.connected && !f.support ? WORDS.held : '',
       submenu: typeof e.submenu === 'function', asks: !!(e.confirm && e.confirm(f, o)),
     };
+    // A line under the item that says what is true of its act here ("Applies in the simple view."), where it says one.
+    const note = e.note ? call(e.note, f, o) : '';
+    if (note) item.note = note;
     if (e.checked) { item.role = 'menuitemcheckbox'; item.checked = !!e.checked(f, o); }
     if (e.radio) { item.role = 'menuitemradio'; item.checked = !!e.radio(f, o); }
     return item;
@@ -1211,6 +1278,20 @@
     return shown(kind, f, o).find((e) => e.key === k) || null;
   }
 
-  const catalog = Object.freeze({ GROUPS, REACTIONS, WORDS, FOLDS, SHOW_KINDS, FILE_KINDS, PICKED_KINDS, PICK_UNITS, STAGE_EXT, TRANSFER_EXT, READER_EXT, CHAT_VIEWS, ZOOM_MIN, ZOOM_MAX, KINDS, supportWords, stageWhy, downOf, withdrawOf, facts, adminFacts, boardFacts, accountFacts, actorKey, entry, shown, ready, items, ids, inline, submenu, byKey, placeOf, lasted });
-  Object.assign(root.AGM = root.AGM || {}, { catalog });
+  /**
+   * Which clock or countdown a simple view draws ('off', 'time' or 'stage'; plan 7-§17.3), from the admin's choice for
+   * the person (`admin`: {show, locked}, the server's) and this device's own (`device`, kept on it alone): the admin's
+   * while it is locked; else the device's, where it made one; else the admin's, where it made one; else the time of day
+   * (owner answer B3). Pure: the server never reads a device's choice, so every page decides it the same way.
+   */
+  function clockFor(c) {
+    const admin = adminClockOf({ clock: c && c.admin });
+    const device = c && isClockShow(c.device) ? c.device : null;
+    if (admin.locked) return admin.show;
+    if (device) return device;
+    return admin.show || 'time';
+  }
+
+  const catalog = Object.freeze({ GROUPS, REACTIONS, WORDS, FOLDS, SHOW_KINDS, FILE_KINDS, PICKED_KINDS, PICK_UNITS, STAGE_EXT, TRANSFER_EXT, READER_EXT, CHAT_VIEWS, CLOCKS, ADMIN_CLOCKS, ZOOM_MIN, ZOOM_MAX, KINDS, supportWords, stageWhy, downOf, withdrawOf, facts, adminFacts, boardFacts, accountFacts, actorKey, entry, shown, ready, items, ids, inline, submenu, byKey, placeOf, lasted, adminClockOf, clockChange, locksClocks });
+  Object.assign(root.AGM = root.AGM || {}, { catalog, clockFor });
 })(typeof window !== 'undefined' ? window : globalThis);

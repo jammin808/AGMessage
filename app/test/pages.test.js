@@ -423,6 +423,35 @@ test('a guest\'s chat view: Simple or Full, or by their seat again; the words ar
   assert.equal(p.viewOf({ toString: () => 'uguest00001' }), '');
 });
 
+test('a guest\'s clock or countdown: the admin\'s choice and its lock, kept beside their view in one record, none again by null', () => {
+  const p = store();
+  assert.deepEqual(p.clockOf('uguest00001'), { show: null, locked: false }, 'their own choice until the admin sets one');
+  assert.equal(p.setClock('uguest00001', { show: 'stage', locked: true }, 1), true);
+  assert.deepEqual(p.clockOf('uguest00001'), { show: 'stage', locked: true });
+  assert.deepEqual(onDisk(p).views, { 'u:uguest00001': { clock: { show: 'stage', locked: true }, at: 1 } });
+  // A view set beside it keeps it: one record a guest, moved to the end as the one set last.
+  assert.equal(p.setView('uguest00002', 'full', 2), true);
+  assert.equal(p.setView('uguest00001', 'simple', 3), true);
+  assert.deepEqual(onDisk(p).views, { 'u:uguest00002': { view: 'full', at: 2 }, 'u:uguest00001': { clock: { show: 'stage', locked: true }, view: 'simple', at: 3 } });
+  assert.deepEqual([p.viewOf('uguest00001'), p.clockOf('uguest00001')], ['simple', { show: 'stage', locked: true }]);
+  // Only a whole clock (lib/views.js) is kept: a lock on no choice, a choice that is none, a lock that is no boolean, and a
+  // uid that is none are refused and change nothing.
+  for (const [uid, clock] of [['uguest00001', { show: null, locked: true }], ['uguest00001', { show: 'tiny', locked: false }], ['uguest00001', { show: 'time' }], ['uguest00001', { show: 'time', locked: 'yes' }], ['uguest00001', 'stage'], ['', { show: 'time', locked: false }], ['a b', { show: 'time', locked: false }], [null, { show: 'time', locked: false }]]) {
+    assert.equal(p.setClock(uid, clock), false, JSON.stringify([uid, clock]));
+  }
+  assert.deepEqual(p.clockOf('uguest00001'), { show: 'stage', locked: true }, 'a refused clock changes nothing');
+  // Null, or the one nobody chose: their own choice again, the view beside it kept; the record goes once it holds neither.
+  assert.equal(p.setClock('uguest00001', null, 4), true);
+  assert.deepEqual(onDisk(p).views, { 'u:uguest00002': { view: 'full', at: 2 }, 'u:uguest00001': { view: 'simple', at: 4 } });
+  assert.equal(p.setClock('uguest00002', { show: 'off', locked: false }, 5), true);
+  assert.equal(p.setView('uguest00002', '', 6), true);
+  assert.deepEqual(onDisk(p).views['u:uguest00002'], { clock: { show: 'off', locked: false }, at: 6 }, 'the view goes, the clock stays');
+  assert.equal(p.setClock('uguest00002', { show: null, locked: false }, 7), true);
+  assert.equal(p.setView('uguest00001', null, 8), true);
+  assert.deepEqual(onDisk(p).views, {});
+  assert.deepEqual(p.clockOf({ toString: () => 'uguest00001' }), { show: null, locked: false });
+});
+
 test('status: a mark and its words, person first, from each page\'s report on the take it holds', () => {
   const at = Date.UTC(2026, 10, 4, 14, 2);
   const take = { seq: 4, content: { kind: 'clock' }, by: { name: 'Ada' }, at };
@@ -572,6 +601,11 @@ test('a record of the wrong shape is dropped as the file is read; the rest is ke
       'u:ugood00001': { view: 'simple', at: 1 }, 'u:ugood00002': { view: 'full', at: 2, clockLater: true },
       'a:aaccount01': { view: 'full', at: 1 }, 'u:bad key': { view: 'full', at: 1 }, 'u:ubadview01': { view: 'director', at: 1 }, 'u:unoat00001': { view: 'full' },
       'u:uempty0001': { view: '', at: 1 }, 'u:ulist00001': ['full'], 'u:PROTO': { view: 'full', at: 1 },
+      // The admin's clock or countdown for a guest: kept alone or beside a view; a lock on no choice, a choice that is none
+      // or a lock that is no boolean is dropped (and the view beside it kept).
+      'u:uclock0001': { clock: { show: 'stage', locked: true }, at: 3 }, 'u:uclock0002': { clock: { show: null, locked: true }, at: 3 },
+      'u:uclock0003': { view: 'full', clock: { show: 'tiny', locked: false }, at: 3 }, 'u:uclock0004': { clock: { show: 'off', locked: 'yes' }, at: 3 },
+      'u:uclock0005': { clock: { show: null, locked: false }, at: 3 },
     },
     halls: {
       [HALL]: {
@@ -603,7 +637,7 @@ test('a record of the wrong shape is dropped as the file is read; the rest is ke
   assert.ok(fs.readFileSync(file, 'utf8').includes('"__proto__"'), 'a key a parse makes its own');
   const p = new Pages(file);
   assert.equal(p.unread, '');
-  assert.deepEqual(Object.fromEntries(p.views), { 'u:ugood00001': { view: 'simple', at: 1 }, 'u:ugood00002': { view: 'full', at: 2 } });
+  assert.deepEqual(Object.fromEntries(p.views), { 'u:ugood00001': { view: 'simple', at: 1 }, 'u:ugood00002': { view: 'full', at: 2 }, 'u:uclock0001': { clock: { show: 'stage', locked: true }, at: 3 }, 'u:uclock0003': { view: 'full', at: 3 } });
   assert.deepEqual(Object.keys(p.halls), [HALL, 'HALLD4']);
   assert.deepEqual(p.halls.HALLD4, { seq: 2, board: {}, people: {}, answers: {}, earlier: [] }, 'a hall\'s parts that do not read are empty, its counter kept');
   const h = p.halls[HALL];
