@@ -4891,6 +4891,11 @@ Web pages need rights of their own.", confirmed "Right", the readings S5 and S13
   `stage.show` and `canShow`), `docs/ANALYSIS.md` (the takes module's helpers, the kinds by layer, the inputs),
   `CLAUDE.md`.
 
+**The analyzers' versions**
+- ESLint 10.14.0 and eslint-plugin-security 4.2.1, from 10.13.0 and 4.2.0 (development only: `npm ci --omit=dev` leaves
+  both out of the portable folder). Dependabot's update of `main` (jammin808/AGMessage#5), carried on this branch with
+  the same lockfile entries. The fences find nothing new; nothing that ships changed.
+
 **Fixed**
 - A hall's side rooms keep the order they were made in. The store ordered them by the millisecond each was made, and
   two made in the same millisecond by their keys, which are random: CI's Node 26 run listed twenty rooms made one after
