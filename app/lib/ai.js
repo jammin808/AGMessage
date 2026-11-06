@@ -39,7 +39,8 @@ function getClient(apiKey) {
  * Recent thread as compact lines for the model. A message its page held before sending it (`held`, whole seconds) is
  * dated as written and as sent, so a request written at 14:02 and sent at 14:06 is not read as asked at 14:06. A message
  * another room sent here says where it came from, and this room's copy of one it sent says where it went (and, taken back
- * since, how long it was there).
+ * since, how long it was there). A file marked confidential is "shared a confidential file": its name may be confidential
+ * too ("Redundancy plan — K. Smith.docx").
  */
 function threadText(messages, max = 60) {
   const hhmm = (ms) => new Date(ms).toISOString().slice(11, 16);
@@ -48,7 +49,8 @@ function threadText(messages, max = 60) {
       + (m.sentFrom ? ` [sent here from ${placeOf(m.sentFrom)}]` : m.sentTo ? ` [sent to ${placeOf(m.sentTo)}${m.sentTo.withdrawn ? ` and withdrawn from there after ${lasted(m.sentTo.withdrawn - m.at)}` : ''}, a copy kept here]` : '');
     const t = hhmm(m.at) + (Number.isInteger(m.held) && m.held > 0 ? `, written ${hhmm(m.at - m.held * 1000)} and sent when the connection was back` : '');
     if (m.type === 'text') return `[${t}] ${who}: ${m.text}`;
-    if (m.type === 'file') return `[${t}] ${who} shared "${m.filename}" for download${m.caption ? ': ' + m.caption : ''}`;
+    // A file marked confidential (`confidential`, the server's from the file's record) by neither its name nor its caption.
+    if (m.type === 'file') return m.confidential === true ? `[${t}] ${who} shared a confidential file` : `[${t}] ${who} shared "${m.filename}" for download${m.caption ? ': ' + m.caption : ''}`;
     if (m.type === 'action') {
       const answers = (m.responses || []).map((r) => `${r.name} → ${r.optionIndex >= 0 ? (m.options || [])[r.optionIndex] : r.note}`).join('; ');
       return `[${t}] ${who} asked: ${m.text} [options: ${(m.options || []).join(' / ')}]${answers ? ' answers: ' + answers : ''}`;
@@ -153,7 +155,8 @@ ${SEATS}`;
  * What was shown on people's pages (the stage record's entries, oldest first: lib/stagerecord.js), every one, as compact
  * lines for the model: "[14:02] Ana showed the Board: a table cell from Q3.xlsx, 'Sheet1'!C4 — "Revenue Q3 £4.2m""; a
  * line sent with it to the speaker's screen adds `; on the speaker's screen: "…"`, what its pages reported "(on 6 of 6
- * pages)", and a withdrawal its time. A take-down says so ("took the information down on the Board's pages"). Entries the
+ * pages)", and a withdrawal its time. A take-down says so ("took the information down on the Board's pages"). A
+ * confidential entry is "Ana showed the Board a confidential item (its name and words not sent to the AI)". Entries the
  * hall's record no longer keeps (`dropped`, past its bound) are counted on a line of their own before them.
  */
 function shownText(entries, dropped = 0) {
@@ -161,6 +164,11 @@ function shownText(entries, dropped = 0) {
   const one = (s) => String(s).replace(/\s*\n\s*/g, ' / ');
   const gone = Number.isInteger(dropped) && dropped > 0 ? ['(' + dropped + ' earlier ' + (dropped === 1 ? 'entry' : 'entries') + ' of the hall\'s record ' + (dropped === 1 ? 'is' : 'are') + ' no longer kept, so not included)'] : [];
   return gone.concat((Array.isArray(entries) ? entries : []).map((e) => {
+    // A confidential entry by none of its text, its line, its file's name or its page (S9): who showed it, and to whom.
+    if (e.confidential === true && e.kind !== 'chat') {
+      const to = e.to === 'board' ? 'the Board' : (e.to && e.to.name) || 'someone';
+      return '[' + hhmm(e.at) + '] ' + (e.by.name || 'Someone') + ' showed ' + to + ' a confidential item (its name and words not sent to the AI)' + (e.withdrawn ? '; withdrawn at ' + hhmm(e.withdrawn) : '');
+    }
     const named = e.to !== 'board' && e.to && e.to.name ? e.to.name : '';
     const whom = e.to === 'board' ? 'the Board' : named || 'someone';
     const whose = e.to === 'board' ? 'the Board\'s pages' : named ? named + '\'s pages' : 'their pages';

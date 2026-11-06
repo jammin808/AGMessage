@@ -126,7 +126,8 @@ one shape:
 - `peers` is one hop only: the peers this node hears, with their light and headline (never their peers), so a node
   that can reach only one other still sees the room.
 - No secrets, no private content (AGMessage never puts message text or documents in its context — only counts, the
-  room's state and action prompts' titles).
+  room's state and action prompts' titles). Nothing of what people's pages are shown, nor a file's confidential mark,
+  reaches it; and while a confidential line is on a Stagewatch's frame, the stage line it carries holds no word of it.
 
 ## 7. Keys and pairing
 

@@ -876,6 +876,13 @@ html[data-theme="dark"] button:focus-visible {
   font-weight: 600;
 }
 .priority-btn:hover { border-color: var(--c-fault); }
+/* 🔒 Confidential beside it: its icon and word say it, the info colour marks it, pressed with a heavier edge (and
+   aria-pressed); never colour alone */
+.confidential-btn { border: 1px solid var(--c-border); background: transparent; color: var(--c-info); font-weight: 600; }
+.confidential-btn:hover, .confidential-btn.on { border-color: var(--c-info); }
+.confidential-btn.on { box-shadow: inset 0 0 0 1px var(--c-info); }
+/* A file card marked confidential: its "🔒 Confidential ·" in the card's own words, set in bold */
+.file-link.confidential { font-weight: 600; }
 .priority-btn.on {
   background: var(--c-fault);
   border-color: var(--c-fault);

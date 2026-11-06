@@ -544,7 +544,7 @@ test('the seat matrix: what each seat is shown on each message', () => {
     research: {
       boardText: ['msg.reply', 'msg.react', 'msg.draft', 'msg.speaker', 'msg.sendNow', 'msg.send', 'msg.pin', 'msg.copy'],
       anaText: ['msg.reply', 'msg.react', 'msg.speaker', 'msg.sendNow', 'msg.send', 'msg.pin', 'msg.copy', 'msg.delete'],
-      anaFile: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.look', 'msg.download', 'msg.delete'],
+      anaFile: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.look', 'msg.download', 'msg.confidential', 'msg.delete'],
       anaQuestion: ['msg.reply', 'msg.react', 'msg.answer', 'msg.answerWords', 'msg.speaker', 'msg.sendNow', 'msg.send', 'msg.pin', 'msg.copy', 'msg.delete'],
       chairHelp: ['msg.reply', 'msg.react', 'msg.helpRespond', 'msg.helpResolve', 'msg.pin', 'msg.copy'],
       cyHelp: ['msg.reply', 'msg.react', 'msg.helpResolve', 'msg.pin', 'msg.copy'],
@@ -591,19 +591,19 @@ test('the seat matrix: what each seat is shown on each message', () => {
     // Staff: messages and files, no Stagewatch: neither 📝 nor 🖥. Tech: Stagewatch's speaker's screen (no show desk), and
     // the hall's screens.
     // (What this room sent into another, by someone else, is not Staff's to withdraw.)
-    staff: { boardText: ['msg.reply', 'msg.react', 'msg.draft', 'msg.send', 'msg.pin', 'msg.copy'], anaFile: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.look', 'msg.download'], sentThere: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.look', 'msg.download'],
+    staff: { boardText: ['msg.reply', 'msg.react', 'msg.draft', 'msg.send', 'msg.pin', 'msg.copy'], anaFile: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.look', 'msg.download', 'msg.confidential'], sentThere: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.look', 'msg.download', 'msg.confidential'],
       // A file for download only: downloaded and moved, never opened.
-      anaZip: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.download'] },
+      anaZip: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.download', 'msg.confidential'] },
     // A seat that may show the Board (canShow): 📺 Show the Board ▸ on a file the stage shows, never on one for download
     // only; the operator (canPush) too.
-    staffShow: { anaFile: ['msg.reply', 'msg.react', 'msg.stage', 'msg.send', 'msg.pin', 'msg.look', 'msg.download'], anaZip: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.download'], anaText: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.copy'] },
-    techPush: { anaFile: ['msg.reply', 'msg.react', 'msg.stage', 'msg.screens', 'msg.pin', 'msg.look', 'msg.download'] },
-    tech: { boardText: ['msg.reply', 'msg.react', 'msg.draft', 'msg.speaker', 'msg.sendNow', 'msg.screens', 'msg.pin', 'msg.copy'], anaFile: ['msg.reply', 'msg.react', 'msg.screens', 'msg.pin', 'msg.look', 'msg.download'] },
+    staffShow: { anaFile: ['msg.reply', 'msg.react', 'msg.stage', 'msg.send', 'msg.pin', 'msg.look', 'msg.download', 'msg.confidential'], anaZip: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.download', 'msg.confidential'], anaText: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.copy'] },
+    techPush: { anaFile: ['msg.reply', 'msg.react', 'msg.stage', 'msg.screens', 'msg.pin', 'msg.look', 'msg.download', 'msg.confidential'] },
+    tech: { boardText: ['msg.reply', 'msg.react', 'msg.draft', 'msg.speaker', 'msg.sendNow', 'msg.screens', 'msg.pin', 'msg.copy'], anaFile: ['msg.reply', 'msg.react', 'msg.screens', 'msg.pin', 'msg.look', 'msg.download', 'msg.confidential'] },
     // A question is not a thing a screen shows: no ⧉ on it.
     // The admin withdraws any send this room made, and deletes only its own.
     admin: {
       anaQuestion: ['msg.reply', 'msg.react', 'msg.answer', 'msg.answerWords', 'msg.speaker', 'msg.sendNow', 'msg.send', 'msg.pin', 'msg.copy'], anaText: ['msg.reply', 'msg.react', 'msg.speaker', 'msg.sendNow', 'msg.screens', 'msg.send', 'msg.pin', 'msg.copy'],
-      sentThere: ['msg.reply', 'msg.react', 'msg.screens', 'msg.send', 'msg.pin', 'msg.look', 'msg.download', 'msg.withdraw'], sentWithdrawn: ['msg.reply', 'msg.react', 'msg.speaker', 'msg.sendNow', 'msg.screens', 'msg.send', 'msg.pin', 'msg.copy'],
+      sentThere: ['msg.reply', 'msg.react', 'msg.screens', 'msg.send', 'msg.pin', 'msg.look', 'msg.download', 'msg.confidential', 'msg.withdraw'], sentWithdrawn: ['msg.reply', 'msg.react', 'msg.speaker', 'msg.sendNow', 'msg.screens', 'msg.send', 'msg.pin', 'msg.copy'],
     },
     support: { boardText: ['msg.reply', 'msg.react', 'msg.draft', 'msg.speaker', 'msg.sendNow', 'msg.send', 'msg.pin', 'msg.copy'] },
     // A room that may send into others by its list: Send to ▸ on words and a file (never a question, which only a forward
@@ -614,7 +614,7 @@ test('the seat matrix: what each seat is shown on each message', () => {
       anaText: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.copy'],
       anaQuestion: ['msg.reply', 'msg.react', 'msg.answer', 'msg.answerWords', 'msg.pin', 'msg.copy'],
       fromHall: ['msg.reply', 'msg.react', 'msg.send', 'msg.sendBack', 'msg.pin', 'msg.copy'],
-      sentThere: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.look', 'msg.download', 'msg.withdraw', 'msg.delete'],
+      sentThere: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.look', 'msg.download', 'msg.confidential', 'msg.withdraw', 'msg.delete'],
       fromLou: ['msg.reply', 'msg.react', 'msg.send', 'msg.sendBack', 'msg.pin', 'msg.copy'],
       // Withdrawn already: no Withdraw; still its copy here, to delete.
       sentWithdrawn: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.copy', 'msg.delete'],
@@ -671,6 +671,11 @@ test('what a seat may do but not now is shown, disabled, with the words why; the
   assert.equal(C.ready('msg', 'msg.answer', SEATS.researchOffline, OBJECTS.anaQuestion), true, 'a held send is ready while down');
   // No screens yet: ⧉ says where to add one.
   assert.equal(C.ready('msg', 'msg.screens', SEATS.techNoScreens, OBJECTS.boardText), C.WORDS.noScreens);
+  // A file marked confidential: ⧉ drawn and greyed with the server's words, screens or none (plan 4-§5.14, S3).
+  const marked = Object.assign({}, OBJECTS.anaFile, { confidential: true });
+  for (const seat of ['tech', 'techNoScreens']) assert.equal(C.ready('msg', 'msg.screens', SEATS[seat], marked), C.WORDS.secretScreens, seat);
+  assert.equal(C.WORDS.secretScreens, 'A confidential file is never shown on screens: anyone near them can see it.');
+  assert.equal(C.ready('msg', 'msg.screens', SEATS.tech, OBJECTS.anaFile), true, 'an unmarked file: ready');
   // The support view draws the person's doors, every one disabled with its words.
   const sv = plain(C.items('msg', SEATS.support, OBJECTS.boardText)).filter((i) => !i.sep).flatMap((i) => (i.children || [i]));
   assert.ok(sv.length > 5 && sv.every((i) => i.disabled === 'This is Kim\'s view — act from your own page.'), JSON.stringify(sv.map((i) => i.disabled)));
@@ -815,9 +820,10 @@ const SCREEN = { id: 'd1', name: 'Lectern monitor', path: '/d/abc', state: 'show
 test('a file and a screen: what each seat is shown, its bar, and its asks', () => {
   const list = Object.assign({}, OBJECTS.anaFile, { where: 'list', pinned: true });
   const preview = Object.assign({}, OBJECTS.anaFile, { where: 'preview', pinned: true });
-  assert.deepEqual(ids('file', SEATS.research, list), ['file.look', 'file.download', 'file.pin']);
-  assert.deepEqual(ids('file', SEATS.research, preview), ['file.download', 'file.pin', 'file.close']);
-  assert.deepEqual(ids('file', SEATS.tech, list), ['file.screens', 'file.look', 'file.download', 'file.pin']);
+  assert.deepEqual(ids('file', SEATS.research, list), ['file.look', 'file.download', 'file.pin', 'file.confidential']);
+  assert.deepEqual(ids('file', SEATS.research, preview), ['file.download', 'file.pin', 'file.confidential', 'file.close']);
+  assert.deepEqual(ids('file', SEATS.tech, list), ['file.screens', 'file.look', 'file.download', 'file.pin', 'file.confidential']);
+  assert.equal(C.ready('file', 'file.screens', SEATS.tech, Object.assign({}, list, { confidential: true })), C.WORDS.secretScreens, 'a confidential file: ⧉ greyed with why');
   assert.deepEqual(ids('file', SEATS.board, list), ['file.look', 'file.pin'], 'On stage: no Download');
   assert.deepEqual(ids('file', SEATS.observer, list), [], 'an observer: nothing of a file');
   assert.deepEqual(ids('file', SEATS.viewerPost, list), ['file.pin'], 'a Viewer granted hall.post: no Look and no Download');
@@ -826,13 +832,13 @@ test('a file and a screen: what each seat is shown, its bar, and its asks', () =
   assert.deepEqual(plain(C.inline('file', SEATS.board, list)).map((i) => [i.id, i.label]), [['file.look', 'Look'], ['file.pin', 'Unpin']]);
   // A seat that may show the Board: 📺 Show the Board ▸ a picture of p. 1, of a page, or the document (a PDF); the picture
   // (an image); the document (any other type); never on a file for download only, which opens nowhere and downloads alone.
-  assert.deepEqual(ids('file', SEATS.staffShow, list), ['file.stage', 'file.look', 'file.download', 'file.pin']);
+  assert.deepEqual(ids('file', SEATS.staffShow, list), ['file.stage', 'file.look', 'file.download', 'file.pin', 'file.confidential']);
   assert.deepEqual(plain(C.submenu('file', 'file.stage', SEATS.staffShow, list)).map((v) => [v.value, v.label]), [['picture1', 'A picture of p. 1'], ['picture', 'A picture of a page…'], ['doc', 'The document…']]);
   const png = Object.assign({}, list, { url: '/uploads/1-plan.png', filename: 'plan.png', mime: 'image/png' });
   const xlsx = Object.assign({}, list, { url: '/uploads/1-q3.xlsx', filename: 'q3.xlsx', mime: 'application/octet-stream' });
   assert.deepEqual([png, xlsx].map((o) => plain(C.submenu('file', 'file.stage', SEATS.staffShow, o)).map((v) => v.label)), [['This picture', 'The document…'], ['The document…']]);
   const zip = Object.assign({}, OBJECTS.anaZip, { where: 'list', pinned: true });
-  assert.deepEqual(ids('file', SEATS.staffShow, zip), ['file.download', 'file.pin'], 'a file for download only');
+  assert.deepEqual(ids('file', SEATS.staffShow, zip), ['file.download', 'file.pin', 'file.confidential'], 'a file for download only');
   assert.deepEqual(ids('file', SEATS.board, zip), ['file.pin'], 'On stage: neither Look nor Download');
   assert.deepEqual(plain(C.submenu('msg', 'msg.stage', SEATS.staffShow, OBJECTS.anaFile)).map((v) => v.value), ['picture1', 'picture', 'doc']);
   assert.deepEqual(plain(C.inline('file', SEATS.research, preview)).map((i) => [i.id, i.label]), [['file.pin', 'Unpin'], ['file.close', 'Close']]);
@@ -879,7 +885,7 @@ test('the rest of the hall page: what each seat is shown on the composer, the st
     ['compose', 'research', COMPOSE.text, ['compose.draft', 'compose.send', 'compose.priority', 'compose.attach']],
     ['compose', 'research', COMPOSE.replying, ['compose.draft', 'compose.send', 'compose.priority', 'compose.attach', 'compose.cancelReply']],
     ['compose', 'research', COMPOSE.action, ['compose.send', 'compose.priority']],
-    ['compose', 'research', COMPOSE.fileChosen, ['compose.draft', 'compose.send', 'compose.priority', 'compose.attach', 'compose.removeFile']],
+    ['compose', 'research', COMPOSE.fileChosen, ['compose.draft', 'compose.send', 'compose.priority', 'compose.confidential', 'compose.attach', 'compose.removeFile']],
     // On stage: its words, 🔥 and Send, no file and no draft.
     ['compose', 'board', COMPOSE.director, ['compose.send', 'compose.priority']],
     ['compose', 'board', COMPOSE.directorReplying, ['compose.send', 'compose.priority', 'compose.cancelReply']],
@@ -888,7 +894,7 @@ test('the rest of the hall page: what each seat is shown on the composer, the st
     ['compose', 'observer', COMPOSE.text, []],
     // A room that may send into others: To ▸ on the message composer (a file attached to it too), never on a question's.
     ['compose', 'researchSends', COMPOSE.text, ['compose.draft', 'compose.send', 'compose.sendTo', 'compose.priority', 'compose.attach']],
-    ['compose', 'researchSends', COMPOSE.fileChosen, ['compose.draft', 'compose.send', 'compose.sendTo', 'compose.priority', 'compose.attach', 'compose.removeFile']],
+    ['compose', 'researchSends', COMPOSE.fileChosen, ['compose.draft', 'compose.send', 'compose.sendTo', 'compose.priority', 'compose.confidential', 'compose.attach', 'compose.removeFile']],
     ['compose', 'researchSends', COMPOSE.action, ['compose.send', 'compose.priority']],
     // The stage chip: the speaker's screen for a seat with its rights, the countdown on screens for one that drives them.
     ['chip', 'research', STAGE, ['chip.speaker']],
@@ -1102,7 +1108,7 @@ test('the other pages\' matrix: what each seat is shown on each object of the ad
     ['person', 'notAdmin', O.person.guest, []],
     ['adminMsg', 'admin', O.adminMsg.text, ['adminMsg.copy', 'adminMsg.delete']],
     // A file of the watched room: ⬇ Download, the server's act by a ticket, as on the hall page.
-    ['adminMsg', 'admin', O.adminMsg.file, ['adminMsg.download', 'adminMsg.delete']],
+    ['adminMsg', 'admin', O.adminMsg.file, ['adminMsg.download', 'adminMsg.confidential', 'adminMsg.delete']],
     ['adminMsg', 'admin', { ...O.adminMsg.file, url: undefined }, ['adminMsg.delete']],
     ['adminMsg', 'notAdmin', O.adminMsg.text, []],
     // The links: the default Stagewatch (set up in one form, its certificate accepted only when it changed), one heard (its

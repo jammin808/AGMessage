@@ -120,6 +120,13 @@ const VIEW_SAID = Object.freeze({ '': 'by seat', simple: 'simple', full: 'full' 
 const VIEW_WORDS = 'Choose By seat, Simple or Full.';
 /** The person a chat view is set for has no page in that room now (or the room is gone). */
 const NOT_IN_ROOM = 'That person is not in this room now.';
+/** What a confidential file asked onto a holding slide is refused with: a holding image goes on screens (plan 4-§5.14, S3). */
+const SCREENS_NEVER = 'A confidential file is never shown on screens: anyone near them can see it.';
+/** What a confirmation of the wrong type, and one this page may not give, is refused with. */
+const CONFIRM_WORDS = 'Confirm is a tick: true, or left out.';
+const CONFIRM_WHO = 'Only the backstage team of a room where this file is in use can confirm showing it — ask them, or the admin.';
+/** "Legal", "Legal and the Main room", "A, B and C": rooms in words. */
+const andList = (xs) => (xs.length <= 1 ? xs.join('') : xs.slice(0, -1).join(', ') + ' and ' + xs[xs.length - 1]);
 /** A client id as a page makes one (public/outbox.js), as a send's is read (server.js `CID_RE`). */
 const CID = /^[A-Za-z0-9_-]{1,40}$/;
 /**
@@ -150,7 +157,7 @@ const pagesWords = (n) => n + ' page' + (n === 1 ? '' : 's');
  * @param {object} ctx    the takes context, frozen: none of lib/gate.js `ROOM_SENDS` (`contexts`)
  */
 function register(socket, conn, ctx) {
-  const { store, audit, accounts, linkFor, sendersOf, pages, stageRecord, tickets, hallPages, takeSends, holdingOf, pagesChanged, pageHidden, selfHosts, viewChanged, stageSource, stageCheck, freshUpload, stageDropped, sendTo } = ctx;
+  const { store, audit, accounts, linkFor, sendersOf, pages, stageRecord, tickets, hallPages, takeSends, holdingOf, pagesChanged, pageHidden, selfHosts, viewChanged, stageSource, stageCheck, freshUpload, stageDropped, inUseRooms, screensShowing, markFresh, madeUrls, sendTo } = ctx;
 
   const write = (action, target, words) => audit.write(conn.actor(), action, target, words, socket.data.ip);
   /**
@@ -283,7 +290,7 @@ function register(socket, conn, ctx) {
     const hall = pushHall(code, (r) => { refused = r; });
     if (!hall) return refused;
     let made = plan(hall, a);
-    if (made.error) return { ok: false, error: made.error };
+    if (made.error) return refusedPush(made);
     // Each file it shows (a document's and its stand-in picture's, a picture's, a holding slide's picture) is checked off
     // the socket's turn at its first take, then everything is read again as it stands after the check.
     if (made.shown.length) {
@@ -293,9 +300,9 @@ function register(socket, conn, ctx) {
       }
       if (!store.get(hall.code)) return { ok: false, error: whyNot(null) };
       made = plan(hall, a);
-      if (made.error) return { ok: false, error: made.error };
+      if (made.error) return refusedPush(made);
     }
-    const { board, target, to, name, content, onStage, layer, arrive, aside, named, was, before, facts, shown, sent } = made;
+    const { board, target, to, name, content, onStage, layer, arrive, aside, named, was, before, facts, shown, sent, confirmed, made: from } = made;
     // A fresh upload it shows is kept by the hall as a stage file while a take names it (and a while after): the hall's
     // stage holds a bound of them, past which a new one is refused; a document and its stand-in picture find room together.
     const files = shown.filter((f) => f.fresh);
@@ -307,12 +314,15 @@ function register(socket, conn, ctx) {
     // An information take keeps who put it up (`who`): its pusher may withdraw it, and a later push's answer gives a web
     // page's address back to them alone, and the admin. It keeps whether its pusher held canPush (`op`).
     const by = { name: byName(), guest: conn.actor().t === 'code', ...(layer !== 'show' && op ? { op: true } : {}), ...(layer !== 'show' && whoKey ? { who: whoKey } : {}) };
-    const take = pages.take(hall.code, to, content, by, { onStage, arrive, aside, slot: named, sent });
+    const take = pages.take(hall.code, to, content, by, { onStage, arrive, aside, slot: named, sent, made: from });
     if (!take) return { ok: false, error: content.kind === 'web' ? WEB_NOT_KEPT : NOT_KEPT };
     for (const f of files) {
       const file = f.url.slice(9);
       const up = freshUpload(file);
       stageDropped(pages.recordFile(hall.code, file, { at: up ? up.at : take.at, room: up ? up.room : hall.code, uid: up ? up.uid : '', name: f.name }, take.at));
+      // A fresh upload shown as confidential is marked by whoever shows it, as whoever shares a file may (plan 4-§5.14): its
+      // record, its row, and every take of it marked.
+      if (content.confidential === true) markFresh(file, conn.actor(), { by: byName(), uid: conn.me() ? conn.me().uid : '' }, f.name, hall, socket.data.ip);
     }
     tell(hall.code, before);
     const holding = holdingOf(hall.code);
@@ -323,7 +333,7 @@ function register(socket, conn, ctx) {
     // In the audit's voice: whom, how many of the Board's pages it reached, what it shows in a few words (never a file's
     // name, a text or a path), and an arrival in the side bar.
     const side = take.arrive === 'side' ? ', in their side bar' + (aside ? ', beside the operator\'s' : '') : named === 'beside' ? ', from their side bar' : '';
-    write('page.push', hall.code, (board ? 'the Board (' + pagesWords(target.length) + ')' : name || AWAY) + ' → ' + describePage(take.content, { hallHolding: holding, voice: 'audit', sent: sent ? sent.name : '' }) + side);
+    write('page.push', hall.code, (board ? 'the Board (' + pagesWords(target.length) + ')' : name || AWAY) + ' → ' + describePage(take.content, { hallHolding: holding, voice: 'audit', sent: sent ? sent.name : '' }) + side + (confirmed ? ', confirmed' : ''));
     pagesChanged(hall.code);
     // The status of the place it went to: beside the operator's, over the show, or the show.
     const status = pages.status(hall.code, to, target, { name: board ? '' : name, hallHolding: holding, layer: aside || named === 'beside' ? 'beside' : layer === 'info' ? 'info' : 'show' });
@@ -421,15 +431,86 @@ function register(socket, conn, ctx) {
     };
     const content = cleanPage(a.content, facts);
     if (content.error) return { error: content.error };
+    // A confidential item (plan 4-§5.14): marked by the server from its file's one record whatever the page sent (a
+    // document's or a picture's own file, a stand-in picture, the file a picture or a quote was made from), never a holding
+    // slide's picture; shown where its file is not in use (the Main room for the Board, each room of the hall a person sits
+    // in), only once its pusher confirms, from a seat that may download it where it is in use. Those rooms then are.
+    const secret = secretOf(a.content, content);
+    if (secret.screens) return { error: SCREENS_NEVER };
+    if (secret.on) content.confidential = true;
+    let confirmed = false;
+    if (secret.files.length) {
+      const drawn = board ? [hall.code] : [...new Set(seated.filter((p) => p.key === person).map((p) => p.room.code))];
+      const missing = drawn.filter((k) => secret.files.some((u) => !inUseRooms(u).has(k)));
+      if (missing.length) {
+        if (a.confirm !== undefined && a.confirm !== null && typeof a.confirm !== 'boolean') return { error: CONFIRM_WORDS };
+        const names = missing.map((k) => (k === hall.code ? 'the Main room' : (store.room(k) || {}).name || 'a room with no name'));
+        if (a.confirm !== true) return { error: 'This file is marked confidential: confirm to show it in ' + andList(names) + '. It will be in use there.', confirm: true, rooms: names };
+        if (!maySayYes(secret.files)) return { error: CONFIRM_WHO };
+        confirmed = true;
+      }
+    }
     // The uploads it shows (a document's stand-in picture after the document), each with its name and whether it is this
     // pusher's fresh upload (kept as a stage file once taken).
     const shown = filesOf(content).map((url, i) => { const src = source(url); return { url, name: (i === 0 && content.name) || src.name || '', fresh: src.fresh === true }; });
+    // A fresh upload shown confidential is marked as it is taken (whoever shows a file may mark it): never while it is on a
+    // screen or a holding image, as file:mark refuses, so no mark leaves a confidential file where anyone near it can see it.
+    if (content.confidential === true) {
+      const on = [...new Set(shown.filter((f) => f.fresh).flatMap((f) => screensShowing(f.url, hall.code)))];
+      if (on.length) return { error: 'Take it off ' + andList(on) + ' first: a screen is seen by whoever stands near it.' };
+    }
     const onStage = [...new Set(seated.filter((p) => p.board).map((p) => p.key))];
     const aside = layer === 'info' && want.kind !== 'chat' && arrive === 'side' && !conn.canPush(hall) && (opOf(info) || !!opOn);
     // A push sent from a side room says so ("…, sent from Legal"): its key is kept to end it with that room's reset.
     const here = conn.room();
     const sent = here && here.hall === hall.code && here !== hall ? { key: here.code, name: here.name || '' } : null;
-    return { board, target, to, name, content, onStage, layer, arrive, aside, named, was, before, facts, shown, sent };
+    return { board, target, to, name, content, onStage, layer, arrive, aside, named, was, before, facts, shown, sent, confirmed, made: secret.made };
+  }
+
+  /** A push refused: its words, and, where it waits for its pusher's confirmation of a confidential file, the rooms it names. */
+  function refusedPush(made) {
+    return { ok: false, error: made.error, ...(made.confirm ? { confirm: true, rooms: made.rooms } : {}) };
+  }
+  /**
+   * Whether a take is confidential, and which marked files it names (pure on the store's marks): `raw` as the page sent it
+   * (a picture's or a quote's source file, by its address, which the take keeps by name alone), `content` as cleanPage made
+   * it. {on, files, screens, made}: `files` the marked uploads among them, `screens` a holding slide's picture that is one,
+   * `made` the upload a picture or a quote was made from, by its name, which the take keeps for a mark set on it later.
+   */
+  function secretOf(raw, content) {
+    const urls = filesOf(content);
+    const from = isRecord(raw) && isRecord(raw.from) && typeof raw.from.url === 'string' && raw.from.url.startsWith('/uploads/') && (content.kind === 'image' || content.kind === 'snippet') ? raw.from.url : '';
+    if (from) urls.push(from);
+    const files = urls.filter((u) => pages.isConfidential(u));
+    return { on: files.length > 0 || content.confidential === true, files, screens: content.kind === 'holding' && files.length > 0, made: from ? [from.slice(9)] : [] };
+  }
+  /**
+   * Whether this page may confirm showing the confidential `files` where they are not in use: the admin; else a seat that may
+   * download a file (lib/pages.js mayDownload) that sits, or shares files by its rights, in a room where each is in use.
+   */
+  function maySayYes(files) {
+    if (conn.theAdmin()) return true;
+    if (!conn.mayDownload()) return false;
+    const here = conn.room();
+    const reads = (key) => { const r = store.room(key); return !!r && (r === here || (conn.canIn('hall.view', r) && conn.canIn('hall.files', r))); };
+    return files.every((u) => [...inUseRooms(u)].some(reads));
+  }
+  /**
+   * Whether this asker may read a take's name, place and words (plan 4-§5.9.3): any take not confidential as it is now
+   * (pages.secret: a file marked since it went up too); a confidential one, the admin, and a page seated in a room of the
+   * hall where it is in use (inUseRooms of every file it shows or was made from; for one of no file, where it is drawn: the
+   * Main room for the Board, each room of a person's pages). Anyone else is told "🔒 a confidential item".
+   */
+  function seesSecret(hall, t, to) {
+    if (!t || !pages.secret(t) || conn.theAdmin()) return true;
+    const here = conn.room();
+    if (!here || here.hall !== hall.code) return false;
+    // A take of files: where each of them is in use (a document and its stand-in, a picture, the file a picture or a quote
+    // was made from); one of no file: where it is drawn.
+    const urls = filesOf(t.content).concat(madeUrls(t));
+    if (urls.length) return urls.every((u) => inUseRooms(u).has(here.code));
+    const rooms = new Set(to === 'board' ? [hall.code] : hallPages(hall.code).filter((p) => !p.support && p.key === to).map((p) => p.room.code));
+    return rooms.has(here.code);
   }
 
   // What a page did with the take it is shown now (plan 1-§5.3, §5.4): `{seq, state, words, again}`, counted only for
@@ -550,9 +631,12 @@ function register(socket, conn, ctx) {
       const s = source(c.url);
       return isRecord(s) && !s.error ? { url: c.url, name: typeof c.name === 'string' ? c.name : '', ...(isRecord(c.at) ? { at: c.at } : {}) } : null;
     };
+    // A confidential take is named only to an asker seated where it is in use (seesSecret); anyone else reads "🔒 a
+    // confidential item".
     const both = (to, list, o) => {
-      const beside = pages.status(hall.code, to, list, { ...o, who, layer: 'beside', docOf });
-      return { ...pages.status(hall.code, to, list, o), info: pages.status(hall.code, to, list, { ...o, who, layer: 'info', docOf }), ...(beside.seq ? { beside } : {}) };
+      const masks = (t) => !seesSecret(hall, t, to);
+      const beside = pages.status(hall.code, to, list, { ...o, who, layer: 'beside', docOf, masks });
+      return { ...pages.status(hall.code, to, list, { ...o, masks }), info: pages.status(hall.code, to, list, { ...o, who, layer: 'info', docOf, masks }), ...(beside.seq ? { beside } : {}) };
     };
     answer({
       ok: true,

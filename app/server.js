@@ -61,7 +61,7 @@ const roomVerbs = require('./lib/handlers/rooms');
 const takeVerbs = require('./lib/handlers/takes');
 const { Latest, sendEach } = require('./lib/latest');
 const { Displays, cleanContent, describe: describeContent } = require('./lib/displays');
-const { Pages, personKey, sourceOk, mayDownload: seatMayDownload, describePage, snippetText, FILE_KINDS } = require('./lib/pages');
+const { Pages, personKey, sourceOk, mayDownload: seatMayDownload, describePage, snippetText, FILE_KINDS, filesOf, stepHold, answerHold, sentHold, uploadRef, HELD_LINE, HOLD_MAX, MARK_WORDS } = require('./lib/pages');
 const uploadcheck = require('./lib/uploadcheck');
 const downloads = require('./lib/downloads');
 const readings = require('./lib/peaks');
@@ -70,7 +70,7 @@ const laptop = require('./lib/laptop');
 const power = require('./lib/power');
 const dataformat = require('./lib/dataformat');
 const laststop = require('./lib/laststop');
-const { StageRecord, whoSaid, didSaid, seenSaid } = require('./lib/stagerecord');
+const { StageRecord, confidentialOf, whoSaid, didSaid, seenSaid } = require('./lib/stagerecord');
 const tunnelend = require('./lib/tunnelend');
 const busy = require('./lib/busy');
 const machinewire = require('./lib/machinewire');
@@ -842,8 +842,9 @@ const apply = ops.applier({
   send: (room, opEvent, payload) => {
     // A file message to the room's pages whole, and without its address to those given no file's link (LINKLESS).
     if (opEvent === 'message' && payload && payload.type === 'file') {
-      io.to(room.code).except(LINKLESS + room.code).emit(opEvent, payload);
-      io.to(LINKLESS + room.code).emit(opEvent, ops.linkless(payload));
+      const m = marked(payload);
+      io.to(room.code).except(LINKLESS + room.code).emit(opEvent, m);
+      io.to(LINKLESS + room.code).emit(opEvent, ops.linkless(m));
     } else io.to(room.code).emit(opEvent, payload);
     const news = ops.newsOf(opEvent, payload);
     if (news) frames.activity.mark(room.code, news);
@@ -853,6 +854,146 @@ const apply = ops.applier({
 });
 /** A request's answer when apply() refused its change: nothing was saved or sent (the server's log says why). */
 const OP_REFUSED = Object.freeze({ ok: false, error: 'That change could not be made: nothing was saved.' });
+
+// ---------------------------------------------------------------- the confidential mark (plan 4-§5.14)
+/**
+ * A message as a page is given it: a file message with `confidential: true` added from its file's one record (pages.json
+ * `marks`) when the file is marked, as an observer's is given without its `url`; every other message, and the record
+ * itself, as it is. No message is rewritten: a mark set or removed reaches every copy of the file at once.
+ */
+function marked(m) {
+  if (!m || m.type !== 'file' || typeof m.url !== 'string') return m;
+  const mark = pages.markOf(m.url.slice(9));
+  const { confidential, markedBy, ...rest } = m;
+  return mark ? { ...rest, confidential: true, markedBy: markedByOf(mark) } : confidential === undefined && markedBy === undefined ? m : rest;
+}
+/** Who marked a file, as a page is told it: their name, and the uid their messages carry (its Remove the mark is theirs). */
+const markedByOf = (mark) => ({ name: mark.by.name, ...(mark.by.uid ? { uid: mark.by.uid } : {}) });
+/** A room as an audit row names it: "Legal (Hall 2)", a Main room "Main (Hall 2)"; never its key, which may be a code. */
+const roomRowOf = (r) => (store.isMain(r) ? 'Main (' + ((store.get(r.hall) || {}).name || 'a hall with no name') + ')' : roomInHall(r));
+/** A file's kind as a row says it: its upload's extension. */
+const fileKindOf = (url) => url.slice(url.lastIndexOf('.') + 1).toLowerCase();
+/** A file as a row says it: its kind and its size on disk ("pdf, 2.1 MB"), never its name. */
+const fileSaid = (url) => { const n = uploadOnDisk(url); return fileKindOf(url) + (n < 0 ? '' : ', ' + (n < 1048576 ? Math.max(1, Math.round(n / 1024)) + ' KB' : (n / 1048576).toFixed(1) + ' MB')); };
+/** A mark a page sent (`confidential`) or a confirmation (`confirm`), read by its type: true, false (left out, or false), or null (any other value, refused). */
+const tickOf = (v) => (v === undefined || v === false ? false : v === true ? true : null);
+/** What a confirmation of the wrong type is refused with. */
+const CONFIRM_WORDS = 'Confirm is a tick: true, or left out.';
+/** What a confidential file sent into a room where it is not in use is refused with until the sender confirms (S12). */
+const confirmToSend = (place) => 'This file is marked confidential: confirm to send it to ' + place + '. It will be in use there.';
+/**
+ * The upload `name` marked confidential as it is shared (plan 4-§5.14: whoever shares a file may mark it), by `who` (an
+ * actor; `by`, the name they sit under, and `uid`, the one their messages carry) into `room`, its file's name `file`. The
+ * record is written now, before the message is posted, so no page is given it unmarked; the answer is what the post's
+ * outcome does with it: `{error}` when it may not be marked now (on a screen or a holding image), else `{posted(ok)}`,
+ * whose `true` writes its one `file.mark` row, marks every take of it and tells every room holding it, and whose `false`
+ * (the post refused) takes the record back. A file already marked keeps its first mark: `posted` then does nothing.
+ */
+function markShared(name, who, file, room, ip, { uid = '', by = '' } = {}) {
+  const on = markRefusal('/uploads/' + name, room.hall);
+  if (on) return { error: on };
+  if (!pages.mark(name, { who: who.t + ':' + who.id, name: by || who.name, uid }, file)) return { posted: () => {} };
+  return {
+    posted: (ok) => {
+      if (!ok) { pages.unmark(name); return; }
+      audit.write(who, 'file.mark', room.code, 'a ' + fileKindOf(name) + ' in ' + roomRowOf(room) + ' marked confidential as it was shared', ip);
+      markedTakes(name);
+      fileMarked(name, true);
+    },
+  };
+}
+/**
+ * A fresh upload of the hall `hall` marked confidential as it is shown on people's pages (plan 4-§5.14: whoever shows a file
+ * may mark it): the record, its one `file.mark` row and every take of it marked. A fresh upload is in no room's messages,
+ * so no room is told. Never while it is on a screen: the push that shows it is refused first (lib/handlers/takes.js).
+ */
+function markFresh(name, who, { by = '', uid = '' } = {}, file, hall, ip) {
+  if (!pages.mark(name, { who: who.t + ':' + who.id, name: by || who.name, uid }, file)) return false;
+  audit.write(who, 'file.mark', hall.code, 'a ' + fileKindOf(name) + ' shown on people\'s pages in ' + roomRowOf(hall) + ' marked confidential as it was shown', ip);
+  markedTakes(name);
+  boardDirty();
+  return true;
+}
+/** Every take of the upload `name` marked as its file now is (lib/pages.js markTakes), and each hall's consoles told. */
+function markedTakes(name) {
+  for (const hall of pages.markTakes(name)) pagesChanged(hall);
+}
+/**
+ * Why the upload at `url` may not be marked confidential now ('' when it may): it is on a screen, a screen's holding slide,
+ * a hall's holding image or a holding slide on people's pages, each named (plan 4-§5.14, S3: whoever stands near a screen
+ * sees it), so a mark never leaves a confidential file where §5.14 forbids it.
+ */
+function markRefusal(url, hall) {
+  const shown = screensShowing(url, hall).concat(pages.holdingSlides(url).map((h) => (h.to === 'board' ? 'the Board\'s holding slide' : 'a holding slide on someone\'s pages')
+    + (h.hall === hall ? '' : ' in ' + ((store.get(h.hall) || {}).name || 'another hall'))));
+  const list = [...new Set(shown)];
+  if (!list.length) return '';
+  return 'Take it off ' + (list.length === 1 ? list[0] : list.slice(0, -1).join(', ') + ' and ' + list[list.length - 1]) + ' first: a screen is seen by whoever stands near it.';
+}
+/** What a draft's document text is refused with: text that names no source, and a confidential file's (plan 4-§5.12). */
+const DOC_FROM = 'Say where the document\'s text comes from: a file of this room, something shown, or your own copy.';
+const DOC_SECRET = 'This file is marked confidential: its text is not sent to the AI.';
+/** What a confidential file asked onto a screen, or as a holding image, is refused with (plan 4-§5.14, S3). */
+const SCREENS_NEVER = 'A confidential file is never shown on screens: anyone near them can see it.';
+/** Whether a screen's content (lib/displays.js cleanContent's) shows a confidential file: its file, or its holding image. */
+const secretOnScreen = (c) => !!c && [c.url, c.image].some((u) => typeof u === 'string' && pages.isConfidential(u));
+/**
+ * The screens that show the upload at `url` now, in words (a screen by its name; its own holding slide's picture; a hall's
+ * holding image, "the hall's" for the hall `hall`): what must come off before the file may be marked confidential.
+ */
+function screensShowing(url, hall) {
+  const out = [];
+  for (const d of displays.list.values()) {
+    if (!d.content) continue;
+    if (d.content.url === url) out.push(d.name || 'a screen');
+    else if (d.content.image === url) out.push((d.name || 'a screen') + '\'s holding slide');
+  }
+  for (const code of Object.keys(displays.halls)) {
+    if (displays.hallHolding(code) !== url) continue;
+    out.push(code === hall ? 'the hall\'s holding image' : ((store.get(code) || {}).name || 'another hall') + '\'s holding image');
+  }
+  return out;
+}
+/** A resumed op as marked sends it: an added file message with its mark. */
+const opMarked = (op) => (op && op.o === 'add' && op.m && op.m.type === 'file' ? { ...op, m: marked(op.m) } : op);
+/**
+ * Every page of every room that holds the upload `name` told its mark now (`fileMark`, latest wins and unnumbered: it
+ * changes no room's log, so no page is left with a gap in its numbers): the messages there that hold it by their ids,
+ * and, to a page given files' links, the file's name; a page given none (LINKLESS) reads the ids alone. The admin page
+ * watching a room sits in its room, and is told as its pages are. Returns the rooms told.
+ */
+function fileMarked(name, on) {
+  const url = '/uploads/' + name;
+  const told = [];
+  for (const r of store.allRooms()) {
+    const ids = r.messages.filter((m) => m.type === 'file' && m.url === url).map((m) => m.id);
+    if (!ids.length) continue;
+    const by = on && pages.markOf(name) ? { markedBy: markedByOf(pages.markOf(name)) } : {};
+    io.to(r.code).except(LINKLESS + r.code).emit('fileMark', { name, ids, confidential: on, ...by });
+    io.to(LINKLESS + r.code).emit('fileMark', { ids, confidential: on, ...by });
+    told.push(r);
+  }
+  boardDirty();
+  return told;
+}
+/**
+ * The rooms where the file at `url` is in use (plan 4-§5.14), by their keys: each room a message of which holds it, the
+ * room a fresh upload of it was made for (a picture drawn of a file, shown as it is uploaded), and, for each take or
+ * Earlier entry of a hall that names it, each room where it is drawn: the hall's Main room for the Board, and for one
+ * person each room of the hall where a page of theirs sits.
+ */
+function inUseRooms(url) {
+  const out = new Set();
+  if (!guard.validUploadUrl(url)) return out;
+  const fresh = freshUploads.get(url.slice(9));
+  if (fresh && typeof fresh.room === 'string' && store.room(fresh.room)) out.add(fresh.room);
+  for (const r of store.allRooms()) if (r.messages.some((m) => m.type === 'file' && m.url === url)) out.add(r.code);
+  for (const { hall, to } of pages.naming(url)) {
+    if (to === 'board') { out.add(hall); continue; }
+    for (const p of hallPages(hall)) if (!p.support && p.key === to) out.add(p.room.code);
+  }
+  return out;
+}
 /** A system line in the hall, or null when the op table refused it. */
 function systemMessage(room, text) {
   const op = apply(room, { o: 'add', m: { id: makeMessageId(), type: 'system', text, at: Date.now() } });
@@ -1030,6 +1171,24 @@ function uploadsInRooms() {
   for (const r of store.allRooms()) for (const m of r.messages) if (m.type === 'file') urls.push(m.url);
   return uploadNamesOf(urls);
 }
+/** Each upload looked at this run by its reference (lib/pages.js uploadRef), and the names already looked at: each hashed once. */
+const refNames = new Map();
+const refsSeen = new Set();
+/**
+ * The uploads a take was made from (its `made`, kept by their references, never their addresses), by their addresses, as
+ * far as a room's messages, a fresh upload or the stage hold them now: one held nowhere is in use nowhere.
+ */
+function madeUrls(t) {
+  const refs = t && Array.isArray(t.made) ? t.made : [];
+  if (refs.some((r) => !refNames.has(r))) {
+    for (const name of [...uploadsInRooms(), ...freshUploads.keys(), ...pages.stageInUse(Date.now())]) {
+      if (refsSeen.has(name)) continue;
+      refsSeen.add(name);
+      refNames.set(uploadRef(name), name);
+    }
+  }
+  return refs.map((r) => refNames.get(r)).filter(Boolean).map((n) => '/uploads/' + n);
+}
 /** Every upload a screen shows or a hall holds as its holding image, by its name. */
 function uploadsOnScreens() {
   const urls = [];
@@ -1065,7 +1224,11 @@ async function removeUnused(names, from = null) {
       continue;
     }
     freshUploads.delete(f);
-    try { await fs.promises.unlink(path.join(UPLOAD_DIR, f)); n++; } catch { /* already gone */ }
+    let gone = true;
+    try { await fs.promises.unlink(path.join(UPLOAD_DIR, f)); n++; } catch (e) { gone = !!e && e.code === 'ENOENT'; }
+    // A file's confidential mark goes with the file (plan 4-§5.11), and only with it: one the disk kept (busy, or not
+    // ours to remove) stays marked while it is there.
+    if (gone) pages.dropMarks([f]);
   }
   return n;
 }
@@ -1236,7 +1399,13 @@ app.post('/uploads/:name/download', downloadForm, (req, res) => {
   res.setHeader('Cache-Control', 'private, no-store');
   res.once('pipe', () => { const s = page(); if (s) s.emit('file:sending', { ticket: t }); });
   res.sendFile(path.join(UPLOAD_DIR, name), { dotfiles: 'deny', cacheControl: false, etag: false, lastModified: false, acceptRanges: false }, (err) => {
-    if (!err) { const s = page(); if (s) s.emit('file:sent', { ticket: t }); return; }
+    if (!err) {
+      // A confidential file's download is one row as its stream ends, never as its ticket is given: a ticket not spent is
+      // not a download (plan 4-§4.6.6). Other downloads are a person reading what their room already shows them.
+      const r = store.room(rec.room);
+      if (pages.isConfidential(name) && rec.actor) audit.write(rec.actor, 'file.download', rec.room, 'a confidential ' + fileKindOf(name) + ' downloaded in ' + (r ? roomRowOf(r) : 'a room since closed'), guard.clientIp(req));
+      const s = page(); if (s) s.emit('file:sent', { ticket: t }); return;
+    }
     if (res.headersSent) { const s = page(); if (s) s.emit('file:sent', { ticket: t, whole: false }); return; }
     res.removeHeader('Content-Disposition');
     res.status(204).end();
@@ -1413,15 +1582,24 @@ app.get('/api/admin/transcript/:code', async (req, res) => {
   const room = store.room(String(req.params.code || '').toUpperCase());
   if (!room) return res.status(404).send('Room not found');
   // The record is read at once once the start has read it; before then the transcript waits for it.
-  const shown = await stageRecord.of(room.hall, { room: room.code });
+  // Each entry confidential as its uploads' marks stand now (one record a file): a file marked after it was shown too.
+  const record = await stageRecord.of(room.hall, { room: room.code });
+  const shown = { ...record, entries: confidentialOf(record.entries, (r) => pages.refMarked(r)) };
   // Read by the laptop's token first, as a socket is: the token's reads are the laptop's, an account's its own.
   const w = isValidAdminCookie(req) ? null : web.who(req);
-  readAsAdmin(w ? web.actorOf(w) : HOST_ACTOR, w ? w.account : null, room, (n) => 'transcript of ' + n, guard.clientIp(req));
+  // A confidential entry's words are shown on the AGMessage laptop itself, or where the admin asked for them (Include
+  // confidential text, `?confidential=1`), which is a read of its own in the audit log (plan 4-§5.13).
+  const asked = req.query.confidential === '1';
+  const who = w ? web.actorOf(w) : HOST_ACTOR;
+  const included = asked ? ', confidential text included' : '';
+  readAsAdmin(who, w ? w.account : null, room, (n) => 'transcript of ' + n + included, guard.clientIp(req));
+  const readRow = !store.isMain(room) && !(w && w.account && rbac.effective(w.account).rooms.has(room.code));
+  if (asked && !readRow) audit.write(who, 'room.read', room.code, 'transcript of ' + roomRowOf(room) + included, guard.clientIp(req));
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'");
   res.setHeader('Content-Disposition', 'inline; filename="transcript-' + room.code + '.html"');
-  res.send(renderTranscriptHtml(room, shown));
+  res.send(renderTranscriptHtml(room, shown, { secrets: asked || guard.isHostMachine(req) }));
 });
 
 // Health: anyone may ask whether it is up; the detail is for the admin (or the host laptop).
@@ -1841,6 +2019,32 @@ const upload = multer({
   fileFilter: (req, file, cb) => cb(null, guard.uploadable(file.originalname)),
 });
 
+/** What an upload's `from` of the wrong shape is refused with. */
+const FROM_REFUSED = 'That picture\'s source could not be read: draw it again from the file.';
+const FROM_FIELD = /^(?:m:[A-Za-z0-9_-]{1,64}|s:[1-9][0-9]{0,8})$/;
+/**
+ * What an upload says it was drawn of (plan 4-§5.9.8): the form field `from`, `m:<messageId>` of a file message of the
+ * room the upload is for, or `s:<seq>` of a take of that room's hall naming a file (a document, a picture, a quote's
+ * source). {} for none; {from: {m|s}, secret} for one AGMessage holds (`secret`: its file, or the take, is confidential);
+ * {error} for any other value, one of the wrong shape, or a source this upload's room does not hold.
+ */
+function uploadFrom(body, t) {
+  const v = body && typeof body === 'object' ? body.from : undefined;
+  if (v === undefined || v === '') return {};
+  if (typeof v !== 'string' || !FROM_FIELD.test(v)) return { error: FROM_REFUSED };
+  const room = store.room(t.room);
+  if (!room) return { error: FROM_REFUSED };
+  if (v[0] === 'm') {
+    const m = room.byId.get(v.slice(2));
+    if (!m || m.type !== 'file') return { error: FROM_REFUSED };
+    return { from: { m: m.id }, secret: pages.isConfidential(m.url) };
+  }
+  const seq = Number(v.slice(2));
+  const found = pages.find(room.hall, seq);
+  if (!found) return { error: FROM_REFUSED };
+  return { from: { s: seq }, secret: pages.secret(found.take) };
+}
+
 let statfsWarned = false;
 /** What an upload of a type AGMessage takes neither for the stage nor for transfer is told. */
 const UNSUPPORTED = 'That file type isn\'t supported. PDF, images, Word, Excel, PowerPoint, CSV and text work, and zip, MP4, M4A, MOV, MP3, WAV and OpenDocument files can be shared for download.';
@@ -1879,9 +2083,12 @@ app.post('/api/upload', async (req, res, next) => {
       head = head.subarray(0, n);
     } catch { /* checked below */ }
     const type = guard.uploadType(req.file.originalname, head);
-    if (!type) {
+    // What a picture was drawn of (`from`: a file message of the upload's room, `m:<id>`, or a take of its hall,
+    // `s:<seq>`), read by its type: anything else is refused, never kept as an upload of no source.
+    const from = uploadFrom(req.body, req.agmUploader);
+    if (!type || from.error) {
       try { fs.unlinkSync(stored); } catch { /* ignore */ }
-      return res.status(400).json({ error: uploadcheck.MISMATCH });
+      return res.status(400).json({ error: type ? from.error : uploadcheck.MISMATCH });
     }
     // Checked before it is kept or named to anyone (lib/uploadcheck.js): a refused file leaves the disk, with one audit
     // row in the hall by its uploader, at the upload's own address (its token is a bearer's: not always the socket's).
@@ -1899,7 +2106,17 @@ app.post('/api/upload', async (req, res, next) => {
         audit.write(t.actor(), 'upload.refused', t.hall, refused.words, guard.clientIp(req));
         return res.status(refused.status).json({ error: refused.error });
       }
-      freshUploads.set(req.file.filename, { at: Date.now(), room: t.room, uid: t.uid, name: guard.cleanText(req.file.originalname, 120), transferOnly: type.transferOnly });
+      freshUploads.set(req.file.filename, { at: Date.now(), room: t.room, uid: t.uid, name: guard.cleanText(req.file.originalname, 120), transferOnly: type.transferOnly, ...(from.from ? { from: from.from } : {}) });
+      // A picture drawn of a confidential file is marked as it is stored, before any take names it (plan 4-§5.9.8), so it
+      // is never an unmarked upload its uploader could share or put on a screen.
+      // One `file.mark` row says so, the picture by its kind alone.
+      if (from.secret) {
+        const who = t.actor();
+        const r = store.room(t.room);
+        if (pages.mark(req.file.filename, { who: who.t + ':' + who.id, name: who.name, uid: t.uid }, req.file.originalname)) {
+          audit.write(who, 'file.mark', t.room, 'a ' + fileKindOf(req.file.filename) + ' drawn of a confidential file, marked confidential as it was uploaded in ' + (r ? roomRowOf(r) : 'a room since closed'), guard.clientIp(req));
+        }
+      }
       res.json({ url: `/uploads/${req.file.filename}`, filename: String(req.file.originalname).slice(0, 120), mime: type.mime.split(';')[0], size: req.file.size, transferOnly: type.transferOnly });
     }).catch((e) => {
       console.error('  [uploads] ' + (e && e.stack ? e.stack : e));
@@ -2386,9 +2603,9 @@ io.on('connection', (socket) => {
     ack({
       ok: true, roomCode: code, roomName: r.name || '', role: cleanRole, name: cleanName, adminView: isAdminView,
       identity, uid: id, note, uploadToken, seq: r.seq,
-      ...(missed ? { ops: missed.map(ops.opForPage).map(linklessPage() ? ops.opLinkless : (op) => op) } : { history: opened.history.map(ops.forPage).map(seen) }),
+      ...(missed ? { ops: missed.map(ops.opForPage).map(opMarked).map(linklessPage() ? ops.opLinkless : (op) => op) } : { history: opened.history.map(ops.forPage).map(marked).map(seen) }),
       users: roomUserSummary(r, { links: socket.data.isAdmin }),
-      ai: !!aiKey(), stage: stagePayload(sw),
+      ai: !!aiKey(), stage: stagePayload(sw, { room: r.code }),
       canSendToStage: !!(sw.base && sw.key && sw.keyState !== 'refused') && allowed('stage.send'),
       canPropose: !!(sw.desk && sw.key && !sw.deskRefusal) && allowed('stage.send'),
       account: acct ? { username: acct.username, name: acct.name, role: acct.role, roleLabel: rbac.ROLES[acct.role].label } : null,
@@ -2443,7 +2660,7 @@ io.on('connection', (socket) => {
       // A first open's bounds (never a resume's): whether the room holds messages before `history` that it did not carry
       // (`more`: Show earlier asks for them), the older ones a page keeps in view however old (`older`: pinned, help not
       // resolved, questions not answered), and every file of the room (`files`), so its lists are whole.
-      ...(opened ? { more: opened.more, older: opened.older.map(ops.forPage).map(seen), files: opened.files.map(seen === ops.linkless ? (f) => { const { url, ...rest } = f; return rest; } : (f) => f) } : {}),
+      ...(opened ? { more: opened.more, older: opened.older.map(ops.forPage).map(marked).map(seen), files: opened.files.map((f) => (pages.isConfidential(f.url) ? { ...f, confidential: true } : f)).map(seen === ops.linkless ? (f) => { const { url, ...rest } = f; return rest; } : (f) => f) } : {}),
     });
 
     if (!isAdminView) {
@@ -2505,6 +2722,9 @@ io.on('connection', (socket) => {
     if (!mayPost(ack)) return;
     if (payload && payload.type === 'file' && !allowed('hall.files')) return ok(ack)({ ok: false, error: onStage() ? 'On stage seats send messages, not files.' : 'Your account may not share files here.' });
     if (payload && payload.type === 'action' && !mayAsk()) return ok(ack)({ ok: false, error: ASKS_BACKSTAGE });
+    // A file shared marked confidential (🔒 beside 🔥): its sharer marks it as it is shared; a message is never marked.
+    const secret = payload && payload.type === 'file' ? tickOf(payload.confidential) : false;
+    if (secret !== true && secret !== false) return ok(ack)({ ok: false, error: MARK_WORDS });
     const built = messageOf(me, payload, room, sent);
     if (built.refused) return ok(ack)({ ok: false, ...built.refused });
     const msg = built.msg;
@@ -2517,8 +2737,13 @@ io.on('connection', (socket) => {
         };
       }
     }
-    if (!apply(room, { o: 'add', m: msg })) return ok(ack)(OP_REFUSED);
-    ok(ack)({ ok: true, id: msg.id, seq: msg.seq });
+    // Marked before it is posted, so no page is ever given it unmarked; never while it is on a screen.
+    const mark = secret ? markShared(msg.url.slice(9), actor(), msg.filename, room, socket.data.ip, { uid: me.uid, by: me.name }) : null;
+    if (mark && mark.error) return ok(ack)({ ok: false, error: mark.error });
+    const posted = !!apply(room, { o: 'add', m: msg });
+    if (mark) mark.posted(posted);
+    if (!posted) return ok(ack)(OP_REFUSED);
+    ok(ack)({ ok: true, id: msg.id, seq: msg.seq, ...(msg.type === 'file' && pages.isConfidential(msg.url) ? { confidential: true } : {}) });
   });
 
   socket.on('actionResponse', ({ messageId, optionIndex, note } = {}, ack) => {
@@ -2692,6 +2917,11 @@ io.on('connection', (socket) => {
     const there = rightsIn(dst);
     if (!there.may('hall.post')) return ok(ack)({ ok: false, error: 'You may read that hall but not post in it.' });
     if (src.type === 'file' && !there.may('hall.files')) return ok(ack)({ ok: false, error: 'You may not share files in that hall.' });
+    // A confidential file goes into a room where it is not in use only once its sender confirms (plan 4-§5.14, S12).
+    const confirmed = tickOf(args && args.confirm);
+    if (confirmed === null) return ok(ack)({ ok: false, error: CONFIRM_WORDS });
+    const secret = src.type === 'file' && pages.isConfidential(src.url) && !inUseRooms(src.url).has(dst.code);
+    if (secret && !confirmed) return ok(ack)({ ok: false, error: confirmToSend(roomInHall(dst)), confirm: true, rooms: [roomInHall(dst)] });
     // A forwarded question is a new one by the forwarder, so it is asked only where they sit backstage.
     if (src.type === 'action' && there.role === 'board') return ok(ack)({ ok: false, error: ASKS_BACKSTAGE });
     const fwd = {
@@ -2704,6 +2934,7 @@ io.on('connection', (socket) => {
     else if (src.type === 'file') Object.assign(fwd, fileCopy(src));
     else if (src.type === 'action') Object.assign(fwd, { text: src.text, options: src.options, responses: [] });
     if (!apply(dst, { o: 'add', m: fwd })) return ok(ack)(OP_REFUSED);
+    if (secret) audit.write(actor(), 'room.send', dst.code, 'a confidential file (' + fileSaid(src.url) + '), forwarded from ' + roomRowOf(room) + ' to ' + roomRowOf(dst) + ', confirmed', socket.data.ip);
     ok(ack)({ ok: true, id: fwd.id });
   });
 
@@ -2747,7 +2978,8 @@ io.on('connection', (socket) => {
   // What a draft is told of where it is asked: the show facts of the room's hall (its Stagewatch and nodes, in every room
   // of it), and, in a side room, which room it is, since nobody on stage reads it (lib/ai.js whereLine). The thread is
   // this room's alone.
-  const draftFacts = () => ({ messages: room.messages, show: briefFor(room.hall), where: { main: store.isMain(room), room: room.name || '' } });
+  // A file marked confidential is in the thread as "shared a confidential file", its name and caption left out (marked).
+  const draftFacts = () => ({ messages: room.messages.map(marked), show: briefFor(room.hall), where: { main: store.isMain(room), room: room.name || '' } });
   /**
    * What the Board's pages show over the show now, for a draft asked in a hall's Main room by one who may push or show
    * there (plan 4-§5.12): one line in the console's words ("On the Board's pages now: ❝ a table cell from Q3.xlsx, …"),
@@ -2761,21 +2993,51 @@ io.on('connection', (socket) => {
     const up = (layer) => { const t = pages.current(hall.code, '', { board: true, layer }).take; return t && t.content.kind !== 'chat' ? t : null; };
     const t = up('info') || up('beside');
     if (!t) return '';
+    // A confidential take of any kind (as it is now: a file marked since it went up too): neither its file's name, its
+    // place nor its words go to the AI (S9).
+    if (pages.secret(t)) return 'On the Board\'s pages now: a confidential item — not sent to the AI';
     const a = actor();
     const said = t.content.kind === 'snippet' && !!t.by.who && t.by.who === a.t + ':' + a.id ? snippetText(t.content) : '';
     return 'On the Board\'s pages now: ' + describePage(t.content, { by: t.by.name, sent: t.sent ? t.sent.name : '' }) + (said ? ' — ' + said : '');
   };
 
+  // The document text a draft is given names where it comes from (`docFrom`, plan 4-§5.12): a file message of this room
+  // ({messageId}), a take of this hall ({seq}: its file, a stage-only one among them), or the researcher's own copy
+  // ({local: true}). Text with no source, or from a file marked confidential (or a confidential take), is refused: a
+  // confidential file's text never reaches the AI. A named file's name is the server's record of it, never the page's.
+  const docSource = (args) => {
+    const docText = typeof args.docText === 'string' ? args.docText.slice(0, 60_000) : '';
+    if (!docText) return { docText: '', docName: '' };
+    const from = args.docFrom;
+    if (!from || typeof from !== 'object' || Array.isArray(from)) return { error: DOC_FROM };
+    const keys = Object.keys(from);
+    if (from.local === true && keys.length === 1) return { docText, docName: typeof args.docName === 'string' ? guard.cleanText(args.docName, 120) : '' };
+    if (typeof from.messageId === 'string' && keys.length === 1) {
+      const m = room.byId.get(from.messageId);
+      if (!m || m.type !== 'file') return { error: DOC_FROM };
+      if (pages.isConfidential(m.url)) return { error: DOC_SECRET };
+      return { docText, docName: guard.cleanText(m.filename, 120) };
+    }
+    if (Number.isInteger(from.seq) && from.seq >= 1 && keys.length === 1) {
+      const found = pages.find(room.hall, from.seq);
+      const c = found ? found.take.content : null;
+      if (!c || !FILE_KINDS.includes(c.kind)) return { error: DOC_FROM };
+      if (pages.secret(found.take)) return { error: DOC_SECRET };
+      return { docText, docName: guard.cleanText(c.name, 120) };
+    }
+    return { error: DOC_FROM };
+  };
   socket.on('ai:draft', (args = {}, ack) => {
     if (!need(ack)) return;
     if (!canDraft()) return ok(ack)({ ok: false, error: 'Drafting is for the backstage team.' });
-    const docText = typeof args.docText === 'string' ? args.docText.slice(0, 60_000) : '';
+    const doc = docSource(args && typeof args === 'object' ? args : {});
+    if (doc.error) return ok(ack)({ ok: false, error: doc.error });
     runAi(ack, (signal) => ai.draftReply(aiKey(), {
       ...draftFacts(),
       board: boardNow(),
       question: typeof args.question === 'string' ? args.question.slice(0, 2000) : '',
       instruction: typeof args.instruction === 'string' ? args.instruction.slice(0, 500) : '',
-      docName: typeof args.docName === 'string' ? args.docName.slice(0, 120) : '', docText,
+      docName: doc.docName, docText: doc.docText,
     }, signal));
   });
 
@@ -2808,7 +3070,15 @@ io.on('connection', (socket) => {
     // The line the page showed, read as one line of the speaker's screen (its spaces and braces as they will show).
     const shown = args.text;
     if (shown !== undefined && shown !== null && shown !== '' && (typeof shown !== 'string' || stagelines.oneLine(shown) !== line)) return { error: 'The line must be the push\'s own words.' };
-    return { line };
+    // A confidential push's line goes only from where its item is in use in the Main room, to the hall's own Stagewatch,
+    // over an encrypted link (plan 4-§5.9.10, §5.14); its frame is then held from every other reader. Confidential as the
+    // take is now: a file it shows or was made from marked since it went up is read too.
+    const secret = pages.secret(take);
+    if (secret) {
+      const why = secretLineWhy(found, hall, linkFor(hall));
+      if (why) return { error: why };
+    }
+    return { line, secret, rooms: secret ? [...takeRooms(hall, found)] : [] };
   };
 
   // ----- Stagewatch: put an answer on the speaker's confidence monitor (research or admin)
@@ -2829,13 +3099,18 @@ io.on('connection', (socket) => {
     // a hall sends to its hall's Stagewatch.
     const from = room, who = actor(), sender = me.name;
     const link = linkFor(from.hall);
+    // A confidential line's hold is set before it goes, so no frame carries it unheld; its receipt names the message it
+    // waits for, and a send that did not go waits for nothing.
+    const gen = link.generation;
+    if (push && push.secret) holdLine(link, push.rooms);
     const r = await link.sendToStage(text, { urgency: args.urgency, ack: args.ack !== false });
+    if (push && push.secret) lineSent(link, r.ok ? r.messageId || 0 : null, gen);
     if (r.ok) {
       // What reached the speaker's screen: the line's words as sendToStage built them (cut on a code point, braces as
       // parentheses). The row says how many characters, never the words.
       const said = stagelines.words(text, stagelines.MESSAGE_MAX);
       const count = plural(Array.from(said).length, 'character');
-      audit.write(who, 'stagewatch.send', from.code, 'a line (' + count + ') on the speaker\'s screen, sent now' + (push ? ', with a push' : ''), socket.data.ip);
+      audit.write(who, 'stagewatch.send', from.code, 'a line (' + count + ') on the speaker\'s screen, sent now' + (push ? ', with a push' : '') + (push && push.secret ? ', a confidential line' : ''), socket.data.ip);
       // A room closed while Stagewatch answered keeps nothing of the send: no line is written into a room that is no
       // longer kept (its files are gone), nor into another room made since under the same key.
       if (store.room(from.code) === from) {
@@ -2908,7 +3183,7 @@ io.on('connection', (socket) => {
     // One row for each proposal the desk took: who asked, for where, and how long (in characters, an emoji one) — never
     // the words themselves.
     const count = plural(Array.from(parsed.text).length, 'character');
-    audit.write(who, 'stagewatch.propose', from.code, 'asked the operator: a message (' + count + ') for ' + built.words + (push ? ', with a push' : '') + ' — proposal ' + r.proposal.id, socket.data.ip);
+    audit.write(who, 'stagewatch.propose', from.code, 'asked the operator: a message (' + count + ') for ' + built.words + (push ? ', with a push' : '') + (push && push.secret ? ', a confidential line' : '') + ' — proposal ' + r.proposal.id, socket.data.ip);
     // The desk's id is its own (it numbers from p1 again after a restart): the line (or, for a push's, its MAC) and the
     // Stagewatch's address tag travel with it, so a proposal of the same number that is not this one is never taken for it.
     const proposal = { id: r.proposal.id, link: link.id, state: r.proposal.state, ok: null, words: '', to: built.words, at: Date.now(), sw: link.tag, ...(push ? { lineMac: lineMacOf(built.line) } : { line: built.line }) };
@@ -2923,6 +3198,14 @@ io.on('connection', (socket) => {
       const onSource = !!source && !!apply(from, { o: 'upd', id: source.id, f: { proposal } });
       const held = (sys ? [sys.m.id] : []).concat(onSource ? [source.id] : []);
       if (held.length) trackProposal(link.id, proposal.id, from.code, held, proposal.state, proposal);
+    }
+    // A confidential line proposed: every new message on the frame is held until the desk's answer is read, once it is
+    // followed (a proposal of the same number followed before it is lost first, never this one); one no follower will read
+    // the answer of (its room closed meanwhile, or nothing kept its record) is answered as lost: it may still run.
+    if (push && push.secret) {
+      holdLine(link, push.rooms, { proposal: r.proposal.id });
+      if (!proposals.has(link.id + ':' + r.proposal.id)) proposalAnswered(link.id, r.proposal.id, FINAL.has(r.proposal.state) ? r.proposal.state : 'lost', { quiet: true });
+      onStageState(link, link.view);
     }
     noteEvent('research proposed a stage message to the show desk', link);
     // The page that asked is told the proposal as every page of its room is (lib/ops.js unlinked).
@@ -2952,6 +3235,8 @@ io.on('connection', (socket) => {
     if (!writes.take()) return limited(ack);
     const c = cleanContent(content);
     if (c.error) return ack({ ok: false, error: c.error });
+    // Never a confidential file, nor a confidential picture as a holding image: a screen is seen by whoever stands near it.
+    if (secretOnScreen(c)) return ack({ ok: false, error: SCREENS_NEVER });
     const who = actor();
     const halls = new Set();
     const results = wanted.map((sid) => {
@@ -3039,6 +3324,7 @@ io.on('connection', (socket) => {
     if (!store.has(c) || !(canDisplays('display.manage', c) || canManageHall())) return ack({ ok: false, error: 'Your account may not set this hall\'s holding image.' });
     const h = cleanContent({ kind: 'holding', image });
     if (h.error) return ack({ ok: false, error: h.error });
+    if (secretOnScreen(h)) return ack({ ok: false, error: SCREENS_NEVER });
     displays.setHallHolding(c, h.image || '');
     for (const d of displays.ofHall(c)) io.to('display:' + d.id).emit('display:state', displayState(d));
     // A person's page shown a holding slide with no picture of its own draws the hall's, as the hall's screens do.
@@ -3304,7 +3590,7 @@ io.on('connection', (socket) => {
     if (socket.data.watching && socket.data.watching !== roomCode) socket.leave(socket.data.watching);
     socket.join(roomCode);
     socket.data.watching = roomCode;
-    ok(ack)({ ok: true, code: roomCode, name: r.name || '', messages: r.messages, users: roomUserSummary(r, { links: true }), locked: !!r.settings.lockRoles, guestCode: store.guestCodeOf(r), codeOn: store.codeOn(r), main: store.isMain(r) });
+    ok(ack)({ ok: true, code: roomCode, name: r.name || '', messages: r.messages.map(marked), users: roomUserSummary(r, { links: true }), locked: !!r.settings.lockRoles, guestCode: store.guestCodeOf(r), codeOn: store.codeOn(r), main: store.isMain(r) });
   });
   socket.on('admin:createRoom', (arg, ack) => {
     if (typeof arg === 'function') { ack = arg; arg = {}; }
@@ -3584,8 +3870,10 @@ io.on('connection', (socket) => {
     // room's transcript reads it (the stage record's entries, a quote with its words).
     runAi(ack, async (signal) => {
       readAsAdmin(socket.data.actor || HOST_ACTOR, socket.data.account, r, (n) => 'minutes of ' + n + ' asked of the AI', socket.data.ip);
-      const { entries, dropped } = await stageRecord.of(r.hall, { room: r.code });
-      return ai.summarise(aiKey(), { messages: r.messages, shown: entries, shownDropped: dropped, roomName: store.isMain(r) ? r.name : roomInHall(r) }, signal);
+      const { entries: kept, dropped } = await stageRecord.of(r.hall, { room: r.code });
+      // A confidential entry, marked since it was shown or not, is given the AI by none of its words, its name or its page.
+      const entries = confidentialOf(kept, (r) => pages.refMarked(r));
+      return ai.summarise(aiKey(), { messages: r.messages.map(marked), shown: entries, shownDropped: dropped, roomName: store.isMain(r) ? r.name : roomInHall(r) }, signal);
     });
   });
   socket.on('admin:postSummary', ({ roomCode, text } = {}, ack) => {
@@ -3816,7 +4104,7 @@ function sendSeen(room, uids) {
 /** What a hall's AI is told of the show network: its Stagewatch, and the nodes of that hall and of every hall in their own words (lib/context.js hallBrief). */
 function briefFor(code) {
   const link = linkFor(code);
-  return hallBrief(code, { status: link.status, key: link.keyState, keyWords: link.keyWords, view: link.view, context: link.context }, Array.from(peerLinks.values()).map((l) => l.view()), discovery ? discovery.list() : []);
+  return hallBrief(code, { status: link.status, key: link.keyState, keyWords: link.keyWords, view: viewFor(link, 'ai'), context: link.context }, Array.from(peerLinks.values()).map((l) => l.view()), discovery ? discovery.list() : []);
 }
 
 // ---------------------------------------------------------------- displays
@@ -3830,7 +4118,7 @@ const TIME_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
 function displayState(d) {
   return {
     id: d.id, name: d.name, hallName: (store.get(d.hall) || {}).name || '', seq: d.seq, content: d.content,
-    holding: displays.hallHolding(d.hall), stage: stagePayload(linkFor(d.hall)), now: Date.now(), tz: TIME_ZONE,
+    holding: displays.hallHolding(d.hall), stage: stagePayload(linkFor(d.hall), 'screens'), now: Date.now(), tz: TIME_ZONE,
     build: BUILD.full,
   };
 }
@@ -4062,7 +4350,7 @@ function tellWebRights(code) {
 function pageHidden(ms) { peaks.pageHidden(ms, Date.now()); }
 /** A Stagewatch's frame moved: the displays of every hall that follows it get the frame. */
 function stageChanged(link) {
-  const payload = stagePayload(link);
+  const payload = stagePayload(link, 'screens');
   for (const r of roomsUsing(link)) for (const d of displays.ofHall(r.code)) if (Displays.screens(d)) io.to('display:' + d.id).emit('display:stage', payload);
 }
 const displaysOf = (code) => displays.ofHall(code).map((d) => { const st = Displays.status(d, displays.hallHolding(code)); return { id: st.id, name: st.name, state: st.state, mark: st.mark, words: st.words + ' — ' + st.showing }; });
@@ -4076,7 +4364,7 @@ const boardSockets = new Set();
 function boardDirty() { frames.board.mark('board'); }
 function hallParts(r, shared) {
   let p = shared.get(r.code);
-  if (!p) { p = { row: board.hallRow(r, { stage: stagePayload(linkFor(r.code)), displays: displaysOf(r.code) }) }; shared.set(r.code, p); }
+  if (!p) { p = { row: board.hallRow(r, { stage: stagePayload(linkFor(r.code), 'board'), displays: displaysOf(r.code), isConfidential: (u) => pages.isConfidential(u) }) }; shared.set(r.code, p); }
   return p;
 }
 function boardFor(socket, shared = new Map()) {
@@ -4380,33 +4668,41 @@ function buildMessage(user, payload, { room, cid, held, size } = {}) {
  * built with the same escaping as a message: who showed what to whom, a quote's words, what the pages reported, the line
  * sent with it to the speaker's screen, and when it was withdrawn.
  */
-function renderTranscriptHtml(room, shown = { entries: [], dropped: 0 }) {
+function renderTranscriptHtml(room, shown = { entries: [], dropped: 0 }, { secrets = false } = {}) {
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const fmt = (ts) => new Date(ts).toLocaleString();
   const rows = [];
   // What was shown, in the order it was shown: each entry goes before the first message after it.
   const entries = [...shown.entries].sort((a, b) => a.at - b.at || a.seq - b.seq);
   const VIA_SAID = { now: 'sent now', operator: 'asked the operator' };
+  // A confidential entry (plan 4-§5.13, §5.14): its mark, file and page always; its words and its line only on the laptop
+  // or where the admin asked for them (`secrets`).
+  const SECRET_WORDS = ' (its words are shown on the AGMessage laptop, or with Include confidential text)';
   const shownRow = (e) => {
-    const what = e.kind === 'chat' ? '' : ': ' + esc(e.what);
+    const secret = e.confidential === true && e.kind !== 'chat';
+    const what = e.kind === 'chat' ? '' : secret ? ': 🔒 Confidential — ' + esc(String(e.what).replace(/^🔒 /, '')) : ': ' + esc(e.what);
     const sent = e.sentFrom ? ', sent from ' + esc(e.sentFrom.name || 'another room') : '';
-    const quote = e.text ? ' — “' + esc(e.text).replace(/\n/g, '<br>') + '”' : '';
+    const words = !secret || secrets;
+    const quote = e.text && words ? ' — “' + esc(e.text).replace(/\n/g, '<br>') + '”' : '';
     const seen = seenSaid(e.seen);
     const withdrawn = e.withdrawn ? ' <span class="pin">withdrawn ' + esc(new Date(e.withdrawn).toLocaleTimeString()) + '</span>' : '';
-    const line = e.line ? '<div class="line">🖥 line: “' + esc(e.line.text) + '” (' + VIA_SAID[e.line.via] + ')</div>' : '';
-    return '<div class="shown">📺 <time>' + esc(fmt(e.at)) + '</time> — ' + esc(whoSaid(e)) + ' ' + esc(didSaid(e)) + what + sent + quote + (seen ? ' · ' + esc(seen) : '') + withdrawn + line + '</div>';
+    const line = e.line && words ? '<div class="line">🖥 line: “' + esc(e.line.text) + '” (' + VIA_SAID[e.line.via] + ')</div>' : '';
+    const kept = secret && !secrets && (e.text || e.line) ? esc(SECRET_WORDS) : '';
+    return '<div class="shown">📺 <time>' + esc(fmt(e.at)) + '</time> — ' + esc(whoSaid(e)) + ' ' + esc(didSaid(e)) + what + sent + quote + kept + (seen ? ' · ' + esc(seen) : '') + withdrawn + line + '</div>';
   };
   let next = 0;
   const shownUntil = (at) => { while (next < entries.length && entries[next].at <= at) rows.push(shownRow(entries[next++])); };
   const main = store.isMain(room);
   if (shown.dropped) rows.push('<div class="sys">📺 ' + plural(shown.dropped, 'earlier entry', 'earlier entries') + (main ? '' : ' of the hall\'s') + (shown.dropped === 1 ? ' is' : ' are') + ' no longer kept</div>');
-  for (const m of room.messages) {
+  for (const message of room.messages) {
+    // A file as its mark stands now (one record a file): "📎 🔒 Confidential · name".
+    const m = marked(message);
     shownUntil(m.at);
     if (m.type === 'system') { rows.push('<div class="sys">— ' + esc(m.text) + ' (' + esc(fmt(m.at)) + ')</div>'); continue; }
     const who = m.from ? esc(m.from.name) + ' <span class="role">' + esc(m.from.role) + '</span>' : '—';
     let content = '';
     if (m.type === 'text') content = '<p>' + esc(m.text).replace(/\n/g, '<br>') + '</p>';
-    else if (m.type === 'file') content = '<p>📎 <em>' + esc(m.filename) + '</em> (shared for download' + (m.transferOnly ? ', download only' : '') + ')' + (m.caption ? ' — ' + esc(m.caption) : '') + '</p>';
+    else if (m.type === 'file') content = '<p>📎 ' + (m.confidential ? '🔒 Confidential · ' : '') + '<em>' + esc(m.filename) + '</em> (shared for download' + (m.transferOnly ? ', download only' : '') + ')' + (m.caption ? ' — ' + esc(m.caption) : '') + '</p>';
     else if (m.type === 'help') content = '<p><strong>Help — ' + esc(m.category) + ':</strong> ' + esc(m.text || '') + '</p>' +
       (m.help ? '<p class="responses">' + esc(m.help.state === 'open' ? 'open' : (m.help.state === 'coming' ? 'on the way' : 'resolved') + (m.help.by ? ' — ' + m.help.by : '') + (m.help.at ? ', ' + fmt(m.help.at) : '')) + '</p>' : '');
     else if (m.type === 'action') {
@@ -4494,12 +4790,157 @@ const stageLink = makeLink('default');
 const linkFor = (code) => hallLinks.get(code) || stageLink;
 const allLinks = () => [stageLink, ...hallLinks.values()];
 const roomsUsing = (link) => Array.from(store.rooms.values()).filter((r) => linkFor(r.code) === link);
-/** What a page shows of a link: the frame (or nothing yet), its state and whether it keeps a show desk. */
-function stagePayload(link) {
+/**
+ * What a reader shows of a link: the frame (or nothing yet) as `audience` may read it (viewFor), its state and whether it
+ * keeps a show desk. A room's pages (`{room: key}`) are told too whether a confidential line could go to this Stagewatch
+ * from their hall (`secretLine`: true, or why not in words).
+ */
+function stagePayload(link, audience = 'screens') {
   if (!link.base) return null;
   // `cert`: the link refuses Stagewatch's certificate (changed, or not the one announced) until an admin accepts it.
   const facts = { status: link.status, desk: link.desk, key: link.keyState, cert: !!(link.tlsState && link.tlsState.problem) };
-  return link.view ? { ...link.view, ...facts } : facts;
+  const room = audience && typeof audience === 'object' ? store.room(audience.room) : null;
+  const secret = room ? { secretLine: secretLinkWhy(link, room.hall) || true } : {};
+  const view = viewFor(link, audience);
+  return view ? { ...view, ...facts, ...secret } : { ...facts, ...secret };
+}
+
+// ---------------------------------------------------------------- a confidential line on a Stagewatch frame (plan 4-§5.14)
+/** Whether each link's frame now carries a held message, by its id: the rooms where the item is in use. The run's. */
+const heldNow = new Map();
+/** A frame message's MAC, as a hold keeps it: never its text. */
+const frameMac = (text) => guard.mac(SECRET, 'stage-frame:' + text);
+/**
+ * The link's generation under which each hold's receipts were read (the Stagewatch as it answered them), by the link's id.
+ * The run's: after AGMessage's own start, and once Stagewatch restarted or the link points elsewhere, they are another's.
+ */
+const holdGens = new Map();
+/**
+ * The hold on `link`'s frame stepped by the frame it carries now (lib/pages.js stepHold), written through the pages lane
+ * only when it changed, and whether this frame is held kept for its readers (viewFor). A send whose receipt named a message
+ * of the Stagewatch as it was then (its generation since changed: restarted, pointed elsewhere, or read before this start)
+ * waits for the next new message instead, as a send whose receipt gave no id does: its ids number afresh.
+ */
+function stepLinkHold(link) {
+  let h = pages.holdOf(link.id);
+  if (!h) { heldNow.delete(link.id); return; }
+  if (holdGens.get(link.id) !== link.generation) {
+    holdGens.set(link.id, link.generation);
+    if (h.sends.some((w) => w > 0)) h = { ...h, sends: h.sends.map(() => 0) };
+  }
+  const r = stepHold(h, link.view, frameMac);
+  pages.setHold(link.id, r.hold);
+  if (r.held) heldNow.set(link.id, (r.hold || h).rooms); else heldNow.delete(link.id);
+}
+/**
+ * `link`'s frame as a reader is given it (plan 4-§5.14): whole, but while a confidential line is held on it, its message
+ * is '' for the screens, the halls board, the context and the AI's brief (`audience` 'screens', 'board', 'context', 'ai'),
+ * and "🔒 a confidential line" for the pages of a room where the item is in use (`audience` {room: key}), '' for every
+ * other room's. Its acknowledgement and who gave it stay: they carry no text, and the sender reads the speaker's answer.
+ */
+function viewFor(link, audience) {
+  const v = link.view;
+  if (!v || !heldNow.has(link.id)) return v;
+  const inUse = !!audience && typeof audience === 'object' && heldNow.get(link.id).includes(audience.room);
+  return { ...v, message: inUse ? HELD_LINE : '' };
+}
+/** What another confidential line is refused with while as many as a hold waits on are waiting there (HOLD_MAX.waits). */
+const HOLD_FULL = 'Wait for the confidential lines already sent to this Stagewatch to come up, or for the show desk to answer them: '
+  + HOLD_MAX.waits + ' are waiting.';
+/**
+ * Why a confidential line may not go to `link` from the hall `hall` ('' when it may: plan 4-§5.9.10): the hall's own
+ * Stagewatch, or one no other hall follows; an encrypted link (https, its certificate pinned and accepted); and room in its
+ * hold, which is never let go for its size.
+ */
+function secretLinkWhy(link, hall) {
+  if (!link.base) return 'This hall has no Stagewatch linked — link one in Set up.';
+  if (!hallLinks.has(hall) && roomsUsing(link).some((r) => r.code !== hall)) return 'This hall shares its Stagewatch with another hall: a confidential line is not sent there.';
+  if (!/^https:/i.test(link.base) || !link.tlsState || !link.tlsState.on || !link.tlsState.pinned || link.tlsState.problem) return 'This hall\'s Stagewatch link is not encrypted: a confidential line is not sent.';
+  const h = pages.holdOf(link.id);
+  if (h && h.sends.length + h.proposals.length >= HOLD_MAX.waits) return HOLD_FULL;
+  return '';
+}
+/**
+ * The rooms of the hall `hall` where a take (`found`, pages.find's {take, to}) is in use (plan 4-§5.14): for a take of
+ * files (a document and its stand-in, a picture, or a picture or a quote made from a file: filesOf and its `made`), each
+ * room of the hall where every one of them is in use (inUseRooms); for one of no file (typed, pasted, a local copy, a web
+ * page's words), where it is drawn: the Main room for the Board, each room a person's pages sit in. Keys.
+ */
+function takeRooms(hall, found) {
+  const t = found.take;
+  const urls = filesOf(t.content).concat(madeUrls(t));
+  if (urls.length) {
+    const sets = urls.map((u) => inUseRooms(u));
+    return new Set(store.roomsOf(hall).map((r) => r.code).filter((k) => sets.every((s) => s.has(k))));
+  }
+  const out = new Set();
+  for (const to of found.to) {
+    if (to === 'board') out.add(hall);
+    else for (const p of hallPages(hall)) if (!p.support && p.key === to) out.add(p.room.code);
+  }
+  return out;
+}
+/**
+ * Why the line of a confidential push may not go (plan 4-§5.9.10): the item in use in the hall's Main room, whose stage the
+ * speaker's screen is (S7), the rooms where it is in use named; then the link's own rule (secretLinkWhy). '' when it may.
+ */
+function secretLineWhy(found, hall, link) {
+  const rooms = takeRooms(hall, found);
+  if (!rooms.has(hall)) {
+    const names = [...rooms].map((k) => store.room(k)).filter(Boolean).map((r) => r.name || 'a room with no name');
+    const where = !names.length ? 'another room' : names.length === 1 ? names[0] : names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
+    return 'This is confidential to ' + where + ': show it in the Main room first.';
+  }
+  return secretLinkWhy(link, hall);
+}
+/**
+ * A confidential line about to go to `link` (sent at once, or proposed with its proposal's id), for the rooms `rooms` where
+ * its item is in use: a send waits for its message, a proposal holds every new message until the desk answers
+ * (stepHold), and the message held already stays held until the frame moves past it. Set before a send goes, so no frame
+ * carries it unheld. Room keys the store no longer holds are let go.
+ */
+function holdLine(link, rooms, { proposal = '' } = {}) {
+  const was = pages.holdOf(link.id);
+  const v = link.view;
+  const waiting = !!was && was.before !== undefined;
+  pages.setHold(link.id, {
+    mac: was ? was.mac : '', messageId: was ? was.messageId : 0,
+    // What waits measures "new" against the frame as last seen: the frame as it is now, unless something already waits.
+    before: waiting ? was.before : v && typeof v.message === 'string' && v.message ? frameMac(v.message) : '',
+    beforeId: waiting ? was.beforeId : v && Number.isInteger(v.messageId) && v.messageId >= 0 ? v.messageId : 0,
+    sends: (was ? was.sends : []).concat(proposal ? [] : [0]),
+    proposals: (was ? was.proposals : []).concat(proposal ? [proposal] : []),
+    caught: was ? was.caught : [],
+    rooms: (was ? was.rooms.filter((k) => store.room(k)) : []).concat(rooms),
+  });
+  stepLinkHold(link);
+}
+/**
+ * A confidential line sent at once answered by Stagewatch: `ref` its receipt's message id (0 for none), or null when it did
+ * not go. A receipt read under the generation the line went under names the message its send waits for; one that did
+ * not go waits for nothing (lib/pages.js sentHold).
+ */
+function lineSent(link, ref, gen) {
+  const h = pages.holdOf(link.id);
+  if (!h) return;
+  pages.setHold(link.id, sentHold(h, ref === null ? null : link.generation === gen ? ref : 0));
+  onStageState(link, link.view);
+}
+/**
+ * The desk's answer to a proposal of ours read (its state): a confidential line's hold on that link ends that proposal's
+ * part (lib/pages.js answerHold). Pending, or a state the desk's answer did not make plain (`unknown`, asked again), it waits
+ * on. Rejected, failed or undelivered, it brought no message; approved, done, lost (it may have run: the desk restarted,
+ * or the proposal is followed no more) or any other, the message it brought is held. `quiet`: the hold alone, with no
+ * reader told (a start, before anything is served).
+ */
+const REFUSED_PROPOSAL = new Set(['rejected', 'failed', 'undelivered']);
+function proposalAnswered(linkId, id, state, { quiet = false } = {}) {
+  if (state === 'pending' || state === 'unknown') return;
+  const h = pages.holdOf(linkId);
+  if (!h || !h.proposals.includes(id)) return;
+  pages.setHold(linkId, answerHold(h, id, !REFUSED_PROPOSAL.has(state)));
+  const link = quiet ? null : allLinks().find((l) => l.id === linkId);
+  if (link) onStageState(link, link.view);
 }
 /** A Stagewatch the admin removed: its pins go, unless another link still follows that address (its pin guards that one too). */
 function forgetStagewatchPins(link) {
@@ -4507,14 +4948,17 @@ function forgetStagewatchPins(link) {
 }
 /** A hall now follows another Stagewatch (or none): its rooms and its screens are told at once, never left on the old frame. */
 function hallStageChanged(code) {
-  const payload = stagePayload(linkFor(code));
-  for (const r of store.roomsOf(code)) io.to(r.code).emit('stage', payload || { status: 'off', desk: false });
+  const link = linkFor(code);
+  stepLinkHold(link);
+  for (const r of store.roomsOf(code)) io.to(r.code).emit('stage', stagePayload(link, { room: r.code }) || { status: 'off', desk: false });
+  const payload = stagePayload(link, 'screens');
   for (const d of displays.ofHall(code)) if (Displays.screens(d)) io.to('display:' + d.id).emit('display:stage', payload);
 }
 function onStageState(link, view) {
-  const payload = stagePayload(link) || { status: 'off', desk: false };
-  // Every room of each hall that follows it.
-  for (const hall of roomsUsing(link)) for (const r of store.roomsOf(hall.code)) io.to(r.code).emit('stage', payload);
+  // The hold first, so no reader is given a held message as the frame arrives.
+  stepLinkHold(link);
+  // Every room of each hall that follows it, each told the frame as its pages may read it.
+  for (const hall of roomsUsing(link)) for (const r of store.roomsOf(hall.code)) io.to(r.code).emit('stage', stagePayload(link, { room: r.code }) || { status: 'off', desk: false });
   followStageAck(link, view);
   stageChanged(link);
   boardDirty();
@@ -4529,7 +4973,7 @@ function configureHallLink(room) {
   const url = sw && typeof sw.url === 'string' ? nodes.normaliseBase(sw.url) : '';
   let link = hallLinks.get(room.code);
   if (!url) {
-    if (link) { link.stop(); hallLinks.delete(room.code); }
+    if (link) { link.stop(); hallLinks.delete(room.code); pages.setHold(link.id, null); heldNow.delete(link.id); }
     return null;
   }
   if (!link) { link = makeLink('hall:' + room.code); hallLinks.set(room.code, link); }
@@ -4548,6 +4992,8 @@ if (process.env.AGM_NODES !== '0') {
 }
 stageLink.configure(settings.stagewatchUrl || '', stagewatchKey(), settings.stagewatchFingerprint || '');
 for (const room of store.rooms.values()) configureHallLink(room);
+// A hold whose link is gone is dropped (plan 4-§5.14); every other is kept, so the first frame after a restart is held.
+for (const id of pages.holdLinks()) if (!allLinks().some((l) => l.id === id)) pages.setHold(id, null);
 
 // ---------------------------------------------------------------- Patterns and PlayMap (lib/peerlinks.js)
 // Linked by the admin (the node's own token, sealed in settings.json → peerLinks; the start of its certificate's
@@ -4677,7 +5123,12 @@ function trackProposal(linkId, id, code, ids, state, { sw = '', line = '', lineM
   if (was && !ids.some((x) => was.ids.includes(x))) loseProposal(key, was, 'it restarted');
   const link = allLinks().find((l) => l.id === linkId);
   proposals.set(key, { link: linkId, id, code, ids, state, sw, line, lineMac, created: 0, gen: link ? link.generation : 0 });
-  if (proposals.size > 200) proposals.delete(proposals.keys().next().value);
+  // Past the bound the oldest is followed no more: a confidential line's hold reads it as lost (it may still run).
+  if (proposals.size > 200) {
+    const [oldest, t] = proposals.entries().next().value;
+    proposals.delete(oldest);
+    proposalAnswered(t.link, t.id, 'lost', { quiet: true });
+  }
 }
 // After a restart, keep following the ones still open, from every room of every hall (their state, and the link they
 // went to, live on the messages).
@@ -4687,6 +5138,11 @@ for (const room of store.allRooms()) {
     const t = proposals.get(linkId + ':' + m.proposal.id);
     if (t) t.ids.push(m.id); else trackProposal(linkId, m.proposal.id, room.code, [m.id], m.proposal.state, m.proposal);
   }
+}
+// A confidential line's proposal no record follows any more (its room gone, or past the bound) is read as lost: the
+// message it may have brought is held, and nothing waits for an answer no follower will read.
+for (const linkId of pages.holdLinks()) {
+  for (const id of pages.holdOf(linkId).proposals) if (!proposals.has(linkId + ':' + id)) proposalAnswered(linkId, id, 'lost', { quiet: true });
 }
 /** Why the desk's proposal of this number is not the one we made, or '' when it is (pure on its facts). */
 function notOurs(t, p, link) {
@@ -4701,6 +5157,7 @@ function loseProposal(key, t, why) {
   showProposalState(t, { state: 'lost', words: 'Stagewatch no longer has this request (' + why + ') — ask again if it is still wanted', decidedBy: '' });
 }
 function showProposalState(t, p) {
+  proposalAnswered(t.link, t.id, p.state);
   const room = store.room(t.code);
   if (!room) return;
   for (const id of t.ids) {
@@ -4882,8 +5339,8 @@ function currentContext(link) {
   return buildContext({
     node: { id: settings.nodeId, name: 'AGMessage' },
     rooms,
-    stage: { status: own.status, key: own.keyState, keyWords: own.keyWords, view: own.view, clock: own.clockInfo(), context: own.context },
-    halls: link ? [] : Array.from(hallLinks.values()).map((l) => ({ status: l.status, key: l.keyState, keyWords: l.keyWords, view: l.view, clock: l.clockInfo(), context: l.context })),
+    stage: { status: own.status, key: own.keyState, keyWords: own.keyWords, view: viewFor(own, 'context'), clock: own.clockInfo(), context: own.context },
+    halls: link ? [] : Array.from(hallLinks.values()).map((l) => ({ status: l.status, key: l.keyState, keyWords: l.keyWords, view: viewFor(l, 'context'), clock: l.clockInfo(), context: l.context })),
     help: rooms.reduce((n, r) => n + board.openHelp(r).length, 0),
     peerContexts: Object.fromEntries(Array.from(peerLinks.values()).filter((l) => l.status === 'live' && l.context && (!link || !l.hall || codes.has(l.hall))).map((l) => [l.node.id, { light: l.context.light, headline: l.context.headline }])),
     peers: discovery ? discovery.list() : [],
@@ -5593,6 +6050,7 @@ function firstWrites() {
 const { ctx, takesCtx } = contexts({
   store, apply, systemMessage, readSend, messageOf, uploadOnDisk, fileCopy, tickets, makeMessageId, removeUnused, fileNamesOf, audit, accounts, boardDirty, newSideRoom, renameRoom, roomNameRefused, newGuestCode, guestPagesOf, sendGuestsOut, codeChanged, invitesFor, settings, sendersOf, sendsInto, setRoomSends, linkFor, stagePayload,
   pages, stageRecord, hallPages, takeSends, holdingOf, pagesChanged, pageHidden, selfHosts, tellWebRights, viewChanged, stageSource, stageCheck, freshUpload, stageDropped, io,
+  marked, fileMarked, inUseRooms, markShared, markFresh, markRefusal, markedTakes, screensShowing, madeUrls,
 });
 
 // The installed node reads its keys before it holds its folder, and stops with their words when it may not run on them.

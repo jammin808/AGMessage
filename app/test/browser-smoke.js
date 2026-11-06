@@ -3698,6 +3698,40 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       await desk.eval(`removePendingFile()`);
       report(hiddenTick === JSON.stringify({ disabled: true, why: 'This file has hidden parts: Download would hand them over. Share a copy without them for download instead.' }), `with a spreadsheet holding a hidden sheet open in the Preview, Let them download it is disabled with its words (${hiddenTick})`);
 
+      // 🔒 Confidential beside 🔥 Priority while a file is attached: shared marked, every card reads "🔒 Confidential", the
+      // Board's too; shown on the Board's pages, the ask before it goes names the room (the server's answer stood in for
+      // once, as a Legal file's would be), and the Board's take says it on its line and its card; ＋ the speaker's screen
+      // says what Stagewatch does with a confidential line.
+      await desk.eval(`(() => { attachFile(new File(['Settle at two million.'], 'legal note.txt', { type: 'text/plain' })); return true; })()`);
+      const lockBtn = await desk.until(`(() => { const b = document.getElementById('textConfidentialBtn'); return !b.hidden && JSON.stringify({ beside: b.previousElementSibling && b.previousElementSibling.id, text: b.textContent, pressed: b.getAttribute('aria-pressed') }); })()`, 5000);
+      await desk.eval(`(() => { document.getElementById('textConfidentialBtn').click(); document.getElementById('textInput').value = 'The legal note'; document.querySelector('#textPane .send-btn').click(); return true; })()`);
+      const secretShared = await desk.until(`(() => { const m = allMessages.find((x) => x.type === 'file' && x.caption === 'The legal note'); const n = m && messagesById.get(m.id); return n && m.confidential && JSON.stringify({ id: m.id, url: m.url, line: n.querySelector('.file-link').textContent, off: document.getElementById('textConfidentialBtn').getAttribute('aria-pressed') }); })()`, 15000);
+      const secretMsg = JSON.parse(secretShared || '{}');
+      const cySecret = await cy.until(`(() => { const n = messagesById.get(${codeLiteral(secretMsg.id || '')}); return n && n.querySelector('.file-link').textContent; })()`, 8000);
+      await desk.eval(`(() => { const real = AGM.outbox.now; let once = true; AGM.outbox.now = (verb, args, done) => { if (once && verb === 'page:push') { once = false; done({ ok: false, error: 'This file is marked confidential: confirm to show it in the Main room. It will be in use there.', confirm: true, rooms: ['the Main room'] }); return; } return real(verb, args, done); };
+        Console.showFile('board', { kind: 'snippet', unit: 'text', text: 'Settle at two million.', from: { url: ${codeLiteral(secretMsg.url || '')} } }); return true; })()`);
+      const askedSecret = await desk.until(`(() => { const a = document.querySelector('.agm-ask'); return a && JSON.stringify({ title: a.querySelector('.agm-ask-title').textContent, words: (a.querySelector('.agm-ask-words') || a).textContent }); })()`, 5000);
+      await desk.eval(`(() => { document.querySelector('.agm-ask [data-answer="yes"]').click(); return true; })()`);
+      const cySecretTake = await cy.until(`(() => { const l = document.querySelector('#pageLayer .take-quote-line'); return !document.getElementById('pageLayer').hidden && l && l.textContent; })()`, 15000);
+      await cy.eval(`document.querySelector('#layerActs [data-action="take.minimise"]').click()`);
+      const cySecretCard = await cy.until(`(() => { const c = [...document.querySelectorAll('#takeCards .take-card-what')].find((x) => x.querySelector('.take-card-secret')); return c && c.textContent; })()`, 5000);
+      // ＋ on the ❝ Quote tab, ticked 🔒: the hall's frame says whether a confidential line may go (`secretLine`), stood in
+      // for here (this hall's Stagewatch, over https; then one that is not), the page's facts put back after.
+      await desk.eval(`(() => { window.__keptFacts = { canSendToStage: pageFacts.canSendToStage, canPropose: pageFacts.canPropose, stage: pageFacts.stage }; factsChanged({ canSendToStage: true, canPropose: false, stage: { status: 'connected', key: 'accepted', desk: false, secretLine: true } });
+        selectTab('quote'); document.getElementById('quoteInput').value = 'Settle at two million.'; document.getElementById('quoteInput').dispatchEvent(new Event('input')); const t = document.getElementById('quoteSecret'); t.checked = true; t.dispatchEvent(new Event('change')); return true; })()`);
+      const plusOf = `(() => { const r = document.getElementById('quoteLine'); if (r.hidden) return ''; const on = r.querySelector('[data-line-on]'); if (!on.disabled && !on.checked) { on.checked = true; on.dispatchEvent(new Event('change')); } const said = r.querySelector('[data-line-said]'); const why = r.querySelector('[data-line-why]'); return JSON.stringify({ disabled: on.disabled, said: said.hidden ? '' : said.textContent, why: why.hidden ? '' : why.textContent }); })()`;
+      const secretPlus = await desk.until(`(() => { const p = ${plusOf}; return p && JSON.parse(p).said && p; })()`, 5000);
+      await desk.eval(`(() => { factsChanged({ stage: { status: 'connected', key: 'accepted', desk: false, secretLine: 'This hall\\'s Stagewatch link is not encrypted: a confidential line is not sent.' } }); document.getElementById('quoteInput').dispatchEvent(new Event('input')); return true; })()`);
+      const secretBarred = await desk.until(`(() => { const p = ${plusOf}; return p && JSON.parse(p).why && p; })()`, 5000);
+      await desk.eval(`(() => { const t = document.getElementById('quoteSecret'); t.checked = false; document.getElementById('quoteInput').value = ''; document.getElementById('quoteInput').dispatchEvent(new Event('input')); factsChanged(window.__keptFacts); selectTab('text'); return true; })()`);
+      report(lockBtn === JSON.stringify({ beside: 'textPriorityBtn', text: '🔒 Confidential', pressed: 'false' }) && /^📎 🔒 Confidential · legal note\.txt · Text/.test(secretMsg.line || '') && secretMsg.off === 'false'
+        && /^📎 🔒 Confidential · legal note\.txt/.test(cySecret || '')
+        && !!askedSecret && JSON.parse(askedSecret).title === '🔒 A confidential file' && JSON.parse(askedSecret).words.includes('Show it in the Main room? It will be in use there.')
+        && /^🔒 Confidential · Typed by|^🔒 Confidential · Quoted by/.test(cySecretTake || '') && /^🔒/.test(cySecretCard || '')
+        && /^🔒 Confidential — every output of this hall's Stagewatch shows it/.test((JSON.parse(secretPlus || '{}').said) || '')
+        && secretBarred === JSON.stringify({ disabled: true, said: '', why: 'This hall\'s Stagewatch link is not encrypted: a confidential line is not sent.' }),
+        `🔒 Confidential beside 🔥 while a file is attached, off after each share; a file shared marked reads "🔒 Confidential" on its card and the Board's; the ask before a confidential take names the room; the Board's take and card carry 🔒; ＋ says what Stagewatch does with a confidential line, or why it cannot go (${JSON.stringify({ lockBtn, secretMsg, cySecret, askedSecret, cySecretTake, cySecretCard, secretPlus, secretBarred })})`);
+
       const shareProblems = [['desk', desk], ['cy', cy], ['ox', ox]].flatMap(([n, t]) => t.problems.map((p) => n + ': ' + p));
       report(shareProblems.length === 0, `the share hall's pages: no console error and no CSP violation${shareProblems.length ? ' — ' + shareProblems.slice(0, 4).join(' | ') : ''}`);
       for (const t of [desk, cy, ox]) { await t.send('Page.navigate', { url: 'about:blank' }); t.close(); }

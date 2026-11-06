@@ -208,6 +208,17 @@ in `data/stage/<HALL>.json`, at most 500 entries, the transcript saying how many
 room's reset clears it, a side room's drops the entries sent from it (what the Main room showed of a side room's file
 stays the hall's), and a hall removed takes it.
 
+**A confidential file** (one record a file, `pages.json`'s `marks`) is never shown on a screen, as a hall's holding image
+or as a holding slide on people's pages: "A confidential file is never shown on screens: anyone near them can see it."
+A file on a screen, a screen's holding slide, a hall's holding image or a holding slide on people's pages is taken off it
+before it is marked, from its ⋯, as it is shared or as it is shown, each named ("Take it off Foyer first: a screen is seen
+by whoever stands near it."); ⧉ Show on screens is drawn greyed with those words on a confidential file, and the holding
+image's list shows a marked picture that cannot be chosen. On people's pages it goes only where it is in
+use (the Main room for the Board, each room a person sits in), or once its pusher confirms; a picture of it and a quote
+from it are marked by the server whatever is sent, and drawn with "🔒 Confidential ·" on their line and "🔒" on their card.
+A console seated where it is not in use reads "🔒 a confidential item". While a confidential line is on a Stagewatch's
+frame, the screens' strip is given no message, and neither are the rooms where it is not in use nor the halls board.
+
 ### A document, a picture
 
 **A document** (`{kind: 'doc', url, at?, download, note?}`) is a file the hall holds, the whole of it, opened at its

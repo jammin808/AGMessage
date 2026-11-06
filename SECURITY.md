@@ -588,7 +588,28 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   the record of a hall whose files are gone goes at the next start. The transcript, which
   whoever the admin page admits reads (the laptop's token, and any account with `settings.manage`, on any device),
   interleaves it with the room's messages and is served `no-store`; the AI's minutes are given its lines. A take stays
-  out of the room's feed and every reader of it, and the audit names the act without its content.
+  out of the room's feed and every reader of it, and the audit names the act without its content. A confidential
+  entry's words sit there too, in clear; the transcript shows them only on the AGMessage laptop itself, or where the admin
+  ticks Include confidential text (a `room.read` row says so), and the minutes are given none of them.
+- **The confidential mark.** One record a file (`pages.json`'s `marks`), read by every check: a file marked goes only
+  where it is in use (the rooms whose messages hold it, the room a fresh upload of it was made for, where a take of it is
+  drawn) or where its sender confirms, from a seat that may download it where it is in use; never on a screen or as a
+  holding image; never its text, name, place or caption to the AI; named only to a page seated where it is in use; its
+  line only from where it is in use in the Main room, to the hall's own Stagewatch over https with its certificate
+  pinned, and while that line is on Stagewatch's frame, its message is given to no other reader of the frame (screens,
+  the halls board, other rooms, the context, the AI's brief), held by its MAC and id across a restart; a second line, a
+  refused proposal or an answer the desk did not make plain never releases a line still on the frame, and at most 20
+  confidential lines wait on one Stagewatch, the next refused, so a hold is never let go for its size. A file marked after
+  a take of it went up is confidential there from then on: every take and Earlier entry of it, a picture or a quote made
+  from it included, is marked, and the stage record's entries are read with the mark as it stands. One race is left: a
+  proposal approved while another message came up on the frame, whose approval AGMessage reads (every 3 s) before the
+  frame carrying the approved line (live), holds the other message and not the line; the frame normally arrives first.
+  Who marked it, or
+  the admin, removes the mark; an On stage seat marks nothing. It is not encryption: the file on disk and its link are as
+  any file's, and anyone who reads it can retype or photograph it. The mark on a picture or a local copy, and the AI's
+  check of a document's source, hold for AGMessage's own page, not against someone who rewrites it or copies the words;
+  what Stagewatch does with a line once it has it is Stagewatch's (every output, its public frame, its triggers, its saved
+  settings).
 - **A part of a page or a picture is a new picture.** A region of a PDF's page or of a picture, what is in view of
   either, and a picture tapped in a Word document or a slide, is drawn on the pusher's own page into a new picture (at
   most 2,048 px on its long edge) and uploaded: no original goes, and a picture's metadata (EXIF, its place) is never

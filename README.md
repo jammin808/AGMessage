@@ -176,6 +176,17 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   are given it. Kept per hall in `data/stage/` (500 entries, the transcript saying how many earlier ones are no longer
   kept); clearing the Main room's messages clears it, clearing a side room's drops what came from it, and removing a hall
   takes it.
+- **🔒 Confidential.** A file can be marked confidential as it is shared (🔒 beside 🔥 Priority) or later from its ⋯ by
+  the backstage team or the admin; only whoever marked it, or the admin, removes the mark. One mark a file: every copy, in
+  every room, shows "🔒 Confidential". It goes only where it is in use or where its sender confirms it ("This file is
+  marked confidential: confirm to send it to Legal. It will be in use there."), on the Board's pages too; it is never shown
+  on screens or as a holding image; a picture of it and a quote from it are marked as well, and so is what is already
+  shown of a file marked later. Its words never go to the AI
+  (the thread, the minutes and the draft get "a confidential file" or "a confidential item"), a backstage page seated
+  where it is not in use reads "🔒 a confidential item", and the transcript shows its words only on the AGMessage laptop or
+  with Include confidential text. Its line on the speaker's screen goes only from the Main room, to the hall's own
+  Stagewatch over an encrypted link, and while it is up there AGMessage's screens, other rooms, the halls board, the
+  context and the AI are given none of it. The mark keeps a file where it is sent; it is not encryption.
 - **Messages that land.** Action prompts with tap-to-answer buttons; documents (PDF, Word, Excel, PowerPoint, CSV,
   Markdown, text, images) shared for download, opened in a person's own panel (👁 Look, 👁 Preview), shown to the Board or
   on screens, PDFs on iPads from iPadOS 16.4 (pdf.js's

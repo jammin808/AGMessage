@@ -162,6 +162,19 @@ function showDashboard() {
     if (el) el.replaceWith(buildAdminMessage(m));
     ADMIN.refresh();
   });
+  // A file of the watched room marked confidential, or its mark removed (the server's one record, latest wins): its messages
+  // drawn again with their 🔒.
+  socket.on('fileMark', ({ ids, confidential } = {}) => {
+    if (!currentRoom || !Array.isArray(ids)) return;
+    for (const id of ids) {
+      const m = currentRoom.messages.find((x) => x.id === id);
+      if (!m) continue;
+      if (confidential === true) m.confidential = true; else delete m.confidential;
+      const el = document.querySelector(`.admin-msg[data-key="${CSS.escape(String(id))}"]`);
+      if (el) el.replaceWith(buildAdminMessage(m));
+    }
+    ADMIN.refresh();
+  });
   // The watched room's guest code was switched or renewed (here or in another tab): its header, and the list.
   socket.on('guestCode', ({ guestCode, codeOn } = {}) => { codeNow(typeof guestCode === 'string' ? guestCode : '', !!codeOn); refreshRooms(); });
   // Another admin tab closed the hall this one is watching: show what is left.
@@ -539,7 +552,8 @@ function buildAdminMessage(m) {
   let bodyHtml = '';
   if (m.type === 'text') bodyHtml = `<p>${escapeHtml(m.text)}</p>`;
   // A file message is a file shared for download (📎; 📦 one AGMessage never opens), downloaded from its ⬇.
-  else if (m.type === 'file') bodyHtml = `<p>${m.transferOnly ? '📦' : '📎'} ${escapeHtml(m.filename)}${m.transferOnly ? ' · download only' : ''}${m.caption ? ` — <em>${escapeHtml(m.caption)}</em>` : ''}</p>`;
+  // One marked confidential says so before its name (🔒, with its word).
+  else if (m.type === 'file') bodyHtml = `<p>${m.transferOnly ? '📦' : '📎'} ${m.confidential ? '🔒 Confidential · ' : ''}${escapeHtml(m.filename)}${m.transferOnly ? ' · download only' : ''}${m.caption ? ` — <em>${escapeHtml(m.caption)}</em>` : ''}</p>`;
   else if (m.type === 'action') {
     bodyHtml = `<p>🟧 <strong>${escapeHtml(m.text)}</strong></p>` +
            `<p class="muted">Options: ${escapeHtml((m.options || []).join(' · '))}</p>`;
@@ -707,7 +721,9 @@ function roomNameForCode(code) {
 // ---------------- What each act does (the catalogue's rows are in catalog.js) ----------------
 Object.assign(ADMIN_RUN, {
   'adminRoom.watch': (o) => watchRoom(o.code),
-  'adminRoom.transcript': (o) => { window.open('/api/admin/transcript/' + encodeURIComponent(o.code), '_blank', 'noopener'); },
+  // ☐ Include confidential text: a confidential entry's words in the transcript off this laptop too, a read the audit log
+  // names (plan 4-§5.13).
+  'adminRoom.transcript': (o) => { const tick = document.getElementById('includeSecret'); window.open('/api/admin/transcript/' + encodeURIComponent(o.code) + (tick && tick.checked ? '?confidential=1' : ''), '_blank', 'noopener'); },
   'adminRoom.clear': (o) => AGM.outbox.now('admin:resetRoom', { roomCode: o.code }, (res) => {
     if (!res?.ok) { say(res?.error || 'Not cleared.', true); return; }
     // A stage record whose file could not be read at the start keeps what that file holds: said, never as cleared.
@@ -791,6 +807,14 @@ Object.assign(ADMIN_RUN, {
   'person.kick': (o) => AGM.outbox.now('admin:kick', { socketId: o.socketId }, (res) => { if (!res || !res.ok) say((res && res.error) || 'Not logged out.', true); else say(o.name + ' is logged out of ' + o.hall + '.'); }),
   'adminMsg.copy': (o, c) => AGM.copy(o.text, { said: 'Copied.', anchor: c.anchor, say }),
   'adminMsg.download': (o) => downloadFile(o),
+  // A file of the watched room marked confidential, or its mark removed: the server's record, told back as `fileMark`.
+  'adminMsg.confidential': (o) => {
+    const on = !o.confidential;
+    AGM.outbox.now('file:mark', { messageId: o.id, on }, (res) => {
+      if (!res || !res.ok) { say((res && res.error) || 'The mark was not changed.', true); return; }
+      say(on ? 'Marked confidential: it goes only where it is in use, or where you send it.' : 'The confidential mark is removed.');
+    });
+  },
   // A file on people's pages now is asked about first (the server's answer is the question): take it down too, or leave
   // it up there, then deleted with that answer.
   'adminMsg.delete': (o, c) => {

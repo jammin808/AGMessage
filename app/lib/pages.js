@@ -36,7 +36,9 @@
  *
  * Stored in `pages.json` (one write lane, written only once this copy holds its data folder: `hold()`): the takes by
  * hall and layer, the persons' answers, each hall's Earlier list, stage files and withdrawn takes, and the guests' chat
- * views; each bounded, the oldest going first. A record of
+ * views; each bounded, the oldest going first; and, once there are any, the confidential marks (`marks`, one record a
+ * file by its upload's name, gone with the file) and the holds on Stagewatch frames that carry a confidential line
+ * (`holds`, one a link, by MAC and id, never text: stepHold). A record of
  * the wrong shape is dropped when it is read. The reports are the run's alone: never saved, and a page that goes takes
  * its report with it.
  *
@@ -49,7 +51,11 @@
  *   fileOf(c)            : the upload a take's content shows (a document's, a picture's, a holding slide's), or '' (pure)
  *   filesOf(c)           : every upload a take's content names: fileOf's, and a document's stand-in picture (pure)
  *   webUrl(v, selfHosts) : a web page's address made safe, {url, host}, or {error} (pure, fail closed)
- *   describePage(c, o)   : what a take shows, in a few words, in the console's voice or the audit's (pure)
+ *   describePage(c, o)   : what a take shows, in a few words, in the console's voice or the audit's (pure); a confidential
+ *                          take masked to an asker not seated where it is in use
+ *   stepHold(h, view)    : the hold on a Stagewatch frame stepped by a frame, and whether that frame is held (pure)
+ *   answerHold(h, id, a) : a proposal's part of a hold ended by the desk's answer (pure)
+ *   sentHold(h, ref)     : a send's part of a hold told its receipt, or that it did not go (pure)
  *   Pages.status(...)    : a take's status over the pages that hold it: a mark and its words, person first (pure)
  *
  * A web page (`web`) is a take of its own: an https address a person's page frames (public/pagelayer.mjs framePage).
@@ -483,6 +489,8 @@ function cleanFile(kind, c, facts) {
   if (kind === 'doc' && f.observer === true) return { error: OBSERVERS };
   const note = own(c, 'note');
   if (note !== undefined && typeof note !== 'string') return { error: KINDS_WORDS };
+  const marked = markedOf(c);
+  if (marked.error) return marked;
   const src = typeof f.source === 'function' ? f.source(url) : null;
   if (!isRecord(src) || src.error) return { error: isRecord(src) && src.error ? src.error : NOT_HELD };
   const room = src.room ? { room: src.room, roomName: src.roomName } : {};
@@ -496,12 +504,25 @@ function cleanFile(kind, c, facts) {
       const from = typeof f.source === 'function' ? f.source(st.standin.url) : null;
       if (!isRecord(from) || from.error) return { error: isRecord(from) && from.error ? from.error : NOT_HELD };
     }
-    return { kind, url, name: src.name, ...(p.at ? { at: p.at } : {}), download: own(c, 'download') === true, ...said, ...room, ...(st.standin ? { standin: st.standin } : {}) };
+    return { kind, url, name: src.name, ...(p.at ? { at: p.at } : {}), download: own(c, 'download') === true, ...said, ...room, ...(st.standin ? { standin: st.standin } : {}), ...marked.mark };
   }
   const from = fromOf(own(c, 'from'), f.source);
   if (from.error) return from;
-  return { kind, url, name: src.name, ...(from.from ? { from: from.from } : {}), ...said, ...room };
+  return { kind, url, name: src.name, ...(from.from ? { from: from.from } : {}), ...said, ...room, ...marked.mark };
 }
+
+/**
+ * The confidential mark a pusher sent on a take (plan 4-§5.14), read by its type: {mark: {confidential: true}} when sent
+ * as true, {mark: {}} when absent or false, {error} for any other value. A client may add the mark, never remove it: the
+ * server sets it from the file's record whatever is sent (lib/handlers/takes.js), and false is no mark.
+ */
+function markedOf(c) {
+  const v = own(c, 'confidential');
+  if (v === undefined || v === false) return { mark: {} };
+  return v === true ? { mark: { confidential: true } } : { error: MARK_WORDS };
+}
+/** What a mark of the wrong type is refused with. */
+const MARK_WORDS = 'Confidential is a tick: true, or left out.';
 
 /** A stand-in that is neither shape, or both; one of the other shape than its document's type; one on a take that is no document. */
 const STANDIN_WORDS = 'A document\'s stand-in is a picture of its place or what you see there: one of the two.';
@@ -527,7 +548,7 @@ function standinOf(v) {
   if ((url === undefined) === (snippet === undefined)) return { error: STANDIN_WORDS };
   if (url !== undefined) return typeof url === 'string' && guard.validUploadUrl(url) && IMAGE_EXT.includes(guard.extOf(url)) ? { standin: { url } } : { error: STANDIN_WORDS };
   if (!isRecord(snippet)) return { error: STANDIN_WORDS };
-  const q = cleanSnippet(Object.fromEntries(Object.entries(snippet).filter(([k]) => k !== 'from' && k !== 'note' && k !== 'kind')), {});
+  const q = cleanSnippet(Object.fromEntries(Object.entries(snippet).filter(([k]) => k !== 'from' && k !== 'note' && k !== 'kind' && k !== 'confidential')), {});
   return q.error ? q : { standin: { snippet: q } };
 }
 
@@ -803,6 +824,9 @@ function cleanSnippet(c, facts = {}) {
     out.more = { rows: more.rows, cols: more.cols };
   }
   if (cut === true) out.cut = true;
+  const marked = markedOf(c);
+  if (marked.error) return marked;
+  if (marked.mark.confidential) out.confidential = true;
   const all = snippetStrings(out).reduce((n, s) => n + chars(s), 0);
   if (all > SNIPPET.whole) return { error: tooLong(SNIPPET.whole, all) };
   return out;
@@ -856,8 +880,9 @@ function storedFile(c) {
   const note = own(c, 'note');
   if (note !== undefined && !(typeof note === 'string' && note.length <= 200)) return null;
   const room = storedRoom(c);
-  if (!room) return null;
-  const said = note !== undefined ? { note } : {};
+  const marked = markedOf(c);
+  if (!room || marked.error) return null;
+  const said = { ...(note !== undefined ? { note } : {}), ...marked.mark };
   if (kind === 'doc') {
     const p = storedPlace(own(c, 'at'), ext);
     const st = own(c, 'standin') === undefined ? {} : standinOf(c.standin);
@@ -1010,9 +1035,15 @@ function snippetSaid(c, voice, by) {
  * own shows the hall's (`hallHolding`) when the hall has one, else the AGMessage mark. `by` names who put a picture up
  * ("Ana's picture of …"), and a take sent from a side room says so (`sent`, its name: "…, sent from Legal"). No take is
  * the chat; anything else, ''.
+ *
+ * A confidential item (plan 4-§5.14, `confidential` on the take) is marked in both voices: "🔒 " before the console's
+ * words, "a confidential …" in the audit's. To an asker not seated where it is in use (`masked`), and to the AI, it is
+ * "🔒 a confidential item": no file's name, place or words, nor the room it was sent from.
  */
-function describePage(c, { hallHolding = '', voice = 'console', by = '', sent = '' } = {}) {
+function describePage(c, { hallHolding = '', voice = 'console', by = '', sent = '', masked = false } = {}) {
   if (!c) return 'the chat';
+  const secret = isRecord(c) && own(c, 'confidential') === true && INFO_LAYER.includes(own(c, 'kind'));
+  if (secret && masked === true) return SECRET_ITEM;
   let words;
   switch (isRecord(c) ? own(c, 'kind') : undefined) {
     case 'chat': words = handBack(c); break;
@@ -1026,8 +1057,11 @@ function describePage(c, { hallHolding = '', voice = 'console', by = '', sent = 
     case 'snippet': words = snippetSaid(c, voice, guard.cleanText(by, 60)); break;
     default: return '';
   }
+  if (secret) words = voice === 'audit' ? 'a confidential ' + words.replace(/^an? /, '') : '🔒 ' + words;
   return sent ? words + ', sent from ' + guard.cleanText(sent, 60) : words;
 }
+/** A confidential item as it is said where its words may not go: to an asker not seated where it is in use, and to the AI. */
+const SECRET_ITEM = '🔒 a confidential item';
 
 // ---------------------------------------------------------------- who may show what (plan 4-§5.9.2.2)
 const NO_WEB = 'Web pages on the stage need their own right — ask an admin.';
@@ -1126,9 +1160,12 @@ const byOf = (by) => ({
   ...(isRecord(by) && typeof by.who === 'string' && WHO.test(by.who) ? { who: by.who } : {}),
 });
 /**
- * A take read back: {seq, content, by: {name, guest?, op?, who?}, at, arrive?, aside?}, its number at most the hall's, or
- * null. `arrive` is kept only as 'side', an information take's way onto a page in its side bar ('over' when absent), and
- * `aside` only with it: that take was put beside the operator's (kept `beside`).
+ * A take read back: {seq, content, by: {name, guest?, op?, who?}, at, arrive?, aside?, made?}, its number at most the
+ * hall's, or null. `arrive` is kept only as 'side', an information take's way onto a page in its side bar ('over' when
+ * absent), and `aside` only with it: that take was put beside the operator's (kept `beside`). `made` is the server's alone
+ * (madeOf): the upload a picture or a quote was made from, by its reference (uploadRef: never its address, which the
+ * content names by its file's name alone), so a confidential mark set on that file later reaches the take (plan 4-§5.14);
+ * no page is told it.
  */
 function storedTake(t, top) {
   if (!isRecord(t) || !whole(t.seq) || t.seq > top || !Number.isFinite(t.at) || !isRecord(t.by) || typeof t.by.name !== 'string') return null;
@@ -1137,8 +1174,19 @@ function storedTake(t, top) {
   if (t.aside !== undefined && !(t.aside === true && t.arrive === 'side')) return null;
   const sent = sentOf(t.sent);
   if (t.sent !== undefined && !sent) return null;
-  return { seq: t.seq, content, by: byOf(t.by), at: t.at, ...(t.arrive === 'side' ? { arrive: 'side' } : {}), ...(t.aside === true ? { aside: true } : {}), ...(sent ? { sent } : {}) };
+  const made = t.made === undefined ? [] : madeOf(t.made);
+  if (!made) return null;
+  return { seq: t.seq, content, by: byOf(t.by), at: t.at, ...(t.arrive === 'side' ? { arrive: 'side' } : {}), ...(t.aside === true ? { aside: true } : {}), ...(sent ? { sent } : {}), ...(made.length ? { made } : {}) };
 }
+/**
+ * A reference to the upload `name` that is not its address (a keyed hash of its name, whose random part keeps the name from
+ * being found from it): what a take and the stage record keep of the file a picture or a quote was made from, so a mark set
+ * on it later is read there without either holding a quote's file address.
+ */
+const uploadRef = (name) => guard.mac('agm upload reference', guard.str(name), 22);
+const UPLOAD_REF = /^[A-Za-z0-9_-]{22}$/;
+/** The uploads a take was made from, by their references (at most two), read by type; null for any other value. */
+const madeOf = (v) => (Array.isArray(v) && v.length <= 2 && v.every((r) => typeof r === 'string' && UPLOAD_REF.test(r)) ? [...new Set(v)] : null);
 /**
  * The side room a take was sent from ({key, name}: kept on this laptop, said by its name, "…, sent from Legal"), read
  * back, or null for none.
@@ -1192,6 +1240,128 @@ function storedHall(book) {
   };
 }
 
+// ---------------------------------------------------------------- the confidential mark and the frame's hold (plan 4-§5.14)
+/** A link's id as the server makes it: the default Stagewatch's, or a hall's own. */
+const LINK_ID = /^(?:default|hall:[A-Z0-9]{4,12})$/;
+/** A MAC as guard.mac writes one (base64url), or '' for none. */
+const MAC = /^[A-Za-z0-9_-]{0,64}$/;
+/** A desk's proposal id, as Stagewatch numbers them. */
+const PROPOSAL = /^[A-Za-z0-9_.:-]{1,40}$/;
+/**
+ * The most a hold waits on (`waits`: its sends and its proposals together, past which the server refuses another
+ * confidential line to that Stagewatch with words, so no part that waits is ever let go for room) and the rooms it names.
+ */
+const HOLD_MAX = Object.freeze({ waits: 20, rooms: 21 });
+/**
+ * A confidential mark read back: {by: {who, name, uid?}, name, at} (who marked it: their actor's kind and id, the name and
+ * the uid their messages carry, by which a page knows its own mark; the file's name), or null.
+ */
+function storedMark(m) {
+  if (!isRecord(m) || !isRecord(m.by) || !Number.isFinite(m.at)) return null;
+  const who = m.by.who;
+  if (!(who === '' || (typeof who === 'string' && WHO.test(who))) || typeof m.by.name !== 'string' || m.by.name.length > 60 || typeof m.name !== 'string' || m.name.length > 120) return null;
+  const uid = m.by.uid === undefined ? '' : m.by.uid;
+  if (!(uid === '' || (typeof uid === 'string' && GUEST.test(uid)))) return null;
+  return { by: { who, name: m.by.name, ...(uid ? { uid } : {}) }, name: m.name, at: m.at };
+}
+/**
+ * A hold read back in its clean shape (stepHold says what each part is), or null: none (nothing held and nothing waiting),
+ * or one of the wrong shape. A list past its bound keeps its newest entries, and the proposals that have seen a new
+ * message are only those still waiting.
+ */
+function storedHold(h) {
+  if (!isRecord(h)) return null;
+  const list = (v, test, max, unique) => (v === undefined ? [] : Array.isArray(v) && v.every(test) ? (unique ? [...new Set(v)] : v).slice(-max) : null);
+  const named = (x) => typeof x === 'string' && PROPOSAL.test(x);
+  const sends = list(h.sends, (x) => whole(x, 0), HOLD_MAX.waits, false);
+  const proposals = list(h.proposals, named, HOLD_MAX.waits, true);
+  const caught = list(h.caught, named, HOLD_MAX.waits, true);
+  const rooms = list(h.rooms, (x) => typeof x === 'string' && HALL.test(x), HOLD_MAX.rooms, true);
+  const mac = h.mac === undefined ? '' : h.mac;
+  if (!sends || !proposals || !caught || !rooms || typeof mac !== 'string' || !MAC.test(mac) || !(h.messageId === undefined || whole(h.messageId, 0))) return null;
+  const waiting = sends.length > 0 || proposals.length > 0;
+  // What waits measures "new" against the frame's message as last seen; a hold that never saw one takes any message as new.
+  const before = h.before === undefined ? '' : h.before;
+  const beforeId = h.beforeId === undefined ? 0 : h.beforeId;
+  if (waiting && !(typeof before === 'string' && MAC.test(before) && whole(beforeId, 0))) return null;
+  const messageId = h.messageId || 0;
+  if (!mac && !messageId && !waiting) return null;
+  return { mac, messageId, ...(waiting ? { before, beforeId } : {}), sends, proposals, caught: caught.filter((p) => proposals.includes(p)), rooms };
+}
+/**
+ * The hold on a Stagewatch frame stepped by the frame `view` (pure; plan 4-§5.14): {hold, held}, the hold as it stands
+ * after this frame (null once released) and whether this frame's message is held back from every reader but the rooms
+ * where the confidential item is in use. `macOf(text)` is the server's MAC of a message; no text is kept.
+ *
+ * A hold is {mac, messageId, before?, beforeId?, sends, proposals, caught, rooms}:
+ *   - the message held (`mac`, `messageId`: '' and 0 for none) is held while the frame's message is it by its MAC or by its
+ *     id, and released once the frame's message differs from both: a new message, or the operator's clear;
+ *   - while a part waits, every new frame message (one that differs from `before`, `beforeId`, the frame's message as last
+ *     seen, by its MAC or its id) is held, the newest kept as the message held: a new line never takes the place of the
+ *     one held before the frame has moved past it;
+ *   - a line sent at once waits (`sends`, its receipt's message id, 0 until the receipt is read) for its message: the one
+ *     that carries its id or a later one; else the first new one;
+ *   - a line proposed waits (`proposals`) until the desk's answer is read (answerHold): the operator may approve it edited,
+ *     so no text is trusted. `caught`, the proposals that have seen a new message since they were proposed;
+ *   - `rooms`, the keys of the rooms where the item is in use, whose pages read "🔒 a confidential line".
+ */
+function stepHold(hold, view, macOf) {
+  const h = hold ? storedHold(hold) : null;
+  if (!h) return { hold: null, held: false };
+  // No frame yet (a link connecting, reconnecting, or started again): nothing is read, so nothing is released.
+  if (!isRecord(view)) return { hold: h, held: false };
+  const message = typeof view.message === 'string' ? view.message : '';
+  const id = whole(view.messageId, 0) ? view.messageId : 0;
+  const mac = message ? guard.str(macOf(message)) : '';
+  const same = !!message && ((!!h.mac && mac === h.mac) || (!!h.messageId && id === h.messageId));
+  // Nothing waits: held until the frame's message is neither the held one by its MAC nor by its id.
+  if (h.before === undefined) return same ? { hold: h, held: true } : { hold: null, held: false };
+  // Something waits, and the frame's message is the one last seen: the message held stays held.
+  if (mac === h.before && id === h.beforeId) return { hold: h, held: same };
+  const seen = { ...h, before: mac, beforeId: id };
+  // The operator's clear: the message held is let go; what waits waits on.
+  if (!message) return { hold: storedHold({ ...seen, mac: '', messageId: 0 }), held: false };
+  // A new message ends the sends whose own it is or has passed (Stagewatch numbers its messages upward, so one whose id is
+  // below it was on the frame or replaced before a frame showed it); none of those, the oldest whose receipt is not read
+  // yet; on a frame with no ids, the oldest. One before every send's own (its id below each receipt's) ends none, and is
+  // held as every new message is while a part waits.
+  const ended = (w) => w > 0 && w <= id;
+  const zero = h.sends.indexOf(0);
+  const sends = !id ? h.sends.slice(1) : h.sends.some(ended) ? h.sends.filter((w) => !ended(w)) : zero < 0 ? h.sends : h.sends.filter((_, k) => k !== zero);
+  return { hold: storedHold({ ...seen, mac, messageId: id, sends, caught: [...h.proposals] }), held: true };
+}
+/**
+ * A hold's proposal `id` answered by the desk (pure): its part ends, and the message held stays held until the frame moves
+ * past it. Approved (or run, or lost: it may have run), the message it brought is held: the newest held since it was
+ * proposed, else, none having come, the next new one, waited for as a send's is. Refused (rejected, failed, undelivered),
+ * nothing more waits for it. A hold that then holds nothing and waits for nothing is let go (null).
+ */
+function answerHold(hold, id, approved) {
+  const h = hold ? storedHold(hold) : null;
+  if (!h || !h.proposals.includes(id)) return h;
+  const sends = approved && !h.caught.includes(id) ? h.sends.concat([0]) : h.sends;
+  return storedHold({ ...h, sends, proposals: h.proposals.filter((p) => p !== id), caught: h.caught.filter((p) => p !== id) });
+}
+/**
+ * A hold's send answered by Stagewatch (pure): `ref` its receipt's message id (0 when it gave none, or none that can be
+ * trusted), or null when the line did not go. A line that did not go waits for nothing: the newest send that has no
+ * receipt yet ends. A receipt names the message the oldest send with none waits for, unless that message is already the
+ * one held (its frame came first, and ended that send). A hold that then holds nothing and waits for nothing is let go.
+ */
+function sentHold(hold, ref) {
+  const h = hold ? storedHold(hold) : null;
+  if (!h) return null;
+  if (ref === null) {
+    const i = h.sends.lastIndexOf(0);
+    return i < 0 ? h : storedHold({ ...h, sends: h.sends.filter((_, k) => k !== i) });
+  }
+  const i = h.sends.indexOf(0);
+  if (!whole(ref, 1) || i < 0 || ref === h.messageId) return h;
+  return storedHold({ ...h, sends: h.sends.map((w, k) => (k === i ? ref : w)) });
+}
+/** The message a reader of a Stagewatch frame is given while it is held: the rooms where it is in use read that it is there. */
+const HELD_LINE = '🔒 a confidential line';
+
 /** Names in words: "Ana", "Ana and Ben", "Ana, Ben and 2 more". */
 function namesWords(names) {
   const list = [...new Set(names.map((n) => n || 'Someone'))];
@@ -1225,6 +1395,12 @@ class Pages {
     }
     this.halls = {};
     if (isRecord(data.halls)) for (const [code, book] of Object.entries(data.halls)) { const r = HALL.test(code) ? storedHall(book) : null; if (r) this.halls[code] = r; }
+    // The confidential marks, one record a file whichever rooms and halls hold it (plan 4-§5.14), and the holds on the
+    // Stagewatch frames that carry a confidential line, one a link, no text.
+    this.marks = new Map();
+    if (isRecord(data.marks)) for (const [name, m] of Object.entries(data.marks)) { const r = guard.validUploadUrl('/uploads/' + name) ? storedMark(m) : null; if (r) this.marks.set(name, r); }
+    this.holds = new Map();
+    if (isRecord(data.holds)) for (const [link, h] of Object.entries(data.holds)) { const r = LINK_ID.test(link) ? storedHold(h) : null; if (r) this.holds.set(link, r); }
     for (const book of Object.values(this.halls)) this._trim(book);
     this._trimViews();
     // The run's reports: by hall, each page (its socket's id) with the take it reported on. Never saved.
@@ -1243,7 +1419,11 @@ class Pages {
   save() {
     if (!this.held) { this.dirty = true; return; }
     this.dirty = false;
-    this.lane.save(() => JSON.stringify({ v: 1, views: Object.fromEntries(this.views), halls: this.halls }));
+    // The marks and the holds are written once there are any.
+    this.lane.save(() => JSON.stringify({
+      v: 1, views: Object.fromEntries(this.views), halls: this.halls,
+      ...(this.marks.size ? { marks: Object.fromEntries(this.marks) } : {}), ...(this.holds.size ? { holds: Object.fromEntries(this.holds) } : {}),
+    }));
   }
   flush() { return this.lane.flushSync(); }
   /**
@@ -1266,19 +1446,21 @@ class Pages {
    * hand-back of the information alone hands back the place `slot` names ('info' or 'beside', what its Take down named),
    * else both. Where a place takes a take it does not draw (`beside` an information take over the show), it keeps that
    * take's number as a hand-back, so nothing older beside it shows again. A web page's address is kept sealed (`_kept`);
-   * `by.guest` marks a code guest's take, `by.op` one its pusher held canPush for. Returns the take, or null when a part is
-   * not one the store keeps (a web page this run cannot seal among them).
+   * `by.guest` marks a code guest's take, `by.op` one its pusher held canPush for; `made`, the uploads a picture or a quote
+   * was made from (by their names, kept by their references: the server's alone, storedTake). Returns the take, or null when
+   * a part is not one the store keeps (a web page this run cannot seal among them).
    */
-  take(hall, to, content, by = {}, { onStage = [], at = Date.now(), arrive = 'over', aside = false, slot = '', sent = null } = {}) {
+  take(hall, to, content, by = {}, { onStage = [], at = Date.now(), arrive = 'over', aside = false, slot = '', sent = null, made = [] } = {}) {
     const clean = storedPage(this._kept(content));
-    if (!HALL.test(guard.str(hall)) || !(to === 'board' || PERSON.test(guard.str(to))) || !clean || !Number.isFinite(at) || !ARRIVALS.includes(arrive)) return null;
+    const from = Array.isArray(made) && made.every((n) => typeof n === 'string' && guard.validUploadUrl('/uploads/' + n)) ? madeOf(made.map(uploadRef)) : null;
+    if (!HALL.test(guard.str(hall)) || !(to === 'board' || PERSON.test(guard.str(to))) || !clean || !from || !Number.isFinite(at) || !ARRIVALS.includes(arrive)) return null;
     const side = arrive === 'side' && layerOf(clean.kind) === 'info';
     const beside = aside === true && side;
     const slots = slotsOf(clean, { aside: beside, slot });
-    const from = sentOf(sent);
+    const sentFrom = sentOf(sent);
     const book = this._book(hall);
     book.seq += 1;
-    const t = { seq: book.seq, content: clean, by: byOf(by), at, ...(side ? { arrive: 'side' } : {}), ...(beside ? { aside: true } : {}), ...(from ? { sent: from } : {}) };
+    const t = { seq: book.seq, content: clean, by: byOf(by), at, ...(side ? { arrive: 'side' } : {}), ...(beside ? { aside: true } : {}), ...(sentFrom ? { sent: sentFrom } : {}), ...(from.length ? { made: from } : {}) };
     const kept = (s) => (s === 'beside' && !beside && clean.kind !== 'chat' ? { seq: t.seq, content: { kind: 'chat', layer: 'info' }, by: t.by, at } : t);
     for (const s of slots) {
       const k = kept(s);
@@ -1774,9 +1956,10 @@ class Pages {
    * none, nothing is beside it (number 0). An information take says too, to an asker (`who`, an actor's kind and id),
    * whether it put it up (`mine`): its pusher may withdraw it; and who put it up (`by`, their name) and how long ago (`ago`,
    * ms at `now`), so a researcher about to replace it is told whose it is and how fresh. A document some of whose pages
-   * could not open it carries the file as `docOf(content, mine)` gives it to this asker (`doc`), where it gives one.
+   * could not open it carries the file as `docOf(content, mine)` gives it to this asker (`doc`), where it gives one. A
+   * confidential take is said "🔒 a confidential item" where `masks(take)` is true: an asker not seated where it is in use.
    */
-  status(hall, to, pages = [], { name = '', hallHolding = '', layer = 'show', who = '', now = Date.now(), docOf = null } = {}) {
+  status(hall, to, pages = [], { name = '', hallHolding = '', layer = 'show', who = '', now = Date.now(), docOf = null, masks = null } = {}) {
     const list = Array.isArray(pages) ? pages : [];
     const states = list.map((p) => ({ ...this.pageState(hall, p, layer), name: p.name, docs: !isRecord(p) || p.docs !== false }));
     let take = null;
@@ -1784,10 +1967,13 @@ class Pages {
     else for (const p of list) { const t = this.current(hall, p.key, { board: p.board, layer }).take; if (t && (!take || t.seq > take.seq)) take = t; }
     const seq = take ? take.seq : 0;
     if (layer !== 'show' && (!take || take.content.kind === 'chat')) return { ...Pages.nothingOver(take, list.length, { board: to === 'board', name, beside: layer === 'beside' }), arrive: layer === 'beside' ? 'side' : 'over', op: false };
-    const st = Pages.status(take, states.map((s) => (s.seq === seq ? s : { ...s, state: 'other' })), { board: to === 'board', name, hallHolding });
+    const masked = !!take && typeof masks === 'function' && masks(take) === true;
+    // Confidential as the take is now: a file it shows or was made from marked since it went up is said so too.
+    const said = take && this.secret(take) && take.content.confidential !== true ? { ...take, content: { ...take.content, confidential: true } } : take;
+    const st = Pages.status(said, states.map((s) => (s.seq === seq ? s : { ...s, state: 'other' })), { board: to === 'board', name, hallHolding, masked });
     // A document some of its pages could not open (`cannot`): the file, as `docOf` gives it to this asker ({url, name, at?},
-    // or nothing), for Show them a picture.
-    const doc = typeof docOf === 'function' && st.kind === 'doc' && st.cannot > 0 ? docOf(take.content, !!who && take.by.who === who) : null;
+    // or nothing), for Show them a picture; never to an asker its mark hides it from.
+    const doc = typeof docOf === 'function' && !masked && st.kind === 'doc' && st.cannot > 0 ? docOf(take.content, !!who && take.by.who === who) : null;
     return layer !== 'show' ? { ...st, arrive: take.arrive === 'side' ? 'side' : 'over', op: take.by.op === true, ...(who ? { mine: take.by.who === who, by: take.by.name, ago: Number.isFinite(now) ? Math.max(0, now - take.at) : 0 } : {}), ...(isRecord(doc) ? { doc } : {}) } : st;
   }
 
@@ -1812,12 +1998,12 @@ class Pages {
    * and why the rest do not. With them, what it shows (`showing`, in words, and its `kind`), and of its `pages` how many
    * show it now (`on`).
    */
-  static status(take, pages, { board = false, name = '', hallHolding = '', clock = clockOf } = {}) {
+  static status(take, pages, { board = false, name = '', hallHolding = '', clock = clockOf, masked = false } = {}) {
     const list = Array.isArray(pages) ? pages : [];
     const n = list.length;
     // `kind`, what it shows ('' for nothing), and `on`, how many of its pages show it now (a hand-back: are back on chat).
     const on = take ? list.filter((p) => p.state === 'shown' || p.state === 'opened').length : 0;
-    const showing = describePage(take && take.content, { hallHolding, by: take && isRecord(take.by) ? take.by.name : '', sent: take && isRecord(take.sent) ? take.sent.name : '' });
+    const showing = describePage(take && take.content, { hallHolding, by: take && isRecord(take.by) ? take.by.name : '', sent: take && isRecord(take.sent) && !masked ? take.sent.name : '', masked });
     // The pages that joined without documents (plan 4-§5.15.2): how many; on a document take, how many drew its stand-in
     // (`standin`: shown "as a picture") and how many could not show it (`cannot`, which Send them a picture answers).
     // Each said only where there are some.
@@ -1828,7 +2014,7 @@ class Pages {
     // What the stand-in was drawn as (`standinAs`): a picture of the place, or a quote of what is there.
     const as = standin ? (take.content.standin.url !== undefined ? 'picture' : 'quote') : '';
     const counts = { ...(without.length ? { nodocs: without.length } : {}), ...(standin ? { standin, standinAs: as } : {}), ...(cannot ? { cannot } : {}) };
-    const out = (mark, words) => ({ seq: take ? take.seq : 0, showing, kind: take && isRecord(take.content) ? take.content.kind : '', mark, words, pages: n, on, ...counts });
+    const out = (mark, words) => ({ seq: take ? take.seq : 0, showing, kind: take && isRecord(take.content) ? take.content.kind : '', mark, words, pages: n, on, ...counts, ...(take && isRecord(take.content) && take.content.confidential === true ? { confidential: true } : {}) });
     const pictured = standin ? ', ' + standin + ' as a ' + as : '';
     if (!n) return out(MARKS.fault, board ? 'Nobody on the Board is online' : name ? name + ' has no page open in this hall' : 'No page of theirs is open in this hall');
     if (!take) return out(MARKS.off, 'Nothing shown yet');
@@ -1871,6 +2057,142 @@ class Pages {
     const other = of('other').length;
     if (other) why.push(other + ' showing something else');
     return out(MARKS.partly, seen + ' of ' + n + (chat ? ' back to chat · ' : ' showing' + pictured + ' · ') + why.join(' · '));
+  }
+
+  // ---------------------------------------------------------------- the confidential mark (plan 4-§5.14)
+  // One record a file, by its upload's name, whichever rooms and halls hold it: every check reads it (isConfidential), and
+  // no message is rewritten. A file's record goes when the file goes (dropMarks).
+
+  /** Whether the upload `name` (or its address) is marked confidential. */
+  isConfidential(name) {
+    const n = typeof name === 'string' && name.startsWith('/uploads/') ? name.slice(9) : name;
+    return typeof n === 'string' && this.marks.has(n);
+  }
+  /** The mark on the upload `name`: {by: {who, name, uid?}, name, at} (who marked it; the file's name), or null. */
+  markOf(name) {
+    const m = typeof name === 'string' ? this.marks.get(name) : undefined;
+    return m ? { by: { ...m.by }, name: m.name, at: m.at } : null;
+  }
+  /**
+   * The upload `name` marked confidential by `by` ({who: an actor's kind and id, name}), its file's name `file`: true when
+   * it was marked now, false when it already was (the first mark stays, with who set it) or the record is not one kept.
+   */
+  mark(name, by, file = '', at = Date.now()) {
+    if (!guard.validUploadUrl('/uploads/' + guard.str(name)) || this.marks.has(name)) return false;
+    const r = storedMark({ by: { who: isRecord(by) ? by.who : '', name: guard.cleanText(isRecord(by) ? by.name : '', 60), ...(isRecord(by) && by.uid ? { uid: by.uid } : {}) }, name: guard.cleanText(file, 120), at });
+    if (!r) return false;
+    this.marks.set(name, r);
+    this.save();
+    return true;
+  }
+  /** The mark on the upload `name` removed: true when there was one. */
+  unmark(name) {
+    if (!this.marks.delete(guard.str(name))) return false;
+    this.save();
+    return true;
+  }
+  /** The marks of the uploads `names` (removed from the disk) let go: how many went. */
+  dropMarks(names) {
+    let n = 0;
+    for (const name of names || []) if (this.marks.delete(name)) n++;
+    if (n) this.save();
+    return n;
+  }
+
+  /**
+   * The hold on the Stagewatch frame of the link `link` (its id), or null: {mac, messageId, before?, beforeId?, sends,
+   * proposals, caught, rooms} (stepHold says what each is). A copy.
+   */
+  holdOf(link) {
+    const h = this.holds.get(link);
+    return h ? { ...h, sends: [...h.sends], proposals: [...h.proposals], caught: [...h.caught], rooms: [...h.rooms] } : null;
+  }
+  /**
+   * The hold on a link's frame set (`hold` as stepHold makes it), or let go (null): written only when it changed. A hold of
+   * the wrong shape is refused (false), never taken for a release: the hold kept stays.
+   */
+  setHold(link, hold) {
+    if (!LINK_ID.test(guard.str(link))) return false;
+    const r = hold ? storedHold(hold) : null;
+    if (hold && !r) return false;
+    const was = this.holds.get(link);
+    if (JSON.stringify(was || null) === JSON.stringify(r)) return false;
+    if (r) this.holds.set(link, r); else this.holds.delete(link);
+    this.save();
+    return true;
+  }
+  /** The links that hold a frame now, by their ids. */
+  holdLinks() { return [...this.holds.keys()]; }
+  /**
+   * Whether a take (a take now, an Earlier entry, pages.find's) is confidential: its content's mark (the server's, set
+   * from its file's record as it was pushed), or a mark on an upload it shows or was made from (filesOf, `made`), read now,
+   * so a file marked after it went up is confidential here too. Every check of a take reads this (plan 4-§5.14).
+   */
+  secret(t) {
+    if (!isRecord(t) || !isRecord(t.content)) return false;
+    if (t.content.confidential === true) return true;
+    return filesOf(t.content).some((u) => this.isConfidential(u)) || (Array.isArray(t.made) && t.made.some((r) => this.refMarked(r)));
+  }
+  /** Whether the upload a reference names (uploadRef) is marked confidential now. */
+  refMarked(ref) {
+    if (typeof ref !== 'string' || !UPLOAD_REF.test(ref)) return false;
+    for (const name of this.marks.keys()) if (uploadRef(name) === ref) return true;
+    return false;
+  }
+  /**
+   * Every take now and every Earlier entry that shows the upload `name` or was made from it, marked confidential in its
+   * content (a mark set later, plan 4-§5.14: a take is never unmarked, as a page may add a mark and never remove it), so the
+   * console, Earlier, the stage record and the pages it is told to again say so. Returns the halls whose takes changed.
+   */
+  markTakes(name) {
+    const url = '/uploads/' + guard.str(name);
+    const halls = new Set();
+    if (!guard.validUploadUrl(url)) return [];
+    const ref = uploadRef(name);
+    const see = (hall, t) => {
+      if (!isRecord(t) || !isRecord(t.content) || t.content.confidential === true || !INFO_LAYER.includes(t.content.kind)) return;
+      if (!filesOf(t.content).includes(url) && !(Array.isArray(t.made) && t.made.includes(ref))) return;
+      t.content = { ...t.content, confidential: true };
+      halls.add(hall);
+    };
+    for (const [hall, book] of Object.entries(this.halls)) {
+      for (const s of SLOTS) see(hall, own(book.board, s));
+      for (const r of Object.values(book.people || {})) for (const s of SLOTS) see(hall, own(r, s));
+      for (const e of book.earlier || []) see(hall, e);
+    }
+    if (halls.size) this.save();
+    return [...halls];
+  }
+  /**
+   * The holding slides on people's pages now that show the upload at `url` as their picture, hall by hall: [{hall, to}],
+   * `to` 'board' or a person's key, each once. A confidential file is never a holding image (plan 4-§5.14).
+   */
+  holdingSlides(url) {
+    const out = new Map();
+    if (!guard.validUploadUrl(url)) return [];
+    const see = (hall, t, to) => { if (isRecord(t) && isRecord(t.content) && t.content.kind === 'holding' && t.content.image === url) out.set(hall + '\n' + to, { hall, to }); };
+    for (const [hall, book] of Object.entries(this.halls)) {
+      for (const s of SLOTS) see(hall, own(book.board, s), 'board');
+      for (const [key, r] of Object.entries(book.people || {})) for (const s of SLOTS) see(hall, own(r, s), key);
+    }
+    return [...out.values()];
+  }
+  /**
+   * Whom the takes now and the Earlier entries that name the upload at `url` (filesOf: a document, its stand-in, a
+   * picture, a holding slide's picture; and a picture or a quote made from it, `made`) are for, hall by hall: [{hall, to}],
+   * `to` 'board' or a person's key, each once.
+   */
+  naming(url) {
+    const out = new Map();
+    if (!guard.validUploadUrl(url)) return [];
+    const ref = uploadRef(url.slice(9));
+    const see = (hall, t, to) => { if (t && (filesOf(t.content).includes(url) || (Array.isArray(t.made) && t.made.includes(ref)))) out.set(hall + '\n' + to, { hall, to }); };
+    for (const [hall, book] of Object.entries(this.halls)) {
+      for (const s of SLOTS) see(hall, own(book.board, s), 'board');
+      for (const [key, r] of Object.entries(book.people || {})) for (const s of SLOTS) see(hall, own(r, s), key);
+      for (const e of book.earlier || []) see(hall, e, e.to);
+    }
+    return [...out.values()];
   }
 
   /** A guest's chat view ('' by their seat, 'simple' or 'full'), kept by their uid. */
@@ -1960,6 +2282,6 @@ class Pages {
 }
 
 module.exports = {
-  Pages, cleanPage, cleanSnippet, snippetText, askedOf, canShow, describePage, sourceOk, mayDownload, FOR_DOWNLOAD, placeOf, placeWords, webUrl, personKey, layerOf, layersOf, reportsOf, inViewOf, KINDS, LAYERS, SLOTS, SHOW_LAYER, INFO_LAYER,
+  Pages, cleanPage, cleanSnippet, snippetText, stepHold, answerHold, sentHold, uploadRef, UPLOAD_REF, HELD_LINE, HOLD_MAX, SECRET_ITEM, MARK_WORDS, askedOf, canShow, describePage, sourceOk, mayDownload, FOR_DOWNLOAD, placeOf, placeWords, webUrl, personKey, layerOf, layersOf, reportsOf, inViewOf, KINDS, LAYERS, SLOTS, SHOW_LAYER, INFO_LAYER,
   FILE_KINDS, fileOf, filesOf, ARRIVALS, EARLIER_TOLD, IMAGE_EXT, STAGE_TYPES, TRANSFER_ONLY, PLACES, UNITS, SNIPPET, REPORTS, ANSWERS, AGAIN_MS, VIEWS, MARKS, BOUNDS, WEB_MAX, STAGE_FULL,
 };

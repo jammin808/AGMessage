@@ -318,11 +318,17 @@ function pictureSaid(content, by) {
   const place = part ? '' : placeSaid(from.at, type);
   return (by ? by + '\'s picture' : 'A picture') + ' of ' + (part ? 'part of ' : '') + (from.local === true ? 'their copy of ' : '') + text(from.name) + room + (place ? ', ' + place : '');
 }
+/**
+ * What a confidential take's lines begin with (plan 4-§5.9.11, §5.14): the mark and its word, never colour alone. The
+ * server sets `confidential` from the file's one record, whatever the pusher sent.
+ */
+const SECRET = '🔒 Confidential · ';
+const secretOf = (content) => (content && content.confidential === true ? SECRET : '');
 /** What a file's take says under its drawing: its name and place, a side room's in brackets; a picture, whose and of what. */
 function fileSaid(content, ctx) {
-  if (content.kind === 'image') return pictureSaid(content, (ctx && ctx.by) || '');
+  if (content.kind === 'image') return secretOf(content) + pictureSaid(content, (ctx && ctx.by) || '');
   const place = placeSaid(content.at, extOf(content.url) || extOf(content.name));
-  return (text(content.name) || 'A document') + (text(content.roomName) ? ' (' + content.roomName + ')' : '') + (place ? ' · ' + place : '');
+  return secretOf(content) + (text(content.name) || 'A document') + (text(content.roomName) ? ' (' + content.roomName + ')' : '') + (place ? ' · ' + place : '');
 }
 /** A reader's failure in the take's words (plan 4-§5.9.11): a picture's, or a document's. */
 function failedSaid(kind, words) {
@@ -472,17 +478,18 @@ function quotePlace(at, type) {
 /**
  * A quote's source line, in its pusher's voice: "Quoted by Ana · Board pack.pdf, p. 12", "… · Minutes.docx (Legal), ≈ p.
  * 3", "Quoted by Ana from their copy of Board pack.pdf", "Quoted by Ana · vote.example.com" (the site by its host alone:
- * its address, where told, is Open the source's, after it), "Typed by Ana".
+ * its address, where told, is Open the source's, after it), "Typed by Ana"; a confidential one "🔒 Confidential · …".
  */
 function quoteSource(content, by) {
   const from = content.from && typeof content.from === 'object' ? content.from : null;
   const who = by || 'someone';
-  if (!from) return 'Typed by ' + who;
-  if (text(from.host)) return 'Quoted by ' + who + ' · ' + from.host;
+  const secret = secretOf(content);
+  if (!from) return secret + 'Typed by ' + who;
+  if (text(from.host)) return secret + 'Quoted by ' + who + ' · ' + from.host;
   const room = text(from.roomName) ? ' (' + from.roomName + ')' : '';
   const place = quotePlace(from.at, text(from.type));
   const of = text(from.name) + room + (place ? ', ' + place : '');
-  return from.local === true ? 'Quoted by ' + who + ' from their copy of ' + of : 'Quoted by ' + who + ' · ' + of;
+  return secret + (from.local === true ? 'Quoted by ' + who + ' from their copy of ' + of : 'Quoted by ' + who + ' · ' + of);
 }
 const rowsOf = (t) => (t && Array.isArray(t.rows) ? t.rows.filter(Array.isArray) : []);
 /** A quote's words in reading order, one line each: its title, its text, its items, its table's rows (cells joined by " · "). */
@@ -728,6 +735,8 @@ export function card(content, ctx) {
     : kind === 'doc' ? fileSaid(content, ctx)
     : kind === 'image' ? (from ? ((ctx && ctx.by) ? ctx.by + '\'s picture' : 'A picture') + (fromPlace ? ' · ' + fromPlace : '') : text(content.name) || k.name)
     : k.name;
+  // A confidential take's card begins with its mark: "🔒 📄 Board pack.pdf · p. 12".
+  if (content && content.confidential === true) { const lock = make('span', 'take-card-secret', '🔒'); lock.setAttribute('aria-label', 'Confidential'); c.append(lock); }
   c.append(icon, make('strong', 'take-card-name', name));
   if (content && content.kind === 'stage') {
     const live = make('span', 'take-card-live');

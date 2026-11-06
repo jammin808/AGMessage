@@ -37,7 +37,7 @@
 const fs = require('fs');
 const path = require('path');
 const { WriteLane } = require('./resilience');
-const { describePage, snippetText, layersOf, KINDS } = require('./pages');
+const { describePage, snippetText, layersOf, filesOf, uploadRef, UPLOAD_REF, KINDS } = require('./pages');
 const guard = require('./guard');
 
 /** At most this many entries a hall; the oldest go first. */
@@ -75,13 +75,17 @@ function sourceOf(c) {
  * their key), `role` the pusher's seat (ROLE_SAID's keys; any other is left out) and `hallHolding` the hall's holding
  * picture, which a holding slide with no picture of its own shows. `what` is the console's words for it (lib/pages.js
  * describePage), `text` a quote's words in reading order (snippetText), `sentFrom` the side room it was sent from and
- * `from` the side room whose file it shows something of.
+ * `from` the side room whose file it shows something of; `confidential` when the take is (plan 4-§5.14): its words are
+ * kept as any entry's, and the transcript shows them only on the laptop or when the admin asks; `uploads`, the uploads it
+ * shows or was made from, by their references (lib/pages.js uploadRef: never an address; the server's alone, never a
+ * reader's), so a mark set on one of them later makes the entry confidential where it is read (confidentialOf).
  */
 function entryOf(take, { to = 'board', name = '', role = '', hallHolding = '' } = {}) {
   const c = take.content;
   const layers = layersOf(c);
   const from = sourceOf(c);
   const sent = isRecord(take.sent) && HALL.test(guard.str(take.sent.key)) ? { key: take.sent.key, name: guard.cleanText(take.sent.name, BOUNDS.name) } : null;
+  const uploads = [...new Set(filesOf(c).map((u) => uploadRef(u.slice(9))).concat(Array.isArray(take.made) ? take.made : []))].slice(0, UPLOADS_MAX);
   return {
     seq: take.seq, at: take.at,
     by: { name: guard.cleanText(take.by && take.by.name, BOUNDS.name), ...(Object.hasOwn(ROLE_SAID, role) ? { role } : {}) },
@@ -92,7 +96,22 @@ function entryOf(take, { to = 'board', name = '', role = '', hallHolding = '' } 
     what: describePage(c, { hallHolding, by: take.by && take.by.name }),
     ...(c.kind === 'snippet' ? { text: snippetText(c) } : {}),
     ...(from ? { from } : {}),
+    ...(c.confidential === true ? { confidential: true } : {}),
+    ...(uploads.length ? { uploads } : {}),
   };
+}
+/** The most uploads an entry names: a document and its stand-in picture, or a picture or a quote and its source. */
+const UPLOADS_MAX = 3;
+/**
+ * The entries as a reader is given them (pure): each confidential when it was, or when an upload it names is marked now
+ * (`marked(ref)`, the pages' store's record by an upload's reference), and none with its `uploads`, which are the
+ * server's alone.
+ */
+function confidentialOf(entries, marked) {
+  return entries.map((e) => {
+    const { uploads, ...rest } = e;
+    return e.confidential !== true && Array.isArray(uploads) && uploads.some((r) => marked(r) === true) ? { ...rest, confidential: true } : rest;
+  });
 }
 
 /** A side room as an entry keeps it ({key, name} sent from; {room, name} shown from), read back, or null. */
@@ -122,6 +141,8 @@ function storedEntry(e) {
     from: (v) => storedRoom(v, 'room'),
     seen: storedSeen,
     withdrawn: (v) => (Number.isFinite(v) ? v : null),
+    confidential: (v) => (v === true ? true : null),
+    uploads: (v) => (Array.isArray(v) && v.length && v.length <= UPLOADS_MAX && v.every((r) => typeof r === 'string' && UPLOAD_REF.test(r)) ? v : null),
   };
   const opt = {};
   for (const [k, read] of Object.entries(readers)) {
@@ -448,4 +469,4 @@ class StageRecord {
   }
 }
 
-module.exports = { StageRecord, entryOf, storedEntry, whoSaid, didSaid, seenSaid, ROLE_SAID, MAX, SEEN_MS };
+module.exports = { StageRecord, entryOf, storedEntry, confidentialOf, whoSaid, didSaid, seenSaid, ROLE_SAID, MAX, SEEN_MS };

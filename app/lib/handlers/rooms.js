@@ -118,6 +118,11 @@ const WITHOUT_DOWNLOAD = 'This was shown without Download.';
 const WITHDRAWN = 'This was withdrawn.';
 const NOT_SHOWN = 'That is not on your pages now.';
 const WHICH_DOWNLOAD = 'Say what to download: a file of this room (messageId), or something shown to you with Download (seq).';
+/** What `file:mark` answers: an `on` of no boolean, a seat that may not mark, and a mark's or a confirmation's wrong type. */
+const MARK_WHICH = 'Say mark (on: true) or remove the mark (on: false).';
+const MARK_BACKSTAGE = 'Marking a file confidential is for the backstage team.';
+const MARK_WORDS = 'Confidential is a tick: true, or left out.';
+const CONFIRM_WORDS = 'Confirm is a tick: true, or left out.';
 /** What `history:message` answers for an id the room holds no message by. */
 const NOT_IN_ROOM = 'That message is not in this room any more.';
 /** "3 guest pages", "1 guest page": a count of pages, never who. */
@@ -161,7 +166,7 @@ const made = new Map();
  * @param {object} ctx    the server's context, frozen (lib/gate.js `contexts`)
  */
 function register(socket, conn, ctx) {
-  const { store, apply, systemMessage, readSend, messageOf, uploadOnDisk, fileCopy, tickets, hallPages, makeMessageId, removeUnused, fileNamesOf, audit, boardDirty, newSideRoom, renameRoom, roomNameRefused, newGuestCode, guestPagesOf, sendGuestsOut, codeChanged, invitesFor, sendersOf, sendsInto, setRoomSends, pages, tellWebRights } = ctx;
+  const { store, apply, systemMessage, readSend, messageOf, uploadOnDisk, fileCopy, tickets, hallPages, makeMessageId, removeUnused, fileNamesOf, audit, boardDirty, newSideRoom, renameRoom, roomNameRefused, newGuestCode, guestPagesOf, sendGuestsOut, codeChanged, invitesFor, sendersOf, sendsInto, setRoomSends, pages, tellWebRights, marked, fileMarked, inUseRooms, markShared, markRefusal, markedTakes } = ctx;
 
   /** A hall as a refusal names it: its name, or "This hall" when it has none. */
   const hallSaid = (hall) => hall.name || 'This hall';
@@ -438,6 +443,19 @@ function register(socket, conn, ctx) {
     const into = store.byRef(str(a.to));
     if (!into || into === room) return answer({ ok: false, error: 'That room is gone.' });
     if (!targetsNow().includes(into)) return answer({ ok: false, error: 'This room may not send there — ask an admin.' });
+    // A confidential file (marked, or marked as it is shared now) goes into a room where it is not in use only once its
+    // sender confirms (plan 4-§5.14, S12), and is said so in the row.
+    const tick = (v) => (v === undefined || v === false ? false : v === true ? true : null);
+    const secretAsked = !src && type === 'file' ? tick(a.confidential) : false;
+    const confirmed = tick(a.confirm);
+    if (secretAsked === null) return answer({ ok: false, error: MARK_WORDS });
+    if (confirmed === null) return answer({ ok: false, error: CONFIRM_WORDS });
+    const fileUrl = type === 'file' ? str(src ? src.url : a.url) : '';
+    const secret = type === 'file' && (secretAsked || pages.isConfidential(fileUrl)) && !inUseRooms(fileUrl).has(into.code);
+    if (secret && !confirmed) {
+      const place = roomRow(into).replace(/^Main \((.*)\)$/, '$1');
+      return answer({ ok: false, error: 'This file is marked confidential: confirm to send it to ' + place + '. It will be in use there.', confirm: true, rooms: [place] });
+    }
     // The message: one of this room's, its words or its file as they are, or a new one made as `message` makes it.
     let body;
     let size = -1;
@@ -454,6 +472,9 @@ function register(socket, conn, ctx) {
       body = rest;
       size = built.size;
     }
+    // A new file shared marked: its sharer marks it as it goes, before any page is given it, never while it is on a screen.
+    const mark = secretAsked ? markShared(body.url.slice(9), conn.actor(), body.filename, room, socket.data.ip, { uid: me.uid, by: me.name }) : null;
+    if (mark && mark.error) return answer({ ok: false, error: mark.error });
     const now = Date.now();
     const from = { uid: me.uid, name: me.name, role: me.role, ...(me.acct ? { acct: true } : {}) };
     const author = src && src.from && src.from.name && src.from.uid !== me.uid ? src.from.name : '';
@@ -466,10 +487,12 @@ function register(socket, conn, ctx) {
       ...body, id: makeMessageId(), at: now, from, pinned: false, ...(sent.held ? { held: sent.held } : {}),
       sentFrom: { ...markOf(room), ...(author ? { originalAuthor: author } : {}) }, ...(answered ? { replyTo: quoteOf(answered) } : {}),
     };
-    if (!apply(into, { o: 'add', m: there })) return answer({ ok: false, error: OP_REFUSED });
+    const posted = !!apply(into, { o: 'add', m: there });
+    if (mark) mark.posted(posted);
+    if (!posted) return answer({ ok: false, error: OP_REFUSED });
     // The row once the message is in T, whatever becomes of the copy: nothing crosses rooms without one.
-    write('room.send', into.code, (type === 'file' ? 'a file (' + kindWords(body.url) + ', ' + sizeWords(size) + ')' : 'a message (' + Array.from(body.text).length + ' characters)')
-      + ' from ' + roomRow(room) + ' to ' + roomRow(into));
+    write('room.send', into.code, (type === 'file' ? 'a ' + (pages.isConfidential(body.url) ? 'confidential ' : '') + 'file (' + kindWords(body.url) + ', ' + sizeWords(size) + ')' : 'a message (' + Array.from(body.text).length + ' characters)')
+      + ' from ' + roomRow(room) + ' to ' + roomRow(into) + (secret ? ', confirmed' : ''));
     const copy = {
       ...body, id: makeMessageId(), at: now, from, pinned: false, ...(sent.cid ? { cid: sent.cid } : {}), ...(sent.held ? { held: sent.held } : {}),
       sentTo: { ...markOf(into), id: there.id }, ...(parent ? { replyTo: quoteOf(parent) } : {}),
@@ -586,7 +609,7 @@ function register(socket, conn, ctx) {
     if (!Number.isInteger(a.beforeSeq) || a.beforeSeq < 1) return answer({ ok: false, error: EARLIER_FROM });
     const got = store.before(conn.room(), a.beforeSeq);
     const seen = conn.linklessPage() ? linkless : (m) => m;
-    answer({ ok: true, history: got.history.map(forPage).map(seen), more: got.more });
+    answer({ ok: true, history: got.history.map(forPage).map(marked).map(seen), more: got.more });
   });
 
   // One message of this page's room (`{messageId}`), as a page is sent it: a message a page keeps in view however old,
@@ -596,7 +619,51 @@ function register(socket, conn, ctx) {
     if (!conn.gate(ack, { bucket: conn.chatter })) return;
     const answer = conn.ok(ack);
     const m = store.readMessage(conn.room(), str((isRecord(args) ? args : {}).messageId));
-    answer(m ? { ok: true, message: conn.linklessPage() ? linkless(forPage(m)) : forPage(m) } : { ok: false, error: NOT_IN_ROOM });
+    answer(m ? { ok: true, message: conn.linklessPage() ? linkless(marked(forPage(m))) : marked(forPage(m)) } : { ok: false, error: NOT_IN_ROOM });
+  });
+
+  // A file marked confidential, or its mark removed (plan 4-§5.14): `{messageId, on}`, a file message of this page's room
+  // (the admin page's: of the room it watches), where the file is in use. Marked by someone seated backstage with
+  // hall.files here, or the admin; the mark removed by whoever set it, or the admin (S16); never On stage (a seat that
+  // shares no file marks none) nor from the support view. Refused while the file is on a screen or a holding image, naming
+  // each: a mark never leaves a confidential file where anyone near a screen can see it. The file's one record is written
+  // (pages.json `marks`), every take of it marked, every page of every room holding it told (`fileMark`, unnumbered), and
+  // one `file.mark` row written, naming the file by its kind alone. Asked as it is, it is answered as done (`already`) and
+  // writes nothing.
+  socket.on('file:mark', (args, ack) => {
+    if (!conn.gate(ack, { joined: false, bucket: conn.writes })) return;   // the admin page marks in the room it watches, seated nowhere: seated or watching is read below
+    const answer = conn.ok(ack);
+    const a = isRecord(args) ? args : {};
+    const watched = !conn.room() && conn.admin() && typeof socket.data.watching === 'string' ? roomOf(socket.data.watching) : null;
+    const room = watched || conn.room();
+    if (!room || roomOf(room.code) !== room) return answer({ ok: false, error: conn.room() ? 'Room gone' : 'Not joined' });
+    if (socket.data.adminView) return answer({ ok: false, error: SUPPORT });
+    if (!watched && conn.onStage()) return answer({ ok: false, error: BACKSTAGE });
+    if (typeof a.on !== 'boolean') return answer({ ok: false, error: MARK_WHICH });
+    const m = room.byId.get(str(a.messageId));
+    if (!m || m.type !== 'file' || typeof m.url !== 'string' || !m.url.startsWith('/uploads/')) return answer({ ok: false, error: 'Message not found' });
+    const name = m.url.slice(9);
+    const was = pages.markOf(name);
+    const who = conn.actor();
+    const whoKey = who.t + ':' + who.id;
+    const admin = !!watched || conn.theAdmin();
+    const me = watched ? null : conn.me();
+    if (a.on) {
+      if (!admin && !(me && me.role === 'research' && conn.allowed('hall.files') && !conn.viewerAccount())) return answer({ ok: false, error: MARK_BACKSTAGE });
+      if (was) return answer({ ok: true, already: true, confidential: true });
+      const shown = markRefusal(m.url, room.hall);
+      if (shown) return answer({ ok: false, error: shown });
+      if (!pages.mark(name, { who: whoKey, name: (me && me.name) || who.name, uid: me ? me.uid : '' }, m.filename)) return answer({ ok: false, error: OP_REFUSED });
+    } else {
+      if (!was) return answer({ ok: true, already: true, confidential: false });
+      if (!admin && was.by.who !== whoKey) return answer({ ok: false, error: 'Only ' + (was.by.name || 'whoever marked it') + ' or an admin can remove the mark.' });
+      pages.unmark(name);
+    }
+    write('file.mark', room.code, 'a ' + kindWords(m.url) + ' in ' + roomRow(room) + (a.on ? ' marked confidential' : ': the confidential mark removed'));
+    // A take is never unmarked: a page may add a mark and never remove it, so a take shown while the file was marked stays so.
+    if (a.on) markedTakes(name);
+    fileMarked(name, a.on);
+    answer({ ok: true, confidential: a.on });
   });
 
   // A download ticket (plan 4-§4.6.6): `{messageId}`, a file message of this page's room (the admin page's: of the room it
@@ -641,7 +708,8 @@ function register(socket, conn, ctx) {
     const size = uploadOnDisk(file.url);
     if (size < 0) return answer({ ok: false, error: 'That file is no longer on the AGMessage laptop.' });
     const name = file.url.slice(9);
-    const got = tickets.issue({ name, filename: file.filename, transferOnly: file.transferOnly, uid: me.uid, address: socket.data.ip, sid: socket.id, hall: room.hall, seq: file.seq });
+    // The room and who asked ride with the ticket: a confidential file's download is written as it ends, in that room.
+    const got = tickets.issue({ name, filename: file.filename, transferOnly: file.transferOnly, uid: me.uid, address: socket.data.ip, sid: socket.id, hall: room.hall, seq: file.seq, room: room.code, actor: conn.actor() });
     if (got.error) return answer({ ok: false, error: got.error });
     answer({ ok: true, ticket: got.ticket, name: file.filename, size });
   });

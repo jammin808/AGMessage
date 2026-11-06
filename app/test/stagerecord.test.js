@@ -13,8 +13,9 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { StageRecord, entryOf, storedEntry, whoSaid, didSaid, seenSaid, MAX, SEEN_MS } = require('../lib/stagerecord');
+const { StageRecord, entryOf, storedEntry, confidentialOf, whoSaid, didSaid, seenSaid, MAX, SEEN_MS } = require('../lib/stagerecord');
 const { WriteLane } = require('../lib/resilience');
+const { uploadRef } = require('../lib/pages');
 const ai = require('../lib/ai');
 const { startServer, restartServer, stopServer, api, connect, emit, wait, until, pngOf, inviteOf, fakeStagewatch, TOKEN } = require('./helpers');
 
@@ -69,6 +70,23 @@ test('an entry is a take as it was asked: who and from which seat, for whom, the
     { ...web, text: 'words on a page that is no quote' }, { ...cell, line: { text: 'x', via: 'later' } }, { ...cell, seen: { shown: 3, of: 2 } }, { ...cell, seen: { shown: 2, of: 2, standin: 0 } }, { ...cell, sentFrom: { key: 'no', name: 'x' } }, { ...cell, withdrawn: 'soon' }, null, []]) {
     assert.equal(storedEntry(bad), null, JSON.stringify(bad));
   }
+});
+
+test('an entry keeps the uploads it shows or was made from by their references, the server\'s alone: a mark set on one later makes it confidential as it is read, and no reader is given them', () => {
+  const doc = '1730000000000-abcdefghijkl-advice.pdf';
+  const pic = '1730000000000-abcdefghijkl-advice-p1.png';
+  const shown = entryOf(take(3, { kind: 'doc', url: '/uploads/' + doc, name: 'Legal advice.pdf', standin: { url: '/uploads/' + pic } }));
+  assert.deepEqual(shown.uploads, [uploadRef(doc), uploadRef(pic)]);
+  assert.ok(!JSON.stringify(shown.uploads).includes('advice'), 'never an address');
+  const quoted = entryOf(take(4, { ...CELL, from: { name: 'Q3.xlsx', type: 'xlsx' } }, { made: [uploadRef(doc)] }));
+  assert.deepEqual(quoted.uploads, [uploadRef(doc)]);
+  assert.equal(entryOf(take(5, ROWS)).uploads, undefined, 'a typed quote names none');
+  assert.deepEqual(storedEntry(quoted), quoted, 'read back with them');
+  for (const bad of [[], ['../escape'], [doc], Array(4).fill(uploadRef(doc)), 'x']) assert.equal(storedEntry({ ...quoted, uploads: bad }), null, JSON.stringify(bad));
+  const read = confidentialOf([shown, quoted, entryOf(take(5, ROWS))], (r) => r === uploadRef(doc));
+  assert.deepEqual(read.map((e) => e.confidential === true), [true, true, false]);
+  assert.ok(read.every((e) => !Object.hasOwn(e, 'uploads')), 'no reader is given them');
+  assert.deepEqual(confidentialOf([quoted], () => false)[0].confidential, undefined);
 });
 
 test('the transcript\'s words for an entry: who and from which seat, what they did for whom, and what the pages reported', () => {

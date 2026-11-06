@@ -309,6 +309,14 @@ never given a file message's link. A file moves to another room (`forward`, `roo
 download it where it is, besides `hall.post` and `hall.files` there and where it goes: "Files are moved by the backstage
 team." A download of a file that is not confidential writes no audit row (a person reading what their room shows them).
 
+**Who may mark a file confidential, and who may remove the mark** (plan 4-§5.14, S16). Whoever shares a file may mark it
+as it is shared (🔒 Confidential beside 🔥 Priority). Later, from the file's ⋯: someone seated backstage with
+`hall.files` in a room where the file is, never a Viewer account, or the admin, from a hall page or the admin page's room
+view (`file:mark`). An On stage seat shares no
+file, so it marks none ("Do that from a backstage page."). The mark is removed by whoever set it, or the admin: "Only
+Sue Staff or an admin can remove the mark." A confidential file goes into a room where it is not in use, or onto
+people's pages there, only once its sender confirms, from a seat that may download it where it is in use, or the admin.
+
 **Inside a hall.** Reading is `hall.view`; everything that changes what the others see — a message, a reply, a help
 request, an answer to an action prompt, a pin, a reaction — is `hall.post`, so an observer or a Viewer reads, sees a
 prompt's options and its tally, and is offered nothing to press. What a page offers on a message (its row's acts, its ⋯,
@@ -526,7 +534,15 @@ room (`room.sendFrom`, by the room's key, one row for every list a change touche
 (Hall 3); it sends back into: Main (Hall 3)", "it no longer sends into: …", a room on the list not open now counted, "2 rooms
 not open now"; each room by its name and its hall's, never a key), each message or file sent into another room
 (`room.send`, by the key of the room it went to: "a message (212 characters) from Legal (Hall 2) to Main (Hall 2)", "a
-file (pdf, 2.1 MB) from …"; never its words or a file's name), each send withdrawn (`room.withdraw`, by the key of the
+file (pdf, 2.1 MB) from …", "a confidential file (pdf, 2.1 MB) from Legal (Hall 2) to Main (Hall 2), confirmed" for a
+confidential file sent or forwarded into a room where it was not in use; never its words or a file's name), a file marked
+confidential or its mark removed (`file.mark`, by the room's key: "a pdf in Legal (Hall 2) marked confidential", "a pdf
+in Legal (Hall 2): the confidential mark removed", "… marked confidential as it was shared", by the hall's key "a png shown
+on people's pages in Main (Hall 2) marked confidential as it was shown", and "a png drawn of a confidential file, marked
+confidential as it was uploaded in Legal (Hall 2)"; never its name), a confidential file's download as its stream ends
+(`file.download`, by the room's key: "a confidential pdf downloaded in Legal (Hall 2)"; other downloads are not
+audited), the admin's transcript read with a confidential entry's words off the laptop (`room.read`: "…, confidential
+text included"), each send withdrawn (`room.withdraw`, by the key of the
 room it went to and was taken from: "a message sent from Legal (Hall 2), there 40 s", "a file …", the admin's "a message by Lou sent
 from …"; never its words or a file's name),
 each upload its check refused (`upload.refused`, by the hall's key, the uploader's row: what the file was refused for and
@@ -539,7 +555,8 @@ pages (`page.push`, by the hall's key: whom, "the Board (6 pages)" or the person
 clock", "a holding slide", "a web page on vote.example.com", a web page by its host alone, "a PDF at p. 12", "a picture
 of a PDF page (p. 12)", "a Word document at ≈ p. 3", a file by its kind alone, never its name, "a quote (a table cell, 18
 characters) from a spreadsheet", "a quote (typed, 42 characters)", "a quote from a web page on vote.example.com", a quote
-by its unit, its size and its file's kind alone, never a word of it, "the information taken
+by its unit, its size and its file's kind alone, never a word of it, "a confidential PDF at p. 3" for a
+confidential item, ", confirmed" where its pusher confirmed showing it where it was not in use, "the information taken
 down", ", in their side bar" for an arrival there, ", sent from Legal" from a side room, ", withdrawn" for a withdrawal,
 one row for each of whom it was for; one row per take, none for its
 repeat or for a person's Back to chat or Minimise, which their own page says to the console), the hall's switch for its
@@ -550,7 +567,8 @@ guests may no longer show web pages (1 shown now stays until taken down)"; an un
 never their values), every proposal Stagewatch's show desk takes (who asked, for which screen, how many characters and
 the desk's number, never the words), every line Stagewatch takes for the speaker's screen sent straight to it
 (`stagewatch.send`: who sent it and how many characters, never the words; an emoji counts as one character in both; a
-line that went with a push says so, "…, sent now, with a push", and its proposal "…, with a push — proposal p3"),
+line that went with a push says so, "…, sent now, with a push", and its proposal "…, with a push — proposal p3"; a
+confidential one "…, a confidential line"),
 commands to Patterns and PlayMap, the internet link (`tunnel.on`: who turned it on and its end, once cloudflared gave
 its address; `tunnel.until`: its end moved; `tunnel.off`: who turned it off, or kept it off with only its end left; and
 system rows, `tunnel.again`: turned on again by a start inside its end, and `tunnel.ended`: turned off at its end; never

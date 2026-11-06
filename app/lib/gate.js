@@ -23,7 +23,8 @@
  * The contexts (`contexts(parts)`), each frozen: `ctx`, every part the server names (its stores, their named effects,
  * `settings` to read and `io`), for the rooms module; `takesCtx`, for the takes module, the same parts but those that make
  * a room, a room's op or send to a room, or set which rooms may send into one (`ROOM_SENDS`: `io`, `apply`,
- * `systemMessage`, `newSideRoom`, `renameRoom`, `sendGuestsOut`, `codeChanged`, `setRoomSends`, `tellWebRights`), and with `sendTo`, so a
+ * `systemMessage`, `newSideRoom`, `renameRoom`, `sendGuestsOut`, `codeChanged`, `setRoomSends`, `tellWebRights`, and `fileMarked` and
+ * `markShared`, which tell every room holding a file its confidential mark), and with `sendTo`, so a
  * take reaches people's pages one socket at a time and never makes a room, a room's op or a room's broadcast.
  *
  * Pure: it requires nothing. What it reads of a socket, a room, the buckets and the sockets open, it is given.
@@ -106,7 +107,7 @@ function gateOf(facts) {
  * `tellWebRights` (each backstage guest page of a hall's Main room, found by walking the room, told whether it may show a
  * web page). The rooms module's alone: the takes context holds none of them.
  */
-const ROOM_SENDS = Object.freeze(['io', 'apply', 'systemMessage', 'newSideRoom', 'renameRoom', 'sendGuestsOut', 'codeChanged', 'setRoomSends', 'tellWebRights']);
+const ROOM_SENDS = Object.freeze(['io', 'apply', 'systemMessage', 'newSideRoom', 'renameRoom', 'sendGuestsOut', 'codeChanged', 'setRoomSends', 'tellWebRights', 'fileMarked', 'markShared']);
 
 /**
  * `sendTo(socketIds, event, payload)`: the event sent to each socket named by its id, one socket at a time, each once,

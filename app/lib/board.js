@@ -23,8 +23,9 @@ function lineOf(m) {
   if (!m) return '';
   const cut = (t) => String(t || '').replace(/\s+/g, ' ').trim().slice(0, 120);
   if (m.type === 'text') return cut(m.text);
-  // A file message is a file shared for download (📎), never something shown on the stage.
-  if (m.type === 'file') return cut('📎 ' + (m.filename || 'a file') + (m.caption ? ' — ' + m.caption : ''));
+  // A file message is a file shared for download (📎), never something shown on the stage; one marked confidential (its
+  // `confidential`, the server's from the file's record) by its name alone, 🔒 before it, never its caption.
+  if (m.type === 'file') return cut(m.confidential === true ? '📎 🔒 ' + (m.filename || 'a file') : '📎 ' + (m.filename || 'a file') + (m.caption ? ' — ' + m.caption : ''));
   if (m.type === 'action') return cut('❓ ' + m.text);
   if (m.type === 'help') return cut('Help: ' + m.category + (m.text ? ' — ' + m.text : ''));
   return '';
@@ -34,7 +35,7 @@ function lineOf(m) {
 function lastMessageScan(room) {
   for (let i = room.messages.length - 1; i >= 0; i--) {
     const m = room.messages[i];
-    if (m && m.type !== 'system' && m.from) return { name: String(m.from.name || '').slice(0, 40), text: lineOf(m), at: m.at };
+    if (m && m.type !== 'system' && m.from) return { name: String(m.from.name || '').slice(0, 40), text: lineOf(m), at: m.at, ...(m.type === 'file' ? { file: m } : {}) };
   }
   return null;
 }
@@ -68,12 +69,17 @@ const openHelp = (room) => scan(room).help;
 /** How many people are in a hall: people, not sockets (an account with it open on a laptop and a phone is one). */
 const peopleIn = (room) => (room.users ? new Set(Array.from(room.users.values(), (u) => u.uid)).size : 0);
 
-/** One hall's row on the board. `stage` is the hall's Stagewatch as a page shows it (or null); `displays` its screens. */
-function hallRow(room, { stage = null, displays = [], now = Date.now() } = {}) {
+/**
+ * One hall's row on the board. `stage` is the hall's Stagewatch as a page shows it (or null); `displays` its screens;
+ * `isConfidential(url)` whether a file is marked now (its mark is no change to the room, so it is read as the row is made).
+ */
+function hallRow(room, { stage = null, displays = [], now = Date.now(), isConfidential = () => false } = {}) {
   const { last, help } = scan(room);
+  const file = last && last.file;
+  const said = last ? { name: last.name, text: file ? lineOf({ ...file, confidential: isConfidential(file.url) === true }) : last.text, at: last.at } : null;
   return {
     code: room.code, name: room.name || '', people: peopleIn(room),
-    last, help: help.length, stage, displays, at: now,
+    last: said, help: help.length, stage, displays, at: now,
   };
 }
 

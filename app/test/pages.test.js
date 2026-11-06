@@ -11,7 +11,7 @@ const path = require('path');
 const {
   Pages, cleanPage, askedOf, canShow, describePage, sourceOk, webUrl, personKey, layerOf, layersOf, reportsOf, inViewOf, KINDS, LAYERS, SHOW_LAYER, INFO_LAYER, ARRIVALS, EARLIER_TOLD,
   IMAGE_EXT, STAGE_TYPES, TRANSFER_ONLY, REPORTS, ANSWERS, AGAIN_MS, VIEWS, MARKS, BOUNDS, WEB_MAX, STAGE_FULL,
-  fileOf, filesOf,
+  fileOf, filesOf, stepHold, answerHold, sentHold, uploadRef, UPLOAD_REF, HELD_LINE, HOLD_MAX, SECRET_ITEM,
 } = require('../lib/pages');
 const { cleanContent } = require('../lib/displays');
 const guard = require('../lib/guard');
@@ -1589,4 +1589,223 @@ test('status counts the pages that cannot open documents: how many, those that d
   p.report(HALL, 'cy', { key: CY, board: true, seq: b2.seq, state: 'shown' });
   assert.equal(p.status(HALL, 'board', two, { layer: 'info', who: 'account:aana', docOf }).doc, undefined, 'every page showed it');
   assert.deepEqual(asked, [true, false], 'asked only where a page could not open it');
+});
+
+// ---------------------------------------------------------------- the confidential mark (plan 4-§5.14)
+test('the mark on a take: true only as sent true, kept as the store reads it back, said "🔒" in the console\'s voice, "a confidential" in the audit\'s, and "🔒 a confidential item" where it is not in use', () => {
+  const source = () => ({ name: 'Legal advice.pdf', room: 'LGQ4MZP8', roomName: 'Legal' });
+  const doc = cleanPage({ kind: 'doc', url: '/uploads/1730000000000-abcdefghijkl-advice.pdf', at: { page: 3 }, confidential: true }, { source });
+  assert.equal(doc.confidential, true);
+  assert.equal(cleanPage({ kind: 'doc', url: '/uploads/1730000000000-abcdefghijkl-advice.pdf', confidential: false }, { source }).confidential, undefined, 'false is no mark');
+  for (const v of ['yes', 1, null, {}]) assert.deepEqual(cleanPage({ kind: 'doc', url: '/uploads/1730000000000-abcdefghijkl-advice.pdf', confidential: v }, { source }), { error: 'Confidential is a tick: true, or left out.' }, String(v));
+  const quote = cleanPage({ kind: 'snippet', unit: 'paragraph', text: 'Settle at £2m.', from: { url: '/uploads/1730000000000-abcdefghijkl-advice.pdf', at: { page: 3 } }, confidential: true }, { source });
+  assert.equal(quote.confidential, true);
+  // A stand-in's quote carries no mark of its own: its document's is the take's.
+  const st = cleanPage({ kind: 'doc', url: '/uploads/1730000000000-abcdefghijkl-advice.docx', standin: { snippet: { unit: 'view', blocks: [{ kind: 'p', text: 'x' }], confidential: true } } }, { source });
+  assert.equal(st.standin.snippet.confidential, undefined);
+  // Kept and read back as it is.
+  const p = new Pages(path.join(folder(), 'pages.json'));
+  const t1 = p.take(HALL, 'board', doc, { name: 'Ana' }, { at: 1 });
+  const t2 = p.take(HALL, 'board', quote, { name: 'Ana' }, { at: 2 });
+  assert.deepEqual([t1.content.confidential, t2.content.confidential], [true, true]);
+  // The voices.
+  assert.equal(describePage(doc), '🔒 Legal advice.pdf in Legal at p. 3');
+  assert.equal(describePage(doc, { voice: 'audit' }), 'a confidential PDF in Legal at p. 3');
+  assert.equal(describePage(quote, { voice: 'audit' }), 'a confidential quote (a paragraph, 14 characters) from a PDF in Legal');
+  assert.match(describePage(quote, { by: 'Ana' }), /^🔒 ❝ a paragraph from Legal advice\.pdf in Legal, p\. 3$/);
+  assert.equal(describePage(quote, { masked: true, sent: 'Legal' }), SECRET_ITEM, 'no name, place, words or room');
+  assert.equal(describePage({ kind: 'clock' }, { masked: true }), 'the clock', 'only information is ever marked');
+  // A take's status said in the masked voice where `masks` says so, its file never handed to that asker.
+  const st2 = p.status(HALL, 'board', [{ sid: 's1', key: BEN, board: true, name: 'Ben' }], { layer: 'info', masks: () => true });
+  assert.deepEqual([st2.showing, st2.confidential], [SECRET_ITEM, true]);
+  assert.match(p.status(HALL, 'board', [{ sid: 's1', key: BEN, board: true, name: 'Ben' }], { layer: 'info', masks: () => false }).showing, /^🔒 ❝/);
+});
+
+test('the marks: one record a file in pages.json, the first mark kept with who set it, removed and let go with the file, read back whole and nothing else', () => {
+  const file = path.join(folder(), 'pages.json');
+  const p = new Pages(file);
+  const name = '1730000000000-abcdefghijkl-advice.pdf';
+  assert.equal(p.isConfidential(name), false);
+  assert.equal(p.mark(name, { who: 'account:asue', name: 'Sue Staff', uid: 'asue' }, 'Legal advice.pdf', 5), true);
+  assert.equal(p.mark(name, { who: 'account:atom', name: 'Tom Tech' }, 'Other.pdf', 6), false, 'the first mark stays');
+  assert.deepEqual(p.markOf(name), { by: { who: 'account:asue', name: 'Sue Staff', uid: 'asue' }, name: 'Legal advice.pdf', at: 5 });
+  assert.equal(p.isConfidential('/uploads/' + name), true, 'by its address too');
+  assert.equal(p.mark('../escape', { who: 'account:asue', name: 'x' }, 'x'), false, 'an upload\'s name alone');
+  p.hold();
+  p.flush();
+  const kept = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.deepEqual(kept.marks, { [name]: { by: { who: 'account:asue', name: 'Sue Staff', uid: 'asue' }, name: 'Legal advice.pdf', at: 5 } });
+  // Read back: a record of the wrong shape is dropped.
+  fs.writeFileSync(file, JSON.stringify({ v: 1, halls: {}, marks: { [name]: kept.marks[name], 'not an upload': kept.marks[name], ['1730000000000-abcdefghijkl-x.pdf']: { by: { who: 'nobody', name: 'x' }, name: 'x', at: 1 } } }));
+  const q = new Pages(file);
+  assert.deepEqual([q.isConfidential(name), q.isConfidential('1730000000000-abcdefghijkl-x.pdf')], [true, false]);
+  assert.equal(q.unmark(name), true);
+  assert.equal(q.unmark(name), false);
+  q.mark(name, { who: '', name: 'Ana' }, 'x');
+  assert.equal(q.dropMarks([name, 'other']), 1, 'let go with its file');
+  assert.equal(q.isConfidential(name), false);
+});
+
+test('the hold on a Stagewatch frame: a send holds its message, a proposal every new one until it is answered, released once the frame moves past it or is cleared, never by a frame-less state; kept with no text', () => {
+  const mac = (t) => 'm' + Buffer.from(t).toString('hex').slice(0, 20);
+  const rooms = ['HALLA1'];
+  const step = (h, message, messageId = 0, extra = {}) => stepHold(h, { message, messageId, ...extra }, mac);
+  // A send: the message on the frame as it went is not held; the next one is, by its MAC and its id.
+  let h = { before: mac('Old'), beforeId: 5, sends: [0], rooms };
+  let r = step(h, 'Old', 5);
+  assert.deepEqual([r.held, r.hold.before, r.hold.sends], [false, mac('Old'), [0]]);
+  r = step(r.hold, 'Settle at £2m', 6);
+  assert.deepEqual([r.held, r.hold.mac, r.hold.messageId, 'before' in r.hold, r.hold.sends], [true, mac('Settle at £2m'), 6, false, []]);
+  h = r.hold;
+  assert.equal(stepHold(h, null, mac).held, false, 'no frame: not read');
+  assert.deepEqual(stepHold(h, null, mac).hold, h, 'and not released');
+  assert.equal(step(h, 'Settle at £2m', 6, { messageAck: 'seen' }).held, true, 'its acknowledgement keeps it');
+  assert.equal(step(h, 'Settle at £2m', 0).held, true, 'by its MAC alone');
+  assert.equal(step(h, 'Retyped', 6).held, true, 'by its id alone');
+  assert.deepEqual(step(h, 'Five minutes', 7), { hold: null, held: false }, 'a new message releases it');
+  assert.deepEqual(step(h, '', 0), { hold: null, held: false }, 'the operator\'s clear releases it');
+  // Its receipt's id: the message that carries it is its own, whatever came before it on the frame.
+  r = step({ before: mac('Old'), beforeId: 5, sends: [9], rooms }, 'Someone else\'s', 8);
+  assert.deepEqual([r.held, r.hold.sends], [true, [9]], 'a message before its own is held, and it waits on');
+  r = step(r.hold, 'Settle at £2m', 9);
+  assert.deepEqual([r.held, r.hold.messageId, r.hold.sends, 'before' in r.hold], [true, 9, [], false]);
+  // One whose own message was replaced before a frame showed it: a later id ends its wait, every such send's at once; one
+  // whose receipt is not read yet waits on for the next.
+  r = step({ before: mac('Old'), beforeId: 5, sends: [9], rooms }, 'Later', 10);
+  assert.deepEqual([r.held, r.hold.sends, 'before' in r.hold], [true, [], false]);
+  r = step({ before: mac('Old'), beforeId: 5, sends: [9, 9, 12, 0], rooms }, 'Later', 10);
+  assert.deepEqual([r.held, r.hold.sends], [true, [12, 0]]);
+  // On a frame with no ids, the oldest send ends with each new message.
+  r = step({ before: mac('Old'), beforeId: 0, sends: [9, 0], rooms }, 'New', 0);
+  assert.deepEqual([r.held, r.hold.sends], [true, [0]]);
+
+  // Two confidential lines in a row: the first stays held while the second waits, then the second is held.
+  for (const ids of [true, false]) {
+    const id = (n) => (ids ? n : 0);
+    let a = step({ before: mac('Old'), beforeId: id(5), sends: [0], rooms }, 'Line A', id(6)).hold;
+    // The second line goes: what waits starts from the frame as it is (A), and A is not its message.
+    a = { ...a, before: mac('Line A'), beforeId: id(6), sends: [0] };
+    r = step(a, 'Line A', id(6));
+    assert.deepEqual([r.held, r.hold.mac, r.hold.messageId], [true, mac('Line A'), id(6)], 'A still held while B waits' + (ids ? '' : ', no ids'));
+    r = step(r.hold, 'Line B', id(7));
+    assert.deepEqual([r.held, r.hold.mac, r.hold.messageId, r.hold.sends], [true, mac('Line B'), id(7), []], 'B held as it comes' + (ids ? '' : ', no ids'));
+    assert.equal(step(r.hold, 'Line B', id(7)).held, true);
+    assert.deepEqual(step(r.hold, 'Line A', id(8)), { hold: null, held: false }, 'released once the frame moves past B');
+  }
+  // A clear while a send waits lets the held message go; the send waits on for its own.
+  r = step({ mac: mac('Line A'), messageId: 6, before: mac('Line A'), beforeId: 6, sends: [0], rooms }, '', 0);
+  assert.deepEqual([r.held, r.hold.mac, r.hold.messageId, r.hold.sends], [false, '', 0, [0]]);
+  assert.equal(step(r.hold, 'Line B', 7).held, true);
+
+  // A proposal: every new message held while it waits, the newest kept.
+  h = { before: mac('Old'), beforeId: 1, proposals: ['p1'], rooms };
+  assert.equal(step(h, 'Old', 1).held, false);
+  r = step(h, 'Edited by the operator', 2);
+  assert.deepEqual([r.held, r.hold.caught], [true, ['p1']]);
+  r = step(r.hold, 'Edited again', 3);
+  assert.deepEqual([r.held, r.hold.mac], [true, mac('Edited again')]);
+  // Approved having seen a new message: that one stays held, nothing more waits.
+  const approved = answerHold(r.hold, 'p1', true);
+  assert.deepEqual([approved.proposals, approved.sends, 'before' in approved, approved.mac], [[], [], false, mac('Edited again')]);
+  assert.equal(step(approved, 'Edited again', 3).held, true);
+  assert.deepEqual(step(approved, 'Break', 4), { hold: null, held: false });
+  // Refused: nothing more waits for it, and a message held already stays held until the frame moves past it.
+  const refused = answerHold(r.hold, 'p1', false);
+  assert.deepEqual([refused.proposals, refused.sends, 'before' in refused, refused.mac], [[], [], false, mac('Edited again')]);
+  assert.equal(step(refused, 'Edited again', 3).held, true, 'a refusal over a held line keeps it held');
+  assert.equal(answerHold({ before: mac('Old'), beforeId: 1, proposals: ['p1'], rooms }, 'p1', false), null, 'refused with nothing held: the hold goes');
+  assert.deepEqual(answerHold(r.hold, 'p9', false), r.hold, 'another proposal\'s answer changes nothing');
+  // A refused proposal over a send already held: the sent line stays held.
+  const sentA = step({ before: mac('Old'), beforeId: 5, sends: [0], rooms }, 'Line A', 6).hold;
+  const over = answerHold({ ...sentA, before: mac('Line A'), beforeId: 6, proposals: ['p2'] }, 'p2', false);
+  assert.equal(step(over, 'Line A', 6).held, true);
+  // Approved before any new message came: the next new one is held, waited for as a send's.
+  const early = answerHold(h, 'p1', true);
+  assert.deepEqual([early.proposals, early.sends], [[], [0]]);
+  assert.equal(step(early, 'Old', 1).held, false);
+  r = step(early, 'The approved line', 3);
+  assert.deepEqual([r.held, 'before' in r.hold], [true, false]);
+
+  // A send's answer: its receipt names its message; a line that did not go waits for nothing.
+  const waiting = { mac: mac('Line A'), messageId: 6, before: mac('Line A'), beforeId: 6, sends: [0], rooms };
+  assert.deepEqual(sentHold(waiting, 7).sends, [7]);
+  assert.deepEqual(sentHold(waiting, 6), storedHoldOf(waiting), 'the receipt of the message already held: nothing to wait for');
+  assert.deepEqual(sentHold(waiting, 0), storedHoldOf(waiting), 'no id: the first new message');
+  const notSent = sentHold(waiting, null);
+  assert.deepEqual([notSent.sends, 'before' in notSent, notSent.mac], [[], false, mac('Line A')], 'A stays held');
+  assert.equal(sentHold({ before: '', beforeId: 0, sends: [0], rooms }, null), null, 'nothing held, nothing waits: let go');
+  assert.equal(sentHold(null, 7), null);
+
+  // The bounds: a list past its bound keeps its newest entries; a hold is never let go for its size.
+  const many = { before: mac('Old'), beforeId: 1, proposals: Array.from({ length: HOLD_MAX.waits + 3 }, (_, i) => 'p' + i), rooms: Array.from({ length: HOLD_MAX.rooms + 4 }, (_, i) => 'ROOM' + String(i).padStart(2, '0')), sends: [] };
+  r = step(many, 'New', 2);
+  assert.equal(r.held, true);
+  assert.deepEqual([r.hold.proposals.length, r.hold.proposals.at(-1), r.hold.rooms.length, r.hold.rooms.at(-1)], [HOLD_MAX.waits, 'p' + (HOLD_MAX.waits + 2), HOLD_MAX.rooms, 'ROOM' + (HOLD_MAX.rooms + 3)]);
+  // Of the wrong shape: none.
+  for (const bad of [{ mac: 'not a mac!' }, { sends: ['x'] }, { proposals: [''] }, { rooms: ['lower'] }, { messageId: -1 }, { sends: [0], before: 7 }, 'a hold']) assert.equal(stepHold(bad, { message: 'x' }, mac).hold, null, JSON.stringify(bad));
+
+  // Kept in pages.json by its MAC, no text, and dropped when it is let go; one of the wrong shape is never written over it.
+  const file = path.join(folder(), 'pages.json');
+  const p = new Pages(file);
+  assert.equal(p.setHold('hall:' + HALL, approved), true);
+  assert.equal(p.setHold('hall:' + HALL, approved), false, 'the same: not written again');
+  assert.equal(p.setHold('not a link', approved), false);
+  assert.equal(p.setHold('hall:' + HALL, { mac: 'not a mac!' }), false, 'a hold of the wrong shape is refused');
+  assert.deepEqual(p.holdOf('hall:' + HALL), approved, 'and the hold kept stays');
+  p.hold();
+  p.flush();
+  const text = fs.readFileSync(file, 'utf8');
+  assert.ok(!text.includes('Edited') && text.includes(mac('Edited again')));
+  assert.deepEqual(new Pages(file).holdOf('hall:' + HALL), approved);
+  assert.equal(p.setHold('hall:' + HALL, null), true);
+  assert.equal(p.holdOf('hall:' + HALL), null);
+  assert.equal(HELD_LINE, '🔒 a confidential line');
+});
+/** A hold as the store reads it back: what stepHold and its kin return for one they leave as it is. */
+function storedHoldOf(h) { return stepHold(h, null, () => '').hold; }
+
+test('a take marked later: its uploads (a document\'s, a picture\'s or a quote\'s source, `made`, kept by reference and never by address) are read now, every take and Earlier entry of the file marked, and a later quote names its file', () => {
+  const file = path.join(folder(), 'pages.json');
+  const p = new Pages(file);
+  const url = '/uploads/1730000000000-abcdefghijkl-advice.pdf';
+  const other = '/uploads/1730000000000-abcdefghijkl-other.pdf';
+  const source = () => ({ name: 'Legal advice.pdf' });
+  const quote = cleanPage({ kind: 'snippet', unit: 'paragraph', text: 'Settle at £2m.', from: { url, at: { page: 1 } } }, { source });
+  const q = p.take(HALL, 'board', quote, { name: 'Ana' }, { at: 1, made: [url.slice(9)] });
+  const d = p.take(HALL, BEN, cleanPage({ kind: 'doc', url: other }, { source }), { name: 'Ana' }, { at: 2 });
+  assert.deepEqual([q.made, d.made], [[uploadRef(url.slice(9))], undefined]);
+  assert.ok(UPLOAD_REF.test(q.made[0]) && !q.made[0].includes('advice'), 'a reference, not the address');
+  assert.equal(uploadRef(url.slice(9)), uploadRef(url.slice(9)), 'the same each time');
+  assert.notEqual(uploadRef(url.slice(9)), uploadRef(other.slice(9)));
+  assert.equal(p.take(HALL, 'board', quote, { name: 'Ana' }, { made: ['../escape'] }), null, 'only an upload\'s name');
+  assert.deepEqual([p.secret(q), p.secret(d)], [false, false]);
+  assert.deepEqual(p.naming(url), [{ hall: HALL, to: 'board' }], 'a quote of a file names that file');
+  p.hold();
+  p.flush();
+  assert.ok(!fs.readFileSync(file, 'utf8').includes(url.slice(9)), 'kept by its reference, never its address');
+  p.mark(url.slice(9), { who: '', name: 'Sue' }, 'Legal advice.pdf');
+  assert.deepEqual([p.secret(q), p.secret(d)], [true, false], 'read now');
+  assert.equal(p.status(HALL, 'board', [{ sid: 's1', key: BEN, board: true, name: 'Ben' }], { layer: 'info' }).confidential, true, 'its status says so');
+  assert.deepEqual(p.markTakes(url.slice(9)), [HALL]);
+  assert.equal(p.find(HALL, q.seq).take.content.confidential, true, 'the take itself marked');
+  assert.deepEqual(p.markTakes(url.slice(9)), [], 'once');
+  // Read back with what it was made from.
+  p.hold();
+  p.flush();
+  const again = new Pages(file).find(HALL, q.seq).take;
+  assert.deepEqual([again.made, again.content.confidential], [[uploadRef(url.slice(9))], true]);
+  assert.equal(p.refMarked(uploadRef(url.slice(9))), true);
+  assert.equal(p.refMarked(uploadRef(other.slice(9))), false);
+  assert.equal(p.refMarked('not a reference'), false);
+});
+
+test('naming: whom the takes and Earlier entries that name an upload are for, hall by hall', () => {
+  const p = new Pages(path.join(folder(), 'pages.json'));
+  const url = '/uploads/1730000000000-abcdefghijkl-advice.pdf';
+  const source = () => ({ name: 'Legal advice.pdf' });
+  p.take(HALL, 'board', cleanPage({ kind: 'doc', url }, { source }), { name: 'Ana' }, { at: 1 });
+  p.take(OTHER, BEN, cleanPage({ kind: 'doc', url }, { source }), { name: 'Ana' }, { at: 2 });
+  assert.deepEqual(p.naming(url), [{ hall: HALL, to: 'board' }, { hall: OTHER, to: BEN }]);
+  assert.deepEqual(p.naming('/uploads/1730000000000-abcdefghijkl-other.pdf'), []);
+  assert.deepEqual(p.naming('nonsense'), []);
 });

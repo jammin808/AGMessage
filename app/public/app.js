@@ -1032,7 +1032,7 @@ const roomFiles = new Map();
  */
 function fileEntry(f) {
   if (!f || typeof f.id !== 'string' || !f.id || typeof f.url !== 'string' || !f.url) return null;
-  return { id: f.id, url: f.url, filename: typeof f.filename === 'string' ? f.filename : '', mime: typeof f.mime === 'string' ? f.mime : '', ...(f.transferOnly === true ? { transferOnly: true } : {}) };
+  return { id: f.id, url: f.url, filename: typeof f.filename === 'string' ? f.filename : '', mime: typeof f.mime === 'string' ? f.mime : '', ...(f.transferOnly === true ? { transferOnly: true } : {}), ...(f.confidential === true ? { confidential: true } : {}) };
 }
 /** A file message heard (or held), into the room's files. */
 function noteFile(msg) { const f = msg && msg.type === 'file' ? fileEntry(msg) : null; if (f) roomFiles.set(f.id, f); }
@@ -2114,6 +2114,7 @@ Object.assign(RUN, {
     beginReply(m);
   },
   'msg.pin': (m) => pinWithUndo(m),
+  'msg.confidential': (m) => markFile(m),
   'msg.look': (m) => openDocInPanel(m),
   'msg.download': (m) => download(m),
   'msg.stage': (m, c) => Show.fromMenu(m, c),
@@ -2174,6 +2175,8 @@ function echoState(item) {
 }
 
 function drawEcho(item) {
+  // A file sent into another room marked confidential asks its sender once more before it goes (S12).
+  if (item.state === 'refused' && item.verb === 'room:send' && confirmSecretSend(item)) { const n = echoes.get(item.cid); if (n) n.remove(); echoes.delete(item.cid); composerFollows({ ...item, state: 'dropped' }); return; }
   let node = echoes.get(item.cid);
   if (!SENDING.has(item.state) && item.state !== 'refused' && item.state !== 'lost') {
     if (node) node.remove();
@@ -2327,13 +2330,13 @@ function drawHeldSend(item) {
   if (item.state === 'waiting' && item.attempt === 0 && !AGM.outbox.online) AGM.toast(marked('waiting', 'Held — it is sent to ' + to + ' when the connection is back.'));
   else if (item.state === 'done') AGM.toast('Sent to ' + to + ' — a copy stays here.');
   else if (item.state === 'gone') AGM.toast('Sent to ' + to + '.');
-  else if (item.state === 'refused') { AGM.toast(item.words, true); AGM.outbox.drop(item.cid); }
+  else if (item.state === 'refused') { if (!confirmSecretSend(item)) { AGM.toast(item.words, true); AGM.outbox.drop(item.cid); } }
 }
 function drawHeldForward(item) {
   const to = (item.tag && item.tag.forward) || 'the other hall';
   if (item.state === 'waiting' && item.attempt === 0 && !AGM.outbox.online) AGM.toast(marked('waiting', 'Held — it is forwarded to ' + to + ' when the connection is back.'));
   else if (item.state === 'done' || item.state === 'gone') AGM.toast('Forwarded to ' + to);
-  else if (item.state === 'refused') { AGM.toast(item.words, true); AGM.outbox.drop(item.cid); }
+  else if (item.state === 'refused') { if (!confirmSecretSend(item)) { AGM.toast(item.words, true); AGM.outbox.drop(item.cid); } }
 }
 
 /** An answer to a prompt, held until the server has it: the option chosen, or -1 and a note in words. */
@@ -2410,8 +2413,12 @@ const extOfName = (name) => { const x = /\.([A-Za-z0-9]{1,5})$/.exec(String(name
 const fileKindOf = (m) => FILE_KINDS_SAID[extOfName(m.url) || extOfName(m.filename)] || 'File';
 /** A size in bytes as a card says it: "340 KB", "2.1 MB"; '' for none (a file shared before sizes were kept). */
 const sizeWords = (n) => (!Number.isInteger(n) || n < 0 ? '' : n < 1024 ? n + ' bytes' : n < 1048576 ? Math.max(1, Math.round(n / 1024)) + ' KB' : (n / 1048576).toFixed(1) + ' MB');
-/** A file message's line on its card: "📎 Board pack.pdf · PDF · 2.1 MB", a transfer-only one "📦 … · download only". */
-const fileLine = (m) => [(m.transferOnly ? '📦 ' : '📎 ') + (m.filename || 'a file'), fileKindOf(m), sizeWords(m.size), m.transferOnly ? 'download only' : ''].filter(Boolean).join(' · ');
+/**
+ * A file message's line on its card: "📎 Board pack.pdf · PDF · 2.1 MB", a transfer-only one "📦 … · download only", and
+ * one marked confidential (its `confidential`, the server's from the file's one record) "📎 🔒 Confidential · Board pack.pdf
+ * · …": an icon with its word, never colour alone.
+ */
+const fileLine = (m) => [(m.transferOnly ? '📦 ' : '📎 ') + (m.confidential ? '🔒 Confidential · ' : '') + (m.filename || 'a file'), fileKindOf(m), sizeWords(m.size), m.transferOnly ? 'download only' : ''].filter(Boolean).join(' · ');
 /**
  * A file's card (a transfer, plan 4-§4.6.3): its name, kind and size, a picture's inline picture, its caption, and the
  * acts this seat has on it (the catalogue's): 👁 Look or Preview (a tap on it), ⬇ Download. An observer's and a Viewer
@@ -2425,6 +2432,7 @@ function renderFileBody(msg) {
   if (isImage) wrap.appendChild(FeedPictures.picture(msg));
   const card = document.createElement('div');
   card.className = 'file-link';
+  card.classList.toggle('confidential', msg.confidential === true);
   card.textContent = fileLine(msg);
   wrap.appendChild(card);
   if (msg.caption) {
@@ -2715,7 +2723,7 @@ function openDocInPanel(msg) {
   if (!msg || msg.type !== 'file' || msg.transferOnly || !isFileUrl(msg.url)) return;
   currentDocMsgId = msg.id;
   previewing = { msg };
-  openPanel(msg.filename || '', msg.caption || '', !!msg.priority);
+  openPanel((msg.confidential ? '🔒 Confidential · ' : '') + (msg.filename || ''), msg.caption || '', !!msg.priority);
   drawDoc({ url: msg.url }, msg.filename, msg.mime, null);
   if (!_applyingRemote) pushUserState('doc', { messageId: msg.id });
   drawDocActs();
@@ -2809,8 +2817,11 @@ async function drawDoc(source, name, mime, at) {
   if (!docShown) return;
   const text = await view.text();
   if (n !== docDrawing || !text) return;
-  // A file on this device is the researcher's own to draft from; a file of the room by its message.
-  docForAi.id = previewing && previewing.msg ? previewing.msg.id : null; docForAi.name = name || ''; docForAi.text = text;
+  // A file on this device is the researcher's own to draft from; a file of the room by its message, and never one marked
+  // confidential, whose text is not sent to the AI (plan 4-§5.12).
+  const msg = previewing && previewing.msg ? findMessage(previewing.msg.id) || previewing.msg : null;
+  if (msg && msg.confidential) return;
+  docForAi.id = msg ? msg.id : null; docForAi.name = name || ''; docForAi.text = text;
 }
 
 /** What the panel says when nothing is open in it, by the seat it is drawn for: the Board's 📺 On stage, the Preview. */
@@ -2878,7 +2889,7 @@ function refreshDocPinnedList() {
     const name = document.createElement('span');
     name.className = 'pinned-item';
     const ico = (m.mime || '').startsWith('image/') ? '🖼' : (m.mime === 'application/pdf' ? '📕' : '📄');
-    name.innerHTML = `<span class="ico" aria-hidden="true">${escapeHtml(ico)}</span><span class="name">${escapeHtml(m.filename)}</span>`;
+    name.innerHTML = `<span class="ico" aria-hidden="true">${escapeHtml(ico)}</span><span class="name">${escapeHtml((m.confidential ? '🔒 Confidential · ' : '') + m.filename)}</span>`;
     const o = fileObject(m.id, 'list');
     if (AGM.catalog.shown('file', F, o).some((e) => e.id === 'file.look')) name.dataset.action = 'file.look';
     const bar = document.createElement('span');
@@ -2934,8 +2945,63 @@ Object.assign(RUN, {
   'file.download': (o) => download(o),
   'file.stage': (o, c) => Show.fromMenu(findMessage(o.id) || o, c),
   'file.pin': (o) => pinWithUndo(o),
+  'file.confidential': (o) => markFile(o),
   'file.close': () => dismissDoc(),
 });
+
+// ---------------- The confidential mark (plan 4-§5.14): one record a file, set and removed by file:mark ----------------
+/** A file marked confidential, or its mark removed: the server's act, said as it answers. */
+function markFile(m) {
+  const on = !m.confidential;
+  AGM.outbox.now('file:mark', { messageId: m.id, on }, (r) => {
+    if (!r || !r.ok) { AGM.toast((r && r.error) || 'The mark was not changed.', true); return; }
+    AGM.toast(on ? 'Marked confidential: it goes only where it is in use, or where you send it.' : 'The confidential mark is removed.');
+  });
+}
+/**
+ * A file's mark changed (`fileMark`, latest wins: the server's one record): each message here that holds it, by its id, is
+ * drawn again with its mark, and so are the pinned list and the open file's header; the AI's copy of an open file now
+ * marked is let go.
+ */
+socket.on('fileMark', (p) => {
+  if (!p || !Array.isArray(p.ids)) return;
+  for (const id of p.ids) {
+    // The room's index of its files too: the lists drawn from it (holding pictures, Show's choices) say the mark.
+    const f = typeof id === 'string' ? roomFiles.get(id) : null;
+    if (f) { if (p.confidential === true) f.confidential = true; else delete f.confidential; }
+    const m = findMessage(id);
+    if (!m) continue;
+    if (p.confidential === true) { m.confidential = true; m.markedBy = p.markedBy && typeof p.markedBy === 'object' ? p.markedBy : null; } else { delete m.confidential; delete m.markedBy; }
+    const node = messagesById.get(id);
+    if (node) rerenderMessage(node, m);
+    if (currentDocMsgId === id) {
+      docTitleEl.textContent = (m.confidential ? '🔒 Confidential · ' : '') + (m.filename || '');
+      if (m.confidential && docForAi.id === id) { docForAi.id = null; docForAi.name = ''; docForAi.text = ''; }
+    }
+  }
+  refreshDocPinnedList();
+  drawDocActs();
+  PreviewBar.draw();
+  refreshOpenMenu();
+});
+/**
+ * A send held by the outbox the server refused until its sender confirms a confidential file (`confirm`, plan 4-§5.14, S12):
+ * asked in place, naming the room; yes holds it again with `confirm: true`, no lets it go. False for any other refusal.
+ */
+function confirmSecretSend(item) {
+  const r = item.result;
+  if (!r || r.confirm !== true || item.args.confirm === true) return false;
+  const rooms = Array.isArray(r.rooms) && r.rooms.length ? r.rooms.join(' and ') : 'that room';
+  const { verb, args, tag, file, upload } = item;
+  AGM.outbox.drop(item.cid);
+  AGM.ask(null, { title: '🔒 A confidential file', words: 'This file is marked confidential. Send it to ' + rooms + '? It will be in use there.', yes: 'Send it to ' + rooms, no: 'Keep it here' }).then((a) => {
+    if (!a || !a.yes) return;
+    const opts = { tag, ...(file ? { file, upload } : {}) };
+    if (verb === 'forward') AGM.outbox.hold('forward', { ...args, confirm: true }, opts);
+    else AGM.outbox.hold('room:send', { ...args, confirm: true }, opts);
+  });
+  return true;
+}
 
 // ---------------- Stage panel collapse/expand: the panel's own ⇥ and its rail ----------------
 const docCollapseBtn = document.getElementById('docCollapseBtn');
@@ -3169,6 +3235,24 @@ function consumePriority(btn) {
   setPriority(btn, false);
   return v;
 }
+/**
+ * 🔒 Confidential beside 🔥 Priority on a file attached (the catalogue's compose.confidential): off by default, and off
+ * again after each share; the file is marked as it is shared.
+ */
+const confidentialBtn = document.getElementById('textConfidentialBtn');
+confidentialBtn?.addEventListener('click', () => { const o = composeObject('text'); if (o) act('compose', 'compose.confidential', o, { opener: confidentialBtn, anchor: confidentialBtn }); });
+function setConfidential(on) {
+  if (!confidentialBtn) return;
+  confidentialBtn.dataset.confidential = on ? '1' : '0';
+  confidentialBtn.classList.toggle('on', on);
+  confidentialBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  confidentialBtn.title = on ? 'Confidential is ON: the file goes only where it is in use, or where you send it — click to turn it off' : 'Mark the file confidential: it goes only where it is in use, or where you send it';
+}
+function consumeConfidential() {
+  const v = !!confidentialBtn && confidentialBtn.dataset.confidential === '1';
+  setConfidential(false);
+  return v;
+}
 const dirPriBtn = wirePriority('dirPriorityBtn', 'director');
 const textPriBtn = wirePriority('textPriorityBtn', 'text');
 const actionPriBtn = wirePriority('actionPriorityBtn', 'action');
@@ -3194,7 +3278,8 @@ function composeObject(form) {
   const t = f === 'text' ? targetNow() : null;
   // A question is asked of the Board in a Main room, and of the room by its name in a side room, which has no Board.
   const askWho = f === 'action' && MAIN === false ? ROOM_NAME || 'this room' : '';
-  return { id: 'compose:' + f, form: f, room: t ? t.name || t.hallName : ROOM_NAME, to: t ? t.ref : '', file: f === 'text' && pendingFile ? pendingFile.filename : '', replying: replyState ? replyState.name : '', priority: !!pri && pri.dataset.priority === '1', askWho };
+  return { id: 'compose:' + f, form: f, room: t ? t.name || t.hallName : ROOM_NAME, to: t ? t.ref : '', file: f === 'text' && pendingFile ? pendingFile.filename : '', replying: replyState ? replyState.name : '', priority: !!pri && pri.dataset.priority === '1', askWho,
+    confidential: f === 'text' && !!confidentialBtn && confidentialBtn.dataset.confidential === '1' };
 }
 /** The room To: is set to, as room:sendTargets told it, or null for this room (or one no longer offered). */
 function targetNow() { return sendTo ? F.targets.find((t) => t.ref === sendTo) || null : null; }
@@ -3276,9 +3361,13 @@ function drawCompose(form) {
     send.title = inl.disabled || inl.label;
     if (inl.disabled) send.setAttribute('aria-disabled', 'true'); else send.removeAttribute('aria-disabled');
   }
-  // 📎 in the message row, where this seat attaches files.
+  // 📎 in the message row, where this seat attaches files; 🔒 Confidential beside 🔥 while a file is attached.
   const clip = form === 'text' ? document.getElementById('attachBtn') : null;
   if (clip) clip.hidden = !AGM.catalog.shown('compose', F, o).some((e) => e.id === 'compose.attach');
+  if (form === 'text' && confidentialBtn) {
+    confidentialBtn.hidden = !AGM.catalog.shown('compose', F, o).some((e) => e.id === 'compose.confidential');
+    if (confidentialBtn.hidden) setConfidential(false);
+  }
   const menu = AGM.catalog.items('compose', F, o).length > 0;
   let more = el.querySelector('.compose-more');
   if (menu && !more) {
@@ -3328,9 +3417,10 @@ const SENDS = {
     // A file attached is shared for download, its words its caption; it is uploaded as it is sent (the outbox's), never
     // before: the copy on this device is all there is until then.
     if (pendingFile) {
+      const secret = consumeConfidential();
       holdMessage('text', {
         type: 'file', url: pendingFile.url || '', filename: pendingFile.filename, mime: pendingFile.mime, caption: text.slice(0, 500),
-        priority: consumePriority(textPriBtn), replyTo: consumeReplyTo(),
+        priority: consumePriority(textPriBtn), replyTo: consumeReplyTo(), ...(secret ? { confidential: true } : {}),
       }, { file: pendingFile.file, upload: uploadFile });
       return;
     }
@@ -3351,6 +3441,7 @@ Object.assign(RUN, {
     draftAnswer(replying || lastBoard);
   },
   'compose.priority': (o) => setPriority(PRIORITY[o.form](), !o.priority),
+  'compose.confidential': (o) => setConfidential(!o.confidential),
   'compose.sendTo': (o, { value }) => { setSendTo(typeof value === 'string' ? value : ''); const field = composerField(); if (field) field.focus(); },
   'compose.attach': () => { selectTab('text'); fileInput.click(); },
   'compose.removeFile': () => { removePendingFile(); textInput.focus(); },
@@ -3443,10 +3534,12 @@ function draftAnswer(q) {
   const btn = document.getElementById('aiDraftBtn');
   btn.disabled = true; btn.textContent = '✨ Drafting…';
   setAiHint('Claude is drafting from the thread' + (docForAi.text ? ' and “' + docForAi.name + '”' : '') + '…');
+  // The document's text names where it comes from (`docFrom`): its message here, or this device's own copy.
+  const docFrom = !docForAi.text ? null : docForAi.id ? { messageId: docForAi.id } : { local: true };
   socket.emit('ai:draft', {
     question: q ? q.text || '' : '',
     instruction: textInput.value.trim(),
-    docName: docForAi.name, docText: docForAi.text,
+    docName: docForAi.name, docText: docForAi.text, ...(docFrom ? { docFrom } : {}),
   }, (res) => {
     btn.disabled = false; btn.textContent = '✨ Draft a reply';
     if (!res || !res.ok) { setAiHint((res && res.error) || 'No draft.', true); return; }
@@ -3561,8 +3654,10 @@ document.getElementById('researchCompose').addEventListener('paste', (e) => {
  * transferOnly}`, or why not — `{status, error}` when the server refused it, `{network: true}` when it never reached
  * AGMessage.
  */
-async function uploadFile(file) {
+async function uploadFile(file, from = '') {
   const fd = new FormData();
+  // What a picture was drawn of (`m:<messageId>` of this room), before the file: its mark is the source's.
+  if (typeof from === 'string' && from) fd.append('from', from);
   fd.append('file', file, file.name);
   let res;
   try { res = await fetch('/api/upload', { method: 'POST', body: fd, headers: { 'X-AGM-Upload': UPLOAD_TOKEN } }); } catch { return { network: true, error: 'Can\'t reach AGMessage — the file goes when the connection is back.' }; }
@@ -4199,7 +4294,14 @@ const Screens = (function () {
     pickH.length = 1;
     // Every picture of the room, its messages held or not (the first open's index of its files).
     const images = [...roomFiles.values()].filter((m) => /^image\/(png|jpeg|gif|webp)$/.test(m.mime));
-    for (const m of images) { const o = document.createElement('option'); o.value = m.url; o.textContent = m.filename; pickH.appendChild(o); }
+    // A picture marked confidential is listed and never chosen: a holding image is on every screen of the hall (S3).
+    for (const m of images) {
+      const o = document.createElement('option');
+      o.value = m.url;
+      o.textContent = m.confidential ? '🔒 ' + m.filename + ' — confidential: never on screens' : m.filename;
+      o.disabled = m.confidential === true;
+      pickH.appendChild(o);
+    }
     pickH.value = want;
     if (pickH.value !== want) { pickH.value = holding; holdingChoice = null; }   // the picked image is gone from the hall
     const cur = images.find((m) => m.url === holding);
@@ -5133,6 +5235,13 @@ const SpeakerLine = (() => {
     : F.canSendToStage ? '' : 'Sending at once needs Stagewatch\'s key');
   const count = (line) => Array.from(line).length;
   /**
+   * Why a confidential item's line may not go to this hall's Stagewatch ('' where it may: plan 4-§5.9.10), as the server's
+   * frame tells this room (`secretLine`): the hall's own Stagewatch, over an encrypted link.
+   */
+  const secretWhy = () => { const st = pageFacts.stage; return st && st.secretLine === true ? '' : st && typeof st.secretLine === 'string' ? st.secretLine : 'This hall has no Stagewatch linked — link one in Set up.'; };
+  /** What ＋ says of a confidential item's line: what Stagewatch does with it (S6). */
+  const SECRET_SAID = '🔒 Confidential — every output of this hall\'s Stagewatch shows it (the speaker\'s screens, NDI, its viewer page); anyone on the venue network can read it from Stagewatch, which also keeps it and passes it to its triggers.';
+  /**
    * The ＋ of one bar (`root`, its block in app.html): draw(content, none, goes) draws it for the take the bar would push
    * now (`none`: why there is nothing to send yet; `goes`: which of the bar's pushes carries that line, where it has
    * several); take() is what a push asks with it now: null where ＋ is off, {way, shown} (the way, and the line the bar
@@ -5154,10 +5263,13 @@ const SpeakerLine = (() => {
       last = { content, none, goes };
       root.hidden = !(F.canSendToStage || F.canPropose);
       line = AGMLine.flatten(content);
-      on.disabled = !line;
-      if (!line) on.checked = false;
-      why.hidden = !!line;
-      why.textContent = line ? '' : none || 'Nothing to put on the speaker\'s screen yet.';
+      // A confidential item's line goes only to the hall's own Stagewatch, over an encrypted link: ＋ is off, with why, elsewhere.
+      const secret = !!content && content.confidential === true;
+      const barred = secret && line ? secretWhy() : '';
+      on.disabled = !line || !!barred;
+      if (on.disabled) on.checked = false;
+      why.hidden = !!line && !barred;
+      why.textContent = barred ? sentence(barred) : line ? '' : none || 'Nothing to put on the speaker\'s screen yet.';
       const ticked = on.checked && !on.disabled;
       ways.hidden = !ticked;
       said.hidden = !ticked;
@@ -5179,7 +5291,7 @@ const SpeakerLine = (() => {
       now.hidden = false;
       const n = count(line);
       const over = line.length > AGMLine.SENT_MAX ? ' Sent now, its first ' + AGMLine.SENT_MAX + ' characters show.' : '';
-      said.textContent = '“' + (line.length > AGMLine.SENT_MAX ? line.slice(0, AGMLine.SENT_MAX) + '…' : line) + '” — ' + n + (n === 1 ? ' character' : ' characters')
+      said.textContent = (secret ? SECRET_SAID + ' ' : '') + '“' + (line.length > AGMLine.SENT_MAX ? line.slice(0, AGMLine.SENT_MAX) + '…' : line) + '” — ' + n + (n === 1 ? ' character' : ' characters')
         + ': ' + AGMLine.SENT_MAX + ' sent now, about ' + AGMLine.DESK_MAX + ' through the desk; it reads at a glance up to about ' + AGMLine.GLANCE + '.' + over + (goes ? ' ' + goes : '');
     }
     on.addEventListener('change', () => draw());
@@ -5314,11 +5426,19 @@ const Console = (function () {
    * back over that take alone, never older content put back (which could pop up again what the Board had closed); it is
    * kept beside the operator's (`aside`) where the operator's information is up, said so. A Take down offers nothing.
    */
-  function push(to, content, { ifSeq, undoable = true, name = '', arrive = '', refused = null, taken = null, line = null } = {}) {
+  function push(to, content, { ifSeq, undoable = true, name = '', arrive = '', refused = null, taken = null, line = null, confirm = false } = {}) {
     const onBoard = to === 'board';
     const info = INFO.includes(content.kind);
     const handBack = content.kind === 'chat' && content.layer === 'info';
-    AGM.outbox.now('page:push', { code: HALL_KEY, to, content, ...(Number.isInteger(ifSeq) ? { ifSeq } : {}), ...(arrive ? { arrive } : {}) }, (r) => {
+    AGM.outbox.now('page:push', { code: HALL_KEY, to, content, ...(Number.isInteger(ifSeq) ? { ifSeq } : {}), ...(arrive ? { arrive } : {}), ...(confirm ? { confirm: true } : {}) }, (r) => {
+      // A confidential file shown where it is not in use: its sender is asked, naming each room, and sends it again
+      // confirmed on yes (plan 4-§5.14).
+      if (r && !r.ok && r.confirm === true && !confirm) {
+        const rooms = Array.isArray(r.rooms) && r.rooms.length ? r.rooms.join(' and ') : 'the Main room';
+        AGM.ask(null, { title: '🔒 A confidential file', words: 'This file is confidential. Show it in ' + rooms + '? It will be in use there.', yes: 'Show it', no: 'Cancel' })
+          .then((a) => { if (a && a.yes) push(to, content, { ifSeq, undoable, name, arrive, refused, taken, line, confirm: true }); });
+        return;
+      }
       // A refusal its sender can mend (a picture whose file went: drawn and sent again) is its sender's to say.
       if ((!r || !r.ok) && refused && refused(r)) { read(); return; }
       if (!r || !r.ok) { AGM.toast((r && r.error) || 'Nothing was shown.', true); read(); return; }
@@ -5585,7 +5705,13 @@ const Show = (() => {
   const HIDDEN_PARTS = 'This file has hidden parts: Download would hand them over. Share a copy without them for download instead.';
   /** A file as a source to show: {url, name, mime} of the room's, or {file, name, mime} on this device; its extension. */
   const extOf = (src) => extOfName(src.url || src.name);
-  const sourceOf = (m) => (m && m.file ? { file: m.file, name: m.file.name, mime: m.file.type || '' } : m && isFileUrl(m.url) ? { url: m.url, name: m.filename || m.name || '', mime: m.mime || '' } : null);
+  const sourceOf = (m) => (m && m.file ? { file: m.file, name: m.file.name, mime: m.file.type || '' } : m && isFileUrl(m.url) ? { url: m.url, name: m.filename || m.name || '', mime: m.mime || '', ...(typeof m.id === 'string' && findMessage(m.id) ? { id: m.id } : {}) } : null);
+  /**
+   * What a picture drawn of `src` says it is of, as its upload names it (`from`): a file message of this room, `m:<id>`, or
+   * the take of this hall that shows it, `s:<seq>` (a document put up, Show them a picture's): its confidential mark then
+   * marks the picture as it is stored. '' for a file on this device, or one of neither.
+   */
+  const fromOf = (src) => (src && src.id ? 'm:' + src.id : src && Number.isInteger(src.seq) && src.seq > 0 ? 's:' + src.seq : '');
   /** The place `n` of a file of type `ext`, as a take's `at` names it, or none (a Word document opens at its top). */
   const atOf = (ext, n) => (PLACE[ext] && n >= 1 ? { [PLACE[ext]]: n } : null);
   /** The words of a step, said in the toast. */
@@ -5597,10 +5723,10 @@ const Show = (() => {
    * A file on this device uploaded for this room now: its address, or null with the server's words said. Turned away by
    * the uploads' rate, it says "Sending in 2 s…" and goes again, at most RATE_TRIES times, then says the server's words.
    */
-  async function upload(file, what) {
+  async function upload(file, what, from = '') {
     say('Uploading ' + what + (sizeWords(file.size) ? ' (' + sizeWords(file.size) + ')' : '') + '…');
     for (let tries = 0; ; tries++) {
-      const up = await uploadFile(file);
+      const up = await uploadFile(file, from);
       if (up && typeof up.url === 'string') return up.url;
       if (!(up && up.status === 429 && tries < RATE_TRIES)) { AGM.toast((up && up.error) || 'Not uploaded.', true); return null; }
       say('Sending in 2 s…');
@@ -5638,10 +5764,10 @@ const Show = (() => {
    * again, without its metadata), shown to `to`: drawn here into a new picture and uploaded, saying what it is a picture
    * of; an image of the room shown whole by its address, one on this device uploaded first. Nothing else of the file goes.
    */
-  async function picture(src, page, to, { name = '', view = null, rect = null, bare = false, arrive = '', fresh = false, note = '', line = null } = {}) {
+  async function picture(src, page, to, { name = '', view = null, rect = null, bare = false, arrive = '', fresh = false, note = '', line = null, confidential = false } = {}) {
     const ext = extOf(src);
     const image = IMAGE.includes(ext);
-    const noted = note ? { note } : {};
+    const noted = { ...(note ? { note } : {}), ...(confidential ? { confidential: true } : {}) };
     if (image && !rect && !bare) {
       const url = src.url || await upload(src.file, 'the picture');
       if (url) Console.showFile(to, { kind: 'image', url, ...noted }, { name, arrive, line });
@@ -5662,14 +5788,14 @@ const Show = (() => {
       if (!blob) { AGM.toast((image ? 'The picture' : 'p. ' + page) + ' could not be drawn.', true); return; }
       const stem = (src.name || 'page').replace(/\.[A-Za-z0-9]{1,5}$/, '');
       const type = blob.type === 'image/jpeg' ? 'jpg' : 'png';
-      url = await upload(new File([blob], stem + (image ? ' part' : ' p' + page) + '.' + type, { type: blob.type || 'image/png' }), 'the picture');
+      url = await upload(new File([blob], stem + (image ? ' part' : ' p' + page) + '.' + type, { type: blob.type || 'image/png' }), 'the picture', fromOf(src));
       if (!url) return;
       keepPicture(key, url, blob.size);
     }
     const at = image ? {} : { at: { page } };
     const from = src.url ? { url: src.url, ...at } : { local: true, name: src.name, ...at };
     // A picture kept from before whose file the stage let go is drawn and uploaded again, once.
-    const refused = kept && !fresh ? (r) => { if (!(r && GONE_FILE.test(r.error || ''))) return false; drawnPictures.delete(key); picture(src, page, to, { name, view, rect, bare, arrive, fresh: true, note, line }); return true; } : null;
+    const refused = kept && !fresh ? (r) => { if (!(r && GONE_FILE.test(r.error || ''))) return false; drawnPictures.delete(key); picture(src, page, to, { name, view, rect, bare, arrive, fresh: true, note, line, confidential }); return true; } : null;
     Console.showFile(to, { kind: 'image', url, from, ...noted }, { name, arrive, refused, line });
   }
   /**
@@ -5677,7 +5803,7 @@ const Show = (() => {
    * its own: drawn again here, its metadata left behind, and uploaded, saying where in the file it is (`at`). Nothing else
    * of the file goes.
    */
-  async function inside(src, to, { view, at = {}, name = '', arrive = '', fresh = false, note = '', line = null } = {}) {
+  async function inside(src, to, { view, at = {}, name = '', arrive = '', fresh = false, note = '', line = null, confidential = false } = {}) {
     const key = pictureKey(src, 'in:' + (at.block || at.slide || 0), null);
     const kept = drawnPictures.get(key);
     let url = !fresh && kept && Date.now() - kept.at < PICTURE_KEEP_MS ? kept.url : '';
@@ -5687,20 +5813,20 @@ const Show = (() => {
       try { blob = view ? await view.pickPicture() : null; } catch { blob = null; }
       if (!blob) { AGM.toast('The picture could not be drawn.', true); return; }
       const stem = (src.name || 'document').replace(/\.[A-Za-z0-9]{1,5}$/, '');
-      url = await upload(new File([blob], stem + ' picture.' + (blob.type === 'image/jpeg' ? 'jpg' : 'png'), { type: blob.type || 'image/png' }), 'the picture');
+      url = await upload(new File([blob], stem + ' picture.' + (blob.type === 'image/jpeg' ? 'jpg' : 'png'), { type: blob.type || 'image/png' }), 'the picture', fromOf(src));
       if (!url) return;
       keepPicture(key, url, blob.size);
     }
     const where = Object.keys(at).length ? { at } : {};
     const from = src.url ? { url: src.url, ...where } : { local: true, name: src.name, ...where };
-    const refused = kept && !fresh ? (r) => { if (!(r && GONE_FILE.test(r.error || ''))) return false; drawnPictures.delete(key); inside(src, to, { view, at, name, arrive, fresh: true, note, line }); return true; } : null;
-    Console.showFile(to, { kind: 'image', url, from, ...(note ? { note } : {}) }, { name, arrive, refused, line });
+    const refused = kept && !fresh ? (r) => { if (!(r && GONE_FILE.test(r.error || ''))) return false; drawnPictures.delete(key); inside(src, to, { view, at, name, arrive, fresh: true, note, line, confidential }); return true; } : null;
+    Console.showFile(to, { kind: 'image', url, from, ...(note ? { note } : {}), ...(confidential ? { confidential: true } : {}) }, { name, arrive, refused, line });
   }
   /** A quote (a pick's body, docview's quote()) of `src` shown to `to`, its source named as AGMessage holds it: never its address. */
-  function quote(src, q, to, { name = '', arrive = '', note = '', line = null } = {}) {
+  function quote(src, q, to, { name = '', arrive = '', note = '', line = null, confidential = false } = {}) {
     const { at, approx, over, ...body } = q;
     const from = src.url ? { url: src.url, ...(at && Object.keys(at).length ? { at } : {}) } : { local: true, name: src.name, ...(at && Object.keys(at).length ? { at } : {}) };
-    Console.showFile(to, { kind: 'snippet', ...body, from, ...(note ? { note } : {}) }, { name, arrive, line });
+    Console.showFile(to, { kind: 'snippet', ...body, from, ...(note ? { note } : {}), ...(confidential ? { confidential: true } : {}) }, { name, arrive, line });
   }
   /**
    * `src` shown whole to `to`, opened at `at`, with Download when ticked: one of this device's uploaded first. Where the
@@ -5709,14 +5835,15 @@ const Show = (() => {
    * for nothing. A stand-in picture kept from before whose file the stage let go is drawn and uploaded again, once. The
    * document is kept by its take's number, for Show them a picture.
    */
-  async function whole(src, at, download, to, { name = '', arrive = '', note = '', line = null } = {}) {
+  async function whole(src, at, download, to, { name = '', arrive = '', note = '', line = null, confidential = false } = {}) {
     const url = src.url || await upload(src.file, 'the document');
     if (!url) return;
-    const doc = { url, name: src.name || '', file: src.file || null };
+    // Its message, where a file of this room is shown: a picture drawn of it for the older devices names it (fromOf).
+    const doc = { url, name: src.name || '', file: src.file || null, ...(src.id ? { id: src.id } : {}) };
     const send = async (fresh) => {
       const made = Console.olderOf(to).n > 0 && STANDIN_TYPES.includes(extOf(src)) ? await standinFor(doc, at, fresh) : null;
       const refused = made && made.kept && !fresh ? (r) => { if (!(r && GONE_FILE.test(r.error || ''))) return false; send(true); return true; } : null;
-      Console.showFile(to, { kind: 'doc', url, ...(at ? { at } : {}), download: download === true, ...(note ? { note } : {}), ...(made ? { standin: made.standin } : {}) }, { name, arrive, refused, line, taken: (r) => keepDoc(r.seq, doc, at) });
+      Console.showFile(to, { kind: 'doc', url, ...(at ? { at } : {}), download: download === true, ...(note ? { note } : {}), ...(made ? { standin: made.standin } : {}), ...(confidential ? { confidential: true } : {}) }, { name, arrive, refused, line, taken: (r) => keepDoc(r.seq, doc, at) });
     };
     await send(false);
   }
@@ -5756,7 +5883,7 @@ const Show = (() => {
     } catch { blob = null; }
     if (!blob) { AGM.toast('p. ' + page + ' could not be drawn for the older devices.', true); return null; }
     const stem = (src.name || 'page').replace(/\.[A-Za-z0-9]{1,5}$/, '');
-    const url = await upload(new File([blob], stem + ' p' + page + '.' + (blob.type === 'image/jpeg' ? 'jpg' : 'png'), { type: blob.type || 'image/png' }), 'the picture');
+    const url = await upload(new File([blob], stem + ' p' + page + '.' + (blob.type === 'image/jpeg' ? 'jpg' : 'png'), { type: blob.type || 'image/png' }), 'the picture', fromOf(src));
     if (!url) return null;
     keepPicture(key, url, blob.size);
     return { url, kept: false };
@@ -5812,10 +5939,11 @@ const Show = (() => {
    */
   function docFor(info) {
     if (!info || !Number.isInteger(info.seq)) return null;
+    // Each with the take that shows it (`seq`): a picture drawn of it names that take as its source (fromOf).
     const d = sentDocs.get(info.seq);
-    if (d) return d;
+    if (d) return { src: { ...d.src, seq: info.seq }, at: d.at };
     const f = info.doc;
-    return f && typeof f === 'object' && isFileUrl(f.url) ? { src: { url: f.url, name: typeof f.name === 'string' ? f.name : '' }, at: f.at && typeof f.at === 'object' ? f.at : null } : null;
+    return f && typeof f === 'object' && isFileUrl(f.url) ? { src: { url: f.url, name: typeof f.name === 'string' ? f.name : '', seq: info.seq }, at: f.at && typeof f.at === 'object' ? f.at : null } : null;
   }
   /** What Show them a picture sends for the document a take shows (`info`): {said}, or null where this page has none of it. */
   function standinSaid(info) {
@@ -5874,7 +6002,7 @@ const Show = (() => {
     if (previewing && previewing.file && STAGE.includes(extOfName(previewing.file.name))) out.push({ value: 'local', label: previewing.file.name + ' (your copy)', src: sourceOf(previewing) });
     for (const m of roomFiles.values()) {
       if (m.transferOnly || !isFileUrl(m.url) || !STAGE.includes(extOfName(m.url))) continue;
-      out.push({ value: m.id, label: m.filename || 'a file', src: sourceOf(m) });
+      out.push({ value: m.id, label: (m.confidential ? '🔒 ' : '') + (m.filename || 'a file'), src: sourceOf(m) });
     }
     return out;
   }
@@ -6228,6 +6356,10 @@ const PreviewBar = (() => {
   const arriveSel = $('pickArrive');
   const arriveWhy = $('pickArriveWhy');
   const freshEl = $('previewFresh');
+  // 🔒 Confidential: lit, and not switched off here, for a file marked confidential (the server marks what is shown of it
+  // whatever is sent); the pusher's own mark for a copy on this device, or a file of the room not marked (plan 4-§5.14).
+  const secret = $('previewSecret');
+  const secretBox = $('previewSecretBox');
   // The line above what goes, for every choice here (a pick, a picture, the document, what is in view), and ＋ the
   // speaker's screen, whose line is the pick's words, else that line.
   const lineNote = $('pickNote');
@@ -6299,6 +6431,12 @@ const PreviewBar = (() => {
     bar.hidden = !show;
     if (!show) { PickBar.draw(); return; }
     drawTargets();
+    const kept = previewing && previewing.msg ? findMessage(previewing.msg.id) || previewing.msg : null;
+    const marked = !!kept && kept.confidential === true;
+    if (marked) secret.checked = true;
+    else if (secret.disabled) secret.checked = false;
+    secret.disabled = marked;
+    secretBox.title = marked ? 'Marked confidential: it goes only where it is in use, or where you send it.' : 'Mark what you show confidential: its words never go to the AI, nor to screens.';
     const n = pageNow();
     const image = Show.IMAGE.includes(ext);
     pic.hidden = !(image || ext === 'pdf');
@@ -6357,12 +6495,13 @@ const PreviewBar = (() => {
    */
   function drawLine() {
     const picked = PickBar.lineContent();
-    speaker.draw(picked || { kind: 'doc', note: lineNote.value.trim() }, 'Pick words in the file, or type a line above it, to put one on the speaker\'s screen.',
+    const marked = secret.checked ? { confidential: true } : {};
+    speaker.draw(picked ? { ...picked, ...marked } : { kind: 'doc', note: lineNote.value.trim(), ...marked }, 'Pick words in the file, or type a line above it, to put one on the speaker\'s screen.',
       picked ? 'It goes with the picked words, by their 📺 Show.' : 'It goes with a picture or the document.');
   }
   /** What a push from the bar carries besides itself: the line above it, and what ＋ asks with it (SpeakerLine take()); ＋ is off again after it. */
   function withPush() {
-    const out = { note: lineNote.value.trim(), line: speaker.take() };
+    const out = { note: lineNote.value.trim(), line: speaker.take(), confidential: secret.checked };
     speaker.reset();
     return out;
   }
@@ -6405,6 +6544,7 @@ const PreviewBar = (() => {
   });
   noMeta.addEventListener('change', draw);
   lineNote.addEventListener('input', () => { if (!bar.hidden) drawLine(); });
+  secret.addEventListener('change', () => { if (!bar.hidden) drawLine(); });
   toSel.addEventListener('change', draw);
   arriveSel.addEventListener('change', () => { chosen(arriveSel); draw(); });
   // Each read of the console draws the bar again: where the target stands, and whether this seat may show at all.
@@ -6540,7 +6680,9 @@ const QuoteTab = (() => {
     const over = q ? model.pasteOver(q) : null;
     const words = note.value.trim();
     // What will go, as the Board's page draws it: measured at a glance on a tablet (PickBar.long), once for each quote.
-    const content = q && !over && !told.error ? { kind: 'snippet', ...q, ...(told.from ? { from: told.from } : {}), ...(words ? { note: words } : {}) } : null;
+    const secretTick = document.getElementById('quoteSecret');
+    const marked = secretTick && secretTick.checked ? { confidential: true } : {};
+    const content = q && !over && !told.error ? { kind: 'snippet', ...q, ...(told.from ? { from: told.from } : {}), ...(words ? { note: words } : {}), ...marked } : null;
     const key = content ? JSON.stringify(content) : '';
     if (content && (!glanced || glanced.key !== key)) glanced = { key, long: PickBar.long(m, content) };
     const parts = [];
@@ -6602,6 +6744,8 @@ const QuoteTab = (() => {
   fromSel.addEventListener('change', () => { webIn.hidden = fromSel.value !== 'web'; if (!webIn.hidden) webIn.focus(); draw(); });
   webIn.addEventListener('input', () => draw());
   note.addEventListener('input', () => draw());
+  // 🔒 Confidential changes what ＋ says of the line, and whether it may go at all.
+  $('quoteSecret').addEventListener('change', () => draw());
   toSel.addEventListener('change', () => draw());
   arriveSel.addEventListener('change', () => { PreviewBar.chosen(arriveSel); draw(); });
   // Show is the one way it goes: Enter in a field never sends it (the form has no submit button).
@@ -6621,7 +6765,10 @@ const QuoteTab = (() => {
     const sent = box.value;
     const line = speaker.take();
     speaker.reset();
-    Console.showFile(t.to, { kind: 'snippet', ...q, ...(from ? { from } : {}), ...(words ? { note: words } : {}) }, { name: t.name, arrive: PreviewBar.arrival(t, arriveSel), line, taken: () => { if (box.value === sent) clear(); } });
+    // 🔒 Confidential: the pusher's own mark on words typed or pasted (plan 4-§5.14): never to the AI, nor to screens.
+    const secretBox = document.getElementById('quoteSecret');
+    const secret = !!secretBox && secretBox.checked;
+    Console.showFile(t.to, { kind: 'snippet', ...q, ...(from ? { from } : {}), ...(words ? { note: words } : {}), ...(secret ? { confidential: true } : {}) }, { name: t.name, arrive: PreviewBar.arrival(t, arriveSel), line, taken: () => { if (box.value === sent) { clear(); if (secretBox) secretBox.checked = false; } } });
   }
   showBtn.addEventListener('click', show);
   tab.addEventListener('click', () => { draw(); box.focus(); });
@@ -6947,7 +7094,7 @@ const Simple = (function () {
     strip.hidden = !m || inView;
     if (strip.hidden) { stripSaid = ''; return; }
     const from = (m.from.name || 'Backstage') + ':';
-    const text = m.type === 'file' ? m.filename || 'a file' : String(m.text || '');
+    const text = m.type === 'file' ? (m.confidential ? '🔒 ' : '') + (m.filename || 'a file') : String(m.text || '');
     const others = hot.length - 1;
     // Got it as the catalogue draws it now (its label, and why it cannot act while the page is not connected).
     const ack = AGM.catalog.inline('msg', F, m).filter((i) => i.id === 'msg.ack').map((i) => [i.label, i.disabled, i.held]);

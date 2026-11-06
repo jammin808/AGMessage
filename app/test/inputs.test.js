@@ -16,12 +16,12 @@ const EVENTS = [...new Set(handlerFiles().flatMap((f) => [...readSource(path.joi
 const ADMIN_SKIP = new Set(['admin:tunnelStart', 'admin:tunnelStop', 'admin:renewCertificate']);
 const NULLS = { roomCode: null, code: null, id: null, messageId: null, text: null, content: null, seq: null, targetRoom: null, socketId: null, line: null, state: null, hall: null, cid: null, on: null, heldMs: null, until: null, codeOn: null, newCode: null, keepGuests: null, sendFrom: null, sendBack: null, to: null, replyTo: null, uid: null, kind: null, url: null, again: null, ifSeq: null, view: null, beforeSeq: null, layer: null, arrive: null, role: null, at: null, from: null, note: null, download: null, takeDown: null,
   unit: null, items: null, table: null, rows: null, blocks: null, title: null, cut: null, more: null, ordered: null, start: null, head: null, side: null, ref: null, focus: null, lines: null, web: null,
-  standin: null, docs: null, withTake: null };
+  standin: null, docs: null, withTake: null, confidential: null, confirm: null, docFrom: null };
 // An object whose toString is not a function: String() throws on it, so a handler must never call String() on input.
 const U = { toString: 1 };
 const UNCONVERTIBLE = { roomCode: U, code: U, id: U, messageId: U, name: U, text: U, caption: U, options: [U], content: { kind: 'message', text: U }, seq: U, targetRoom: U, line: U, state: U, hall: U, words: U, destination: U, urgency: U, image: U, token: U, url: U, cid: U, heldMs: U, until: U, sendFrom: [U], sendBack: [U], to: U, replyTo: U, uid: U, kind: U, again: U, ifSeq: U, view: U, beforeSeq: U, layer: U, arrive: U, role: U, at: { page: U, approx: U }, from: { url: U }, note: U, download: U, takeDown: U,
   unit: U, items: [U], table: { rows: [[U]] }, blocks: [U], title: U, cut: U, more: { rows: U }, ordered: U, start: U, ref: U, focus: [U], lines: [U], web: U,
-  standin: { url: U, snippet: U }, docs: U, withTake: U };
+  standin: { url: U, snippet: U }, docs: U, withTake: U, confidential: U, confirm: U, docFrom: { messageId: U, seq: U, local: U } };
 const SHAPES = [null, 7, 'x', true, [], {}, NULLS, { code: {}, id: [], roomCode: 5, messageId: {}, content: 'x', text: {} }, UNCONVERTIBLE];
 
 // Each send: with an answer callback (the server may answer it) or without; either way at most 400 ms is waited.
@@ -154,6 +154,11 @@ test('client values are read by their type: a value String() cannot convert reac
     // none here): no ticket given.
     [guest, 'file:download', { messageId: U, seq: U }], [guest, 'file:download', { messageId: U }], [guest, 'file:download', { seq: U }],
     [guest, 'file:download', U], [ctl, 'file:download', { messageId: U }],
+    // A file's confidential mark, its message and its tick by type, from a backstage seat and from the admin's page: nothing
+    // marked. A confidential file's confirmation and a draft's document source by type: nothing sent or drafted.
+    [guest, 'file:mark', { messageId: U, on: U }], [guest, 'file:mark', { messageId: U, on: true }], [guest, 'file:mark', U], [ctl, 'file:mark', { messageId: U, on: U }],
+    [guest, 'forward', { messageId: U, targetRoom: U, confirm: U }], [guest, 'room:send', { to: U, messageId: U, confirm: U, confidential: U }],
+    [guest, 'ai:draft', { docText: U, docFrom: { messageId: U } }], [guest, 'ai:draft', { docText: 'words', docFrom: U }],
     // A line with a push, its push's number and its words by type, from a backstage seat that may send to the speaker's
     // screen (a locked hall's guest, and an open hall's): the push named is read before anything is looked up or sent.
     [lockedGuest, 'stage:propose', { text: U, withTake: U }],

@@ -745,6 +745,22 @@ and says how many earlier ones are no longer kept. Clearing the Main
 room's messages clears it, clearing a side room's drops what came from
 it, and removing the hall removes it.
 
+Confidential files. Tick 🔒 Confidential beside 🔥 Priority when you
+share a file, or choose 🔒 Mark confidential on its ⋯ later (the
+backstage team, and the admin, from a hall page or the admin page). Take
+it off any screen or holding image first. Only whoever marked it, or the
+admin, can remove the mark. A confidential file goes only where it is in use: to
+send it into another room, or show it on the Board's pages from a side
+room, you are asked once more, naming the room ("It will be in use
+there"). It is never put on a screen or used as a holding image. Its
+words never go to the AI, and the transcript shows them only on this
+laptop, or when Include confidential text is ticked on the admin page.
+Its line on the speaker's screen goes only from the Main room, and only
+to the hall's own Stagewatch over https; while it is up, the screens,
+the other rooms and the halls board show nothing of it. The mark is a
+rule about where AGMessage sends the file, not encryption: anyone who
+reads it can retype or photograph it.
+
 What a Board tablet keeps: nothing AGMessage writes or offers. What is
 shown is drawn from memory and let go when it goes; files are never kept
 in the browser's cache, and opening a file's address does not save it or

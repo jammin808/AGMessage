@@ -730,7 +730,7 @@ test('(d), (i), (j) the contexts: conn made in the connection after each helper 
   const call = groupAt(server, built + 'const { ctx, takesCtx } = contexts('.length - 1);
   assert.equal(call.entries.length, 1, 'contexts() is given the parts and nothing else');
   const parts = groupAt(server, call.at[0]).entries.map(keyOf);
-  assert.deepEqual(parts.map((k) => k.key), ['store', 'apply', 'systemMessage', 'readSend', 'messageOf', 'uploadOnDisk', 'fileCopy', 'tickets', 'makeMessageId', 'removeUnused', 'fileNamesOf', 'audit', 'accounts', 'boardDirty', 'newSideRoom', 'renameRoom', 'roomNameRefused', 'newGuestCode', 'guestPagesOf', 'sendGuestsOut', 'codeChanged', 'invitesFor', 'settings', 'sendersOf', 'sendsInto', 'setRoomSends', 'linkFor', 'stagePayload', 'pages', 'stageRecord', 'hallPages', 'takeSends', 'holdingOf', 'pagesChanged', 'pageHidden', 'selfHosts', 'tellWebRights', 'viewChanged', 'stageSource', 'stageCheck', 'freshUpload', 'stageDropped', 'io']);
+  assert.deepEqual(parts.map((k) => k.key), ['store', 'apply', 'systemMessage', 'readSend', 'messageOf', 'uploadOnDisk', 'fileCopy', 'tickets', 'makeMessageId', 'removeUnused', 'fileNamesOf', 'audit', 'accounts', 'boardDirty', 'newSideRoom', 'renameRoom', 'roomNameRefused', 'newGuestCode', 'guestPagesOf', 'sendGuestsOut', 'codeChanged', 'invitesFor', 'settings', 'sendersOf', 'sendsInto', 'setRoomSends', 'linkFor', 'stagePayload', 'pages', 'stageRecord', 'hallPages', 'takeSends', 'holdingOf', 'pagesChanged', 'pageHidden', 'selfHosts', 'tellWebRights', 'viewChanged', 'stageSource', 'stageCheck', 'freshUpload', 'stageDropped', 'io', 'marked', 'fileMarked', 'inUseRooms', 'markShared', 'markFresh', 'markRefusal', 'markedTakes', 'screensShowing', 'madeUrls']);
   assert.ok(parts.every((k) => k.value === null), 'each part by its own name');
   const declared = new Map();
   for (const m of server.matchAll(/^(?:const|let|var|class|function\*?|async function\*?)\s+([A-Za-z_$][\w$]*)/gm)) if (!declared.has(m[1])) declared.set(m[1], m.index);
@@ -1567,6 +1567,16 @@ const ANY_ROOM = {
     'a room\'s people list told again, by its key, Main or side, when what its admin\'s rows say of a person changed (their chat view)',
     'a file on people\'s pages ends with its message only where no other message of the hall, in any of its rooms, holds it',
     'a file a take would show: the rooms of its hall, Main or side, whose messages hold it, and the room a fresh upload was made for',
+    'a picture\'s source is a file message of the room, Main or side, its upload was made for',
+    'a confidential mark reaches every room, Main or side, of any hall, whose messages hold its file',
+    'a confidential file is in use in every room, Main or side, of any hall, whose messages hold it',
+    'and in the room, Main or side, a fresh upload of it was made for',
+    'a confidential file\'s download is written in the room, Main or side, its ticket was given in',
+    'a room\'s pages, Main or side, are told whether its hall may send a confidential line, and a held line as theirs to read',
+    'a picture drawn of a confidential file is marked in the room, Main or side, its upload was made for',
+    'a confidential take is in use in each room of its hall, Main or side, where every file it shows or was made from is',
+    'and a confidential line refused names each room, Main or side, where its item is in use',
+    'a held line\'s rooms, Main or side, are kept while they are still here',
   ],
   'lib/handlers/rooms.js': [
     'a hall full of rooms says how many it holds',
@@ -1578,6 +1588,8 @@ const ANY_ROOM = {
   'lib/handlers/takes.js': [
     'the rooms of a hall a pusher may read, Main or side: a holding picture shared in them, and the people a push names or a console lists seated in them',
     'the room the admin names a person\'s chat view in, by its key, Main or side: the person seated there',
+    'a confidential file shown where it is not in use names each room, Main or side, it will be in use in',
+    'and its pusher confirms it from a room, Main or side, where it is in use',
   ],
 };
 /** A call to one of the store's any-room readers, however it is spaced. */

@@ -5835,6 +5835,126 @@ text; the confidential mark, its words in the transcript and what it withholds f
 - The papers: `README.md`, `README.txt`, `docs/DISPLAYS.md`, `docs/DESIGN.md`, `docs/ACCOUNTS.md` (`room.reset`'s
   words), `docs/ANALYSIS.md`, `SECURITY.md`, `CLAUDE.md`.
 
+**A file can be marked confidential, and it goes only where it is in use or sent** (the plan's Part 4, unit 31, its §5.14
+with §5.9.10's line, §5.11's stores and rows, §5.12's AI and §5.13's transcript; the owner's answer 16, "Files, especially
+confidential, can only be sent to the rooms in use or selected", and S3, S6-S9, S12 and S16 as applied; an On stage seat
+shares no file, so it marks none, as Part 7 amends §5.14)
+- **One record a file.** The mark is `pages.json`'s `marks` (the upload's name: who marked it, the file's name, when),
+  written once there is one; no message is rewritten, so every copy of the file, in every room and hall, a side room not
+  loaded included, is marked at once, and a new message of a marked file is marked. A page is given a file message with
+  `confidential: true` and who marked it (`markedBy`, their name and the uid their messages carry), live, in a join's
+  history and a resume's ops, read back earlier (`history:before`, `history:message`) and in the admin's room view; a
+  change of the mark is told to every page of every room holding the file (`fileMark`, by the messages' ids, unnumbered,
+  latest wins). The record goes once the file has left the disk (one the disk kept, busy or not ours to remove, stays
+  marked while it is there).
+- **Who marks it.** Whoever shares a file marks it as it is shared: 🔒 Confidential beside 🔥 Priority, off by default,
+  shown while a file is attached (`message` and `room:send` take `confidential: true`), the record written before the
+  message is posted and taken back if the post is refused. Later, from a file's ⋯ (🔒 Mark confidential, `file:mark
+  {messageId, on}`, one writes token): a seat backstage with `hall.files` where the file is, never a Viewer account, or the
+  admin, from a hall page or the admin page's room view (the room it watches). The mark is removed by whoever set it or the
+  admin ("Only Sue Staff or an admin can remove the mark."). Never On stage ("Do that from a backstage page."), nor from
+  the admin's support view. Refused while the file is on a screen, a screen's holding slide, a hall's holding image or a
+  holding slide on people's pages, naming each ("Take it off Foyer and the hall's holding image first: a screen is seen by
+  whoever stands near it."), as a mark set by sharing or showing it is. Asked again as it is, it is answered `already`. One
+  `file.mark` row for each mark set or removed, the file by its kind alone: "a pdf in Legal (Hall 2) marked confidential"
+  / "…: the confidential mark removed", "… marked confidential as it was shared", "a png shown on people's pages in Main
+  (Hall 2) marked confidential as it was shown", "a png drawn of a confidential file, marked confidential as it was
+  uploaded in Legal (Hall 2)".
+- **Where it is in use, and where it goes only confirmed.** In use: each room a message of which holds it, the room a
+  fresh upload of it was made for, and where a take or an Earlier entry naming it is drawn (the Main room for the Board,
+  each room a person's pages sit in). `room:send` and `forward` into a room where it is not in use, and a take that would
+  draw it where it is not, are refused until the sender confirms (`confirm: true`): "This file is marked confidential:
+  confirm to send it to Hall 2. It will be in use there." / "…: confirm to show it in the Main room. It will be in use
+  there.", the answer carrying `confirm` and the rooms; the page asks once more, naming the rooms, and sends it again
+  confirmed (S12). A confirmation comes from a seat that may download it where it is in use, or the admin. The rows say
+  "a confidential file (pdf, 2.1 MB) from Legal (Hall 2) to Main (Hall 2), confirmed" (a forward is a `room.send` row too)
+  and "the Board (6 pages) → a confidential PDF at p. 3, confirmed". A picture or a quote keeps the upload it was made
+  from on its take by a reference (a keyed hash of its name: never its address, which `pages.json` still holds of no
+  quote; the server's alone, never told a page), so it puts its file in use where it is drawn, as a document does.
+- **What carries it.** A take is marked by the server from its file's record whatever the page sent: a document, a
+  picture of it (the upload's new form field `from`, `m:<messageId>` of the room's file or `s:<seq>` of the take that
+  shows it, which the page sends for a picture drawn for the older devices and for Show them a picture, marks the picture
+  as it is stored, before any take names it; a `from` of any other shape is refused), its stand-in, and a quote picked
+  from it. A page may add the mark (🔒 Confidential in the Preview's bar, lit and locked for a marked file, and on the ❝
+  Quote tab), never remove it; a fresh upload shown so is marked by who showed it.
+- **Marked after it went up.** A file marked while a take of it is up, or an Earlier entry names it, marks every such
+  take (a picture or a quote made from it too; a page shown it draws its 🔒 when it is next told its takes, at its next
+  take or join), and every check reads the take as it is now: its line and the hold, the
+  AI's "now" line, a draft's document, a picture drawn of it, the console's words to each asker. The stage record's
+  entries keep the uploads they name by the same references (the server's alone), so the transcript and the minutes read
+  the mark as they are read: an entry shown before its file was marked is withheld from the AI and keeps its words to the laptop.
+- **Never on a screen.** A confidential file is refused on a screen, as a hall's holding image and as a holding slide on
+  people's pages: "A confidential file is never shown on screens: anyone near them can see it." (S3). ⧉ Show on screens
+  is drawn greyed with those words on a confidential file, and the holding image's list shows a marked picture, never to
+  be chosen ("🔒 name — confidential: never on screens").
+- **Named only where it is in use.** The console's words mark it ("🔒 ❝ a paragraph from Legal advice.pdf, p. 3"), the
+  audit's say "a confidential …", and an asker of `page:status` seated in no room where the item is in use (a Media
+  researcher) reads "🔒 a confidential item", with no file, place or words, nor the room it was sent from, and is given
+  no file to send a picture of.
+- **Its line on the speaker's screen** goes only when the item is in use in the hall's Main room ("This is confidential to
+  Legal: show it in the Main room first.", naming each room where it is: for a take of files, where every file it shows
+  or was made from is in use), to the hall's own Stagewatch ("This hall shares its Stagewatch with another
+  hall: a confidential line is not sent there.") over an encrypted link, https with its certificate pinned ("This hall's
+  Stagewatch link is not encrypted: a confidential line is not sent."), with words that say what Stagewatch does with it
+  (every output, its public frame, its triggers, its saved settings; S6). A hall page is told which in its frame
+  (`secretLine`), so ＋ is off, with why, where it cannot go. Its row adds ", a confidential line". At most 20 confidential
+  lines wait on one Stagewatch at once (sent, or proposed): the next is refused until they come up or the desk answers
+  ("Wait for the confidential lines already sent to this Stagewatch to come up, or for the show desk to answer them: 20
+  are waiting."), so no part of a hold is ever let go for its size.
+- **The hold.** While a confidential line is on a Stagewatch's frame, its message reaches none of AGMessage's other
+  readers: screens, the halls board, the context and the AI's brief get `''`; pages of a room where the item is in use
+  read "🔒 a confidential line"; every other room `''`; its acknowledgement stays. Set before the line goes. The message
+  held is held while the frame shows it (by its MAC or its id) and released once the frame moves past both: a new
+  message, or the operator's clear. While anything waits, every new message is held, the newest kept, so a second line
+  never releases the first before the frame has moved past it: a send waits for its own message (the one carrying its
+  receipt's id or a later one, Stagewatch numbering upward; with no id, the first new one; a receipt read before
+  Stagewatch restarted, or before AGMessage's own start, the first new one); a proposal waits for the desk's answer (the
+  operator may approve it edited): approved, done or lost (it may have run: the desk restarted, or no record follows it
+  any more), the newest message held since it was proposed, else the next; rejected, failed or undelivered, its part
+  ends and what is held stays held; an answer that is not plain (`unknown`) is asked again, holding meanwhile. Kept by
+  MAC and id, never text, in `pages.json`'s `holds`, so a restart still holds the first frame; a frame-less state
+  (connecting, a restart) releases nothing; a hold whose link is gone is dropped.
+- **The AI.** `ai:draft`'s document text names its source (`docFrom`: `{messageId}`, `{seq}` or `{local: true}`): text
+  with none, or from a confidential file or take, is refused ("This file is marked confidential: its text is not sent to
+  the AI."), and a named file's name is the server's, never the page's (the page leaves a confidential file's text out).
+  The thread says "shared a confidential file", the "now" line "a confidential item — not sent to the AI", and the
+  minutes "Ana showed the Board a confidential item (its name and words not sent to the AI)", none of them its name,
+  place, caption or words (S9).
+- **The transcript** shows a confidential entry's mark, file and place, and its words and line only on the AGMessage
+  laptop itself or with the admin page's 🔒 Include confidential text (`?confidential=1`), which writes a `room.read` row
+  "…, confidential text included"; otherwise "(its words are shown on the AGMessage laptop, or with Include confidential
+  text)". A marked file reads "📎 🔒 Confidential · name". A confidential file's download is one `file.download` row as
+  its stream ends ("a confidential pdf downloaded in Legal (Hall 2)"), never at its ticket.
+- **Where it shows**, an icon with its word, never colour alone: the file card ("📎 🔒 Confidential · Board pack.pdf"),
+  the Preview's header and the pinned list, the take's card ("🔒" first) and its source line ("🔒 Confidential · Quoted
+  by Ana · …") on the Board's pages, the console, the admin's room view and the halls board's line ("📎 🔒 name", never
+  its caption). The admin's Roles & invites takes 🎟, so 🔒 means confidential alone among the acts.
+- What it does not do: it is not encryption; a person who reads it can retype or photograph it; the mark on a picture or
+  local copy and the AI's check hold for AGMessage's own page, not against one that rewrites itself.
+- Rolling back: 0.5.1 does not read `pages.json`, so under 0.5.1 a marked file is an ordinary one, and a hold is not kept.
+- Tests: `test/confidential.test.js` (new, end to end: shared marked, one record with no message rewritten, given marked
+  to a page that joins, reads back and resumes, removed by its marker or the admin only, refused On stage, on a screen and
+  as a holding image, and while on a screen; a picture drawn of it marked as it is stored; a Board take confirmed then in
+  use, a picture and a quote marked whatever was sent; "🔒 a confidential item" to Media; `room:send` and `forward`
+  confirmed and their rows; a download's row as it ends; the AI's draft and minutes withholding it, `docName` the
+  server's; the transcript on the laptop, off it and with Include confidential text; the halls board's line; nothing in
+  the context; the line refused for an item in use only in Legal, on a shared Stagewatch and over http, sent over the
+  hall's own https link, the hold on screens, the board, Media's page, the context and the AI, "🔒 a confidential line"
+  where it is in use, kept across a restart, a proposal approved edited held, two confidential lines in a row, a refused
+  proposal over a held line, an answer that is not plain, the hold at its bound, each released by the next message; a
+  file marked after its quote went up: Media's words, the AI's now line, a picture of the take, the minutes, the
+  transcript and the line on a shared Stagewatch; the admin page's mark; a mark refused while a fresh upload is on a
+  screen and while a picture is a holding slide on people's pages; the upload's `file.mark` row),
+  `test/pages.test.js` (the mark on a take and its voices, the marks' record, the hold's steps: a send's own message by
+  its receipt, two lines in a row with and without ids, a clear while one waits, a proposal approved, refused over a held
+  line, approved before its message; `sentHold`; the bounds; a hold of the wrong shape never written; a take marked later
+  and `markTakes`; `naming`), `test/stagerecord.test.js` via `confidentialOf`,
+  `test/catalog.test.js` (the rows, the admin page's, and ⧉ greyed for a confidential file) and `test/menus.test.js`
+  (their refusal), `test/inputs.test.js` (`file:mark`,
+  `confirm`, `confidential`, `docFrom`), `test/modules.test.js` and `test/units.test.js` (the contexts).
+- The papers: `README.md`, `README.txt`, `docs/ACCOUNTS.md`, `docs/DISPLAYS.md`, `docs/DESIGN.md`, `docs/NODES.md`,
+  `docs/SHOWBUS.md`, `docs/ANALYSIS.md` (the contexts and the inputs fence), `SECURITY.md`, `CLAUDE.md`.
+
 **Fixed**
 - An upload whose stored path is no file (a folder in its place) is refused as one that could not be checked, on every
   platform. The archive's check opened it and, on Windows, read a folder as an empty file, so it was refused in the

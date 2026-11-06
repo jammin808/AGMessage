@@ -49,6 +49,8 @@
     held: root.AGM.mark('waiting') + ' sent when the connection is back',
     gone: 'Not available any more.',
     noScreens: 'No screens in this hall yet — add one in Screens & pages.',
+    // A file marked confidential, as the server refuses it on a screen (plan 4-§5.14, S3).
+    secretScreens: 'A confidential file is never shown on screens: anyone near them can see it.',
     noStagewatch: 'This hall has no Stagewatch linked — link one in Set up.',
     onChat: 'Already on chat.',
     reading: 'Reading where their pages stand…',
@@ -347,6 +349,20 @@
   /** Who an audit row's actor is, as the filter keeps it: its kind and its id. */
   const actorKey = (o) => (o.actor ? String(o.actor.t || '') + ':' + String(o.actor.id || o.actor.name || '') : '');
 
+  /**
+   * Who may remove a file's confidential mark: whoever set it (its `markedBy`, by the uid their messages carry), or the
+   * admin; anyone else is told whose it is (S16).
+   */
+  const unmarkWhy = (f, o) => (!o.confidential || f.admin || (!!o.markedBy && !!o.markedBy.uid && o.markedBy.uid === f.uid) ? true
+    : 'Only ' + ((o.markedBy && o.markedBy.name) || 'whoever marked it') + ' or an admin can remove the mark.');
+  /**
+   * The mark's row on a file message (`msg`) and a file (`file`): Mark confidential, or Remove the mark once it is marked; for
+   * the admin, and a seat backstage that shares files here and is no Viewer account (which is given no file's link).
+   */
+  const MARK_ROW = (kind, fits) => ({
+    id: kind + '.confidential', label: (f, o) => (o.confidential ? 'Remove the mark' : 'Mark confidential'), icon: '🔒', group: '3_keep', verb: 'file:mark', mode: 'now',
+    may: (f) => f.role !== 'board' && (f.admin || (f.role === 'research' && f.files && !f.viewer)), fits, ready: unmarkWhy,
+  });
   const KINDS = {
     // A message: in the feed, and its copy in the pinned strip (one delegated handler for both, no clone).
     msg: [
@@ -394,7 +410,7 @@
       { id: 'msg.stage', label: 'Show the Board', icon: '📺', key: 'S', group: '2_send', inline: (f, o) => (o.type === 'file' ? 2 : false), verb: 'page:push', mode: 'now',
         may: (f) => f.canPush || f.canShow, fits: (f, o) => full(f) && o.type === 'file' && stageFile(o), submenu: (f, o) => stageChoices(o) },
       { id: 'msg.screens', label: 'Show on screens…', icon: '⧉', group: '2_send', inline: () => 4, verb: 'display:take', mode: 'now',
-        may: (f) => f.canScreens, fits: (f, o) => full(f) && showable(o), ready: (f) => f.screens > 0 || WORDS.noScreens },
+        may: (f) => f.canScreens, fits: (f, o) => full(f) && showable(o), ready: (f, o) => (o.confidential ? WORDS.secretScreens : f.screens > 0 || WORDS.noScreens) },
       // ↗ Send to ▸: one list of rooms, asked of the server as it opens: first those whose list lets this room send into
       // them (a copy stays here), then the other rooms this person may forward into. The runner sends by room:send to the
       // first, and by its verb, forward, to the rest; the person never chooses between two verbs. A file moves only from a
@@ -421,6 +437,9 @@
         may: (f) => f.download, fits: (f, o) => full(f) && o.type === 'file' && linked(o) },
       { id: 'msg.copy', label: 'Copy text', icon: '📋', group: '3_keep', verb: 'local', mode: 'local',
         may: () => true, fits: (f, o) => full(f) && typeof o.text === 'string' && o.text.length > 0 },
+      // 🔒 Mark confidential / Remove the mark: the file's one record (plan 4-§5.14), which keeps it where it is in use or
+      // sent. Marked by a seat backstage that shares files here, or the admin; removed by whoever marked it, or the admin.
+      MARK_ROW('msg', (f, o) => full(f) && o.type === 'file' && linked(o)),
       // ⊘ is the withdrawn line's mark, so the act has an icon of its own. Its sender or the admin takes back what this
       // room sent into another room, never On stage (where the seat acts on no other room); the ask names the room and how
       // long it has been there (`now`, the page's clock, given where the ask is made: by default, the time it is asked).
@@ -439,13 +458,14 @@
       { id: 'file.stage', label: 'Show the Board', icon: '📺', key: 'S', group: '2_send', verb: 'page:push', mode: 'now',
         may: (f) => f.canPush || f.canShow, fits: (f, o) => full(f) && stageFile(o), submenu: (f, o) => stageChoices(o) },
       { id: 'file.screens', label: 'Show on screens…', icon: '⧉', group: '2_send', verb: 'display:take', mode: 'now',
-        may: (f) => f.canScreens, fits: (f, o) => showable(o), ready: (f) => f.screens > 0 || WORDS.noScreens },
+        may: (f) => f.canScreens, fits: (f, o) => showable(o), ready: (f, o) => (o.confidential ? WORDS.secretScreens : f.screens > 0 || WORDS.noScreens) },
       { id: 'file.look', label: (f) => (f.role === 'research' ? 'Preview' : 'Look'), icon: '👁', key: 'Enter', group: '3_keep', inline: () => 1, verb: 'local', mode: 'local',
         may: (f) => seesFiles(f), fits: (f, o) => o.where === 'list' && opens(o) },
       { id: 'file.download', label: 'Download', icon: '⬇', key: 'D', group: '3_keep', verb: 'file:download', mode: 'now',
         may: (f) => f.download, fits: (f, o) => full(f) && linked(o) },
       { id: 'file.pin', label: (f, o) => (o.pinned ? 'Unpin' : 'Pin'), icon: '📌', key: 'P', group: '3_keep', inline: () => 2, verb: 'pin', mode: 'now',
         may: (f) => f.pin, fits: () => true, undo: 'file.pin' },
+      MARK_ROW('file', (f, o) => full(f) && linked(o)),
       { id: 'file.close', label: 'Close', group: '4_manage', inline: () => 3, verb: 'local', mode: 'local',
         may: () => true, fits: (f, o) => o.where === 'preview' },
     ],
@@ -495,6 +515,9 @@
           .concat(f.targets.map((t) => ({ value: t.ref, label: placeOf(t), role: 'menuitemradio', checked: o.to === t.ref }))) },
       { id: 'compose.priority', label: 'Priority', icon: '🔥', group: '2_send', verb: 'local', mode: 'local', checked: (f, o) => !!o.priority,
         may: (f) => f.post, fits: () => true },
+      // 🔒 Confidential beside 🔥 Priority, on a file shared: whoever shares it marks it as it is shared (plan 4-§5.14).
+      { id: 'compose.confidential', label: 'Confidential', icon: '🔒', group: '2_send', verb: 'local', mode: 'local', checked: (f, o) => !!o.confidential,
+        may: (f) => f.files, fits: (f, o) => o.form === 'text' && !!o.file },
       // 📎 in the message row: a file chosen, dropped or pasted is attached to the next message, opened in the Preview from
       // the copy on this device; nothing reaches AGMessage until it is shared or shown.
       { id: 'compose.attach', label: 'Attach a file…', icon: '📎', group: '2_send', verb: 'local', mode: 'local',
@@ -694,7 +717,7 @@
         may: (f) => f.admin, fits: (f) => onAdmin(f) },
       { id: 'adminRoom.minutes', label: 'Minutes', icon: '✨', group: '3_keep', verb: 'admin:summary', mode: 'now',
         may: (f) => f.admin, fits: (f) => onAdmin(f), ready: (f) => f.ai || WORDS.noAi },
-      { id: 'adminRoom.invites', label: 'Roles & invites', icon: '🔒', group: '4_manage', verb: 'admin:invites', mode: 'now',
+      { id: 'adminRoom.invites', label: 'Roles & invites', icon: '🎟', group: '4_manage', verb: 'admin:invites', mode: 'now',
         may: (f) => f.admin, fits: (f) => onAdmin(f) },
       { id: 'adminRoom.create', label: 'New room in this hall…', icon: '➕', group: '4_manage', verb: 'room:create', mode: 'now',
         may: (f) => setsUp(f), fits: (f, o) => isHall(o),
@@ -802,6 +825,10 @@
     adminMsg: [
       // ⬇ Download a file of the room the admin page watches: the server's act, by a ticket, as on the hall page.
       { id: 'adminMsg.download', label: 'Download', icon: '⬇', key: 'D', group: '3_keep', inline: () => 1, verb: 'file:download', mode: 'now',
+        may: (f) => f.admin, fits: (f, o) => o.type === 'file' && typeof o.url === 'string' && /^\/uploads\/[\w.-]+$/.test(o.url) },
+      // 🔒 Mark confidential / Remove the mark on a file of the watched room: the file's one record (plan 4-§5.14), which
+      // the admin sets and removes whoever marked it.
+      { id: 'adminMsg.confidential', label: (f, o) => (o.confidential ? 'Remove the mark' : 'Mark confidential'), icon: '🔒', group: '3_keep', verb: 'file:mark', mode: 'now',
         may: (f) => f.admin, fits: (f, o) => o.type === 'file' && typeof o.url === 'string' && /^\/uploads\/[\w.-]+$/.test(o.url) },
       { id: 'adminMsg.copy', label: 'Copy text', icon: '📋', group: '3_keep', verb: 'local', mode: 'local',
         may: (f) => f.admin, fits: (f, o) => typeof o.text === 'string' && o.text.length > 0 },

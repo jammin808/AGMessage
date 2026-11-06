@@ -60,6 +60,8 @@ const ON_STAGE_WORDS = {
   'page:withdraw': 'Do that from a backstage page.',
   // On stage a file of the room is a Look: only a take shown with Download ticked is downloaded there.
   'file:download': 'On stage tablets keep no copies — ask the backstage team to show it to you with Download ticked.',
+  // A file's confidential mark is the backstage team's and the admin's: an On stage seat shares no file, so it marks none.
+  'file:mark': 'Do that from a backstage page.',
 };
 
 test('every act hidden from a seat by its rights is refused by the server as that seat, with words, and changes nothing', async (t) => {
@@ -222,6 +224,8 @@ test('every act hidden from a seat by its rights is refused by the server as tha
     'page:withdraw': (o) => ({ code: hallA, seq: (o.info || o.beside || { seq: 1 }).seq }),
     // A download ticket: a file of the room by its message, a take shown with Download by its number.
     'file:download': (o, e) => (['take.download', 'card.download', 'past.download'].includes(e.id) ? { seq: o.seq } : { messageId: o.id }),
+    // Mark confidential (or remove the mark) on a file of the room, by its message.
+    'file:mark': (o) => ({ messageId: o.id, on: !o.confidential }),
     // A page's word on the take it is shown (the layer's acts, a card's): Back to chat on the object's take.
     'page:report': (o) => ({ seq: o.seq, state: 'dismissed' }),
     // The person's chat view, the admin's (Chat view ▸ in the People panel).

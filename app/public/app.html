@@ -121,6 +121,7 @@
             <button type="button" class="btn ghost attach-btn" id="attachBtn" data-action="compose.attach" aria-label="Attach a file…" title="Attach a file to share for download, or to show the Board">📎</button>
             <button type="button" class="btn ghost ai-btn" id="aiDraftBtn" title="Claude drafts an answer to the board's latest question (or the one you're replying to) from the thread and the document on stage. You edit it; nothing is sent until you press Send." hidden>✨ Draft a reply</button>
             <button type="button" class="btn ghost priority-btn" id="textPriorityBtn" data-priority="0" aria-pressed="false" title="Mark as high priority">🔥 Priority</button>
+            <button type="button" class="btn ghost confidential-btn" id="textConfidentialBtn" data-action="compose.confidential" data-confidential="0" aria-pressed="false" title="Mark the file confidential: it goes only where it is in use, or where you send it" hidden>🔒 Confidential</button>
             <button class="btn primary send-btn" type="submit" aria-label="Send"><span class="send-icon" aria-hidden="true">➤</span><span class="send-word">Send</span></button>
           </div>
         </form>
@@ -185,6 +186,7 @@
           </div>
           <div class="row quote-row">
             <input type="text" id="quoteNote" maxlength="200" placeholder="A line above it (optional)" aria-label="A line above it (optional)" />
+            <label class="preview-tick"><input type="checkbox" id="quoteSecret" /> 🔒 Confidential</label>
             <button class="btn primary" type="button" id="quoteShow">📺 Show the Board</button>
           </div>
         </form>
@@ -240,6 +242,7 @@
           <select id="pickArrive" aria-label="Where it arrives"><option value="over">over their chat</option><option value="side">in their side bar</option></select>
           <small class="muted" id="pickArriveWhy" hidden></small>
           <input type="text" id="pickNote" maxlength="200" placeholder="A line above it (optional)" aria-label="A line above it (optional)" />
+          <label class="preview-tick" id="previewSecretBox"><input type="checkbox" id="previewSecret" /> 🔒 Confidential</label>
         </div>
         <!-- ＋ the speaker's screen: one line with the push, the pick's words or the line above it, through the operator or at once (app.js SpeakerLine). -->
         <div class="speaker-line" id="pickLine" hidden>
