@@ -4570,7 +4570,12 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
           ways: !ways.hidden, propose: way('propose'), send: way('send'), now: r.querySelector('[data-line-now]').hidden ? '' : r.querySelector('[data-line-now]').textContent,
           said: r.querySelector('[data-line-said]').hidden ? '' : r.querySelector('[data-line-said]').textContent }); })()`).then(JSON.parse);
       const tick = (id) => desk.eval(`(() => { const on = document.querySelector('#${id} [data-line-on]'); on.click(); return on.checked; })()`);
+      // ＋ set to a state, never toggled, so a step after one that found ＋ late is not handed the opposite of its own.
+      const setTick = (id, want) => desk.eval(`(() => { const on = document.querySelector('#${id} [data-line-on]'); if (on.checked !== ${want ? 'true' : 'false'}) on.click(); return on.checked; })()`);
       const choose = (id, way) => desk.eval(`(() => { const i = document.querySelector('#${id} input[value="${way}"]'); i.click(); return i.checked; })()`);
+      // What the ❝ Quote tab stands on when its Show is not ready: the box, its pane, the console's read, and when this page
+      // fetched what the tab waits for (pagelayer.mjs, docmodel.mjs), against the page's own clock.
+      const QUOTE_STATE = `JSON.stringify({ show: !document.getElementById('quoteShow').disabled, box: document.getElementById('quoteInput').value, open: !document.getElementById('quotePane').classList.contains('hidden'), info: Console.showsInfo(), loads: performance.getEntriesByType('resource').filter((e) => /[/](pagelayer|docmodel)[.]mjs/.test(e.name)).map((e) => [e.name.split('/').pop(), Math.round(e.startTime), Math.round(e.responseEnd)]), now: Math.round(performance.now()) })`;
       const roomLines = () => desk.eval(`JSON.stringify(allMessages.filter((m) => m.type === 'system').map((m) => m.text))`).then(JSON.parse);
 
       // No Stagewatch linked: ＋ is not drawn.
@@ -4617,11 +4622,12 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       await desk.until(`typeof joined !== 'undefined' && joined && F.canSendToStage && F.canPropose && !document.getElementById('quoteTab').hidden`, 15000);
       await desk.eval(`document.getElementById('quoteTab').click()`);
       await typed('Turnout was 64%');
-      await desk.until(`!document.getElementById('quoteShow').disabled && 'ready'`, 8000);
-      await tick('quoteLine');
+      const presetReady = await desk.until(`!document.getElementById('quoteShow').disabled && 'ready'`, 8000);
+      const presetState = presetReady ? null : JSON.parse(await desk.eval(QUOTE_STATE));
+      await setTick('quoteLine', true);
       const preset = await plus('quoteLine');
-      report(preset.send.checked && !preset.propose.checked, `＋ is preset to the way chosen last on this device (${JSON.stringify(preset)})`);
-      await tick('quoteLine');
+      report(presetReady === 'ready' && preset.send.checked && !preset.propose.checked, `＋ is preset to the way chosen last on this device (${JSON.stringify(presetState ? { preset, presetState } : preset)})`);
+      await setTick('quoteLine', false);
 
       // The Preview's bar: a document's line is the line typed above it, never its name; with none, ＋ is disabled with why.
       await desk.eval(`(() => { attachFile(new File([Uint8Array.from(atob('${fixture('board-pack-tagged.pdf').toString('base64')}'), (c) => c.charCodeAt(0))], 'board pack.pdf', { type: 'application/pdf' })); return true; })()`);
@@ -4678,16 +4684,17 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       await gone.close();
       await desk.eval(`document.getElementById('quoteTab').click()`);
       await typed('Turnout was 64%');
-      await desk.until(`!document.getElementById('quoteShow').disabled && 'ready'`, 8000);
-      await tick('quoteLine');
+      const goneReady = await desk.until(`!document.getElementById('quoteShow').disabled && 'ready'`, 8000);
+      const goneState = goneReady ? null : JSON.parse(await desk.eval(QUOTE_STATE));
+      await setTick('quoteLine', true);
       const wayBefore = await plus('quoteLine');
       await desk.eval(`new Promise((r) => socket.emit('hall:configure', { code: HALL_KEY, stagewatchUrl: ${codeLiteral(goneUrl)}, stagewatchKey: ${codeLiteral(KEY)} }, r))`);
       // The link's words: checking its key, then not connected (catalog.js stageWhy), each beginning "Stagewatch".
       const downWhy = await desk.until(`F.stageWhy`, 20000);
       await desk.eval(`document.getElementById('quoteShow').click()`);
       const downToast = await toastWith('The quote', 'No line went to the speaker\'s screen: Stagewatch ');
-      report(wayBefore.ticked && wayBefore.send.checked && !!downWhy && !!downToast && !slSw.requests.slice(-1).some((r) => r.url.includes('Turnout')),
-        `＋ ticked, its way closed by the time of the push: the take goes, and its toast says why no line went, in the link's words (${JSON.stringify({ downWhy, downToast })})`);
+      report(goneReady === 'ready' && wayBefore.ticked && wayBefore.send.checked && !!downWhy && !!downToast && !slSw.requests.slice(-1).some((r) => r.url.includes('Turnout')),
+        `＋ ticked, its way closed by the time of the push: the take goes, and its toast says why no line went, in the link's words (${JSON.stringify({ downWhy, downToast, ...(goneState ? { wayBefore, goneState } : {}) })})`);
 
       // A Stagewatch without a show desk: 📝 Ask the operator is disabled with its reason, 🖥 Send now chosen.
       await desk.eval(`new Promise((r) => socket.emit('hall:configure', { code: HALL_KEY, stagewatchUrl: ${codeLiteral(noDesk.url)}, stagewatchKey: ${codeLiteral(KEY)} }, r))`);

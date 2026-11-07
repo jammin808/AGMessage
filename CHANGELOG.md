@@ -6621,6 +6621,10 @@ next push; nothing of it has run on Windows yet)
   the context, the hello and the AI's brief carry none of it.
 
 **Fixed**
+- The browser smoke's ＋ steps on the ❝ Quote tab say what the tab stood on when its Show was not ready in time, and set
+  ＋ on or off rather than toggling it. One local run found Show not ready 8 s after a reload (the next two runs did
+  not), and a step after it was then handed ＋ the wrong way round; the next time, the report names the box, its pane,
+  the console's read and when the page fetched what the tab waits for. Nothing that ships changed.
 - The installed node's account lookup says when it cannot read Windows' local accounts, and looks for a module's
   manifest in a folder of its version too. CI's Windows run, its first of these scripts, read `BUILTIN\Users` as no
   group: a failure of the lookup was swallowed, so an account read as no local user and no group whatever it was.
