@@ -433,7 +433,10 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     const health = async () => (await fetch(base + '/api/health')).json();
     const ask = (s, ev) => new Promise((resolve) => { s.emit(ev, resolve); });
     const h = await health();
-    assert.deepEqual(Object.keys(h).slice(-16), ['elu', 'rssMb', 'maxSocketsPerAddress', 'tunnelSockets', 'largestHall', 'latest', 'peaks', 'showDay', 'tunnel', 'refused', 'acceptErrors', 'format', 'sleeps', 'power', 'lastStop', 'sideRooms'], 'appended at the end of the detail');
+    assert.deepEqual(Object.keys(h).slice(-17), ['elu', 'rssMb', 'maxSocketsPerAddress', 'tunnelSockets', 'largestHall', 'latest', 'peaks', 'showDay', 'tunnel', 'refused', 'acceptErrors', 'format', 'sleeps', 'power', 'lastStop', 'event', 'sideRooms'], 'appended at the end of the detail');
+    // The current event: a folder's first, not named and never archived.
+    assert.deepEqual([Object.keys(h.event), h.event.name, h.event.kind, h.event.from, h.event.archives], [['id', 'name', 'began', 'kind', 'from', 'archives'], '', 'first', '', 0]);
+    assert.match(h.event.id, /^e[0-9a-z]{8,24}$/);
     // `rooms` counts the halls, each its Main room; `sideRooms` the rooms beside them, none in a new folder.
     assert.deepEqual([typeof h.rooms, h.sideRooms], ['number', 0]);
     // A new folder: no stop before this start, and no hall told AGMessage restarted.

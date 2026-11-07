@@ -133,15 +133,21 @@ function newsOf(event, payload) {
  */
 const mergeNews = (a, b) => ({ priority: a.priority || b.priority });
 
+/** The words said for an op on a room that takes none now: a kind of thing, never a key. */
+const NOT_HELD = 'a change of a room that takes none now (one removed, an archived event\'s, or any while an event is being archived)';
 /**
  * `apply(room, op)`: the op committed (numbered, kept for resume, on disk: `commit`), each of its events sent to the hall
  * (`send(room, event, payload)`), the change marked (`changed(room)`), and the op answered. An op the table cannot send
- * is said (`refused(why)`) and nothing is committed, sent or marked: `apply()` answers null.
+ * is said (`refused(why)`) and nothing is committed, sent or marked: `apply()` answers null. So is an op on a room that
+ * `holds(room)` says takes none now (the server's: one removed, an archived event's, whose key the next event's room may
+ * have, or any while an event is being archived): a page, a link or a timer of the earlier event never writes into the
+ * room that has its key now, nor into an event half archived.
  */
-function applier({ commit, send, changed, refused }) {
+function applier({ commit, send, changed, refused, holds = () => true }) {
   return function apply(room, op) {
     const why = refusal(op);
     if (why) { refused(why); return null; }
+    if (!holds(room)) { refused(NOT_HELD); return null; }
     commit(room, op);
     for (const [event, payload] of eventsOf(op, room)) send(room, event, payload);
     changed(room);

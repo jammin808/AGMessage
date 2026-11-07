@@ -82,6 +82,10 @@
     onStageAdmin: 'Only an admin may choose what an On stage seat may do.',
     appliesOnStage: 'Applies On stage.',
     noCountdown: 'No screen in this hall shows the countdown now.',
+    // An event archived (plan 6-U15): the admin's alone, as the server refuses a manager; an archive's contents deleted
+    // only at the laptop, with its token typed.
+    eventAdmin: 'Only an admin may archive an event.',
+    purgeHere: 'Delete an archive\'s contents at the AGMessage laptop, with its token.',
   });
   /** The support view's words (R8): every door the person has, drawn, and none of them acts. */
   const supportWords = (name) => 'This is ' + name + '\'s view — act from your own page.';
@@ -422,6 +426,37 @@
    * The halls a node may be linked for: every hall, then each listed; the hall it is linked for now stays a choice (and
    * chosen) when the page does not list it (closed since, or the list not read yet), so a Save never moves it quietly.
    */
+  /**
+   * The ask that archives the current event (`cur`: its name, and the busy line, from the Event object): what comes next
+   * first (`next`, choices; or `fixed`, an archive's own Continue or Copy), then the new event's name typed as the
+   * confirmation (a continue types the name of the event it continues), the current event's name where it has none, the
+   * screens' links where it is a copy, the split, and a reason where AGMessage is busy.
+   */
+  function archiveAsk(cur, next, fixed) {
+    const c = cur || {};
+    const fields = [];
+    if (next) fields.push({ name: 'next', type: 'select', label: 'What comes next', options: next, value: 'fresh' });
+    if (!c.name) fields.push({ name: 'current', label: 'This event\'s name, for its archive', max: 80 });
+    fields.push(fixed && fixed.kind === 'continue'
+      ? { name: 'name', label: 'Type “' + fixed.title + '” to continue it', max: 80 }
+      : { name: 'name', label: 'The new event\'s name, typed to confirm', max: 80 });
+    if (!fixed || fixed.kind === 'copy') fields.push({ name: 'keepScreens', type: 'checkbox', label: 'Keep the screens\' links (a copy only: for screens of your own kit)', value: false });
+    // The entries a split at this event's point would move: the live log's, from its first to its newest now.
+    const range = c.audit && c.audit.to >= c.audit.from ? 'entries ' + c.audit.from + '–' + c.audit.to : 'the entries before this event';
+    fields.push({ name: 'split', type: 'checkbox', label: 'Also split the audit log here: move ' + range + ' into a signed archive. The check then starts from this event; the archive stays on this laptop and in every export.', value: false });
+    if (c.busy) fields.push({ name: 'reason', label: 'AGMessage is busy (' + c.busyWords + '): type why it is archived now', max: 200 });
+    const now = c.name ? '“' + c.name + '”' : 'This event';
+    const what = !fixed ? 'Then the next one begins.' : fixed.kind === 'continue'
+      ? '“' + fixed.title + '” then continues as it was archived' + (fixed.purged ? ' (its contents were deleted: it continues with its name alone, and the token at the laptop makes the first admin account)' : '') + '.'
+      : 'The next one begins as a copy of “' + fixed.title + '”\'s settings and structure: new codes and invites, no messages, files or sign-ins.';
+    return {
+      title: fixed ? (fixed.kind === 'continue' ? 'Continue “' + fixed.title + '”?' : 'Copy “' + fixed.title + '”?') : 'Archive this event?',
+      words: [now + ' is archived: its halls, messages, files, help requests, screens, accounts, takes and desk results go into its archive, never deleted. ' + what,
+        'Links, keys, certificate pins and the audit log are kept. Every sign-in ends: everyone signs in again or joins with the new codes.'],
+      fields, yes: fixed ? (fixed.kind === 'continue' ? 'Archive and continue' : 'Archive and copy') : 'Archive', no: 'Cancel', danger: !fixed,
+    };
+  }
+
   function hallChoices(f, now) {
     const listed = (f.halls || []).map((h) => ({ value: h.code, label: (h.name || h.code) + ' · ' + h.code }));
     const kept = now && !listed.some((h) => h.value === now) ? [{ value: now, label: now + ' · not listed here now' }] : [];
@@ -1053,6 +1088,38 @@
         submenu: (f, o) => o.addresses.map((a) => ({ value: a, label: a })) },
     ],
 
+    // The current event (the admin page's Event): its `name` ('' for a folder's first event, not named yet), `kind` and
+    // `began`, whether AGMessage is busy now (`busy`, the busy line in words `busyWords`), an archive that stopped (`stuck`,
+    // else ''; `stuckStep`: 'moves' or 'next', which Finish tries again, or 'held', which only a start can, its words
+    // `stuckWords`), the live log's range a split would move (`audit`), what the next event may be made from (`copies`,
+    // `continues`: archives each {name, title}), and why this run archives nothing (`unread`: its record not read).
+    // Archive this event… asks what comes next first, then the new event's name, typed as the confirmation; Copy this
+    // event… and Continue this event… on an archive ask the same for that archive.
+    event: [
+      { id: 'event.archive', label: (f, o) => (o.stuck ? 'Finish archiving the event…' : 'Archive this event…'), icon: '🗄', group: '9_danger', inline: () => 1, verb: 'http:POST /api/event/archive', mode: 'now',
+        may: (f) => f.admin, fits: () => true, ready: (f, o) => (!f.theAdmin ? WORDS.eventAdmin : o.stuckStep === 'held' ? o.stuckWords : o.unread && !o.stuck ? o.unread : true),
+        confirm: (f, o) => (o.stuck ? { title: 'Finish archiving the event?', words: o.stuckWords, yes: 'Try again', no: 'Not now', danger: true }
+          : archiveAsk(o, [{ value: 'fresh', label: 'Start fresh: no halls, screens or accounts' }, { value: 'copy:current', label: 'Copy this event\'s settings and structure' },
+            ...o.copies.map((a) => ({ value: 'copy:' + a.name, label: 'Copy the settings and structure of “' + a.title + '”' })), ...o.continues.map((a) => ({ value: 'continue:' + a.name, label: 'Continue “' + a.title + '”' }))])) },
+    ],
+    // An archived event (the admin page's Event, under the current one): its folder's `name`, `title` (the event's name),
+    // whether its contents are still there (`contents`), and whether it was continued or its contents deleted (`continued`,
+    // `purged`). Continue and Copy archive the current event first, and say so in their asks; Delete its contents is the
+    // archive's one danger.
+    archive: [
+      { id: 'archive.continue', label: 'Continue this event…', icon: '⏯', group: '4_manage', inline: () => 1, verb: 'http:POST /api/event/archive', mode: 'now',
+        may: (f) => f.admin, fits: (f, o) => !o.continued, ready: (f) => (f.theAdmin ? true : WORDS.eventAdmin),
+        confirm: (f, o) => archiveAsk(o.current, null, { kind: 'continue', name: o.name, title: o.title, purged: !!o.purged }) },
+      { id: 'archive.copy', label: 'Copy this event…', icon: '📑', group: '4_manage', inline: () => 2, verb: 'http:POST /api/event/archive', mode: 'now',
+        may: (f) => f.admin, fits: (f, o) => !o.continued && !o.purged && !!o.contents, ready: (f) => (f.theAdmin ? true : WORDS.eventAdmin),
+        confirm: (f, o) => archiveAsk(o.current, null, { kind: 'copy', name: o.name, title: o.title }) },
+      { id: 'archive.delete', label: 'Delete this archive\'s contents…', icon: '🗑', group: '9_danger', verb: 'http:POST /api/event/purge', mode: 'now',
+        may: (f) => f.admin, fits: (f, o) => !!o.contents, ready: (f) => (f.local ? true : WORDS.purgeHere),
+        confirm: (f, o) => ({ title: 'Delete the contents of “' + o.title + '”\'s archive?', words: ['Its messages, files, accounts, takes and stage record are deleted for good. Its record stays, so the archive is still listed, and the audit log and its archives are not touched.',
+          'Type the token from the AGMessage window (installed: Start → AGMessage → Show the admin token).'],
+          fields: [{ name: 'token', type: 'password', label: 'The admin token', max: 64 }], yes: 'Delete its contents', no: 'Keep them', danger: true }) },
+    ],
+
     // ------------------------------------------------------------ the halls board (boardFacts)
     // A hall's row: `code` (its key), `name`, `guestCode`: the code its guests type, as the server tells this watcher ('' to
     // one that may not know it), and `rooms`: its side rooms this watcher may enter, as the board lists them ({key, name,
@@ -1252,12 +1319,13 @@
    * The admin page's facts (/api/admin/me's answer): whom its gate admits (`ok`: the laptop's token, or an account that
    * may manage settings), "the admin" (`admin`: the token, or an account whose role is admin), whether this page's account
    * may manage accounts (`manageUsers`: a room's Members…), whether AI drafts are on, the halls a node may be linked for,
-   * and whether the page is connected now. Pure.
+   * whether the page is connected now, and whether it is open on the AGMessage laptop itself (`local`: an archive's
+   * contents are deleted there, with the token typed). Pure.
    */
   function adminFacts(s) {
     const halls = Array.isArray(s.halls) ? s.halls.filter((h) => h && typeof h.code === 'string').map((h) => Object.freeze({ code: h.code, name: typeof h.name === 'string' ? h.name : '' })) : [];
     // The socket the gate admits is the server's admin (isAdmin), whom mayDriveNode lets drive every node: `canDrive`.
-    return Object.freeze({ page: 'admin', admin: !!s.ok, theAdmin: !!s.admin, manageUsers: s.manageUsers === true, canDrive: !!s.ok, ai: !!s.ai, halls: Object.freeze(halls), connected: !!s.connected, support: '' });
+    return Object.freeze({ page: 'admin', admin: !!s.ok, theAdmin: !!s.admin, manageUsers: s.manageUsers === true, canDrive: !!s.ok, ai: !!s.ai, halls: Object.freeze(halls), connected: !!s.connected, support: '', local: s.local === true });
   }
   /**
    * The halls board's facts (/api/halls's answer and the board's): who may set halls up, the admin (`admin`, its

@@ -160,13 +160,24 @@ class Accounts {
   constructor(file) {
     this.file = file;
     this.lane = new WriteLane(file, { delayMs: 50, keepBak: true, mode: 0o600 });
-    const data = readJsonWithBak(file);
     this.users = new Map();
     this.pending = new Set();   // usernames whose account is being made (its hash in flight)
+    this.replace(readJsonWithBak(file));
+  }
+
+  /**
+   * The accounts held now become those of `data` (the file's shape, `{users}`; none for anything else), each read by
+   * type: the file read again (an archived event continued), a copy of an event's (its accounts and their rights), or none
+   * (a fresh event). Saves nothing: a caller that changed them saves.
+   */
+  replace(data) {
+    this.users = new Map();
     for (const u of data && Array.isArray(data.users) ? data.users : []) {
       if (u && typeof u.id === 'string' && USERNAME.test(u.username || '') && rbac.isRole(u.role)) this.users.set(u.id, u);
     }
   }
+  /** The accounts read again from their file. */
+  reload() { this.replace(readJsonWithBak(this.file)); }
 
   save() { this.lane.save(() => JSON.stringify({ v: 1, users: Array.from(this.users.values()) }, null, 1)); }
   flush() { this.lane.flushSync(); }
@@ -404,6 +415,8 @@ class Sessions {
 
   save() { this.lane.save(() => JSON.stringify({ v: 1, sessions: Array.from(this.map.values()) })); }
   flush() { this.lane.flushSync(); }
+  /** Every session ended (a new event): none lets its holder in again, and the file is written so. */
+  clear() { this.map.clear(); this.save(); }
 
   /** Whether a session still lets its holder in: its account there and on, its epoch current, not too old, not idle. */
   live(s, now = Date.now()) {
@@ -498,6 +511,8 @@ class TokenSessions {
 
   save() { this.lane.save(() => JSON.stringify({ v: 1, k: this.tag, sessions: Array.from(this.map.values()) })); }
   flush() { this.lane.flushSync(); }
+  /** Every sign-in ended (a new event), those this run made too, and the file written so. */
+  clear() { this.map.clear(); this.minted.clear(); this.save(); }
 
   /** A new sign-in: its id goes in the cookie, only its hash is kept. Those whose day is over go as it comes. */
   create(now = Date.now()) {

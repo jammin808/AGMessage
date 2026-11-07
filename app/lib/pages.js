@@ -1416,10 +1416,27 @@ class Pages {
     this.open = open;
     // How long a stage file is kept once nothing names it (the server's UPLOAD_ORPHAN_MS).
     this.wait = Number.isFinite(wait) && wait >= 0 ? wait : 60 * 60_000;
+    this.file = file;
     this.lane = new WriteLane(file, { delayMs: 100, keepBak: true, mode: 0o600 });
-    const read = readJsonWhole(file);
+    this.held = false;
+    this.dirty = false;
+    this.reload();
+  }
+
+  /** The store read again from its file (at the start, and an archived event continued). */
+  reload() {
+    const read = readJsonWhole(this.file);
     this.unread = read.codes[0] && read.codes[0] !== 'ENOENT' ? read.codes[0] : '';
-    const data = isRecord(read.data) ? read.data : {};
+    this.replace(read.data);
+  }
+
+  /**
+   * What the store holds becomes what `data` holds (the file's shape), each part read by type, and the run's reports let
+   * go: the file read again, or a new event's (an archived one continued, a copy of an event's views, none). Saves
+   * nothing: a caller that changed it saves.
+   */
+  replace(raw) {
+    const data = isRecord(raw) ? raw : {};
     // The guests' views, in the order they were set (the oldest first), as the store writes them: the file's order is the
     // order set, never the laptop's clock, so the bound lets the oldest go at no cost and a clock stepped back moves none.
     // Each holds what the admin chose for that guest: a chat view, the clock or countdown, or both (lib/views.js).
@@ -1457,8 +1474,6 @@ class Pages {
     // The run's reports: by hall, each page (its socket's id) with the take it reported on. Never saved.
     this.live = new Map();
     this.liveHall = new Map();
-    this.held = false;
-    this.dirty = false;
   }
 
   /** This copy holds its data folder: from now on it writes, beginning with what changed before. */

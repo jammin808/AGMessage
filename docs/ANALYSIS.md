@@ -261,6 +261,22 @@ import` runs of `app` as a process of its own, `lib/importfacts.js`, is a row of
 only `app\lib`, `app\verify` and Node's built-ins and asks for nothing `app` cannot answer, so no package and no
 optional lookup reached from those modules later runs elevated without the fence failing.
 
+An event archived (the plan's Part 6, unit U15) adds `lib/events.js`, allowed 11 synchronous calls with its reason: the
+event's files are moved into its archive in one turn of the loop, so no save of the event lands between two of its files
+and no request is answered half way (a rename each on one volume; the uploads copied, sized alike and only then removed
+across two, the watchdog's beat sent meanwhile), and its folder's names, kinds, sizes, volume and free space read. It runs
+only at the admin's act, behind the busy check, and once at a start that finishes an archive a stop cut short, never on
+another request; the archives' list and an archive's contents deleted go through `fs.promises` (the record written again
+through a file of the process's own, fsynced, then renamed). Its server half adds ten any-room calls to the module fence's
+register (l), each with its reason, and gives the op table a predicate: `apply()` changes a room only while it is the
+store's own object for its key, and none while an event is being archived (fence (k) reads it), so a page, a link or a
+timer of an archived event writes nothing into the next event's room that has its key, nor into an event half archived.
+`test/events.test.js` stubs the server under test (`test/eventmove-preload.js`): a rename refused into an archive being
+made (a store, or a room's files), out of one made (a continue), onto the next event's record, onto the archive's word
+that its next began and onto its point's entry; the current event's record unreadable; a part of an archive's contents not removed; the uploads on a
+volume of their own with little free. In its own process it stubs `fs.statSync`, `fs.copyFileSync`, `fs.readFileSync`
+and `fs.promises.rename` for the uploads on another volume, a record busy and a record not written again.
+
 What the console says, kept (the plan's U3), adds `lib/serverlog.js` at 4, with its reason: only the watchdog's process
 runs it, never the server, and never on a request. A console line is appended to `server.log` as it is said, so a line
 said just before the watchdog ends (a refusal's words, a give-up) is on disk; its folder is made and its size read once,

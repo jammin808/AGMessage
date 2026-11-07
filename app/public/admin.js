@@ -28,7 +28,13 @@ let currentRoom = null;
 // What the server told this page: whom its gate admits (/api/admin/me), "the admin", whether its account may manage
 // accounts (a room's Members…), whether AI drafts are on, the halls a node may be linked for, and whether it is connected
 // now. A change redraws every bar and the open menu in place.
-const adminState = { ok: false, admin: false, manageUsers: false, ai: false, halls: [], connected: false };
+const adminState = { ok: false, admin: false, manageUsers: false, ai: false, halls: [], connected: false, local: false };
+/**
+ * The event as admin-plus.js last read it: each earlier hall's own Stagewatch link New hall offers (`links`, from
+ * /api/event), and whether this page archived the event itself (`archiving`): every sign-in then ends, and the page reads
+ * its answer before it starts again.
+ */
+const ADMIN_EVENT = { links: [], archiving: false };
 let ADMIN_F = AGM.catalog.adminFacts(adminState);
 const ADMIN_RUN = {};
 const say = (words, bad) => AGM.toast(words, bad);
@@ -62,7 +68,7 @@ const ADMIN_DRAWERS = [];
   // First, check if we're already logged in (cookie set) and on the host
   const me = await fetch('/api/admin/me').then((r) => r.json()).catch(() => ({}));
   // An admin account works from any device on the venue network; the host's token only on the host laptop.
-  if (me.ok) { adminState.ok = true; adminState.admin = !!me.admin; adminState.manageUsers = me.manageUsers === true; showDashboard(); return; }
+  if (me.ok) { adminState.ok = true; adminState.admin = !!me.admin; adminState.manageUsers = me.manageUsers === true; adminState.local = me.local === true; showDashboard(); return; }
   loginPanel.hidden = false;
   if (!me.local) {
     loginNotice.innerHTML =
@@ -116,7 +122,8 @@ function showDashboard() {
   // A sign-out in another tab, a change to this account or admin through the tunnel turned off closes this socket: the
   // page starts again and asks for what it needs. After a restart it reconnects by itself; it starts again only when
   // its sign-in no longer holds (a new admin token), never on a failed check.
-  socket.on('account:changed', () => { setTimeout(() => location.reload(), 300); });
+  // An event this page archived ends its own sign-in too: it reads the answer first (admin-plus.js starts it again).
+  socket.on('account:changed', ({ what } = {}) => { if (what === 'event' && ADMIN_EVENT.archiving) return; setTimeout(() => location.reload(), 300); });
   let connectedOnce = false;
   socket.on('connect', async () => {
     if (connectedOnce) {
@@ -291,14 +298,23 @@ function renderRoomList(rooms) {
   ADMIN.refresh();
 }
 
-/** New hall: its name asked in place (none, and it has its code alone). */
+/**
+ * New hall: its name asked in place (none, and it has its code alone), and, where an archived event's hall kept its own
+ * Stagewatch link, which of those it takes (none: the default Stagewatch).
+ */
 function createNewRoom() {
   const btn = document.getElementById('newSessionBtn');
-  AGM.ask(btn, { title: 'New hall', words: 'It gets a 6-character guest code: crew without an account join with it.', fields: [{ name: 'name', label: 'Hall name (for example Hall 2)', max: 80 }], yes: 'Create hall', no: 'Cancel' }, { opener: btn }).then((a) => {
+  const fields = [{ name: 'name', label: 'Hall name (for example Hall 2)', max: 80 }];
+  if (ADMIN_EVENT.links.length) {
+    fields.push({ name: 'link', type: 'select', label: 'Its Stagewatch', value: '', options: [{ value: '', label: 'The default Stagewatch' },
+      ...ADMIN_EVENT.links.map((l) => ({ value: l.key, label: 'An earlier hall\'s: ' + (l.hall ? '“' + l.hall + '”' + (l.event ? ' (' + l.event + ')' : '') + ', ' : '') + l.url }))] });
+  }
+  AGM.ask(btn, { title: 'New hall', words: 'It gets a 6-character guest code: crew without an account join with it.', fields, yes: 'Create hall', no: 'Cancel' }, { opener: btn }).then((a) => {
     if (!a.yes) return;
-    AGM.outbox.now('admin:createRoom', { name: a.values.name }, (res) => {
+    AGM.outbox.now('admin:createRoom', { name: a.values.name, ...(a.values.link ? { link: a.values.link } : {}) }, (res) => {
       if (!res?.ok) { say(res?.error || 'Not created.', true); return; }
-      say('Created ' + (res.name || res.code) + ' — guest code ' + res.code + '.');
+      say('Created ' + (res.name || res.code) + ' — guest code ' + res.code + (res.stagewatch ? ', with the Stagewatch at ' + res.stagewatch : '') + '.');
+      if (res.stagewatch) ADMIN_EVENT.links = ADMIN_EVENT.links.filter((l) => l.key !== a.values.link);
       watchRoom(res.code);
     });
   });

@@ -5354,6 +5354,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       message: await doorsOf(admin, 'adminMsg', 'window.__feedMsg', `AGM.page.object('adminMsg', window.__feedMsg.dataset.key)`, { ...PAGE_DOORS, hit: '.admin-msg-head strong' }),
       tunnel: await doorsOf(admin, 'tunnel', `document.getElementById('tunnelSection')`, `AGM.page.object('tunnel')`, { ...PAGE_DOORS, hit: 'h3', focus: `document.querySelector('#tunnelActs .obj-more')` }),
       laptop: await doorsOf(admin, 'laptop', `document.getElementById('laptopSection')`, `AGM.page.object('laptop')`, { ...PAGE_DOORS, hit: 'h3', focus: `document.querySelector('#laptopActs .obj-more')` }),
+      event: await doorsOf(admin, 'event', `document.getElementById('eventHead')`, `AGM.page.object('event')`, { ...PAGE_DOORS, hit: 'h3', focus: `document.querySelector('#eventActs .obj-more')` }),
     };
     for (const [what, d] of Object.entries(adminDoors)) report(doorsInStep(d), `the admin page's ${what}: right-click = ⋯ = Shift+F10 = the catalogue's set, the bar in it (${d.want}; ${d.right} / ${d.dots} / ${d.key}; ${d.inline}; hit ${d.hit})`);
     // "This laptop": every fact with its words and where it was read, in the server's order; Windows' facts read on
@@ -5374,6 +5375,19 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await admin.shot(path.join(OUT, 'admin-laptop.png'));
     report(LAPTOP_ROWS.every((id) => (laptopRead.ids || []).includes(id)) && laptopRead.said && laptopRead.marks && laptopRead.elsewhere && /^format 2 · /.test(laptopRead.folder || '') && !!refreshed,
       `the admin page's "This laptop" says each fact, its mark beside its shape, and where it was read, and Refresh reads Windows again (${laptopRows}; "${refreshed}")`);
+    // Admin → Event: the current event said, no archive yet, and Archive this event… asking first what comes next (fresh,
+    // or a copy of this event: no archive to continue), then the new event's name typed, this event's name (it has none),
+    // the screens' links and the split unticked, and a reason (AGMessage is busy); Cancel archives nothing.
+    const eventSaid = await admin.until(`(() => { const t = document.getElementById('eventLine').textContent; return /^This event \\(not named yet\\) — the first event in this data folder/.test(t) && !document.getElementById('noArchives').hidden && t; })()`, 10000);
+    await admin.eval(`document.querySelector('#eventActs [data-action="event.archive"]').click()`);
+    const eventAsk = await admin.until(`(() => { const box = document.querySelector('.agm-ask'); if (!box) return false;
+      return JSON.stringify({ title: box.querySelector('.agm-ask-title').textContent, fields: [...box.querySelectorAll('input, select')].map((i) => i.name + (i.type === 'checkbox' ? (i.checked ? ':on' : ':off') : '')),
+        next: [...box.querySelectorAll('select[name="next"] option')].map((o) => o.value), danger: !!box.querySelector('.btn.danger') }); })()`, 5000);
+    await admin.eval(`document.querySelector('.agm-ask [data-answer="no"]').click()`);
+    const eventAfter = await admin.eval(`(async () => (await (await fetch('/api/event')).json()).archives.length)()`);
+    const eventAskRead = JSON.parse(eventAsk || '{}');
+    report(!!eventSaid && eventAskRead.title === 'Archive this event?' && JSON.stringify(eventAskRead.next) === JSON.stringify(['fresh', 'copy:current']) && (eventAskRead.fields || []).slice(0, 5).join() === 'next,current,name,keepScreens:off,split:off' && eventAskRead.danger && eventAfter === 0,
+      `the admin page's Event says the current event, and Archive this event… asks what comes next first, then the names, both ticks unticked; Cancel archives nothing ("${eventSaid}"; ${eventAsk}; ${eventAfter} archives)`);
     // Every page and screen open in this browser names the build that serves it, so none is listed on another.
     report(laptopRead.pages === 'every open page and screen is on this build', `"This laptop"'s Pages: every page this browser opened, and each screen, named the build that serves it ("${laptopRead.pages}")`);
     report(JSON.parse(adminDoors.hall.want).includes('adminRoom.watch') && !JSON.parse(adminDoors.header.want).includes('adminRoom.watch') && JSON.parse(adminDoors.person.want).includes('person.seat') && JSON.parse(adminDoors.message.want).includes('adminMsg.delete'),

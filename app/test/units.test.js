@@ -1231,6 +1231,24 @@ function opsRig() {
   return { dir, store, room, apply, sent, marked, said, steps, logged };
 }
 
+test('op table: an op on a room the store no longer holds (an archived event\'s, one removed) is said and changes nothing, on disk or sent', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-ops-held-'));
+  const store = new RoomStore(dir);
+  const old = store.create('ABC234', 'Main hall');
+  const sent = [], said = [];
+  const apply = ops.applier({ commit: (r, op) => store.commit(r, op), send: (r, event) => sent.push(event), changed: () => {}, refused: (why) => said.push(why), holds: (r) => store.room(r.code) === r });
+  assert.ok(apply(old, { o: 'add', m: { id: 'm1', type: 'text', text: 'one', at: 1 } }), 'the store\'s own room takes it');
+  // The event archived: the store let its rooms go, and the next event's room has the same key.
+  store.clear();
+  const next = store.create('ABC234', 'Main hall');
+  const log = fs.readFileSync(path.join(dir, 'ABC234.log'), 'utf8');
+  assert.equal(apply(old, { o: 'add', m: { id: 'm2', type: 'text', text: 'from a page of the earlier event', at: 2 } }), null);
+  assert.deepEqual([said, sent, next.seq, next.messages.length, fs.readFileSync(path.join(dir, 'ABC234.log'), 'utf8')], [['a change of a room that takes none now (one removed, an archived event\'s, or any while an event is being archived)'], ['message'], 0, 0, log], 'said once, nothing sent, numbered, kept or on disk');
+  assert.ok(apply(next, { o: 'add', m: { id: 'm3', type: 'text', text: 'the next event', at: 3 } }), 'the room that holds the key now takes it');
+  // Without the predicate, every room is held, as before.
+  assert.ok(ops.applier({ commit: () => {}, send: () => {}, changed: () => {}, refused: () => {} })(old, { o: 'add', m: { id: 'm4', type: 'text', text: 'x', at: 4 } }));
+});
+
 test('op table: apply() given a field outside the table says so, commits nothing, sends nothing and answers null, never a throw', () => {
   const t = opsRig();
   const m = t.apply(t.room, { o: 'add', m: { id: 'm1', type: 'text', text: 'one', at: 1 } }).m;

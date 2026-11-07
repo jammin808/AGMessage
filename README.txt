@@ -1398,7 +1398,17 @@ Troubleshooting
 
 - Uploaded files are kept in:
       app\uploads\
-  Delete this folder after the event if you want to clear attachments.
+  After the event, do not delete folders by hand: on the admin page,
+  Event -> Archive this event... moves the event's halls, messages, files,
+  help requests, screens, accounts and takes into app\data\archive\, never
+  deleted, and the next event begins as a copy of its settings and
+  structure, as an archived event continued, or fresh. Links, keys,
+  certificate pins and the audit log stay; every sign-in ends. To clear an
+  archive's attachments and messages, Delete this archive's contents... on
+  this laptop, with the admin token; its record stays.
+  (Installed: the same, on the admin page. Opening the protected data folder
+  in Explorer and pressing "Continue" gives your account access to it for
+  good, so use the admin page instead.)
 
 - Conversation history is kept in:
       app\data\rooms\

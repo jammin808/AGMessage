@@ -438,6 +438,11 @@ test('every act of the admin page, the halls board and the Accounts page hidden 
     tunnel: [{ running: false, url: '', checking: false, checkedAgo: null }, { running: true, url: 'https://a-b.trycloudflare.com', checking: false, checkedAgo: null }],
     laptop: [{ addresses: (await emit(ctl, 'admin:settings', null)).addresses.map((a) => 'http://' + a + ':' + srv.port), reading: false }],
   };
+  // The event as Admin → Event reads it (/api/event), and an archive of it as one would be listed: refused by right alike.
+  const ev = (await api(base, 'GET', '/api/event', undefined, { cookie: root })).body;
+  const current = { name: ev.event.name, kind: ev.event.kind, began: ev.event.began, busy: ev.busy, busyWords: ev.busyWords, stuck: '', stuckWords: '', copies: [], continues: [] };
+  objects.event = [current];
+  objects.archive = [{ name: '2026-10-27T14-02-00-000Z', title: 'Spring Summit', contents: true, continued: false, purged: false, current }];
 
   // Each seat of a page: its socket (or none), its HTTP cookie, and its facts from the server's answers.
   const me = async (cookie) => (await api(base, 'GET', '/api/admin/me', undefined, { cookie })).body;
@@ -505,11 +510,15 @@ test('every act of the admin page, the halls board and the Accounts page hidden 
   // Members… saves each account with its own PATCH: sent here for Sid, the side room put in his rooms (Board members… on
   // a hall: the hall put in his On stage halls).
   const sidId = users.find((u) => u.username === 'sid').id;
-  const BODIES = { 'account.edit': { name: 'Renamed by a seat that may not' }, 'account.disable': { disabled: true }, 'audit.split': { seq: 2 } };
+  const BODIES = { 'account.edit': { name: 'Renamed by a seat that may not' }, 'account.disable': { disabled: true }, 'audit.split': { seq: 2 },
+    'event.archive': { next: { kind: 'fresh' }, name: 'Taken by a seat that may not', current: 'Spring Summit', reason: 'testing' },
+    'archive.continue': { next: { kind: 'continue', from: '2026-10-27T14-02-00-000Z' }, name: 'Spring Summit', current: 'Spring Summit', reason: 'testing' },
+    'archive.copy': { next: { kind: 'copy', from: '2026-10-27T14-02-00-000Z' }, name: 'Taken by a seat that may not', current: 'Spring Summit', reason: 'testing' },
+    'archive.delete': { archive: '2026-10-27T14-02-00-000Z', token: 'not-the-token' } };
   const HTTP = { 'adminRoom.members': (o) => ({ id: sidId, body: o.main ? { board: [o.code] } : { rooms: [o.code] } }) };
   // The halls board draws a hall's rooms in its Set up (kind adminRoom, the same rooms as the admin page's), and its room
   // buttons (kind room: its hall's Set up from there).
-  const KINDS = { admin: ['adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop'], board: ['hall', 'room', 'help', 'adminRoom'], accounts: ['account', 'audit'] };
+  const KINDS = { admin: ['adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop', 'event', 'archive'], board: ['hall', 'room', 'help', 'adminRoom'], accounts: ['account', 'audit'] };
   // The acts these pages draw: each that fits some seat's facts and some object here (a kind's rows the hall page draws, a
   // person's Show them ▸ among them, never fit these pages).
   const fitsOn = (page, k, e) => Object.values(seats[page]).some((seat) => ((seat.objects && seat.objects[k]) || objects[k]).some((o) => e.fits(seat.f, o)));
@@ -564,6 +573,7 @@ test('every act of the admin page, the halls board and the Accounts page hidden 
   assert.deepEqual(usersAfter.map((u) => [u.username, u.name, !!u.disabled, u.rooms, u.board]), users.map((u) => [u.username, u.name, !!u.disabled, u.rooms, u.board]), 'no account given a room or an On stage seat');
   assert.ok(guest.connected, 'the guest was not logged out');
   assert.deepEqual((await api(base, 'GET', '/api/audit/split', undefined, { cookie: root })).body.unfinished || null, null, 'no split was begun');
+  assert.deepEqual((await api(base, 'GET', '/api/event', undefined, { cookie: root })).body.archives, [], 'no event was archived');
 });
 
 test('a menu opened from a button is drawn under it or above it and never over it, wherever the button is and however tall the menu: where it fits on neither side it scrolls on the side with more room; an ask is drawn whole, a pointer\'s menu and a submenu where they were', () => {

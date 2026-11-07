@@ -577,6 +577,11 @@ task, so either one there stops it with code 3.
   changing a password, turning an account off or "sign out everywhere" ends every session of that account at once — and
   closes its open pages, which reconnect with the rights it has now. The Accounts page counts only the sessions that
   still sign in.
+- **A new event ends every sign-in** (Admin → Event → Archive this event…, the admin's alone): every session and the
+  token's sign-in at the laptop, and every page open on them, which reloads. Under a copy of an event the accounts are
+  copied with their rights, views and passwords, and everyone signs in again; under a continue the archived event's
+  accounts come back; under a fresh start there are none, and the token at the laptop makes the first admin account, as
+  at a first start. The event's `accounts.json` and its ended sessions are kept in its archive (`data/archive/<time>/`).
 - Every state-changing request must come from AGMessage's own pages (the `Origin` check).
 - Through the Cloudflare tunnel, accounts with admin rights (`users.manage`, `settings.manage` or `audit.export`) cannot sign in, nor use
   those rights on a session they already have, unless the admin turns on "Let accounts with admin rights sign in through

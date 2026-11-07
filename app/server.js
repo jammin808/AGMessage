@@ -75,6 +75,7 @@ const laststop = require('./lib/laststop');
 const upgradebackup = require('./lib/upgradebackup');
 const { StageRecord, confidentialOf, whoSaid, didSaid, seenSaid } = require('./lib/stagerecord');
 const tunnelend = require('./lib/tunnelend');
+const events = require('./lib/events');
 const busy = require('./lib/busy');
 const machinewire = require('./lib/machinewire');
 const { MachineEvents, seqOfRow: machineSeqOfRow } = require('./lib/machineevents');
@@ -358,9 +359,11 @@ function flushLanes() {
  */
 function saveAll() {
   const unsaved = flushLanes();
-  const halls = store.compactDirty();
+  // What a start read of what a stop left out of an event's archive is never written: the archive is finished from disk.
+  const leftovers = !!eventChanging && eventChanging.step === 'moves' && eventChanging.memory === 'leftovers';
+  const halls = leftovers ? 0 : store.compactDirty();
   // The halls any of whose rooms is left unwritten: a side room counts as its hall.
-  const left = new Set(store.dirtyCodes().map((key) => store.room(key).hall)).size;
+  const left = leftovers ? 0 : new Set(store.dirtyCodes().map((key) => store.room(key).hall)).size;
   if (left) unsaved.push(plural(left, 'hall'));
   if (savePeaks() && !peaksLane.flushSync() && !unsaved.includes('peaks')) {
     console.error('  [save] peaks could not be written: ' + peaksLane.lastError);
@@ -631,6 +634,9 @@ function healthFacts() {
     // How the copy before this start stopped (data/last-stop.json, lib/laststop.js): whether it saved, and when not, why
     // (no record, one not read, or what that stop could not save), and the halls this start said AGMessage restarted in.
     lastStop: stopFacts(),
+    // The current event (lib/events.js): its id, name, start, how it began and how many archives the folder holds, and an
+    // archive under way or one that stopped part way (`changing`).
+    event: eventView(),
   };
 }
 /**
@@ -829,15 +835,16 @@ audit.onPut = (ms) => { peaks.auditPut(ms, Date.now()); };
 // A rooms folder that is there but cannot be read (a file in its place, a folder this account may not list) stops the start
 // with its words, in either channel: a copy that served without its halls would make new ones over them.
 let restored = 0;
+/** A room as it loads (a start, an archived event continued): a message moved to today's words is a change no op made, so its room is marked and written once. */
+function migrateRoom(room) {
+  for (const m of room.messages) {
+    if (m.from && m.from.role === 'director') { m.from.role = 'board'; store.markDirty(room); }   // legacy role name
+    // A forward names its hall, never its code (an earlier build kept it).
+    if (m.forwardedFrom && Object.hasOwn(m.forwardedFrom, 'roomCode')) { delete m.forwardedFrom.roomCode; store.markDirty(room); }
+  }
+}
 try {
-  // A message moved to today's words is a change no op made: its room is marked, so the start writes it once.
-  restored = store.loadAll((room) => {
-    for (const m of room.messages) {
-      if (m.from && m.from.role === 'director') { m.from.role = 'board'; store.markDirty(room); }   // legacy role name
-      // A forward names its hall, never its code (an earlier build kept it).
-      if (m.forwardedFrom && Object.hasOwn(m.forwardedFrom, 'roomCode')) { delete m.forwardedFrom.roomCode; store.markDirty(room); }
-    }
-  }, { compact: false });
+  restored = store.loadAll(migrateRoom, { compact: false });
 } catch (e) {
   cannotStartYet('the rooms folder ' + ROOMS_DIR + ' cannot be read (' + (e.code || e.message) + '). Choose a data folder this Windows account can read and write (AGM_DATA_DIR), or fix that one\'s permissions.');
 }
@@ -848,7 +855,10 @@ if (restored) console.log('  Restored', restored, 'room(s) from', ROOMS_DIR);
  * the table cannot send is refused before it is committed, in one line that names its kind and fields, never a value,
  * and apply() answers null: it never throws for it, the Stagewatch followers outside the guarded handlers included. A
  * caller reads that null: a request is answered OP_REFUSED, and nothing that follows the change (a file removed, a row
- * written, a send followed) is done for a change that was not made.
+ * written, a send followed) is done for a change that was not made. A room the store no longer holds (one removed, or an
+ * archived event's, whose key the next event's room may have) takes no op, and no room takes one while an event is being
+ * archived (eventChanging): refused as null, so nothing a page or a link of an earlier event still names lands in the
+ * room that has its key now, nor in an event half archived.
  */
 const apply = ops.applier({
   commit: (room, op) => store.commit(room, op),
@@ -866,6 +876,7 @@ const apply = ops.applier({
   },
   changed: () => boardDirty(),
   refused: (why) => console.error('  [ops] refused, nothing saved or sent: ' + why),
+  holds: (room) => !eventChanging && !!room && store.room(room.code) === room,
 });
 /** A request's answer when apply() refused its change: nothing was saved or sent (the server's log says why). */
 const OP_REFUSED = Object.freeze({ ok: false, error: 'That change could not be made: nothing was saved.' });
@@ -1145,7 +1156,7 @@ const boardSeats = (seats) => Object.fromEntries(Object.entries(seats).filter(([
  * room its On stage seats alone (plan 4-§5.9.2.1). One numbered change, only when they differ.
  */
 function syncSeats(room) {
-  if (!store.hasRoom(room.code)) return;
+  if (store.room(room.code) !== room) return;   // one removed, or an archived event's: nothing is kept for it
   const locked = room.settings.lockRoles === true;
   if (!locked && !store.isMain(room)) return;
   const next = locked ? seatsNow(room) : boardSeats(seatsNow(room));
@@ -1449,6 +1460,13 @@ app.post('/uploads/:name/download', downloadForm, (req, res) => {
 }, (_err, _req, res, _next) => { if (!res.headersSent) res.status(204).end(); });
 
 app.use(express.json({ limit: '256kb' }));
+// While an event is being archived every write over HTTP is refused, as a socket's is (guardHandlers), but the archive's
+// own (its try again), the split, and signing in and out, which the admin needs to finish one that stopped part way.
+const WRITES_WHILE_ARCHIVING = /^\/api\/(?:event\/|audit\/split$|admin\/log(?:in|out)$|auth\/log(?:in|out)$)/;
+app.use((req, res, next) => {
+  if (!eventChanging || req.method === 'GET' || req.method === 'HEAD' || !req.path.startsWith('/api/') || WRITES_WHILE_ARCHIVING.test(req.path)) return next();
+  return res.status(503).json({ ok: false, error: changingWords() });
+});
 const web = mountAccounts(app, {
   accounts, sessions, audit, settings, isEncrypted, isLoopback,
   isTokenAdmin: (req) => isValidAdminCookie(req),
@@ -1675,9 +1693,13 @@ function lookupAllowed(key) {
 app.post('/api/rooms', (req, res) => {
   const w = web.who(req);
   if (!(isAdminReq(req) || (w && !w.account.mustChange && rbac.can(w.account, 'halls.manage')))) return res.status(403).json({ ok: false, error: 'Only admin can create rooms.' });
+  // With `link`, an earlier hall's own Stagewatch link (one an archived event's hall kept) moves to the new hall.
+  const earlier = earlierLinkFor(req.body && req.body.link !== undefined ? guard.str(req.body.link).toUpperCase() : '');
+  if (earlier && earlier.error) return res.status(409).json({ ok: false, error: earlier.error });
   const room = newRoom(req.body && typeof req.body.name === 'string' ? req.body.name : '');
-  audit.write(w ? web.actorOf(w) : HOST_ACTOR, 'hall.create', room.code, room.name || '(no name)', guard.clientIp(req));
-  res.json({ code: room.code, name: room.name });
+  if (earlier) takeEarlierLink(room, earlier);
+  audit.write(w ? web.actorOf(w) : HOST_ACTOR, 'hall.create', room.code, (room.name || '(no name)') + (earlier ? ', with the Stagewatch link of an earlier hall (' + earlier.url + ')' : ''), guard.clientIp(req));
+  res.json({ code: room.code, name: room.name, ...(earlier ? { stagewatch: earlier.url } : {}) });
 });
 // A guest's code looked up: the room it opens now (a live code, switched on), named with its hall and whether it is the
 // hall's Main room, so the join page offers that room's seats. A code that is switched off, an earlier code of a room, a
@@ -1721,7 +1743,9 @@ app.get('/api/halls', web.signedIn(), (req, res) => {
   }
   halls.sort((x, y) => (x.name || x.code).localeCompare(y.name || y.code));
   rooms.sort((x, y) => x.hallName.localeCompare(y.hallName) || x.name.localeCompare(y.name));
-  res.json({ ok: true, halls, account: Accounts.view(a), canManageHalls: rbac.can(a, 'halls.manage'), canManageUsers: mayManageUsers(req), canAudit: rbac.can(a, 'audit.read'), isAdmin: isAdminReq(req), rooms, answersOnBoard });
+  // The halls' own Stagewatch links an archived event's halls kept, which New hall offers, to whoever may set halls up.
+  const setsUp = rbac.can(a, 'halls.manage');
+  res.json({ ok: true, halls, account: Accounts.view(a), canManageHalls: setsUp, canManageUsers: mayManageUsers(req), canAudit: rbac.can(a, 'audit.read'), isAdmin: isAdminReq(req), rooms, ...(setsUp ? { earlierLinks: earlierLinks() } : {}), answersOnBoard });
 });
 
 // A hall's name is shown on every page, screen and board, and written in the audit log: it is cleaned as every typed
@@ -1757,10 +1781,12 @@ function newGuestCode() {
  * guest code, live or earlier (a hall's key is its code until New code, so the two are never shared); or something still
  * names it that would open the new one to whoever held the one before — an account's halls, On stage halls or rooms (one
  * a page saved back after its hall closed, one a room that comes back at the next start keeps), a node linked for a hall,
- * a list of the rooms that may send into a room (as the room listed or as a room on it).
+ * a list of the rooms that may send into a room (as the room listed or as a room on it), an earlier hall's own Stagewatch
+ * link (one a new hall is offered); or an archived event's rooms held it, as a key or a code, which its guests were given.
  */
 function keyHeld(key) {
-  return store.codeHeld(key) || accounts.names(key) || Object.values(settings.peerLinks || {}).some((l) => !!l && l.hall === key) || sendsName(key);
+  return store.codeHeld(key) || accounts.names(key) || Object.values(settings.peerLinks || {}).some((l) => !!l && l.hall === key) || sendsName(key)
+    || archivedCodes.has(key) || !!hallStagewatch(key);
 }
 
 // ---------------------------------------------------------------- which rooms may send into a room (plan 1-§4.1)
@@ -2161,6 +2187,667 @@ app.post('/api/upload', async (req, res, next) => {
   });
 });
 
+// ---------------------------------------------------------------- events (lib/events.js; plan 6-U15)
+// One data folder holds one event at a time. The admin (the laptop's token, or an account whose role is admin) archives
+// it, never deleting it, and the next one begins: an archived event continued, a copy of an event's settings and
+// structure, or a fresh one. What the node itself holds is kept in all three and never archived: its settings (the
+// Stagewatch link with its key and fingerprint, each hall's own Stagewatch, the Patterns and PlayMap links, the certificate
+// pins, its id, the context token, the AI key, the tunnel's end, the last machine event the log holds), the key folder and
+// secret.key, the audit log and its archives, the laptop's admin and its grants (the machine's), and the confidential holds,
+// which go into the next event's pages.json. One act, one row: the archive point (audit.point), its last step.
+/** The current event's record: the folder's own, or its first event's, which is written only when it is archived. */
+function oldestHall() { let t = Infinity; for (const r of store.rooms.values()) if (Number(r.createdAt) < t) t = Number(r.createdAt); return Number.isFinite(t) ? t : 0; }
+/** The current event's record as this start read it: there, absent (only then is the folder between two events), or not read. */
+const liveRead = events.readLive(DATA_DIR);
+let eventNow = liveRead.rec || events.firstOf(settings.nodeId, 0);
+/** Why the current event's record could not be read at this start ('' when it was, or there is none): this run archives nothing over it. */
+const eventUnread = liveRead.state === 'unread' ? liveRead.code : '';
+/**
+ * An archive under way, or one that stopped: {since, by, step, name, words, memory, carried, point, splitStarted}. `step`
+ * is '' while the act runs, 'moves' where its files are not all in its archive (`name`, made aside), 'next' where the
+ * archive is made and the next event has not begun, and 'held' where a start could not read what it needs to tell (its
+ * words say what). While it is set every new join and every write is refused, a room takes no op, and nothing lands in an
+ * event half archived. `memory` says whether this run holds the event being archived whole ('event': the act's own try)
+ * or what a start read of what was left out of it ('leftovers'); `carried`, `point` and `splitStarted` are what a next
+ * step that stopped had done already, so trying it again does none of it twice.
+ */
+let eventChanging = null;
+const EVENT_WORDS = 'AGMessage is starting a new event: try again in a moment.';
+const STUCK_WORDS = 'AGMessage is starting a new event, and archiving the one before has not finished: the admin finishes it (Admin → Event), or the next start of AGMessage does.';
+/** Why a join or a write is refused while an event is being archived. */
+const changingWords = () => (eventChanging && eventChanging.step ? STUCK_WORDS : EVENT_WORDS);
+/** Every code an archived event's rooms held (their keys, live codes and earlier ones): none is ever made again (keyHeld). */
+const archivedCodes = new Set();
+/** The halls of the archived events by their keys, newest event first: {name, event} (an earlier hall's Stagewatch, by name). */
+const archivedHalls = new Map();
+/** The archives made, by their names, oldest first: read at the start, and kept as each is made (health counts them). */
+let archiveNames = [];
+/**
+ * What this start read of the archives: the folder's listing refused (`code`), the archives whose record could not be read
+ * (`unread`), those whose next event has not begun (`unbegun`), and those whose next began ({name, seq, began}, `begun`):
+ * whether the folder is between two events is read from these, never from a current event's record that is missing.
+ */
+const archivesAtStart = { code: '', unread: [], unbegun: [], begun: [] };
+/** What the archives' records say of their codes and halls, and of their next events, read at the start. */
+function readArchivedNames() {
+  archiveNames = events.names(DATA_DIR);
+  for (const name of archiveNames) {
+    const rec = events.readArchived(DATA_DIR, name);
+    if (!rec) { archivesAtStart.unread.push(name); continue; }
+    for (const c of rec.codes) archivedCodes.add(c);
+    for (const h of rec.halls) archivedHalls.set(h.key, { name: h.name, event: rec.name });
+    if (rec.next && !rec.next.began) archivesAtStart.unbegun.push(name);
+    else if (rec.next) archivesAtStart.begun.push({ name, seq: rec.point ? rec.point.seq : 0, began: rec.next.began });
+  }
+}
+try { readArchivedNames(); } catch (e) {
+  archivesAtStart.code = e.code || e.message;
+  console.error('  [event] the archives in ' + events.archiveDir(DATA_DIR) + ' could not be read (' + archivesAtStart.code + '): their codes are not kept from new rooms this run');
+}
+/** A new event's id. */
+const newEventId = () => 'e' + crypto.randomBytes(8).toString('hex');
+/** The words of an archive that stopped: what it stopped at, and what finishes it. */
+function stuckWords(c) {
+  if (c.step === 'moves') return 'The event is not archived whole: ' + c.words + '. What moved is in ' + path.join(events.ARCHIVE, '.' + c.name + '.partial') + ' and nothing is lost: Finish archiving tries again (close what holds the file first), and so does the next start of AGMessage.';
+  if (c.step === 'next') return 'The event is archived (' + path.join(events.ARCHIVE, c.name) + '), and the next one has not begun: ' + c.words + '. Nothing is lost: Finish archiving begins it (close what holds the file first), and so does the next start of AGMessage.';
+  return c.words + '. Nothing was moved or begun, and every join and change waits: start AGMessage again once nothing else holds the file.';
+}
+/** An archive stopped at `step`: every new join and write waits until it is finished, and the act says why (503, `stuck`). */
+function eventStuck(step, name, words, extra = {}) {
+  const was = eventChanging || {};
+  eventChanging = { since: was.since || Date.now(), by: was.by || '', step, name, words, memory: 'leftovers', carried: null, point: null, splitStarted: false, ...extra };
+  console.error('  [event] ' + stuckWords(eventChanging));
+  return { ok: false, status: 503, stuck: true, error: stuckWords(eventChanging) };
+}
+/** A step that threw, in words: a move's own (lib/events.js), else its code or message. */
+const thrownWords = (e) => (e && e.words) || 'it stopped (' + ((e && (e.code || e.message)) || 'EIO') + ')';
+/** The current event as health, the admin page and the context read it: its name, how and when it began, its archives. */
+function eventView() {
+  const c = eventChanging;
+  return {
+    id: eventNow.id, name: eventNow.name, began: eventNow.began || oldestHall() || null, kind: eventNow.kind, from: eventNow.from, archives: archiveNames.length,
+    ...(eventUnread ? { unread: eventUnread } : {}),
+    ...(c ? { changing: { since: c.since, stuck: c.step ? c.name || c.step : '', step: c.step, words: c.step ? stuckWords(c) : '' } } : {}),
+  };
+}
+/** The archives as the admin page lists them, newest first: never a code or a key (the codes are capabilities, if dead). */
+async function archivesNow() {
+  return (await events.list(DATA_DIR)).map(({ name, record: r, contents }) => (r
+    ? { name, contents, event: { id: r.id, name: r.name, began: r.began, ended: r.ended, kind: r.kind, from: r.from }, next: r.next && { kind: r.next.kind, from: r.next.from, name: r.next.name }, counts: r.counts, halls: r.halls.map((h) => h.name), point: r.point, continued: r.continued, purged: r.purged }
+    : { name, contents, unread: true }));
+}
+/**
+ * The halls' own Stagewatch links whose hall is no hall now (an earlier event's, kept after a fresh start): listed on
+ * Admin → Show network and offered when a hall is made, never deleted silently. By the earlier hall's key, its address
+ * and the hall's name as its archive recorded it.
+ */
+function earlierLinks() {
+  const all = settings.hallStagewatch && typeof settings.hallStagewatch === 'object' ? settings.hallStagewatch : {};
+  return Object.entries(all).filter(([key, sw]) => !store.has(key) && sw && typeof sw.url === 'string' && sw.url)
+    .map(([key, sw]) => { const h = archivedHalls.get(key); return { key, url: sw.url, hall: h ? h.name : '', event: h ? h.event : '' }; });
+}
+/**
+ * A new hall takes an earlier hall's own Stagewatch link (`link`, its key as earlierLinks names it): the link moves to it
+ * with its key, fingerprint and the hold on its frame. Answers the link taken, null for none asked, or {error}.
+ */
+function earlierLinkFor(link) {
+  if (!link) return null;
+  const earlier = earlierLinks().find((l) => l.key === link);
+  if (!earlier) return { error: 'That earlier hall\'s Stagewatch link is not kept now: make the hall, then set its Stagewatch up.' };
+  if (settingsUnsaved()) return { error: settingsUnsaved() };
+  return earlier;
+}
+function takeEarlierLink(room, earlier) {
+  settings.hallStagewatch = { ...settings.hallStagewatch, [room.code]: settings.hallStagewatch[earlier.key] };
+  delete settings.hallStagewatch[earlier.key];
+  saveSettings();
+  const held = pages.holdOf('hall:' + earlier.key);
+  if (held) { pages.setHold('hall:' + room.code, held); pages.setHold('hall:' + earlier.key, null); }
+  configureHallLink(room);
+}
+
+/** What an archive's act asks, read by type: what comes next, the names typed, the ticks and the reason. */
+function eventAskOf(b) {
+  const o = isRecord(b) ? b : {};
+  const n = isRecord(o.next) ? o.next : {};
+  return {
+    kind: typeof n.kind === 'string' ? n.kind : '', from: guard.str(n.from).slice(0, 40),
+    name: guard.cleanText(o.name, events.NAME_MAX), current: guard.cleanText(o.current, events.NAME_MAX),
+    keepScreens: tickOf(o.keepScreens), split: tickOf(o.split), reason: guard.cleanText(o.reason, 200),
+  };
+}
+/** Why the act cannot run as asked, before anything is written: {status, error}, or null. */
+function eventRefusal(ask) {
+  if (settingsUnsaved()) return { status: 409, error: 'Not archived: ' + settingsUnsaved().replace(/^Not saved: /, '') };
+  if (eventUnread) return { status: 503, error: 'Not archived: this event\'s record (' + events.LIVE + ') could not be read at this start (' + eventUnread + '), and nothing is written over it. Start AGMessage again once nothing else holds it.' };
+  for (const [what, why] of [['the screens', displays.unread], ['people\'s pages', pages.unread]]) {
+    if (why) return { status: 409, error: 'Not archived: the file of ' + what + ' could not be read at this start (' + why + '), so this run cannot say what the archive would hold. Start AGMessage again once nothing else holds it.' };
+  }
+  if (ask.keepScreens === null || ask.split === null) return { status: 400, error: 'Keep the screens\' links and Also split the audit log are ticks: true, or left out.' };
+  if (!events.NEXT.includes(ask.kind)) return { status: 400, error: 'Choose what comes next: continue an archived event, copy an event\'s settings and structure, or start fresh.' };
+  if (!eventNow.name && !ask.current) return { status: 400, error: 'Name this event first: it is archived under its name.' };
+  if (ask.kind === 'continue') {
+    const from = events.readArchived(DATA_DIR, ask.from);
+    if (!from) return { status: 404, error: 'No archived event to continue by that name.' };
+    if (from.continued) return { status: 409, error: '“' + from.name + '” was continued already: its archive holds no more of it.' };
+    if (ask.name !== from.name) return { status: 400, error: 'Type the name of the event you continue, “' + from.name + '”, to continue it.' };
+    return null;
+  }
+  if (!ask.name) return { status: 400, error: 'Type the new event\'s name.' };
+  if (ask.kind === 'copy' && ask.from !== 'current') {
+    const from = events.readArchived(DATA_DIR, ask.from);
+    if (!from) return { status: 404, error: 'No archived event to copy by that name.' };
+    if (from.purged || from.continued) return { status: 409, error: '“' + from.name + '”\'s archive holds none of its settings and structure now (' + (from.purged ? 'its contents were deleted' : 'it was continued') + '): copy another event, or start fresh.' };
+  }
+  return null;
+}
+/**
+ * The uploads an act moves, refused before anything is written where a copy across volumes would not fit with the
+ * disk's floor kept: the event's own into the data folder's volume (`plan`), and a continued event's back into the uploads
+ * folder (`back`), where the event's own leave that volume first.
+ */
+function uploadsRefusal(plan, back) {
+  const gb = (n) => (n / 1024 ** 3).toFixed(1) + ' GB';
+  if (!plan.same && plan.free !== null && plan.free < plan.bytes + UPLOAD_MIN_FREE) {
+    return { status: 507, error: 'Not archived: the uploads are on another volume, and the data folder\'s has ' + gb(plan.free) + ' free, less than the ' + gb(plan.bytes) + ' they take and the ' + gb(UPLOAD_MIN_FREE) + ' kept free. Nothing was moved.' };
+  }
+  const room = back && !back.same && back.free !== null ? back.free + (plan.same ? 0 : plan.bytes) : Infinity;
+  if (back && room < back.bytes + UPLOAD_MIN_FREE) {
+    return { status: 507, error: 'Not archived: the uploads of the event continued come back to the uploads folder, on another volume, which would have ' + gb(room) + ' free, less than the ' + gb(back.bytes) + ' they take and the ' + gb(UPLOAD_MIN_FREE) + ' kept free. Nothing was moved.' };
+  }
+  return null;
+}
+/** What an event holds, counted from what this run holds of it (the uploads from their folder's plan). */
+function eventCounts(uploads) {
+  let messages = 0, help = 0;
+  for (const r of store.allRooms()) for (const m of r.messages) { if (!m || m.type === 'system') continue; messages++; if (m.type === 'help') help++; }
+  let takes = 0;
+  for (const book of Object.values(pages.halls)) takes += Number.isSafeInteger(book.seq) ? book.seq : 0;
+  return { halls: store.rooms.size, rooms: store.allRooms().length, messages, help, files: uploads.files.length, bytes: uploads.bytes, accounts: accounts.size, screens: displays.list.size, takes, deskResults: deskResults.length };
+}
+/** An event's next in the words of its archive point: what begins, and from where. */
+function nextWords(next) {
+  const at = (n) => path.join(events.ARCHIVE, n);
+  if (next.kind === 'fresh') return '“' + next.name + '” begins fresh';
+  if (next.kind === 'continue') return '“' + next.name + '”, archived in ' + at(next.from) + ', is continued';
+  return next.from === 'current' ? '“' + next.name + '” begins as a copy of its settings and structure' : '“' + next.name + '” begins as a copy of the settings and structure of the event in ' + at(next.from);
+}
+/** The audit log's own words at the end of an archive point (H.10.1). */
+const POINT_LOG = '. The audit log carries on, and can be split here (Admin → Health).';
+/**
+ * The archive point's words (H.10.1): the event, where it went, what comes next, links kept, ending with the log's. One
+ * archived while busy says the reason typed in place of the list of what went into the archive (its record keeps both,
+ * and the busy line), so the act's one row carries why it went ahead. Held to an entry's words (300 characters): the
+ * reason is cut first, with an ellipsis, so the log's words always end it.
+ */
+function pointWords(rec, name) {
+  const where = path.join(events.ARCHIVE, name);
+  const next = '; ' + nextWords({ ...rec.next, name: rec.next.name.slice(0, 60) }) + '; links kept';
+  const event = 'the event “' + rec.name.slice(0, 60) + '” was archived ';
+  if (!rec.busy) return event + '(messages, files, help requests, transcripts, desk results and takes into ' + where + ')' + next + POINT_LOG;
+  const lead = event + 'into ' + where + ' while busy, for: ';
+  const room = 300 - lead.length - next.length - POINT_LOG.length;
+  const reason = rec.reason.length <= room ? rec.reason : rec.reason.slice(0, Math.max(0, room - 1)) + '…';
+  return lead + reason + next + POINT_LOG;
+}
+
+/** A screen's take as a copy keeps it: its standing kind (the clock, the countdown without words, black), else holding. */
+function layoutOf(c) {
+  const kind = c && typeof c === 'object' ? c.kind : '';
+  if (kind === 'clock' || kind === 'black') return { kind };
+  if (kind === 'countdown') { const k = cleanContent({ kind: 'countdown', tone: c.tone }); return { kind: 'countdown', text: '', tone: k.tone }; }
+  return { kind: 'holding' };
+}
+/**
+ * A room's settings a copy keeps, what the admin set: its lock, its guests' web pages with it, its code's switch. Never
+ * the seats a restart keeps for the guests seated in it (`seats`): those are the earlier event's people, and a copy
+ * starts with nobody seated.
+ */
+function structureOf(s) {
+  const out = {};
+  if (!isRecord(s)) return out;
+  if (s.lockRoles === true) out.lockRoles = true;
+  if (s.lockRoles === true && s.guestWeb === true) out.guestWeb = true;
+  if (typeof s.codeOff === 'boolean') out.codeOff = s.codeOff;
+  return out;
+}
+
+/**
+ * The current event let go in memory, once its files are in its archive: its rooms, accounts, sign-ins, screens, what its
+ * people's pages were shown and its stage record, its desk results and uploads not yet posted, each hall's Stagewatch
+ * link stopped (its hold kept). Every store is saved empty from here, so a save that lands writes the next event's.
+ * Answers what the next event carries of it: the confidential holds, and each screen's browsers by its link.
+ */
+function leaveEvent() {
+  const holds = pages.holdLinks().map((id) => [id, pages.holdOf(id)]);
+  const screensLive = new Map(Array.from(displays.list.values()).map((d) => [d.tokenHash, d.live]));
+  for (const p of pendingLeaves.values()) clearTimeout(p.timer);
+  pendingLeaves.clear();
+  uploadTokens.clear();
+  freshUploads.clear();
+  for (const [id] of Array.from(alsoLive)) alsoLetGo(id);
+  countdownsTold.clear();
+  store.clear();
+  for (const link of hallLinks.values()) link.stop();
+  hallLinks.clear();
+  accounts.replace(null); accounts.save();
+  sessions.clear(); tokenSessions.clear();
+  displays.replace(null); displays.save();
+  pages.replace(null); pages.save();
+  stageRecord.reset();
+  deskResults.splice(0); saveDeskResults();
+  return { holds, screensLive };
+}
+/** The holds the archive `name` keeps in its pages.json (what a run that no longer holds that event in memory carries). */
+function holdsArchived(name) {
+  const raw = resilience.readJsonWithBak(path.join(events.folderOf(DATA_DIR, name), 'pages.json'));
+  return isRecord(raw) && isRecord(raw.holds) ? Object.entries(raw.holds) : [];
+}
+/** The desk results waiting in the data folder, read as a start reads them: each reported, never run again. */
+function readDeskResults() {
+  const results = deskresults.readRecords(resilience.readJsonWithBak(DESK_RESULTS_PATH), settings.nodeId).map((r) => ({ ...r, attempts: 0, posts: 0, nextAt: 0, lastStatus: 0, gen: 0, fresh: false }));
+  for (const r of results) rememberRun(ranKey(r.sw, r));
+  deskResults.splice(0, deskResults.length, ...results);
+}
+/**
+ * The stores of one file each read again from the data folder (a continue whose files did not all come back): what this
+ * run holds is then what is on disk, so a save that lands writes back what came back, never the empty ones.
+ */
+function readStoresAgain() {
+  accounts.reload();
+  displays.reload();
+  pages.reload();
+  readDeskResults();
+}
+/**
+ * A copy of the settings and structure of the event archived in `src`: its accounts with their rights and views first,
+ * so the codes made for its rooms are kept from what they name (keyHeld); its halls and side rooms by their keys (an
+ * address, never a code a guest types), names, locks and guests' web pages with them, each with a new guest code and no
+ * earlier one, so no code or invite of an earlier event opens it; the rooms that may send into each; its screens by their
+ * names and halls, each with its standing layout and a new link unless `keepScreens`; the guests' chat views, clocks and
+ * On stage switches. Never its messages, files, help requests, takes, pins, stage record, marks, desk results or the
+ * guests a restart kept seated.
+ */
+function copyEvent(src, keepScreens, screensLive) {
+  const dir = events.folderOf(DATA_DIR, src);
+  accounts.replace(resilience.readJsonWithBak(path.join(dir, 'accounts.json'))); accounts.save();
+  const views = resilience.readJsonWithBak(path.join(dir, 'pages.json'));
+  pages.replace({ v: 1, views: isRecord(views) && isRecord(views.views) ? views.views : {}, halls: {} }); pages.save();
+  const from = new RoomStore(path.join(dir, 'rooms'), { make: false });
+  from.loadAll(null, { compact: false });
+  const taken = new Set(from.allRooms().map((r) => r.code));
+  const codeFor = () => { let c; do { c = makeRoomCode(); } while (keyHeld(c) || taken.has(c)); taken.add(c); return c; };
+  const made = (a, b) => Number(a.createdAt) - Number(b.createdAt);
+  for (const h of Array.from(from.rooms.values()).sort(made)) {
+    if (!store.hasRoom(h.code)) store.create(h.code, h.name, { guestCode: codeFor(), settings: structureOf(h.settings) });
+    for (const x of from.roomsOf(h.code).slice(1)) if (!store.hasRoom(x.code)) store.createIn(h.code, x.code, x.name, { guestCode: codeFor(), settings: { codeOff: true, ...structureOf(x.settings) } });
+  }
+  from.clear();
+  const screens = resilience.readJsonWithBak(path.join(dir, 'displays.json'));
+  const now = Date.now();
+  const list = (isRecord(screens) && Array.isArray(screens.displays) ? screens.displays : []).filter((d) => isRecord(d) && typeof d.id === 'string' && store.has(d.hall)).map((d) => {
+    const kept = keepScreens && /^[0-9a-f]{64}$/.test(d.tokenHash || '') && typeof d.tokenSealed === 'string';
+    return { ...(kept ? { id: d.id, tokenHash: d.tokenHash, tokenSealed: d.tokenSealed } : displays.freshLink()), hall: d.hall, name: guard.cleanText(d.name, 60) || 'Screen', content: layoutOf(d.content), seq: (Number.isSafeInteger(d.seq) ? d.seq : 0) + 1, createdAt: now, updatedAt: now, updatedBy: '' };
+  });
+  displays.replace({ v: 1, halls: {}, displays: list });
+  for (const d of displays.list.values()) { const live = screensLive.get(d.tokenHash); if (live) d.live = live; }
+  displays.save();
+}
+/**
+ * The rooms that may send into each room become the next event's (settings.roomSends): a continued or copied event's as
+ * its archive recorded them, of the rooms there are; none after a fresh start.
+ */
+function eventSends(sends) {
+  const kept = {};
+  for (const [k, list] of Object.entries(sends || {})) { if (!store.hasRoom(k)) continue; const l = list.filter((x) => store.hasRoom(x)); if (l.length) kept[k] = l; }
+  if (Object.keys(kept).length) settings.roomSends = kept; else delete settings.roomSends;
+  saveSettings();
+}
+/**
+ * Step 7, the next event, as the archive's record names it: an archived event's files moved back and read again
+ * (continue: its record gains `continued`), a copy of an event's settings and structure (copy), or nothing (fresh). Under
+ * all three the holds of the event just archived (`kept.holds`) go into the next event's pages.json and each hall's
+ * Stagewatch link starts; then the archive's record says the next event began (`next.began`), before the current event's
+ * record is written, so a start never begins it twice. Answers the current event's record; a step refused throws, and
+ * what this run holds is then what is on disk.
+ */
+function beginNext(rec, name, kept) {
+  const next = rec.next;
+  const now = Date.now();
+  let began;
+  if (next.kind === 'continue') {
+    const from = events.readArchived(DATA_DIR, next.from);
+    try { events.moveBack(DATA_DIR, UPLOAD_DIR, next.from, { beat }); } catch (e) { readStoresAgain(); throw e; }
+    store.loadAll(migrateRoom);
+    readStoresAgain();
+    stageRecord.reset({ loaded: false });
+    stageRecord.load((hall) => store.has(hall) || store.hallsOnDisk.has(hall)).catch((e) => console.error('  [stage] the stage record of the event continued could not be read: ' + (e && e.message ? e.message : e)));
+    eventSends(from ? from.sends : {});
+    events.markArchived(DATA_DIR, next.from, { continued: { at: now, into: name } });
+    began = { id: from ? from.id : newEventId(), name: next.name, at: from && from.began ? from.began : now, kind: 'continue', from: next.from };
+  } else if (next.kind === 'copy') {
+    const src = next.from === 'current' ? name : next.from;
+    copyEvent(src, next.keepScreens, kept.screensLive);
+    eventSends(src === name ? rec.sends : (events.readArchived(DATA_DIR, src) || {}).sends);
+    began = { id: newEventId(), name: next.name, at: now, kind: 'copy', from: src };
+  } else {
+    eventSends({});
+    began = { id: newEventId(), name: next.name, at: now, kind: 'fresh', from: '' };
+  }
+  // The holds belong to the links, which every kind keeps: the event just archived's, in place of any the next one had.
+  for (const id of pages.holdLinks()) pages.setHold(id, null);
+  for (const [id, h] of kept.holds) if (h) pages.setHold(id, h);
+  for (const room of store.rooms.values()) configureHallLink(room);
+  if (!events.markArchived(DATA_DIR, name, (raw) => ({ next: { ...raw.next, began } }))) throw Object.assign(new Error('its record cannot be read'), { words: path.join(events.ARCHIVE, name, events.LIVE) + ' cannot be read, so the next event is not begun' });
+  return events.liveOf(name, began);
+}
+/**
+ * Step 8: the pages are told (every sign-in, the sessions' and the token's alike, ended with the event: leaveEvent), and
+ * the screens given their new state:
+ * a screen whose link the next event keeps shows what it holds now; one whose link it does not is told its link is no
+ * longer in use. Every page reloads (account:changed) and is judged afresh at its next connection.
+ */
+function tellNewEvent(words) {
+  for (const s of Array.from(io.sockets.sockets.values())) {
+    if (!s.data) continue;
+    if (s.data.display) {
+      const d = displays.get(s.data.display);
+      if (d && d.tokenHash === s.data.displayHash) { s.emit('display:state', displayState(d)); continue; }
+      s.emit('display:unknown', { words: 'This screen\'s event was archived, and its link is not in use in the next one. Ask for the current link.' });
+    } else s.emit('account:changed', { what: 'event', words });
+    s.disconnect(true);
+  }
+  for (const d of displays.list.values()) displaysChanged(d.hall);
+}
+/**
+ * Step 4 once the archive's record is on disk (the act, or a try again): the event's files moved into the archive made
+ * aside, and the folder renamed whole; then the steps after it (nextSteps). A move refused leaves the archive aside, every
+ * join and write waiting, and answers why (eventStuck).
+ */
+function archiveSteps(name, rec, actor, ip, { carried = null, split = false } = {}) {
+  let moved;
+  try { moved = events.moveIn(DATA_DIR, UPLOAD_DIR, name, { beat }); } catch (e) {
+    return eventStuck('moves', name, thrownWords(e), { memory: carried === 'memory' ? 'event' : 'leftovers' });
+  }
+  asideSaid(name, moved.aside);
+  return nextSteps(name, rec, actor, ip, { carried, split });
+}
+/** Files set aside as an archive was made: said, by the archive's folder (lib/events.js keeps the archive's own). */
+function asideSaid(name, n) {
+  if (n) console.error('  [event] ' + plural(n, 'file') + ' of the event written after its archive began, under a name the archive held already, ' + (n === 1 ? 'was' : 'were') + ' set aside in ' + path.join(events.ARCHIVE, name, events.ASIDE) + ': the archive keeps its own');
+}
+/**
+ * Steps 5 to 8 once the archive is made whole: the event let go in memory; the archive point written, the archive's one
+ * row, as the first line of a new file, and its entry noted in the archive's record; the split, where asked, begun as its
+ * own act straight after it (a promise, `split`); the next event begun; its record put in place; and its pages told.
+ * What the next event carries of the one archived comes from this run's memory where it holds that event whole
+ * (`carried: 'memory'`), else from the archive's pages.json. A step that stopped is tried again from where it stopped
+ * (eventChanging's `point`, `carried`, `splitStarted`): an archive whose next event began has its record put in place
+ * alone. Answers {ok, answer, split}, or the stuck answer, its split with it when one began.
+ */
+function nextSteps(name, rec, actor, ip, { carried = null, split = false } = {}) {
+  const was = eventChanging && eventChanging.step === 'next' && eventChanging.name === name ? eventChanging : null;
+  let point = was ? was.point : null;
+  let splitStarted = was ? was.splitStarted : false;
+  let kept = was ? was.carried : null;
+  let splitDone = null;
+  // The archive's codes and halls are an earlier event's from now on: no code made for the next one is one of them.
+  for (const c of rec.codes) archivedCodes.add(c);
+  for (const h of rec.halls) archivedHalls.set(h.key, { name: h.name, event: rec.name });
+  if (!archiveNames.includes(name)) archiveNames = [...archiveNames, name].sort();
+  let live;
+  try {
+    if (rec.next.began) live = events.liveOf(name, rec.next.began);
+    else {
+      const left = leaveEvent();
+      if (!kept) kept = carried === 'memory' ? left : { holds: holdsArchived(name), screensLive: new Map() };
+      // An archive whose point was written and not noted in its record (its record refused that write) is never given a
+      // second one: the point is looked for among the log's newest rows first.
+      if (!rec.point && !point) point = audit.latest(500).find((x) => x.action === 'audit.archive' && typeof x.target === 'string' && x.target.startsWith(name + ';')) || null;
+      if (!rec.point && !point) point = audit.point(actor, name, pointWords(rec, name), ip);
+      if (!rec.point) {
+        try { events.markArchived(DATA_DIR, name, { point: { seq: point.seq } }); } catch (e) { console.error('  [event] the archive point\'s entry could not be noted in ' + path.join(events.ARCHIVE, name) + ' (' + (e.code || e.message) + ')'); }
+      }
+      const at = rec.point || point;
+      if (split && !splitStarted && at) { splitDone = auditArchiver.split(at.seq, actor, ip); splitStarted = true; }
+      live = beginNext(rec, name, kept);
+    }
+    events.writeLive(DATA_DIR, live);
+  } catch (e) {
+    const stuck = eventStuck('next', name, thrownWords(e), { carried: kept, point, splitStarted });
+    return { ...stuck, split: splitDone };
+  }
+  eventNow = live;
+  eventChanging = null;
+  boardDirty();
+  for (const r of store.rooms.values()) frames.rooms.mark(r.code);
+  tellNewEvent(live.kind === 'continue' ? '“' + live.name + '” is continued: sign in again, or join with its code.' : 'This event was archived, and “' + live.name + '” has begun: sign in again, or join with the new event\'s code.');
+  return { ok: true, answer: { archive: name, words: archivedWords(rec, name), event: eventView(), point: point ? point.seq : rec.point ? rec.point.seq : null, signedOut: true }, split: splitDone };
+}
+/** The act's answer in words: the archive, what began, and that every sign-in ended. */
+function archivedWords(rec, name) {
+  return '✓ “' + rec.name + '” archived (' + path.join(events.ARCHIVE, name) + '): ' + nextWords(rec.next) + '. Links kept. Every sign-in ended: sign in again.';
+}
+
+/**
+ * Archive the current event (steps 1 to 8, the split begun straight after the point), by the one writer, in one turn of
+ * the loop from the busy check to the pages told: `ask` as eventAskOf read it. Answers {ok, status?, error?, answer,
+ * split}; one that stopped is finished by the same act asked again (finishArchive).
+ */
+function archiveEvent(ask, actor, ip) {
+  if (eventChanging && eventChanging.step) return finishArchive(actor, ip);
+  if (eventChanging) return { ok: false, status: 409, error: EVENT_WORDS };
+  if (purging.size) return { ok: false, status: 409, error: 'An archive\'s contents are being deleted: try again when it ends.' };
+  const refused = eventRefusal(ask);
+  if (refused) return { ok: false, ...refused };
+  // Step 1: the busy check. A busy server is archived only with a typed reason, which the archive point says.
+  const line = busyNow();
+  const isBusy = busy.isBusy(line);
+  if (isBusy && !ask.reason) return { ok: false, status: 409, busy: true, line, error: 'Not archived: AGMessage is busy (' + busy.words(line) + '). Type a reason to archive it anyway.' };
+  let plan, back = null;
+  try {
+    plan = events.uploadsPlan(DATA_DIR, UPLOAD_DIR);
+    if (ask.kind === 'continue') back = events.copyPlan(path.join(events.folderOf(DATA_DIR, ask.from), events.UPLOADS), UPLOAD_DIR);
+  } catch (e) { return { ok: false, status: 503, error: 'Not archived: the uploads could not be read (' + (e.code || e.message) + '). Nothing was moved.' }; }
+  const room = uploadsRefusal(plan, back);
+  if (room) return { ok: false, ...room };
+  let at = Date.now();
+  while (events.readArchived(DATA_DIR, events.nameAt(at)) || events.partials(DATA_DIR).includes(events.nameAt(at))) at++;
+  const name = events.nameAt(at);
+  const fromName = ask.kind === 'continue' ? ask.from : ask.kind === 'copy' ? ask.from : '';
+  const rec = {
+    v: 1, id: eventNow.id, name: eventNow.name || ask.current, began: eventNow.began || oldestHall() || at, ended: at, kind: eventNow.kind, from: eventNow.from,
+    next: { kind: ask.kind, from: fromName, name: ask.name, keepScreens: ask.kind === 'copy' && ask.keepScreens === true },
+    counts: eventCounts(plan), sends: isRecord(settings.roomSends) ? settings.roomSends : {},
+    halls: Array.from(store.rooms.values()).map((r) => ({ key: r.code, name: r.name || '' })),
+    codes: [...new Set(store.allRooms().flatMap((r) => [r.code, store.guestCodeOf(r), ...r.retired].filter(Boolean)))],
+    ...(ask.split === true ? { split: true } : {}),
+    ...(isBusy ? { busy: busy.words(line), reason: ask.reason } : {}),
+  };
+  eventChanging = { since: at, by: actor.name || '', step: '', name, words: '' };
+  // Step 2: the audit log, every lane and each hall that changed saved, as a stop saves them.
+  let unsaved;
+  try { ({ unsaved } = saveAll()); } catch (e) { unsaved = ['the event (' + (e.code || e.message) + ')']; }
+  if (unsaved.length) { eventChanging = null; return { ok: false, status: 503, error: 'Not archived: ' + unsaved.join(', ') + ' could not be saved, so its archive would not be whole. Nothing was moved.' }; }
+  // Step 3: the archive made aside, its record first, so a stop from here on leaves its intent on disk.
+  try { events.begin(DATA_DIR, name, rec); } catch (e) { eventChanging = null; return { ok: false, status: 503, error: 'Not archived: its folder could not be made in ' + events.archiveDir(DATA_DIR) + ' (' + (e.code || e.message) + '). Nothing was moved.' }; }
+  for (const r of store.allRooms()) store.closeLog(r);
+  return archiveSteps(name, events.cleanArchived(rec), actor, ip, { carried: 'memory', split: ask.split === true });
+}
+/**
+ * An archive that stopped, finished by the admin's act asked again: its moves tried again (then the rest of its steps),
+ * or its next event begun. The split asked with it is begun by this act, the admin's, straight after its point.
+ */
+function finishArchive(actor, ip) {
+  const c = eventChanging;
+  if (c.step === 'held') return { ok: false, status: 503, stuck: true, error: stuckWords(c) };
+  if (settingsRead.unread) return { ok: false, status: 503, stuck: true, error: 'Not finished: ' + settingsRead.words + ', so the next event could not be saved. ' + settingsRead.fix };
+  const partial = c.step === 'moves';
+  const rec = events.readArchived(DATA_DIR, c.name, { partial });
+  if (!rec || !rec.next) return { ok: false, status: 503, stuck: true, error: 'Not finished: the archive ' + (partial ? 'being made' : 'made') + ' cannot be read (' + path.join(events.ARCHIVE, (partial ? '.' + c.name + '.partial' : c.name), events.LIVE) + '): start AGMessage again once nothing else holds it.' };
+  // A room's log a commit opened since the archive began is closed, so the folder renames whole.
+  for (const r of store.allRooms()) store.closeLog(r);
+  return partial
+    ? archiveSteps(c.name, rec, actor, ip, { carried: c.memory === 'event' ? 'memory' : null, split: rec.split })
+    : nextSteps(c.name, rec, actor, ip, { split: rec.split });
+}
+
+/**
+ * What a start finishes once the audit log is open: an archive a stop cut short whose moves it finished (`finish`), or
+ * the next event of an archive made whole whose next event never began (`begin`): {name, rec, kind}.
+ */
+let eventFinishAtStart = null;
+/** The split asked with an archive a start finished is not made by the start: the admin makes it at its point. */
+const SPLIT_LEFT = ' The split asked with it was not made: split the log at its point from Admin → Health.';
+/**
+ * At a start, once this copy holds its folder and before anything of the event is written (people's pages, the rooms'
+ * snapshots, a restart's line): an archive a stop cut short has its moves finished from its record, no file of the folder
+ * ever put over one the archive holds; else the archives say whether the folder is between two events, and only where the
+ * current event's record is absent (neither file nor .bak) and exactly one archive's next event never began is that next
+ * event begun. Either way what this start read of the event is let go, and its next steps wait for the audit log
+ * (eventAtStart). Where the next event began and its record was not put in place, the record is written from what the
+ * archive says, and nothing else is done. Anything that cannot be read or moved leaves the folder as it is, every join
+ * and write refused with why.
+ */
+function eventFolderAtStart() {
+  let parts;
+  try { parts = events.partials(DATA_DIR); } catch (e) { eventStuck('held', '', 'The archives in ' + events.archiveDir(DATA_DIR) + ' could not be listed (' + (e.code || e.message) + '), so this start cannot tell whether one was being made'); return; }
+  const partialAt = (n) => path.join(events.ARCHIVE, '.' + n + '.partial');
+  if (parts.length > 1) { eventStuck('held', '', parts.length + ' archives were being made at the last stop (' + parts.map(partialAt).join(', ') + '), and one is made at a time, so each is left as it is'); return; }
+  if (parts.length) {
+    const name = parts[0];
+    if (settingsRead.unread) { eventStuck('moves', name, settingsRead.words + ', so the next event could not be saved'); return; }
+    const rec = events.readArchived(DATA_DIR, name, { partial: true });
+    if (!rec || !rec.next) { eventStuck('moves', name, path.join(partialAt(name), events.LIVE) + ' cannot be read'); return; }
+    let moved;
+    try { moved = events.moveIn(DATA_DIR, UPLOAD_DIR, name, { beat }); } catch (e) { eventStuck('moves', name, thrownWords(e)); return; }
+    asideSaid(name, moved.aside);
+    leaveEvent();
+    eventFinishAtStart = { name, rec, kind: 'finish' };
+    return;
+  }
+  const a = archivesAtStart;
+  if (liveRead.state === 'ok') {
+    // A record of the next event in place whose archive does not say it began: the archive is told, and nothing begins again.
+    for (const n of a.unbegun) {
+      if (n === eventNow.after) { try { events.markArchived(DATA_DIR, n, (raw) => ({ next: { ...raw.next, began: { id: eventNow.id, at: eventNow.began, name: eventNow.name, kind: eventNow.kind, from: eventNow.from } } })); } catch (e) { console.error('  [event] ' + path.join(events.ARCHIVE, n) + ' could not be told its next event began (' + (e.code || e.message) + ')'); } }
+      else console.error('  [event] ' + path.join(events.ARCHIVE, n) + ' names a next event that never began, and this folder holds its current event (“' + eventNow.name + '”): nothing of it begins, and both are left as they are');
+    }
+    return;
+  }
+  const unsure = (why) => eventStuck('held', '', why + ', so this start cannot tell whether an event was being begun');
+  if (a.code) { unsure('The archives in ' + events.archiveDir(DATA_DIR) + ' could not be read (' + a.code + ')'); return; }
+  if (a.unread.length) { unsure('The record of ' + plural(a.unread.length, 'archive') + ' (' + a.unread.slice(0, 3).map((n) => path.join(events.ARCHIVE, n)).join(', ') + ') could not be read, and ' + (liveRead.state === 'unread' ? 'neither could this event\'s (' + events.LIVE + ', ' + liveRead.code + ')' : 'this folder has no current event\'s record')); return; }
+  if (liveRead.state === 'unread') {
+    if (a.unbegun.length) { unsure('This event\'s record (' + events.LIVE + ') could not be read (' + liveRead.code + '), and ' + path.join(events.ARCHIVE, a.unbegun[0]) + ' names a next event that never began'); return; }
+    console.error('  [event] this event\'s record (' + events.LIVE + ') could not be read (' + liveRead.code + '): nothing is written over it, and this event is not archived this run');
+    return;
+  }
+  if (a.unbegun.length > 1) { unsure(plural(a.unbegun.length, 'archive') + ' name a next event that never began (' + a.unbegun.map((n) => path.join(events.ARCHIVE, n)).join(', ') + ')'); return; }
+  if (a.unbegun.length === 1) {
+    const name = a.unbegun[0];
+    const rec = events.readArchived(DATA_DIR, name);
+    if (!rec || !rec.next) { unsure('The record of ' + path.join(events.ARCHIVE, name) + ' could not be read'); return; }
+    if (settingsRead.unread) { eventStuck('next', name, settingsRead.words + ', so the next event could not be saved'); return; }
+    leaveEvent();
+    eventFinishAtStart = { name, rec, kind: 'begin' };
+    return;
+  }
+  if (!a.begun.length) return;
+  // Every archive's next event began, and the newest one's record was not put in place: it is written from the archive's
+  // own words of it, the newest by its archive point (the audit log's order, never the clock's), and nothing else is done.
+  const newest = a.begun.slice().sort((x, y) => x.seq - y.seq || (x.name < y.name ? -1 : 1)).at(-1);
+  const live = events.liveOf(newest.name, newest.began);
+  try {
+    events.writeLive(DATA_DIR, live);
+    eventNow = live;
+    console.log('  Event:   “' + live.name + '”\'s record was put in place at this start, from ' + path.join(events.ARCHIVE, newest.name));
+  } catch (e) { console.error('  [event] the record of “' + live.name + '” could not be put in place (' + (e.code || e.message) + '): the next start tries again'); }
+}
+/**
+ * At a start, once the audit log is open and before this copy serves: what eventFolderAtStart left to finish gets its
+ * archive point (where the archive has none yet), its next event and its record. A step that stops waits, as in a run.
+ */
+function eventAtStart() {
+  if (!eventFinishAtStart) return;
+  const { name, rec, kind } = eventFinishAtStart;
+  eventFinishAtStart = null;
+  const r = nextSteps(name, rec, SYSTEM_ACTOR, '');
+  if (!r.ok) return;
+  const splitLeft = rec.split && !rec.point ? SPLIT_LEFT : '';
+  if (kind === 'finish') console.log('  Event:   archiving “' + rec.name + '” was cut short by the last stop, and was finished at this start (' + path.join(events.ARCHIVE, name) + ').' + splitLeft);
+  else console.log('  Event:   “' + eventNow.name + '” began at this start: the last stop came after “' + rec.name + '” was archived and before the next event began.' + splitLeft);
+}
+/** The archives whose contents are being deleted now, by their names. */
+const purging = new Set();
+
+// The current event and its archives, for the admin page: whom its gate admits. Whether this page may archive is "the
+// admin"'s (theAdminReq), and whether it may delete an archive's contents is the laptop's (`local`, with the token typed).
+// `audit` is the live log's range a split at this event's point would move (H.10.2's tick).
+app.get('/api/event', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  if (!isAdminReq(req)) return res.status(403).json({ ok: false, error: 'Only the admin page reads the event.' });
+  const line = busyNow();
+  let archives = [];
+  let unread = '';
+  try { archives = await archivesNow(); } catch (e) { unread = e.code || e.message; }
+  res.json({ ok: true, event: eventView(), archives, ...(unread ? { unread } : {}), busy: busy.isBusy(line), busyWords: busy.words(line), admin: web.theAdminReq(req), local: guard.isHostMachine(req), earlierLinks: earlierLinks(), audit: { from: audit.from, to: audit.seq } });
+});
+// Archive this event (the admin: theAdminReq; a manager granted settings.manage is refused), and begin the next one; with
+// the split ticked, the audit log is split at the archive point straight after it, and its answer said with the archive's.
+const NOT_EVENT_ADMIN = 'Only an admin may archive an event.';
+app.post('/api/event/archive', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  if (!web.theAdminReq(req)) return res.status(403).json({ ok: false, error: NOT_EVENT_ADMIN });
+  const w = isValidAdminCookie(req) ? null : web.who(req);
+  const actor = w ? web.actorOf(w) : HOST_ACTOR;
+  const r = archiveEvent(eventAskOf(req.body), actor, guard.clientIp(req));
+  let split = null;
+  if (r.split) {
+    try { split = { ...(await r.split) }; } catch (e) { split = { ok: false, error: 'The audit log was not split (' + (e && e.message ? e.message : e) + ').' }; }
+    delete split.status;
+  }
+  if (!r.ok) { const answer = { ...r, ...(split ? { split } : {}) }; delete answer.status; if (!split) delete answer.split; return res.status(r.status || 409).json(answer); }
+  return res.json({ ok: true, ...r.answer, ...(split ? { split } : {}) });
+});
+// Delete an archive's contents: the laptop's token, typed at the laptop, and audited (event.purged) once anything went.
+// Its event.json stays, read before anything is deleted and written again with what was left, so the archive's existence
+// stays recorded and a later ask deletes the rest; data/audit-archive/ is never reached, and nothing is deleted on a timer.
+const PURGE_HERE = 'Delete an archive\'s contents at the AGMessage laptop, with its token.';
+app.post('/api/event/purge', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  if (!guard.isHostMachine(req)) return res.status(403).json({ ok: false, error: PURGE_HERE });
+  const b = isRecord(req.body) ? req.body : {};
+  const bad = typedTokenProblem(req, b.token, 'Delete this archive\'s contents');
+  if (bad) return res.status(bad.status).json({ ok: false, error: bad.error });
+  if (eventChanging) return res.status(409).json({ ok: false, error: changingWords() });
+  const name = guard.str(b.archive).slice(0, 40);
+  const rec = events.readArchived(DATA_DIR, name);
+  if (!rec) return res.status(404).json({ ok: false, error: 'No archive by that name.' });
+  if (purging.has(name)) return res.status(409).json({ ok: false, error: 'Its contents are being deleted now.' });
+  purging.add(name);
+  let r;
+  try {
+    if (!(await events.holdsAny(DATA_DIR, name))) return res.json({ ok: true, already: true, archive: name, words: 'The contents of “' + rec.name + '”\'s archive were deleted already.' });
+    r = await events.purge(DATA_DIR, name, { by: HOST_ACTOR.name });
+  } catch (e) {
+    return res.status(503).json({ ok: false, error: 'Not deleted: the archive could not be read (' + (e.code || e.message) + '). Nothing was deleted.' });
+  } finally { purging.delete(name); }
+  const c = rec.counts;
+  const held = plural(c.halls, 'hall') + ', ' + plural(c.messages, 'message') + ', ' + plural(c.files, 'file') + ', ' + plural(c.accounts, 'account');
+  const leftNames = r.left.map(([n, code]) => n + ': ' + code);
+  const leftWords = r.left.length ? ', but for ' + plural(r.left.length, 'part') + ' that could not be removed (' + leftNames.slice(0, 4).join(', ') + (leftNames.length > 4 ? ', …' : '') + ')' : '';
+  const recordWords = r.recorded ? '; its record could not be written again (' + r.recorded + ')' : '; its record is kept';
+  if (!r.removed.length) return res.status(503).json({ ok: false, archive: name, error: 'Not deleted: ' + leftNames.join(', ') + '. Close what holds them, then delete again.' });
+  audit.write(HOST_ACTOR, 'event.purged', name, 'the contents of the archive of “' + rec.name + '” were deleted (' + held + ', with its takes and stage record)' + leftWords + recordWords, guard.clientIp(req));
+  const whole = !r.left.length && !r.recorded;
+  return res.status(whole ? 200 : 207).json({
+    ok: whole, archive: name,
+    ...(r.left.length ? { error: 'Not all deleted: ' + leftNames.join(', ') + '. Close what holds them, then delete again.' } : r.recorded ? { error: 'Deleted, and its record could not be written again (' + r.recorded + '): it still lists what it held.' } : {}),
+    words: '✓ The contents of “' + rec.name + '”\'s archive were deleted (' + held + ')' + (r.left.length ? ', all but ' + plural(r.left.length, 'part') : '') + '; its record is kept.',
+  });
+});
+
 // Errors end in one short JSON line, never a stack trace: a malformed body is the caller's (400), anything else is ours
 // (500, logged). Express 5 forwards a rejected async handler here too.
 app.use((err, _req, res, _next) => {
@@ -2323,6 +3010,13 @@ function guardHandlers(socket) {
         noteFault('socket', String(event).slice(0, 40), e);
         if (ack) { try { ack({ ok: false, error: 'That request could not be handled.' }); } catch { /* the client has gone */ } }
       };
+      // While an event is being archived, every new join and every write is refused: nothing lands in an event half archived.
+      // The admin page's read of its settings (no change asked) goes on, so it can say the archive and finish it.
+      const readsSettings = event === 'admin:settings' && (clean[0] === undefined || typeof clean[0] === 'function');
+      if (eventChanging && !readsSettings && (event === 'join' || busy.INPUT.has(event))) {
+        if (ack) { try { ack({ ok: false, error: changingWords() }); } catch { /* the client has gone */ } }
+        return undefined;
+      }
       // Input on a seated page makes this copy busy for the window (lib/busy.js), whatever its handler answers.
       if (busy.INPUT.has(event)) { const page = seatedPage(socket); if (page) activity.note(page, Date.now()); }
       try {
@@ -3764,12 +4458,17 @@ io.on('connection', (socket) => {
     socket.data.watching = roomCode;
     ok(ack)({ ok: true, code: roomCode, name: r.name || '', messages: r.messages.map(marked), users: roomUserSummary(r, { links: true }), locked: !!r.settings.lockRoles, guestCode: store.guestCodeOf(r), codeOn: store.codeOn(r), main: store.isMain(r) });
   });
+  // A new hall, and with `link` an earlier hall's own Stagewatch link (one an earlier event's hall kept, Admin → Show
+  // network's earlier links) moved to it, with its key, fingerprint and the hold on its frame.
   socket.on('admin:createRoom', (arg, ack) => {
     if (typeof arg === 'function') { ack = arg; arg = {}; }
     if (!admin(ack)) return;
+    const earlier = earlierLinkFor(arg && arg.link !== undefined ? guard.str(arg.link).toUpperCase() : '');
+    if (earlier && earlier.error) return ok(ack)({ ok: false, error: earlier.error });
     const r = newRoom(arg && typeof arg.name === 'string' ? arg.name : '');
-    auditRoom('hall.create', r.code, r.name || '(no name)');
-    ok(ack)({ ok: true, code: r.code, name: r.name });
+    if (earlier) takeEarlierLink(r, earlier);
+    auditRoom('hall.create', r.code, (r.name || '(no name)') + (earlier ? ', with the Stagewatch link of an earlier hall (' + earlier.url + ')' : ''));
+    ok(ack)({ ok: true, code: r.code, name: r.name, ...(earlier ? { stagewatch: earlier.url } : {}) });
   });
   socket.on('admin:resetRoom', ({ roomCode } = {}, ack) => {
     if (!admin(ack)) return;
@@ -4220,7 +4919,10 @@ io.on('connection', (socket) => {
     if (!room || !me || socket.data.adminView) return;
     const r = room, u = me;
     r.users.delete(socket.id);
-    emitUsers(r);
+    // A room the store no longer holds as this object (one removed, or an event's archived since, whose key the next
+    // event's room may have): its people list is told no one, and no leave is said or seat kept for it below.
+    const current = store.room(r.code) === r;
+    if (current) emitUsers(r);
     boardDirty();
     // Its report on what it was shown goes with it (a Board page's time out of view, ended here, read by the day's peaks).
     const reported = pages.left(socket.id);
@@ -4229,11 +4931,12 @@ io.on('connection', (socket) => {
     const still = Array.from(r.users.values()).some((x) => x.uid === u.uid);
     if (!still) {
       trackLeave(u.uid, r.code);
+      if (!current) return;
       const k = r.code + '|' + u.uid;
       const announce = () => {
         const p = pendingLeaves.get(k);
         pendingLeaves.delete(k);
-        if (!store.hasRoom(r.code) || Array.from(r.users.values()).some((x) => x.uid === u.uid)) return;
+        if (store.room(r.code) !== r || Array.from(r.users.values()).some((x) => x.uid === u.uid)) return;
         syncSeats(r);
         if (moved || (p && p.moved)) return;
         systemMessage(r, `${u.name} left`);
@@ -4244,7 +4947,7 @@ io.on('connection', (socket) => {
         pendingLeaves.set(k, { timer: setTimeout(announce, LEAVE_GRACE_MS), name: u.name, role: holdSeat ? u.role : null, guest: !u.acct && !socket.data.isAdmin, moved: false });
       }
     }
-    if (store.hasRoom(r.code)) syncSeats(r);
+    syncSeats(r);
   }
 
   socket.on('disconnect', (reason) => {
@@ -4308,6 +5011,8 @@ function serveDisplay(socket, token) {
   const d = displays.byToken(token);
   if (!d) { socket.emit('display:unknown', { words: 'This screen link is not (or no longer) in use. Ask for the current link.' }); setTimeout(() => socket.disconnect(true), 100); return; }
   socket.data.display = d.id;
+  // The link it opened, by its hash: a new event keeps the screen on only where it keeps its link (tellNewEvent).
+  socket.data.displayHash = d.tokenHash;
   socket.join('display:' + d.id);
   const asked = guard.str(socket.handshake.auth.screen);
   const key = SCREEN_KEY.test(asked) ? asked : socket.id;
@@ -6454,6 +7159,9 @@ function firstWrites() {
     if (why) secretFound.words = secretFound.file + ' was not made: ' + why;
   }
   if (settingsDue) saveSettings();
+  // An archive a stop cut short has its moves finished, or a folder between two events is found, before anything of the
+  // event is written (pages.json just below, the rooms' snapshots after), and what this start read of it let go (6-U15).
+  eventFolderAtStart();
   pages.hold();
   // Each person's pins in a room no longer here go (plan 7-§17.5): one removed whose files stayed on disk, or one that
   // could not be read at this start, is still here, and keeps them for the start it loads.
@@ -6517,14 +7225,19 @@ holdDataFolder(() => front.listen(PORT, HOST, () => {
   listening = true;
   serving = true;
   firstWrites();
-  bootSnapshots = store.compactDirty();
-  if (!stopBefore.saved) {
+  // An archive a stop cut short that this start could not finish: what it read of what was left out of it is never written.
+  const leftovers = !!eventChanging && eventChanging.step === 'moves';
+  bootSnapshots = leftovers ? 0 : store.compactDirty();
+  if (!stopBefore.saved && !leftovers) {
     for (const room of store.allRooms()) {
       store.commit(room, { o: 'add', m: { id: makeMessageId(), type: 'system', text: '— AGMessage restarted · ' + plural(room.messages.length, 'message') + ' kept —', at: Date.now() } });
       if (store.isMain(room)) restartSaid++;   // every room says it; health counts the halls
     }
   }
   audit.open();
+  // An archive a stop cut short is finished, and a folder left between two events begins the next one, before anything is
+  // served (its archive point needs the log open).
+  eventAtStart();
   const upgraded = dataformat.rowWords(formatNow, BUILD.full);
   if (upgraded) audit.write(SYSTEM_ACTOR, 'server.upgraded', BUILD.full, upgraded);
   for (const fn of untilServing.splice(0)) fn();

@@ -766,6 +766,62 @@ its keys leave the account's profile, which every portable folder of that accoun
   next start; each refusal, each check that does not pass, the copy taken out again and the bundle cleared, and
   `forget-keys` removing nothing without the verdict and naming a removal that failed with its path.
 
+## Events and their archives
+
+One data folder holds one event at a time, in both channels. After an event, nobody deletes folders by hand (under the
+installed node Explorer's "Continue" on the protected data folder adds the person to its access list for good,
+https://support.microsoft.com/kb/950934): the admin archives the event on the admin page, and the next one begins.
+
+- **Admin → Event** says the current event's name, how and when it began, and lists the archived events under it, each
+  with its counts. **Archive this event…** is the admin's alone (the laptop's token, or an account whose role is admin;
+  a manager given `settings.manage` is refused with "Only an admin may archive an event."). It asks what comes next:
+  - **Start fresh:** no halls, screens or accounts. The token at the laptop makes the first admin account, as at a first
+    start (installed: Start → AGMessage → Show the admin token).
+  - **Copy an event's settings and structure** (this one, or an archived one): its halls and side rooms by their keys,
+    names, allow-lists, locks and each hall's backstage guests' web pages with its lock, each hall's
+    own Stagewatch link, the accounts with their rights and views, the guests' chat views, and the screens by name and
+    hall with their standing layout. Never its messages, files, help requests, transcripts, minutes, desk results,
+    takes, pins, sign-ins or the guests a restart would seat again. Each room gets a new guest code and no invite carries
+    over, since codes and invites are capabilities, not structure. Screens get new links unless "Keep the screens' links" is ticked (for screens of your
+    own kit).
+  - **Continue an archived event:** it comes back as it was archived, its codes, screens' links, messages and files
+    included. Its name is typed to confirm. The current event is archived first; continuing it is no new event. Where its
+    uploads come back to an uploads folder on another volume, a continue that would leave less than 1 GiB free there is
+    refused before anything moves.
+- **Kept in all three, never archived:** the links (Stagewatch with its key and fingerprint, each hall's own Stagewatch,
+  Patterns and PlayMap), the certificate pins, the node's id, the context token, the AI key, the tunnel's end, the key
+  folder and `secret.key`, the audit log and its archives in `data\audit-archive\`, the laptop's admin and its grants,
+  and the confidential holds. After a fresh start a hall's own Stagewatch link is kept as an earlier hall's: Admin →
+  Show network lists it, and New hall (on the admin page, and on the halls board for whoever sets halls up) offers it.
+- **What moves** goes into `data\archive\<time>\` (`2026-10-27T14-02-00-000Z`): the rooms, the stage record,
+  `pages.json`, `displays.json`, `desk-results.json`, `accounts.json`, the ended sign-ins, the uploads and the event's
+  record, `event.json`. On one volume each move is a rename. Where the uploads folder (`AGM_UPLOAD_DIR`) is on another
+  volume its files are copied, counted and sized alike, and only then removed; a copy that would leave less than 1 GiB
+  free is refused before anything moves.
+- **Every sign-in ends**, the token's too: everyone signs in again, or joins with the new event's codes. Each page
+  reloads; a screen whose link the next event keeps shows its new state, any other is told its link is no longer in use.
+- **The audit log carries on.** The archive point, `audit.archive`, is the act's one row, the first line of a new log
+  file, naming the archive's folder; "Also split the audit log here" (unticked) splits the log there straight after it
+  (unit H3's split: the older part goes into a signed archive in `data\audit-archive\`, checkable on its own and in every
+  export).
+- **Busy.** A busy AGMessage is archived only with a typed reason, which the archive point says.
+- **A stop part way** loses nothing: a move another program refuses leaves the archive aside under
+  `data\archive\.<time>.partial\`, every new join and write refused with words, until Finish archiving the event… tries
+  again; the next start finishes it before it serves, then writes the point and begins the next event. One refused once
+  the archive is whole (a continue's file coming back, the next event's record) waits the same way, and Finish begins
+  the next event from where it stopped. No file is ever put over one the archive holds: a file of the event written
+  after its archive began is kept in the archive's `aside\` folder. The archive's `event.json` says when its next event
+  has begun, so a start never begins it twice; a start that cannot read what it needs to tell (an archive's record, the
+  current event's, the settings) leaves the folder as it is, every join and write refused with why, until a start that
+  can (close what holds the file, then start AGMessage again). A split asked with an archive a start finished is not
+  made by the start: Admin → Health splits the log at its point.
+- **Delete this archive's contents…**, at the laptop with the admin token typed, removes an archive's messages, files,
+  accounts, takes and stage record when asked, never on a timer. Its `event.json` stays, so the archive is still listed,
+  and it never reaches `data\audit-archive\`. The audit log writes `event.purged`. What another program held is named,
+  kept in the record, and removed by the next Delete this archive's contents….
+- **What only a Windows run proves**: a rename of a store another program holds open (an antivirus, a backup tool), and
+  the uploads on another volume than `%ProgramData%\AGMessage\data`. The rest is held on Linux (`test/events.test.js`).
+
 ## The version number, the release order and the data folder's format
 
 - **The version number** an installer and an upgrade compare is MAJOR.MINOR.BUILD (PlayMap's rule, in the bounds an

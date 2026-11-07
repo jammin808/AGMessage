@@ -225,6 +225,7 @@ class StageRecord {
     this.watches = new Map();   // hall + '\n' + seq → a take waiting for its `seen`
     this.loaded = false;
     this.loading = null;
+    this.gen = 0;               // the reads begun: a read that a reset overtook keeps nothing of what it read
     this.unlisted = '';         // why the folder could not be listed at the load ('' when it was, or is not there yet)
     this.queue = [];
   }
@@ -240,20 +241,26 @@ class StageRecord {
     return this.loading;
   }
   async _load(exists) {
+    const gen = this.gen;
     let names = [];
     const unread = [];
     // A folder that could not be listed holds files that were not read: no hall's is written this run.
-    try { names = await fs.promises.readdir(this.dir); } catch (e) { if (e.code !== 'ENOENT') { this.unlisted = e.code || 'EIO'; unread.push(['', this.unlisted]); } }
+    let unlisted = '';
+    try { names = await fs.promises.readdir(this.dir); } catch (e) { if (e.code !== 'ENOENT') unlisted = e.code || 'EIO'; }
+    if (gen !== this.gen) return { gone: [], unread: [], kept: [] };
+    if (unlisted) { this.unlisted = unlisted; unread.push(['', unlisted]); }
     const halls = [...new Set(names.map((n) => FILE.exec(n)).filter(Boolean).map((m) => m[1]))].sort();
     const gone = [];
     const kept = [];
     for (const hall of halls) {
+      if (gen !== this.gen) return { gone, unread, kept };
       if (!exists(hall)) {
         gone.push(hall);
         kept.push(...await this._unlink(hall));
         continue;
       }
       const read = await readRecord(this._file(hall));
+      if (gen !== this.gen) return { gone, unread, kept };
       const data = isRecord(read.data) ? read.data : null;
       const book = blankBook(read.whole);
       if (data) {
@@ -270,6 +277,23 @@ class StageRecord {
     for (const fn of this.queue.splice(0)) fn();
     return { gone, unread, kept };
   }
+  /**
+   * Every hall's record let go and each lane closed (what is pending dropped), its files left where they are: an event
+   * archived took them (lib/events.js). `loaded` keeps the store taking what is asked at once, with no record, until the
+   * next event's are read again (`load`, an archived event continued), which waits as at a start.
+   */
+  reset({ loaded = true } = {}) {
+    this.gen++;
+    for (const w of this.watches.values()) clearTimeout(w.timer);
+    this.watches.clear();
+    for (const book of this.books.values()) if (book.lane) book.lane.close();
+    this.books.clear();
+    this.unlisted = '';
+    this.loaded = loaded;
+    this.loading = null;
+    if (loaded) for (const fn of this.queue.splice(0)) fn();
+  }
+
   /** Run `fn` now once the record is read, else once it is, after what was asked before it. */
   _do(fn) {
     if (this.loaded) return fn();

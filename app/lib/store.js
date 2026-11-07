@@ -470,9 +470,14 @@ class RoomStore {
     this._bury(room, readTomb({ id: m.id, seq, uid: m.from && m.from.uid, cid: key ? m.cid : '' }));
   }
 
-  /** Make a hall: its key is its guest code until it is renewed (`setGuestCode`), and its first snapshot is written at once. */
-  create(code, name) {
-    const room = this._blank(code, name || '', this._madeNow());
+  /**
+   * Make a hall: its key is its guest code until it is renewed (`setGuestCode`), unless it is made with a code of its own
+   * (`guestCode`, never its key: a new event's copy of a hall), and its first snapshot is written at once, with `settings`
+   * where given.
+   */
+  create(code, name, { guestCode = '', settings = null } = {}) {
+    const room = this._blank(code, name || '', this._madeNow(), { guestCode: RoomStore.validCode(guestCode) && guestCode !== code ? guestCode : '' });
+    if (settings && typeof settings === 'object') room.settings = { ...settings };
     this.rooms.set(code, room);
     this._index();
     this.compact(code);
@@ -693,6 +698,9 @@ class RoomStore {
     return true;
   }
 
+  /** A room's log closed (an event being archived moves its files): the next change opens it again. */
+  closeLog(room) { this._closeLog(room); }
+
   _closeLog(room) {
     if (room.logFd !== null) { try { fs.closeSync(room.logFd); } catch { /* already closed: nothing to release */ } room.logFd = null; }
   }
@@ -727,6 +735,22 @@ class RoomStore {
     this._index();
     const back = loadsAgain(main) ? [hall, ...sides.filter(([, kept]) => loadsAgain(kept)).map(([code]) => code)] : [];
     return { rooms, kept: [...sides.flatMap(([, kept]) => kept), ...main], again: back.length, back };
+  }
+
+  /**
+   * Every room let go, each log closed, and nothing removed: an event archived took their files (lib/events.js), and the
+   * next event's rooms are made or loaded after it. What the last load found on disk goes with them.
+   */
+  clear() {
+    for (const room of this.allRooms()) this._closeLog(room);
+    this.rooms.clear();
+    this.side.clear();
+    this.sideByHall.clear();
+    this.hallsOnDisk = new Set();
+    this.roomsOnDisk = new Set();
+    this.found = { lines: 0, newest: 0 };
+    this.lastError = null;
+    this._index();
   }
 
   /** Let a room go, its log closed, and remove its files; returns the files that stay (`_unlink`). */

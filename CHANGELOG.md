@@ -6620,6 +6620,90 @@ next push; nothing of it has run on Windows yet)
   `docs/ACCOUNTS.md`, `docs/DESIGN.md`, `docs/ANALYSIS.md`, `SECURITY.md` and `CLAUDE.md`. `docs/NODES.md` is unchanged:
   the context, the hello and the AI's brief carry none of it.
 
+**An event is archived, never deleted silently; the next one continues an archived event, copies an event's settings and
+structure, or starts fresh** (the plan's Part 6, unit U15, with the owner's answer 45; the code and its tests on Linux,
+nothing of it run on Windows yet)
+- **Admin → Event** (new) says the current event's name, how and when it began, and lists each archived event under it
+  with its counts. Its acts are catalogue rows (kinds `event` and `archive`): **Archive this event…** asks first what comes
+  next (start fresh, copy this event's or an archived event's settings and structure, continue an archived event), then
+  the new event's name, typed as the confirmation, with "Keep the screens' links" for a copy and "Also split the audit log
+  here", both unticked, the current event's name where it has none, and a reason when AGMessage is busy; on an archive,
+  **Continue this event…** (the event's own name typed), **Copy this event…** and **Delete this archive's contents…**.
+- **Only the admin** archives (the laptop's token, or an account whose role is admin: `theAdminReq`). A manager an admin
+  granted `settings.manage`, whom the admin page admits, is refused with "Only an admin may archive an event.", and the
+  page draws the rows disabled with those words. A busy server is archived only with a typed reason, which the archive
+  point says.
+- **The order, by the one writer, in one turn of the loop:** every new join and write refused ("AGMessage is starting a
+  new event"); the audit log, every lane and each hall that changed saved; `data/archive/.<time>.partial/event.json`
+  written first, with what comes next; the event's rooms, stage record, `pages.json`, `displays.json`,
+  `desk-results.json`, `accounts.json`, the ended `sessions.json` and `admin-sessions.json` and its uploads moved in
+  (each a rename on one volume; across two the uploads are copied, sized alike and only then removed, and a copy that
+  would not leave 1 GiB free is refused before anything moves); the folder renamed to `<time>` (to the millisecond); the
+  archive point, `audit.archive`, written as the first line of a new log file, its target `<time>;<run>`, the act's one
+  row (no `event.archived`); a split ticked begun as its own act straight after it, its answer said with the archive's;
+  the next event begun, and the archive's record told so (`next.began`) before the current event's record
+  (`data/event.json`) is written; every page told (`account:changed`), every sign-in ended, the sessions' and the token's
+  alike, and each screen given its new state or told its link is no longer in use. No room takes a change while an event
+  is being archived, a link's or a timer's included.
+- **The next event.** A copy keeps the halls and side rooms by their keys with their names, their locks and each hall's
+  `guestWeb` with its lock and their code's switch, a new guest code for each room and no earlier one (so no code or
+  invite of an earlier event opens it), and nobody seated (the guests a restart would seat again are the earlier
+  event's), the allow-lists, each hall's own Stagewatch link, the accounts with their rights, views,
+  clocks and On stage switches, the guests' chat views, and the screens by name and hall with their standing layout (the
+  clock, the countdown without its words, black) on new links, unless "Keep the screens' links" is ticked. A continue
+  moves an archive's files back and reads every store again: its codes, links and messages as they were; its archive keeps
+  its record, now marked `continued`, and its ended sign-ins. A fresh start has no halls, screens or accounts, and the
+  token at the laptop makes the first admin account; each hall's own Stagewatch link is kept as an earlier hall's, listed
+  on Admin → Show network and offered by New hall on the admin page and on the halls board (to whoever sets halls up),
+  which moves it, with its key and its frame's hold, to the new hall. A continue whose uploads come back to an uploads
+  folder on another volume is refused, before anything moves, where they would not leave 1 GiB free there.
+- **Kept in all three, never archived:** `settings.json` (the Stagewatch link with its sealed key and fingerprint, each
+  hall's own Stagewatch, the Patterns and PlayMap links, the certificate pins, the node's id, the context token, the AI
+  key, the tunnel's end, `machineSeq`), the key folder and `secret.key`, the audit log and `data/audit-archive/`, the
+  laptop's admin and its grants, and the confidential holds, which go into the next event's `pages.json`. No code an
+  archived event's rooms held is ever made again for a new room or a New code.
+- **A stop part way loses nothing.** A move refused (a file another program holds) leaves the archive aside under
+  `.partial`, every join and write refused with words, until Finish archiving the event… tries again; one refused once
+  the archive is whole (a continue's files coming back, the next event's record) waits the same way, and Finish begins
+  the next event from where it stopped, its point and split never made twice (a point the archive's record did not note is found in the log). A continue whose files came back part way
+  reads them back at once, so no save of the stores let go lands over them. No file of the data folder is ever put over
+  one the archive holds already: one written after the archive began is set aside in its `aside/`. The next start
+  finishes a `.partial`'s moves before anything of the event is written (a snapshot, a restart's line, `pages.json`),
+  lets go what it read of what was left behind, then writes the point and begins the next event; the split asked with
+  it is left for the admin (Admin → Health), and said so. A folder between an archive made whole and its next event is
+  read only from the archives' records (exactly one whose `next.began` is not there, and no `event.json` nor its `.bak`):
+  a current event's record that cannot be read is never taken for none, so nothing is begun again or saved over, and
+  Archive this event… is refused this run; an archive whose record, or a `.partial` whose record, cannot be read, or
+  settings that cannot be read, leave the folder as it is and every join and write refused with why.
+- **Delete this archive's contents…** is for the laptop's token, typed at the laptop: it reads the archive's `event.json`
+  first, removes everything else in the archive, writes the record again marked `purged` (with what could not be
+  removed, `left`, which the next ask deletes: the row stays while anything is there), and writes `event.purged` once
+  anything went, with what was left and whether its record could be written. It never reaches `data/audit-archive/`, and
+  nothing is deleted on a timer. A change to a room the store no longer holds (one removed, or an archived event's whose
+  key the next event's room has) is refused, so nothing a page of an earlier event still names lands in the next one.
+- **Readers:** the admin health's `event` (`id`, `name`, `began`, `kind`, `from`, `archives`, and an archive under way),
+  the admin page, the halls board and the context (the new event's halls at once), the AI's brief (the current event
+  only), the audit list and the screens.
+- Held on Linux (`test/events.test.js`, new, with `test/eventmove-preload.js`; `test/catalog.test.js`,
+  `test/menus.test.js`, `test/resilience.test.js`): copy, continue and fresh on a seeded folder, the archive holding every
+  room, upload, screen, take and account file, counted alike; the node's settings byte for byte unchanged; new codes, no
+  earlier code or invite admitting, the hall's Stagewatch link and allow-list following, a continue giving back the
+  codes, messages, upload and screen link; the desk result archived and back; every sign-in ended in each; nobody seated
+  in a copy; the point as the first line of a new file, its target and words; a move refused part way tried again in the
+  run, its split made by the Finish, and, held, finished by the next start; a room's snapshot or its backup held, the
+  archive keeping the hall's messages whole at the next start; the next event's record refused (Finish in the run, and a
+  start that puts it in place and begins nothing again); the archive's word that its next began refused (the next start
+  begins it, the holds read from the archive, its point, not noted in its record, found in the log and never written twice); a current event's record unreadable at a start (nothing begun or saved
+  over, the act refused); a continue's files coming back part way (its accounts kept, Finish bringing the rest); a
+  `.partial`'s record unreadable at a start (served with every join and write refused, finished once it reads); a
+  continue's uploads across volumes refused for room; a deletion left part way, recorded and finished by the next ask;
+  the halls board's New hall taking an earlier hall's link; a manager refused, the screens' links kept when ticked, the
+  split after the point, the contents deleted only with the token typed and the log still checking. What only a Windows run proves: a rename of a
+  store another program holds open there (an antivirus) and the uploads on another volume (`%ProgramData%` and an
+  `AGM_UPLOAD_DIR` elsewhere). Unit K (#80) adds the claim, the pin and the refusal while accounts are held aside.
+- The papers: `README.md`, `README.txt` (after the event), `docs/INSTALL.md` (Events and their archives),
+  `docs/ACCOUNTS.md`, `docs/DESIGN.md` and `CLAUDE.md`.
+
 **Fixed**
 - The portable import names a part of its bundle by the part's own name when it refuses one ("0000021.part is not a
   part the export wrote (a link, or not a file)"). It named the part by its whole path under the account's inbox, and the

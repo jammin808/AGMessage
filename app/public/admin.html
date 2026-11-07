@@ -143,6 +143,8 @@
           <h4>Linked Patterns and PlayMap</h4>
           <p class="hint">AGMessage reads what each linked one is doing every 5 s and shows it on the halls board; crews with the right propose the verbs it lists to the show desk, where a person approves them. Its pairing token is full control of it, so AGMessage sends it only to this laptop or over HTTPS to a certificate you confirmed by typing the first 16 or more characters of the fingerprint the node shows on its own screen.</p>
           <ul id="nodeLinks" class="peer-list link-list" aria-label="Linked Patterns and PlayMap"></ul>
+          <p id="earlierTitle" class="hint" hidden>Earlier halls' own Stagewatch links, kept from an archived event: New hall offers each.</p>
+          <ul id="earlierLinks" class="peer-list" aria-labelledby="earlierTitle" hidden></ul>
           <h3>👥 Accounts and access</h3>
           <p class="hint"><span id="acctCount">—</span> · <a href="/users.html">Manage people, roles and halls</a> · <a href="/users.html#audit">Audit log</a></p>
           <label class="row"><input id="remoteAdmin" type="checkbox" /> Let accounts with admin rights sign in through the Cloudflare tunnel (off: admins sign in on the venue network only)</label>
@@ -174,6 +176,21 @@
           </header>
           <p id="laptopRead" class="hint" role="status"></p>
           <ul id="laptopFacts" class="laptop-facts" aria-labelledby="laptopTitle"></ul>
+        </section>
+
+        <!-- The event: the current one (its name, how and when it began) and the archived ones under it, each with its
+             counts. Its acts are the catalogue's (kinds event and archive): Archive this event…, and on an archive
+             Continue this event…, Copy this event… and Delete this archive's contents…. -->
+        <section class="admin-laptop-section admin-event-section" id="eventSection" aria-labelledby="eventTitle">
+          <header class="admin-laptop-header" data-key="event" id="eventHead">
+            <h3 id="eventTitle">🗄 Event</h3>
+            <span class="obj-bar" id="eventActs"></span>
+          </header>
+          <p id="eventLine" class="hint" role="status">—</p>
+          <p id="eventStuck" class="error" role="alert" hidden></p>
+          <h4 id="archivesTitle">Archived events</h4>
+          <ul id="eventArchives" class="peer-list link-list" aria-labelledby="archivesTitle"></ul>
+          <p id="noArchives" class="hint">No event archived yet. Archive this event… keeps everything of it here, never deleted.</p>
         </section>
 
         <!-- Cloudflare tunnel control: lets remote users (off-LAN) join via a

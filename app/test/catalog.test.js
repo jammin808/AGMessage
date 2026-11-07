@@ -47,6 +47,8 @@ const REQUIRED = ['react', 'actionResponse', 'help:respond', 'ai:draft', 'stage:
   'admin:settings', 'nodes:link', 'nodes:unlink', 'nodes:acceptCertificate', 'nodes:command', 'admin:acceptCertificate', 'admin:tunnelStart', 'admin:tunnelStop', 'admin:tunnelStatus', 'admin:tunnelUntil',
   // "This laptop" (laptop)
   'admin:laptop',
+  // The event (event, archive): archived, continued or copied, and an archive's contents deleted
+  'http:POST /api/event/archive', 'http:POST /api/event/purge',
   'hall:settings', 'nodes:list', 'http:PATCH /api/users/:id', 'http:POST /api/users/:id/password', 'http:POST /api/users/:id/signout', 'http:DELETE /api/users/:id',
   'http:GET /api/audit/verify', 'http:POST /api/audit/export', 'http:POST /api/audit/split'];
 /** The status marks the pages draw (AGM.MARKS, common.js's one table): no act's icon is one, so a mark has one meaning. */
@@ -265,6 +267,8 @@ const PAGE = {
   manager: C.adminFacts({ ok: true, admin: false, ai: true, halls: HALLS, connected: true }),
   adminOffline: C.adminFacts({ ok: true, admin: true, ai: true, halls: HALLS, connected: false }),
   notAdmin: C.adminFacts({ connected: true }),
+  // The admin at the AGMessage laptop itself (/api/admin/me's `local`): an archive's contents are deleted there alone.
+  adminHere: C.adminFacts({ ok: true, admin: true, ai: true, halls: HALLS, connected: true, local: true }),
   // The admin page of an admin account, which manages accounts too: a room's Members….
   adminUsers: C.adminFacts({ ok: true, admin: true, manageUsers: true, ai: true, halls: HALLS, connected: true }),
   // The halls board: a manager who sets halls up and drives the show network, and a hall's crew; an admin account's
@@ -325,6 +329,24 @@ const PAGE_OBJECTS = {
     // Off with its end still kept: cloudflared ended, or a start could not turn it on again.
     kept: { running: false, url: '', checking: false, checkedAgo: null, untilWords: '23:30 today', untilClock: '23:30' },
   },
+  // The current event (Admin → Event): named or not yet, busy or not, an archive that stopped part way; and an archived
+  // event: whole, continued, its contents deleted.
+  event: {
+    named: { name: 'Spring Summit', kind: 'first', began: at, busy: false, busyWords: '', stuck: '', stuckWords: '', audit: { from: 1, to: 2003 }, copies: [{ name: '2026-10-27T14-02-00-000Z', title: 'Winter Gala' }], continues: [{ name: '2026-10-27T14-02-00-000Z', title: 'Winter Gala' }] },
+    unnamed: { name: '', kind: 'first', began: at, busy: true, busyWords: '3 pages active', stuck: '', stuckWords: '', copies: [], continues: [] },
+    stuck: { name: 'Spring Summit', kind: 'first', began: at, busy: false, busyWords: '', stuck: '2026-10-27T14-02-00-000Z', stuckStep: 'moves', stuckWords: 'The event is not archived whole: displays.json could not be moved (EBUSY). What moved is in archive/.2026-10-27T14-02-00-000Z.partial and nothing is lost: Finish archiving tries again (close what holds the file first), and so does the next start of AGMessage.', copies: [], continues: [] },
+    // A start that could not tell whether an event was being begun: only a start finishes it, so the act is greyed with why.
+    held: { name: 'Spring Summit', kind: 'first', began: at, busy: false, busyWords: '', stuck: 'held', stuckStep: 'held', stuckWords: 'The record of 1 archive (archive/2026-10-27T14-02-00-000Z) could not be read, and this folder has no current event\'s record, so this start cannot tell whether an event was being begun. Nothing was moved or begun, and every join and change waits: start AGMessage again once nothing else holds the file.', copies: [], continues: [] },
+    // A current event whose record this start could not read: nothing is archived over it.
+    unread: { name: '', kind: 'first', began: at, busy: false, busyWords: '', stuck: '', stuckWords: '', unread: 'This event\'s record could not be read at this start (EBUSY): nothing is archived over it. Start AGMessage again once nothing else holds it.', copies: [], continues: [] },
+  },
+  archive: {
+    whole: { name: '2026-10-27T14-02-00-000Z', title: 'Winter Gala', contents: true, continued: false, purged: false, current: { name: 'Spring Summit', busy: false, busyWords: '' } },
+    continued: { name: '2026-10-28T09-00-00-000Z', title: 'Spring Summit', contents: false, continued: true, purged: false, current: { name: 'Spring Summit', busy: false, busyWords: '' } },
+    purged: { name: '2026-10-29T09-00-00-000Z', title: 'Autumn Forum', contents: false, continued: false, purged: true, current: { name: '', busy: true, busyWords: '1 page active' } },
+    // A deletion that could not remove every part: what is left is deleted by the next ask.
+    partlyPurged: { name: '2026-10-30T09-00-00-000Z', title: 'Gala Dinner', contents: true, continued: false, purged: true, current: { name: 'Spring Summit', busy: false, busyWords: '' } },
+  },
   // "This laptop": its addresses as devices open them, and whether Windows is read now.
   laptop: {
     two: { addresses: ['http://192.168.1.20:3023', 'http://10.0.4.7:3023'], reading: false },
@@ -376,7 +398,7 @@ const KIND_SEATS = {
   compose: [SEATS.admin, SEATS.researchNoDesk, SEATS.board, SEATS.boardSimple, SEATS.researchSends], chip: [SEATS.admin, SEATS.researchNoDesk], header: [SEATS.admin, SEATS.board, SEATS.research],
   take: [SEATS.board, SEATS.boardSimple, SEATS.boardFull, SEATS.research], card: [SEATS.board, SEATS.boardSimple, SEATS.observer], past: [SEATS.board, SEATS.boardSimple, SEATS.observer], sheet: [SEATS.boardSimple, SEATS.boardSimpleFull, SEATS.supportBoard], board: [SEATS.adminPush, SEATS.pushNoStagewatch, SEATS.adminWeb, SEATS.staffShow],
   earlier: [SEATS.research, SEATS.boardSimple, SEATS.observer], cleared: [SEATS.boardSimpleClears, SEATS.boardSimple], pick: [SEATS.adminPush, SEATS.staffShow],
-  adminRoom: [PAGE.admin, PAGE.adminNoAi, PAGE.adminUsers, PAGE.boardAdmin], person: [PAGE.admin, SEATS.research, SEATS.board, SEATS.techPush, SEATS.guestWeb], adminMsg: [PAGE.admin], link: [PAGE.admin], tunnel: [PAGE.admin], laptop: [PAGE.admin],
+  adminRoom: [PAGE.admin, PAGE.adminNoAi, PAGE.adminUsers, PAGE.boardAdmin], person: [PAGE.admin, SEATS.research, SEATS.board, SEATS.techPush, SEATS.guestWeb], adminMsg: [PAGE.admin], link: [PAGE.admin], tunnel: [PAGE.admin], laptop: [PAGE.admin], event: [PAGE.admin, PAGE.manager], archive: [PAGE.admin, PAGE.adminHere],
   hall: [PAGE.board], room: [PAGE.board, SEATS.research], help: [PAGE.board], account: [PAGE.accountsAdmin], audit: [PAGE.accountsAdmin, PAGE.filtered],
 };
 /** Every seat of a kind with every object of it ([f, o] pairs): messages, a file where it is listed and where it is open, a screen, and the other pages' objects. */
@@ -410,7 +432,7 @@ test('the file types: the pages\' one copy of the types the stage shows and of t
 });
 
 test('the entries: kind.verb ids, known groups in order with danger last, labels, keys, icons that are no marks', () => {
-  assert.deepEqual(KINDS, ['msg', 'file', 'screen', 'compose', 'chip', 'header', 'take', 'card', 'past', 'sheet', 'board', 'earlier', 'cleared', 'pick', 'adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop', 'hall', 'room', 'help', 'account', 'audit'], 'the kinds landed so far');
+  assert.deepEqual(KINDS, ['msg', 'file', 'screen', 'compose', 'chip', 'header', 'take', 'card', 'past', 'sheet', 'board', 'earlier', 'cleared', 'pick', 'adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop', 'event', 'archive', 'hall', 'room', 'help', 'account', 'audit'], 'the kinds landed so far');
   const seen = new Set();
   for (const kind of KINDS) {
     const list = C.KINDS[kind];
@@ -1242,8 +1264,10 @@ test('the marks: one table, each mark one name, one meaning and a colour role of
 // ---------------------------------------------------------------- the admin page, the halls board, the Accounts page
 test('the other pages\' facts: read from the server\'s answers, and nothing a page could name for itself', () => {
   assert.deepEqual(plain(C.adminFacts({ ok: 1, admin: 0, ai: 'yes', halls: [{ code: 'K7P2QX', name: 'Hall 2', extra: 1 }, { name: 'no code' }, null], connected: true, role: 'admin' })),
-    { page: 'admin', admin: true, theAdmin: false, manageUsers: false, canDrive: true, ai: true, halls: [{ code: 'K7P2QX', name: 'Hall 2' }], connected: true, support: '' }, 'the gate\'s answer, "the admin", the drive right it carries, AI, the halls by code and name');
-  assert.deepEqual(plain(C.adminFacts({})), { page: 'admin', admin: false, theAdmin: false, manageUsers: false, canDrive: false, ai: false, halls: [], connected: false, support: '' }, 'nothing told: no right');
+    { page: 'admin', admin: true, theAdmin: false, manageUsers: false, canDrive: true, ai: true, halls: [{ code: 'K7P2QX', name: 'Hall 2' }], connected: true, support: '', local: false }, 'the gate\'s answer, "the admin", the drive right it carries, AI, the halls by code and name');
+  assert.deepEqual(plain(C.adminFacts({})), { page: 'admin', admin: false, theAdmin: false, manageUsers: false, canDrive: false, ai: false, halls: [], connected: false, support: '', local: false }, 'nothing told: no right');
+  // At the laptop only on the server's word (/api/admin/me's `local`), a true and nothing like it.
+  assert.deepEqual([C.adminFacts({ ok: true, local: true }).local, C.adminFacts({ ok: true, local: 'yes' }).local, C.adminFacts({ ok: true, local: 1 }).local], [true, false, false]);
   // Members… is offered on the server's word that this account may manage accounts, a true and nothing like it.
   assert.deepEqual([C.adminFacts({ ok: true, manageUsers: true }).manageUsers, C.adminFacts({ ok: true, manageUsers: 'yes' }).manageUsers, C.adminFacts({ ok: true, manageUsers: 1 }).manageUsers], [true, false, false]);
   assert.deepEqual(plain(C.boardFacts({ canManageHalls: true, canDrive: 1, connected: true, isAdmin: true, canManageUsers: true })), { page: 'halls', manageHalls: true, admin: true, manageUsers: true, canDrive: true, connected: true, support: '' });
@@ -1319,6 +1343,16 @@ test('the other pages\' matrix: what each seat is shown on each object of the ad
     ['laptop', 'admin', O.laptop.two, ['laptop.refresh', 'laptop.copy']],
     ['laptop', 'admin', O.laptop.none, ['laptop.refresh']],
     ['laptop', 'notAdmin', O.laptop.two, []],
+    // The event: Archive this event… for whom the admin page admits (a manager's drawn disabled, the server's words);
+    // on an archive, Continue unless it was continued, Copy and Delete its contents while they are there.
+    ['event', 'admin', O.event.named, ['event.archive']],
+    ['event', 'manager', O.event.named, ['event.archive']],
+    ['event', 'notAdmin', O.event.named, []],
+    ['archive', 'admin', O.archive.whole, ['archive.continue', 'archive.copy', 'archive.delete']],
+    ['archive', 'admin', O.archive.continued, []],
+    ['archive', 'admin', O.archive.purged, ['archive.continue']],
+    ['archive', 'admin', O.archive.partlyPurged, ['archive.continue', 'archive.delete']],
+    ['archive', 'notAdmin', O.archive.whole, []],
     // A hall's row: opened (here or in a tab) by everyone it is listed for, its guest code copied where the server told it;
     // set up and the show network by right.
     ['hall', 'board', O.hall.row, ['hall.open', 'hall.tab', 'hall.copy', 'hall.code', 'hall.setup', 'hall.network']],
@@ -1390,11 +1424,11 @@ test('the other pages\' matrix: what each seat is shown on each object of the ad
   const facts = (seat) => PAGE[seat] || SEATS[seat];
   for (const [kind, seat, o, want] of M) assert.deepEqual(ids(kind, facts(seat), o), want, kind + ' · ' + seat + ' on ' + JSON.stringify(o).slice(0, 60));
   // Every act of these kinds is shown to some seat: none passes the matrix by its absence.
-  const kinds = ['adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop', 'hall', 'room', 'help', 'account', 'audit'];
+  const kinds = ['adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop', 'event', 'archive', 'hall', 'room', 'help', 'account', 'audit'];
   const shownSomewhere = new Set(M.flatMap((r) => r[3]));
   for (const k of kinds) for (const e of C.KINDS[k]) assert.ok(shownSomewhere.has(e.id), e.id + ' is shown to some seat in the matrix');
   // Every act a seat is shown is one its rights allow: the admin page's acts need its gate, the split "the admin".
-  for (const k of ['adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop']) for (const o of Object.values(PAGE_OBJECTS[k])) assert.deepEqual(ids(k, PAGE.notAdmin, o), [], k + ': nothing to a page the admin page\'s gate does not admit');
+  for (const k of ['adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop', 'event', 'archive']) for (const o of Object.values(PAGE_OBJECTS[k])) assert.deepEqual(ids(k, PAGE.notAdmin, o), [], k + ': nothing to a page the admin page\'s gate does not admit');
   // The admin page's own acts are never drawn in Set up, whoever looks: their runners are the admin page's.
   for (const seat of ['board', 'boardCrew', 'boardAdmin', 'boardUsers']) for (const o of Object.values(PAGE_OBJECTS.adminRoom)) {
     assert.deepEqual(ids('adminRoom', PAGE[seat], o).filter((id) => /\.(watch|transcript|minutes|invites|clear)$/.test(id)), [], seat);
@@ -1422,6 +1456,21 @@ test('the other pages: what may be done but not now is shown, disabled, with the
   // "This laptop": Refresh while Windows is read says so, and offline says so too; a copy sends nothing, so it goes on.
   assert.deepEqual(why('laptop', 'admin', O.laptop.reading), { 'laptop.refresh': 'Reading Windows\' facts now…', 'laptop.copy': '' });
   assert.deepEqual(why('laptop', 'adminOffline', O.laptop.two), { 'laptop.refresh': C.WORDS.offline, 'laptop.copy': '' });
+  // The event: a manager granted settings.manage sees Archive this event… and its Continue and Copy, disabled with the
+  // server's words ("the admin" archives); an archive's contents are deleted at the laptop alone; offline, nothing goes.
+  assert.deepEqual(why('event', 'manager', O.event.named), { 'event.archive': 'Only an admin may archive an event.' });
+  assert.deepEqual(why('event', 'admin', O.event.named), { 'event.archive': '' });
+  const managerPage = C.adminFacts({ ok: true, admin: false, ai: true, halls: HALLS, connected: true });
+  assert.deepEqual(Object.fromEntries(plain(C.items('archive', managerPage, O.archive.whole)).filter((i) => !i.sep).map((i) => [i.id, i.disabled])),
+    { 'archive.continue': 'Only an admin may archive an event.', 'archive.copy': 'Only an admin may archive an event.', 'archive.delete': C.WORDS.purgeHere });
+  assert.deepEqual(why('archive', 'admin', O.archive.whole), { 'archive.continue': '', 'archive.copy': '', 'archive.delete': C.WORDS.purgeHere });
+  assert.deepEqual(why('archive', 'adminHere', O.archive.whole), { 'archive.continue': '', 'archive.copy': '', 'archive.delete': '' });
+  assert.deepEqual(why('event', 'adminOffline', O.event.named), { 'event.archive': C.WORDS.offline });
+  // A start that could not tell whether an event was being begun, and an event whose record it could not read: greyed
+  // with the server's words; one that stopped part way is Finish, never greyed.
+  assert.deepEqual(why('event', 'admin', O.event.held), { 'event.archive': O.event.held.stuckWords });
+  assert.deepEqual(why('event', 'admin', O.event.unread), { 'event.archive': O.event.unread.unread });
+  assert.deepEqual(why('event', 'admin', O.event.stuck), { 'event.archive': '' });
   // The Accounts page has no socket: nothing there is refused for a connection.
   assert.deepEqual(Object.values(why('account', 'accountsAdmin', O.account.other)).filter(Boolean), []);
   // The On stage switches (plan 7-§17.6) are the admin's alone: a manager's page, and the admin page of a manager granted
@@ -1880,4 +1929,30 @@ test('where a message from On stage also went, in the words every reader of its 
   assert.deepEqual(plain(C.items('person', PAGE.admin, PAGE_OBJECTS.person.board)).filter((i) => /onStage/.test(i.id)).map((i) => [i.label, i.role, i.checked, i.note]),
     plain(C.ON_STAGE_SWITCHES.map(([key, label, words]) => [label, 'menuitemcheckbox', key === 'screens', words])));
   assert.deepEqual(['person.onStageScreens', 'account.onStageScreens'].map((id) => C.entry(id.split('.')[0], id).verb), ['admin:setOnStage', 'http:PATCH /api/users/:id']);
+});
+
+test('the event: Archive this event… asks what comes next first, then the new name typed; the split and the screens\' links unticked; a reason only when busy', () => {
+  const O = PAGE_OBJECTS;
+  const fields = (kind, id, o, f = PAGE.admin) => plain(C.entry(kind, id).confirm(f, o)).fields.map((x) => [x.name, x.type || 'text', x.value === undefined ? null : x.value]);
+  assert.deepEqual(fields('event', 'event.archive', O.event.named), [['next', 'select', 'fresh'], ['name', 'text', null], ['keepScreens', 'checkbox', false], ['split', 'checkbox', false]], 'next first, then the name; both ticks unticked');
+  const next = plain(C.entry('event', 'event.archive').confirm(PAGE.admin, O.event.named)).fields[0].options.map((x) => x.value);
+  assert.deepEqual(next, ['fresh', 'copy:current', 'copy:2026-10-27T14-02-00-000Z', 'continue:2026-10-27T14-02-00-000Z'], 'start fresh, copy this event or an archived one, continue an archived one: Continue never offers the current event');
+  // A first event with no name is named for its archive; a busy server asks why it is archived now.
+  assert.deepEqual(fields('event', 'event.archive', O.event.unnamed).map((x) => x[0]), ['next', 'current', 'name', 'keepScreens', 'split', 'reason']);
+  assert.match(plain(C.entry('event', 'event.archive').confirm(PAGE.admin, O.event.unnamed)).fields.at(-1).label, /^AGMessage is busy \(3 pages active\)/);
+  // An archive that stopped part way: the same act tries again, and says so.
+  assert.equal(plain(C.items('event', PAGE.admin, O.event.stuck))[0].label, 'Finish archiving the event…');
+  assert.deepEqual(plain(C.entry('event', 'event.archive').confirm(PAGE.admin, O.event.stuck)).fields, undefined);
+  assert.equal(plain(C.entry('event', 'event.archive').confirm(PAGE.admin, O.event.stuck)).words, O.event.stuck.stuckWords, 'in the server\'s words of where it stopped');
+  // The split's tick names the entries it would move (H.10.2): the live log's, first to newest.
+  assert.match(plain(C.entry('event', 'event.archive').confirm(PAGE.admin, O.event.named)).fields.find((x) => x.name === 'split').label, /^Also split the audit log here: move entries 1–2003 into a signed archive\./);
+  assert.match(plain(C.entry('event', 'event.archive').confirm(PAGE.admin, O.event.unnamed)).fields.find((x) => x.name === 'split').label, /^Also split the audit log here: move the entries before this event into a signed archive\./);
+  // On an archive: Continue types the name of the event it continues; Copy keeps the screens' links where ticked.
+  assert.deepEqual(fields('archive', 'archive.continue', O.archive.whole), [['name', 'text', null], ['split', 'checkbox', false]]);
+  assert.match(plain(C.entry('archive', 'archive.continue').confirm(PAGE.admin, O.archive.whole)).fields[0].label, /“Winter Gala”/);
+  assert.deepEqual(fields('archive', 'archive.copy', O.archive.whole), [['name', 'text', null], ['keepScreens', 'checkbox', false], ['split', 'checkbox', false]]);
+  assert.deepEqual(fields('archive', 'archive.continue', O.archive.purged).map((x) => x[0]), ['current', 'name', 'split', 'reason']);
+  // Delete this archive's contents… asks for the token, typed.
+  assert.deepEqual(fields('archive', 'archive.delete', O.archive.whole, PAGE.adminHere), [['token', 'password', null]]);
+  assert.equal(plain(C.entry('archive', 'archive.delete').confirm(PAGE.adminHere, O.archive.whole)).danger, true);
 });

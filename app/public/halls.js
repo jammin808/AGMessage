@@ -21,6 +21,8 @@
   let live = {};           // code -> the board's live row (stage, last, help, displays, people)
   let helps = [];          // open help requests across the rooms this account reads, and its halls' side rooms' for their crew
   let canManageHalls = false;
+  // The halls' own Stagewatch links an archived event's halls kept (Admin → Event): New hall offers each to whoever sets halls up.
+  let earlierLinks = [];
   let isAdmin = false;     // /api/halls's: the admin, who switches and renews a room's code and removes a room in Set up
   let canManageUsers = false;   // /api/halls's: a room's Members… in Set up
   let canDrive = false;    // the board's: Show network lists a node this account may drive
@@ -57,6 +59,7 @@
     $('usersLink').hidden = !(r.canManageUsers || r.canAudit);
     $('adminLink').hidden = !r.isAdmin;
     $('newHallBtn').hidden = !canManageHalls;
+    earlierLinks = Array.isArray(r.earlierLinks) ? r.earlierLinks : [];
     $('boardTitle').textContent = me.rights.allHalls ? 'Every hall' : (halls.length === 1 ? 'Your hall' : 'Your halls');
     const first = !arrived;
     arrived = true;
@@ -714,13 +717,24 @@
     $('passwordDialog').close();
     AGM.toast('Password saved. Your other devices are signed out.');
   });
-  $('newHallBtn').addEventListener('click', () => { $('hallForm').reset(); AGM.openDialog($('hallDialog')); });
+  $('newHallBtn').addEventListener('click', () => {
+    $('hallForm').reset();
+    // Its Stagewatch: the default one, or an earlier hall's own link, which moves to the new hall.
+    const pick = $('hallLink');
+    pick.textContent = '';
+    for (const [value, label] of [['', 'The default Stagewatch'], ...earlierLinks.map((l) => [l.key, 'An earlier hall\'s: ' + (l.hall ? '“' + l.hall + '”' + (l.event ? ' (' + l.event + ')' : '') + ', ' : '') + l.url])]) {
+      const o = document.createElement('option'); o.value = value; o.textContent = label; pick.appendChild(o);
+    }
+    $('hallLinkField').hidden = !earlierLinks.length;
+    AGM.openDialog($('hallDialog'));
+  });
   $('hallForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const r = await AGM.api('POST', '/api/rooms', { name: $('hallName').value.trim() });
+    const link = earlierLinks.length ? $('hallLink').value : '';
+    const r = await AGM.api('POST', '/api/rooms', { name: $('hallName').value.trim(), ...(link ? { link } : {}) });
     if (!r.code) { AGM.toast(r.error || 'Not created.', true); return; }
     $('hallDialog').close();
-    AGM.toast('Created ' + (r.name || r.code) + ' — guest code ' + r.code + '.');
+    AGM.toast('Created ' + (r.name || r.code) + ' — guest code ' + r.code + (r.stagewatch ? ', with the Stagewatch at ' + r.stagewatch : '') + '.');
     load();
   });
 

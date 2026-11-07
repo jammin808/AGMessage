@@ -86,6 +86,12 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   with a verifier that runs offline, in Node or one browser page, and it is **carried across events**: an archive point
   at each, where the admin may split the older part off into a signed archive that the check names and every export
   carries. [docs/ACCOUNTS.md](docs/ACCOUNTS.md)
+- **Events, archived.** Admin → Event → **Archive this event…** (the admin's alone) moves the event's halls, messages,
+  files, help requests, screens, accounts, takes and desk results into `data/archive/<time>/`, never deleted, and the
+  next one begins as a copy of an event's settings and structure (new codes and invites, screens' links kept only when
+  ticked), an archived event continued as it was, or fresh. The links, keys, certificate pins, the audit log and the
+  confidential holds stay; every sign-in ends; a stop part way is finished at the next start. An archive's contents are
+  deleted only at the laptop, with the token typed, and its record stays. [docs/INSTALL.md](docs/INSTALL.md)
 - **Screens.** Every hall's screens — projector PC, lectern monitor, foyer TV — each with its own link to open in any
   browser: holding image, a message (note / soon / urgent), an image or PDF page from the hall, the hall's countdown
   with a message under it (the speaker's comfort monitor), the clock, or black. Each screen confirms what it showed.

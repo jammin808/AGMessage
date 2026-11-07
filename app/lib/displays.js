@@ -93,21 +93,38 @@ function describe(c, hallHolding = '', { audit = false } = {}) {
 class Displays {
   constructor(file, { seal, open }) {
     this.seal = seal; this.open = open;
+    this.file = file;
     this.lane = new WriteLane(file, { delayMs: 100, keepBak: true, mode: 0o600 });
-    const read = readJsonWhole(file);
-    const data = read.data || {};
-    // Why the file itself could not be read (EBUSY, EACCES), or '': what it holds, screens' sealed links among them, is
-    // not known this run, whatever its .bak gave.
-    this.unread = read.codes[0] && read.codes[0] !== 'ENOENT' ? read.codes[0] : '';
+    this.reload();
+  }
+
+  /**
+   * The screens held now become those of `data` (the file's shape, `{halls, displays}`), each read by type with no
+   * browser on it: a new event's (a copy of an event's screens, or none). Saves nothing: a caller that changed them saves.
+   */
+  replace(data) {
     this.list = new Map();
     this.byHash = new Map();
-    this.halls = data.halls && typeof data.halls === 'object' ? data.halls : {};   // CODE -> {holding}
-    for (const d of Array.isArray(data.displays) ? data.displays : []) {
+    this.halls = data && data.halls && typeof data.halls === 'object' && !Array.isArray(data.halls) ? data.halls : {};   // CODE -> {holding}
+    for (const d of data && Array.isArray(data.displays) ? data.displays : []) {
       if (!d || typeof d.id !== 'string' || !/^[0-9a-f]{64}$/.test(d.tokenHash || '')) continue;
       d.live = freshLive();
       this.list.set(d.id, d);
       this.byHash.set(d.tokenHash, d);
     }
+  }
+  /** The screens read again from their file (at the start, and an archived event continued). */
+  reload() {
+    const read = readJsonWhole(this.file);
+    // Why the file itself could not be read (EBUSY, EACCES), or '': what it holds, screens' sealed links among them, is
+    // not known this run, whatever its .bak gave.
+    this.unread = read.codes[0] && read.codes[0] !== 'ENOENT' ? read.codes[0] : '';
+    this.replace(read.data || {});
+  }
+  /** A new screen record's id and link, as `create` makes them: a link that has never opened a screen. */
+  freshLink() {
+    const token = crypto.randomBytes(32).toString('base64url');
+    return { id: 'd' + makeId(), tokenHash: sha256(token), tokenSealed: this.seal(token) };
   }
 
   save() {

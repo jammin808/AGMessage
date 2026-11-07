@@ -1,7 +1,7 @@
 // The admin page's other parts: AI minutes, role invites, the AI key, the show network's links, HTTPS, Health and the
 // audit log there, and "This laptop". Shares admin.js's globals (socket, currentRoom, the page's acts ADMIN and their runners ADMIN_RUN) —
 // loaded after it. A link's acts are the catalogue's (kind link); nothing here opens a native dialog.
-/* global socket, currentRoom, ADMIN, ADMIN_RUN, ADMIN_DRAWERS, ADMIN_OBJECTS, adminFactsChanged, say, watchRoom */
+/* global socket, currentRoom, ADMIN, ADMIN_RUN, ADMIN_DRAWERS, ADMIN_OBJECTS, ADMIN_EVENT, KEPT_READ_MS, adminFactsChanged, say, watchRoom */
 (function () {
   'use strict';
   if (document.documentElement.dataset.floor === 'old') return;   // below the page floor (theme-init.js): nothing asked, nothing polled
@@ -140,6 +140,7 @@
 
   function renderHealth(h) {
     if (!h) return;
+    eventMoved(h.event);
     $('tunnelPlaces').textContent = tunnelWords(h.tunnel);
     const parts = [];
     parts.push(h.restarts ? 'restarted by the watchdog ' + h.restarts + '×' : 'running since start');
@@ -490,6 +491,117 @@
   ADMIN_DRAWERS.push(drawLaptop);
   ADMIN_OBJECTS.laptop = laptopObject;
 
+  // ---------------------------------------------------------------- the event (kinds event and archive; plan 6-U15)
+  // The current event and the archived ones, as /api/event answers: read when the page opens, when health says the event
+  // or its archives changed, and after each act. An archive this page made ends its own sign-in too: the answer is said,
+  // and the page starts again once it can be read.
+  let eventNow = null;
+  let eventSeen = '';
+  const day = (t) => { const d = new Date(t); return d.getDate() + ' ' + MONTHS[d.getMonth()] + ' ' + d.getFullYear(); };
+  const KIND_WORDS = { first: 'the first event in this data folder', fresh: 'begun fresh', copy: 'a copy of an earlier event\'s settings and structure', continue: 'an archived event continued' };
+  /** The current event as the catalogue reads it (kind event). */
+  function eventObject() {
+    const r = eventNow || { event: {}, archives: [] };
+    const e = r.event || {};
+    const listed = (r.archives || []).filter((a) => a.event);
+    const stuck = e.changing && e.changing.stuck ? e.changing.stuck : '';
+    return {
+      name: e.name || '', kind: e.kind || 'first', began: e.began || null, busy: !!r.busy, busyWords: r.busyWords || '', stuck, stuckStep: stuck ? e.changing.step : '', stuckWords: stuck ? e.changing.words : '',
+      unread: e.unread ? 'This event\'s record could not be read at this start (' + e.unread + '): nothing is archived over it. Start AGMessage again once nothing else holds it.' : '',
+      audit: r.audit && Number.isSafeInteger(r.audit.from) && Number.isSafeInteger(r.audit.to) ? { from: r.audit.from, to: r.audit.to } : null,
+      copies: listed.filter((a) => a.contents && !a.continued && !a.purged).map((a) => ({ name: a.name, title: a.event.name })),
+      continues: listed.filter((a) => !a.continued).map((a) => ({ name: a.name, title: a.event.name })),
+    };
+  }
+  /** An archived event as the catalogue reads it (kind archive), with the current event its ask names. */
+  function archiveObject(name) {
+    const a = eventNow && (eventNow.archives || []).find((x) => x.name === name);
+    if (!a || !a.event) return null;
+    return { name: a.name, title: a.event.name, contents: !!a.contents, continued: !!a.continued, purged: !!a.purged, current: eventObject() };
+  }
+  const countWords = (c) => [[c.halls, 'hall'], [c.messages, 'message'], [c.files, 'file'], [c.accounts, 'account'], [c.screens, 'screen']].map(([n, w]) => n + ' ' + w + (n === 1 ? '' : 's')).join(', ');
+  function renderEvent(r) {
+    if (!r || !r.ok) return;
+    eventNow = r;
+    const e = r.event;
+    putText($('eventLine'), (e.name ? '“' + e.name + '”' : 'This event (not named yet)') + ' — ' + (KIND_WORDS[e.kind] || e.kind) + (e.began ? ', since ' + day(e.began) : '') + '.' + (r.busy ? ' AGMessage is busy now: ' + r.busyWords + '.' : '') + (e.unread ? ' Its record could not be read at this start (' + e.unread + '): nothing is archived over it this run.' : ''));
+    const stuck = e.changing && e.changing.stuck;
+    $('eventStuck').hidden = !stuck;
+    if (stuck) putText($('eventStuck'), AGM.mark('couldNot') + ' ' + e.changing.words);
+    const ul = $('eventArchives');
+    const listed = r.archives || [];
+    prune(ul, new Set(listed.map((a) => a.name)));
+    $('noArchives').hidden = listed.length > 0;
+    for (const a of listed) {
+      const words = !a.event ? 'An archive whose record cannot be read (' + a.name + ')'
+        : '“' + a.event.name + '” · ' + (a.event.began ? day(a.event.began) + ' – ' : '') + day(a.event.ended) + ' · ' + countWords(a.counts)
+          + (a.continued ? ' · continued on ' + day(a.continued.at) : '') + (a.purged ? ' · its contents deleted on ' + day(a.purged.at) : '');
+      linkRow(ul, a.name, words).tabIndex = 0;
+    }
+    ADMIN_EVENT.links = Array.isArray(r.earlierLinks) ? r.earlierLinks : [];
+    const el = $('earlierLinks');
+    el.textContent = '';
+    for (const l of ADMIN_EVENT.links) { const li = document.createElement('li'); li.textContent = (l.hall ? '“' + l.hall + '”' + (l.event ? ' (' + l.event + ')' : '') + ': ' : '') + l.url; el.appendChild(li); }
+    el.hidden = $('earlierTitle').hidden = !ADMIN_EVENT.links.length;
+    drawEvent();
+    ADMIN.refresh();
+  }
+  function drawEvent() {
+    ADMIN.draw($('eventActs'), 'event', eventObject(), { more: 'Event actions', words: true, cls: 'btn ghost small' });
+    for (const li of $('eventArchives').querySelectorAll(':scope > li[data-key]')) {
+      const o = archiveObject(li.dataset.key);
+      if (o) ADMIN.draw(li.querySelector('.obj-bar'), 'archive', o, { more: 'Actions for “' + o.title + '”', words: true, cls: 'btn ghost small', keysOn: li });
+    }
+  }
+  async function loadEvent() {
+    const r = await AGM.api('GET', '/api/event');
+    if (r && r.ok) renderEvent(r);
+  }
+  /** Health's event moved (a name, an archive made, one under way): the Event section is read again. */
+  function eventMoved(e) {
+    const sig = e ? JSON.stringify([e.id, e.name, e.archives, e.changing || null]) : '';
+    if (sig && sig !== eventSeen) { eventSeen = sig; loadEvent(); }
+  }
+  /** What comes next, as the ask's pick list names it: `kind:from`. */
+  const nextOf = (v) => { const i = String(v).indexOf(':'); return i < 0 ? { kind: String(v) } : { kind: v.slice(0, i), from: v.slice(i + 1) }; };
+  async function archiveNow(body) {
+    ADMIN_EVENT.archiving = true;
+    const r = await AGM.api('POST', '/api/event/archive', body);
+    if (!r.ok) {
+      ADMIN_EVENT.archiving = false;
+      say(r.error || 'Not archived.', true);
+      loadEvent();
+      return;
+    }
+    const split = r.split ? ' ' + (r.split.ok ? r.split.words : AGM.mark('couldNot') + ' The audit log was not split: ' + (r.split.error || r.split.words || 'no answer')) : '';
+    putText($('eventLine'), r.words + split);
+    say(r.words + split);
+    // Every sign-in ended with the event: this page starts again once its words can be read.
+    setTimeout(() => location.reload(), KEPT_READ_MS);
+  }
+  const asked = (c) => (c && c.values) || {};
+  const ticks = (v) => ({ keepScreens: v.keepScreens === true, split: v.split === true });
+  Object.assign(ADMIN_RUN, {
+    'event.archive': (o, c) => {
+      if (o.stuck) { archiveNow({}); return; }
+      const v = asked(c);
+      const next = nextOf(v.next || 'fresh');
+      archiveNow({ next, name: v.name || '', current: v.current || '', reason: v.reason || '', ...ticks(v), keepScreens: next.kind === 'copy' && v.keepScreens === true });
+    },
+    'archive.continue': (o, c) => { const v = asked(c); archiveNow({ next: { kind: 'continue', from: o.name }, name: v.name || '', current: v.current || '', reason: v.reason || '', split: v.split === true }); },
+    'archive.copy': (o, c) => { const v = asked(c); archiveNow({ next: { kind: 'copy', from: o.name }, name: v.name || '', current: v.current || '', reason: v.reason || '', ...ticks(v) }); },
+    'archive.delete': async (o, c) => {
+      const r = await AGM.api('POST', '/api/event/purge', { archive: o.name, token: asked(c).token || '' });
+      say(r.ok ? r.words : (r.error || 'Not deleted.'), !r.ok);
+      loadEvent();
+    },
+  });
+  ADMIN.bind($('eventHead'), { kind: 'event', find: (el) => el.closest('#eventHead'), get: eventObject, label: 'Event actions', header: () => 'This event' });
+  ADMIN.bind($('eventArchives'), { kind: 'archive', find: (el) => el.closest('li[data-key]'), get: (key) => archiveObject(key), label: (o) => 'Actions for “' + o.title + '”', header: (o) => '“' + o.title + '”' });
+  ADMIN_DRAWERS.push(drawEvent);
+  ADMIN_OBJECTS.event = eventObject;
+  ADMIN_OBJECTS.archive = archiveObject;
+
   /**
    * The watched room's invite links, made with its guest code: On stage and Backstage in a hall's Main room, a Member's
    * in a side room (no seat there is On stage); said where its code is off, since a link then admits nobody new. An open
@@ -612,6 +724,7 @@
     socket.on('nodes:changed', loadNodes);
     socket.on('laptop:facts', renderLaptop);
     loadNodes();
+    loadEvent();
     if (socket.connected) loadSettings();
 
     setInterval(() => { if (socket.connected) loadSettings(); }, 5000);   // health, clock and peers stay current

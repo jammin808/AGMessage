@@ -1426,9 +1426,12 @@ test('(k) apply() is the op table\'s: made once in server.js by lib/ops.js, and 
   // refusal's own path cannot throw, the Stagewatch followers' included.
   const given = groupAt(server, at + MADE.length);
   const wiring = new Map(given.entries.map(keyOf).map((k) => [k.key, k.value]));
-  assert.deepEqual([...wiring.keys()], ['commit', 'send', 'changed', 'refused']);
+  assert.deepEqual([...wiring.keys()], ['commit', 'send', 'changed', 'refused', 'holds']);
   assert.equal(wiring.get('commit'), '(room, op) => store.commit(room, op)');
   assert.match(wiring.get('refused'), /^\(why\) => console\.error\('[^'\\]*' \+ why\)$/);
+  // And a room is changed only while it is the store's own object for its key, never one removed or an archived event's,
+  // and none while an event is being archived.
+  assert.equal(wiring.get('holds'), '(room) => !eventChanging && !!room && store.room(room.code) === room');
 });
 
 test('(k) a planted upd of a field outside the table, and a page table out of step, each fail it', () => {
@@ -1582,6 +1585,16 @@ const ANY_ROOM = {
     'what the admin lets a person do On stage is told to each page of theirs with the countdown screens of the hall of its room, Main or side',
     'a hall\'s countdown screens told again to the pages in each of its rooms, Main or side, whose person may send to them',
     'a message from On stage followed for where it also went is read in its room by its key, wherever it sits',
+    'an op is applied only to a room the store holds by its key, Main or side: never one removed, or an archived event\'s',
+    'an event archived counts the messages and help requests of every room, Main or side',
+    'and its rooms, Main or side',
+    'a copy of an event keeps each hall by its key, Main or side alike: one already there is not made again',
+    'and each of its side rooms likewise',
+    'the rooms that may send into a room, carried to the next event, of the rooms it has, Main or side',
+    'and each room on such a list',
+    'an event archived keeps every code its rooms held, Main or side: none is made again',
+    'and each room\'s log is closed, Main or side, before its files move, at the act and at its Finish',
+    'a room a page leaves is said, kept and told only while it is the store\'s own for its key, Main or side: never an archived event\'s',
   ],
   'lib/importfacts.js': [
     'an import counts every room, Main or side, and the messages each holds, alike in the portable folder and the installed node',
