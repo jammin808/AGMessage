@@ -114,6 +114,13 @@ test('whose: readings that disagree, or one that cannot be read, are the person\
   for (const [sid, name] of [['S-1-5-21-444-555-666-1105', 'VENUE\\Show Crew'], ['S-1-12-1-55-66-77-88', 'AzureAD\\Show Crew']]) {
     assert.throws(() => machine.adminOf(name, answer({ sid, name })), (e) => e.refused && /which Windows cannot confirm is one person's account on this PC: it is no local account and has never signed in here/.test(e.words), name);
   }
+  // Windows' local accounts unread (their module not loaded): an account that has never signed in here is refused in words
+  // that say why, never as "no local account"; one that has signed in here is still confirmed by its profile.
+  const unread = 'the module Microsoft.PowerShell.LocalAccounts is not in C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules\\Microsoft.PowerShell.LocalAccounts';
+  assert.throws(() => machine.adminOf('LAPTOP\\ben', answer({ lookupError: unread })), (e) => e.refused && /which Windows cannot confirm is one person's account on this PC: its local accounts could not be read \(the module Microsoft\.PowerShell\.LocalAccounts is not in /.test(e.words) && !/it is no local account/.test(e.words));
+  assert.deepEqual(machine.adminOf('LAPTOP\\ben', answer({ profile: true, lookupError: unread })), ben, 'one that has signed in here');
+  // Each module by its manifest under $PSHOME\Modules, in its own folder or in its one version folder (LocalAccounts').
+  assert.ok(machine.PS_WHOSE.includes("if (-not [System.IO.File]::Exists($p)) { $v = @(foreach ($x in [System.IO.Directory]::GetDirectories($d))"), 'a version folder read');
   // A SID Windows names no account for (typed as a SID, so it "resolves" without one): refused, never taken as given.
   assert.throws(() => machine.adminOf('S-1-5-21-444-555-666-1999', answer({ sid: 'S-1-5-21-444-555-666-1999', name: '', translated: false, user: false, profile: true })), /which Windows does not know as an account on this PC/);
 });
@@ -180,7 +187,9 @@ test('on Windows, whose\'s and the programs\' scripts answer in their own shape:
   assert.deepEqual([w.account.sid, w.account.translated, typeof w.account.group, typeof w.account.user, typeof w.account.profile], [account.sid, true, 'boolean', 'boolean', 'boolean'], 'an account resolved from its SID, named, and whether it is a local group, a local user and has a profile here: ' + JSON.stringify(w.account));
   assert.ok(w.account.user === true || w.account.profile === true, 'the account this test runs as is confirmed one person\'s: ' + JSON.stringify(w.account));
   if (machine.personSid(account.sid)) assert.deepEqual(machine.adminOf(account.name, w.account).sid, account.sid, '/ADMIN naming this account is taken');
+  assert.equal(w.account.lookupError, undefined, 'Windows\' local accounts read: ' + JSON.stringify(w.account));
   const groups = H.powershell(machine.PS_WHOSE, { AGM_SIDS: '', AGM_ACCOUNT: 'S-1-5-32-545' });
+  assert.equal(groups.account.lookupError, undefined, 'Windows\' local accounts read: ' + JSON.stringify(groups.account));
   assert.deepEqual([groups.account.group, groups.account.user, groups.account.profile], [true, false, false], 'Users is a local group, no user, with no profile: ' + JSON.stringify(groups.account));
   const p = H.powershell(machine.PS_PROGRAMS, { AGM_APP: path.dirname(process.execPath) });
   assert.equal(p.error, undefined, JSON.stringify(p));

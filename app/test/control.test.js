@@ -33,6 +33,8 @@ const ACCOUNTS = {
   'laptop\\it': { sid: IT, name: 'LAPTOP\\it', user: true },
   users: { sid: 'S-1-5-32-545', name: 'BUILTIN\\Users', group: true },
   'laptop\\showcrew': { sid: 'S-1-5-21-1-2-3-1010', name: 'LAPTOP\\ShowCrew', group: true },
+  // An account Windows names whose local accounts could not be read (no local user, no group known), never signed in here.
+  'laptop\\dee': { sid: 'S-1-5-21-1-2-3-1011', name: 'LAPTOP\\dee', lookupError: 'the module Microsoft.PowerShell.LocalAccounts is not in C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules\\Microsoft.PowerShell.LocalAccounts' },
 };
 const NAMES = Object.fromEntries(Object.values(ACCOUNTS).map((a) => [a.sid, a.name]));
 const read = (f) => fs.readFileSync(f, 'utf8');
@@ -79,7 +81,7 @@ function fakeWindows({ record = { InstallDir: 'C:\\Program Files\\AGMessage', Po
       const out = { names };
       if (e.AGM_ACCOUNT) {
         const a = ACCOUNTS[String(e.AGM_ACCOUNT).toLowerCase()] || Object.values(ACCOUNTS).find((x) => x.sid === e.AGM_ACCOUNT);
-        out.account = a ? { sid: a.sid, name: a.name, translated: true, group: !!a.group, user: !!a.user, profile: !!a.profile } : undefined;
+        out.account = a ? { sid: a.sid, name: a.name, translated: true, group: !!a.group, user: !!a.user, profile: !!a.profile, ...(a.lookupError ? { lookupError: a.lookupError } : {}) } : undefined;
         if (!a) out.accountError = 'Some or all identity references could not be translated.';
       }
       return JSON.stringify(out) + '\r\n';
@@ -277,7 +279,7 @@ test('grant: from the laptop\'s admin\'s own task, the account resolved to its S
   ask(root, ANA, { verb: 'grant', account: 'LAPTOP\\ben', rights: ['start'] });
   assert.equal((await control(root, ANA, win, net)).code, 0);
   assert.deepEqual([answerOf(root, ANA).already, answerOf(root, ANA).words], [true, 'LAPTOP\\ben already holds start.']);
-  for (const [account, re] of [['Users', /BUILTIN\\Users is not one person's account \(a group or a service\)\. Give rights to one person's account\./], ['LAPTOP\\ShowCrew', /Give rights to one person's account\./], ['LAPTOP\\nobody', /"LAPTOP\\nobody" is not an account Windows knows on this PC/], ['LAPTOP\\ana', /LAPTOP\\ana is this PC's AGMessage admin and holds every right already\./]]) {
+  for (const [account, re] of [['Users', /BUILTIN\\Users is not one person's account \(a group or a service\)\. Give rights to one person's account\./], ['LAPTOP\\ShowCrew', /Give rights to one person's account\./], ['LAPTOP\\dee', /Windows cannot confirm that LAPTOP\\dee is one person's account on this PC: its local accounts could not be read \(the module Microsoft\.PowerShell\.LocalAccounts is not in /], ['LAPTOP\\nobody', /"LAPTOP\\nobody" is not an account Windows knows on this PC/], ['LAPTOP\\ana', /LAPTOP\\ana is this PC's AGMessage admin and holds every right already\./]]) {
     ask(root, ANA, { verb: 'grant', account, rights: ['start'] });
     assert.equal((await control(root, ANA, win, net)).code, 3, account);
     assert.match(answerOf(root, ANA).words, re);

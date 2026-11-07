@@ -718,6 +718,7 @@ function adminOf(asked, answer) {
   const who = said(a.name || asked, 80);
   if (!isSid(a.sid) || a.translated !== true) throw refusal('/ADMIN names "' + said(asked, 80) + '", which Windows does not know as an account on this PC' + (a.error ? ' (' + said(a.error, 120) + ')' : '') + '. Name one person\'s account: /ADMIN=LAPTOP\\ana.');
   if (a.group === true || !personSid(a.sid)) throw refusal('/ADMIN names ' + who + ', which is not one person\'s account (a group or a service). Give it to one person\'s account: /ADMIN=LAPTOP\\ana.');
+  if (a.user !== true && a.profile !== true && a.lookupError) throw refusal('/ADMIN names ' + who + ', which Windows cannot confirm is one person\'s account on this PC: its local accounts could not be read (' + said(a.lookupError, 120) + ') and the account has never signed in here. Name an account that has signed in to this PC once.');
   if (a.user !== true && a.profile !== true) throw refusal('/ADMIN names ' + who + ', which Windows cannot confirm is one person\'s account on this PC: it is no local account and has never signed in here (a group of a domain or of Entra ID is neither). Name a local account, or one that has signed in to this PC once.');
   return { name: said(a.name || asked, 120), sid: a.sid };
 }
@@ -864,7 +865,7 @@ function hands(sys, run = childProcess.execFileSync) {
 // (Windows' own), answers one line of JSON with every character past ASCII written \uXXXX, and says why where Windows
 // refuses. A value is read from the environment it is handed (AGM_…), never written into the script.
 const PS_HEAD = String.raw`$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue';
-function AgmUse($m) { Import-Module ($PSHOME + '\Modules\' + $m + '\' + $m + '.psd1') };
+function AgmUse($m) { $d = $PSHOME + '\Modules\' + $m; $p = $d + '\' + $m + '.psd1'; if (-not [System.IO.File]::Exists($p)) { $v = @(foreach ($x in [System.IO.Directory]::GetDirectories($d)) { if ([System.IO.File]::Exists($x + '\' + $m + '.psd1')) { $x } }); if ($v.Count -ne 1) { throw ('the module ' + $m + ' is not in ' + $d) }; $p = $v[0] + '\' + $m + '.psd1' }; Import-Module $p };
 function AgmWhy($e) { $r = [string]$e.CategoryInfo.Reason; if ($r -eq 'RuntimeException' -or -not $r) { $r = [string]$e.Exception.Message }; return $r };
 function AgmAscii($j) { return (-join @(foreach ($c in $j.ToCharArray()) { if ([int]$c -gt 126) { '\u{0:x4}' -f [int]$c } else { [string]$c } })) };
 function AgmSay($h) { return (AgmAscii (ConvertTo-Json -InputObject $h -Depth 4 -Compress)) };
@@ -921,7 +922,7 @@ if ($env:AGM_ACCOUNT) {
     $n = [string]$env:AGM_ACCOUNT; if ($n -match '^S-1-') { $sid = New-Object System.Security.Principal.SecurityIdentifier($n) } else { $sid = (New-Object System.Security.Principal.NTAccount($n)).Translate([System.Security.Principal.SecurityIdentifier]) };
     $a = @{ sid = [string]$sid.Value; name = ''; translated = $false; group = $false; user = $false; profile = $false };
     try { $a.name = [string]$sid.Translate([System.Security.Principal.NTAccount]).Value; $a.translated = $true } catch { $a.name = '' };
-    try { AgmUse 'Microsoft.PowerShell.LocalAccounts'; $a.group = (@(Get-LocalGroup -SID $sid -ErrorAction SilentlyContinue).Count -gt 0); $a.user = (@(Get-LocalUser -SID $sid -ErrorAction SilentlyContinue).Count -gt 0) } catch { $a.user = $false };
+    try { AgmUse 'Microsoft.PowerShell.LocalAccounts'; $a.group = (@(Get-LocalGroup -SID $sid -ErrorAction SilentlyContinue).Count -gt 0); $a.user = (@(Get-LocalUser -SID $sid -ErrorAction SilentlyContinue).Count -gt 0) } catch { $a.group = $false; $a.user = $false; $a.lookupError = (AgmWhy $_) };
     try { AgmUse 'Microsoft.PowerShell.Management'; $a.profile = [bool](Test-Path -LiteralPath ('Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\' + [string]$sid.Value)) } catch { $a.profile = $false };
     $o.account = $a
   } catch { $o.accountError = (AgmWhy $_) }
@@ -1852,6 +1853,7 @@ function personFor(c, asked, act) {
   const who = said(a.name || asked, 120);
   if (!isSid(a.sid) || a.translated !== true) throw refusal('"' + said(asked, 120) + '" is not an account Windows knows on this PC' + (a.error ? ' (' + said(a.error, 120) + ')' : '') + '. Name one person\'s account: LAPTOP\\ben.');
   if (a.group === true || !personSid(a.sid)) throw refusal(who + ' is not one person\'s account (a group or a service). ' + (act === 'handover' ? 'Hand AGMessage\'s admin over to one person\'s account.' : 'Give rights to one person\'s account.'));
+  if (a.user !== true && a.profile !== true && a.lookupError) throw refusal('Windows cannot confirm that ' + who + ' is one person\'s account on this PC: its local accounts could not be read (' + said(a.lookupError, 120) + ') and the account has never signed in here. Name an account that has signed in to this PC once.');
   if (a.user !== true && a.profile !== true) throw refusal('Windows cannot confirm that ' + who + ' is one person\'s account on this PC: it is no local account and has never signed in here. Name a local account, or one that has signed in to this PC once.');
   return { sid: a.sid, name: said(a.name || asked, 120) };
 }

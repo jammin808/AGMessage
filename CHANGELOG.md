@@ -6549,6 +6549,14 @@ the next push; nothing of it has run on Windows yet)
   `CLAUDE.md`. `docs/NODES.md` is unchanged: the context, the hello and the AI's brief carry none of it.
 
 **Fixed**
+- The installed node's account lookup says when it cannot read Windows' local accounts, and looks for a module's
+  manifest in a folder of its version too. CI's Windows run, its first of these scripts, read `BUILTIN\Users` as no
+  group: a failure of the lookup was swallowed, so an account read as no local user and no group whatever it was.
+  `machine.js` imports each module Windows PowerShell ships by its manifest's path under `$PSHOME\Modules` and looked
+  only in the module's own folder; it now also takes the manifest in the module's one version folder, where
+  LocalAccounts is taken to keep it (the next Windows run says whether that was the cause). A lookup that still fails
+  says why: `/ADMIN`, a grant and a handover refuse an account that has never signed in here in words that name it,
+  never as "no local account", and one that has signed in here is still confirmed by its profile.
 - An upload whose stored path is no file (a folder in its place) is refused as one that could not be checked, on every
   platform. The archive's check opened it and, on Windows, read a folder as an empty file, so it was refused in the
   words for a file packed some other way; Linux could not read it at all. The upload check now asks first whether it
