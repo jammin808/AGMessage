@@ -95,6 +95,21 @@ test('channel: unset or empty is the portable folder, task is the installed node
   assert.deepEqual(startup.CHANNELS, ['portable', 'task']);
 });
 
+test('channel: the installed node\'s logs folder (AGM_LOG_DIR), when the launcher names it, is a full path outside the program\'s folder, and its server.log is kept there; unset, or portable, data\\logs', () => {
+  const linux = { programDir: '/opt/AGMessage', platform: 'linux' };
+  const all = { AGM_RUNS: 'task', AGM_DATA_DIR: '/var/lib/agm/data', AGM_UPLOAD_DIR: '/var/lib/agm/uploads', AGM_KEY_DIR: '/var/lib/agm/keys' };
+  assert.deepEqual(startup.channelOf({ ...all, AGM_LOG_DIR: '/var/lib/agm/logs' }, linux), { runs: 'task', problem: '' });
+  assert.deepEqual(startup.channelOf({ ...all, AGM_LOG_DIR: 'logs' }, linux), { runs: 'task', problem: 'AGM_LOG_DIR is "logs", which is not a full path. The installed node\'s logs folder is a full path outside /opt/AGMessage.' });
+  assert.deepEqual(startup.channelOf({ ...all, AGM_LOG_DIR: '/opt/AGMessage/app/logs' }, linux), { runs: 'task', problem: 'AGM_LOG_DIR is /opt/AGMessage/app/logs, inside the program\'s folder /opt/AGMessage. The installed node\'s logs folder is outside it, where an upgrade never replaces it.' });
+  const win = { programDir: 'C:\\Program Files\\AGMessage', platform: 'win32' };
+  const allWin = { AGM_RUNS: 'task', AGM_DATA_DIR: 'C:\\ProgramData\\AGMessage\\data', AGM_UPLOAD_DIR: 'C:\\ProgramData\\AGMessage\\uploads', AGM_KEY_DIR: 'C:\\ProgramData\\AGMessage\\keys' };
+  assert.equal(startup.channelOf({ ...allWin, AGM_LOG_DIR: '\\ProgramData\\AGMessage\\logs' }, win).problem.startsWith('AGM_LOG_DIR is "\\ProgramData\\AGMessage\\logs", which is not a full path'), true, 'from the current drive\'s root is no full path');
+  assert.equal(startup.channelOf({ ...allWin, AGM_LOG_DIR: 'c:\\program files\\agmessage\\logs' }, win).problem.includes('inside the program\'s folder'), true, 'inside, without letter case');
+  assert.equal(startup.serverLogFile({ AGM_LOG_DIR: '/var/lib/agm/logs' }, { dataDir: '/d', runs: 'task' }), path.join('/var/lib/agm/logs', 'server.log'));
+  assert.equal(startup.serverLogFile({}, { dataDir: '/d', runs: 'task' }), path.join('/d', 'logs', 'server.log'), 'unset: the data folder\'s');
+  assert.equal(startup.serverLogFile({ AGM_LOG_DIR: '/var/lib/agm/logs' }, { dataDir: '/d', runs: 'portable' }), path.join('/d', 'logs', 'server.log'), 'a portable copy keeps its own, whatever its environment holds');
+});
+
 test('channel: the installed node needs its data, uploads and key folders, each a full path outside the program\'s folder', () => {
   const linux = { programDir: '/opt/AGMessage', platform: 'linux' };
   const all = { AGM_RUNS: 'task', AGM_DATA_DIR: '/var/lib/agm/data', AGM_UPLOAD_DIR: '/var/lib/agm/uploads', AGM_KEY_DIR: '/var/lib/agm/keys' };

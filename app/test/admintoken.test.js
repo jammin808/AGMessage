@@ -372,15 +372,21 @@ test('launch.js reads this PC\'s AGMessage admin from the install record by reg.
     }
   } finally { if (before === undefined) delete process.env.SystemRoot; else process.env.SystemRoot = before; }
   assert.equal(launch.adminName({ sys, platform: 'linux', run: () => { throw new Error('never run'); } }), '');
-  assert.ok(!/process\.env/.test(h.readSource(path.join(ROOT, 'launch.js'))), 'launch.js reads no machine path from its environment');
+  // launch.js reads no machine path from its environment: the installer passes each folder as an argument. Its one read
+  // of its environment is taskEnv's, which hands the watchdog Windows' own names (TASK_PASSED) and nothing else of it, so
+  // no NODE_OPTIONS, no AGM_… and no secret reaches the installed node from whatever started the task.
+  const src = h.readSource(path.join(ROOT, 'launch.js'));
+  assert.deepEqual(src.match(/process\.env\b.{0,1}/g), ['process.env)'], 'one read of its environment');
+  assert.match(src, /function taskEnv\(a, inherited = process\.env\) \{\n {2}const env = \{\};\n {2}for \(const name of TASK_PASSED\) if \(typeof inherited\[name\] === 'string' && inherited\[name\]\) env\[name\] = inherited\[name\];\n/, 'and it copies the named names only');
+  assert.ok(!launch.TASK_PASSED.some((n) => /^(AGM_|NODE_|ADMIN|ANTHROPIC|PATH$)/i.test(n)), 'none of them AGMessage\'s, Node\'s, a secret or the search path');
 });
 
-test('launch.js knows one command, token --machine <full path> [--sys <System32 folder>], and refuses any other word', () => {
+test('launch.js knows serve, token and status, and refuses any other word; token takes --machine <full path> [--sys <System32 folder>]', () => {
   const said = [];
   const out = (t) => said.push(t);
   const machine = tmp('agm-machine-');
   assert.equal(launch.main([], { out }), 64);
-  assert.equal(launch.main(['serve', '--data', machine], { out }), 64);
+  assert.equal(launch.main(['boot'], { out }), 64);
   assert.equal(launch.main(['token'], { out }), 64);
   assert.equal(launch.main(['token', '--machine', 'relative\\folder'], { out }), 64);
   assert.equal(launch.main(['token', '--machine', machine, '--print'], { out }), 64);
@@ -391,8 +397,8 @@ test('launch.js knows one command, token --machine <full path> [--sys <System32 
   const fits = 'launch.js token takes --machine <folder> and --sys <folder>, each once and each with its folder; ';
   const needs = 'launch.js token needs --machine <folder>, the installed node\'s folder as a full path (%ProgramData%\\AGMessage).';
   assert.deepEqual(said, [
-    'launch.js knows one command: token --machine <folder> [--sys <folder>].',
-    'launch.js knows one command: token --machine <folder> [--sys <folder>]. "serve" is not one of them.',
+    'launch.js knows serve, token or status.',
+    'launch.js knows serve, token or status. "boot" is not one of them.',
     needs,
     needs,
     fits + '"--print" does not fit.',

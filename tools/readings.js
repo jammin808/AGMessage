@@ -66,14 +66,12 @@ const READINGS = [
     what: 'the task: a stop at loopback with the proof saves and `last-stop.json` says so; the watchdog\'s give-up and a configuration refusal end the task with 0, and it stays stopped',
     mark: '10 of 10',
     miss: 'the release notes name the failing case; a stop that does not save is said on "This laptop"',
-    needs: ['U12 (#72): the server task'],
   },
   {
     id: 'R4',
     what: 'under the task: `LOCALAPPDATA`, `os.homedir()`, UDP 9928 broadcast heard, a quick tunnel\'s URL returned with nothing written in the account\'s profile, a rule by program, protocol and port matching `node.exe` under the task, `whoami /priv` from the server\'s process, `schtasks /showsid`',
     mark: '`SeImpersonatePrivilege` absent, and the server serves with `SeChangeNotifyPrivilege` alone',
     miss: 'the privilege list U12 sets is widened by the one privilege the reading names, with its reason',
-    later: ['U12 (#72): the server task itself, in place of the stand-in'],
   },
   {
     id: 'R5',
@@ -94,14 +92,13 @@ const READINGS = [
     what: 'the folder pipe\'s access list as libuv makes it (`CreateNamedPipeW(…, NULL)`, `crit-dl/pipe.c:596-599`) under the task\'s token, and whether a remote client reaches it',
     mark: 'recorded',
     miss: 'nothing machine-level writes the pipe any more (U8); the busy line\'s readers are named',
-    later: ['U12 (#72): the server task itself, in place of the stand-in'],
   },
   {
     id: 'R8',
     what: '`icacls C:\\` and `icacls %ProgramData%` (may a standard account create `C:\\node_modules` or `%ProgramData%\\AGMessage`?); `schtasks /query /xml` of each task as a standard account: readable or not, and no secret in it',
     mark: 'recorded',
     miss: 'U11 and U12\'s order already assume the worst',
-    later: ['U12 (#72) and U17 (#74): the tasks\' definitions, read as a standard account'],
+    later: ['U17 (#74): the control tasks\' definitions, read as a standard account'],
   },
   {
     id: 'R9',
@@ -109,7 +106,6 @@ const READINGS = [
     mark: 'recorded, beside R2',
     miss: 'as R2',
     defender: true,
-    needs: ['U12 (#72): the upgrade\'s stop and its backup'],
   },
   {
     id: 'R10',
@@ -130,7 +126,6 @@ const READINGS = [
     what: 'RestartOnFailure on the server task: does a non-zero exit of the action start it again, and does exit 0 leave it stopped',
     mark: 'recorded',
     miss: 'U.5\'s second cost reads as measured',
-    later: ['U12 (#72): the server task itself, in place of the stand-in'],
   },
   {
     id: 'R13',
@@ -483,7 +478,7 @@ function judgeR7(r) {
   return verdict('recorded', 'read: ' + (first.read.join(', ') || 'none') + '; write: ' + (first.write.join(', ') || 'none') + ' (' + lists.length + ' pipe' + (lists.length === 1 ? '' : 's') + '); ' + reach, { pipes: lists, remote });
 }
 
-/** R8: may a standard account make a folder at C:\ or in %ProgramData%; the tasks' definitions wait for the tasks. */
+/** R8: may a standard account make a folder at C:\ or in %ProgramData%, and read the server task's definition; the control tasks' wait for U17. */
 function judgeR8(r) {
   const places = r.places && typeof r.places === 'object' ? r.places : {};
   const found = [];
@@ -496,7 +491,17 @@ function judgeR8(r) {
     found.push(where + ': a standard account ' + (folder.answer === 'yes' ? 'may create a folder (' + folder.by + ')' : folder.answer === 'refused' ? 'is refused a folder (' + folder.by + ')' : 'may not create a folder'));
   }
   if (!found.length) return verdict('not run', 'neither access list was read', facts);
-  return verdict('recorded', found.join('; ') + '; the tasks\' definitions as a standard account wait for U12 (#72) and U17 (#74)', facts);
+  // U12's server task's definition, as app/machine.js writes it: whether a standard account may read it, by its descriptor.
+  const def = r.serverTask && typeof r.serverTask === 'object' ? r.serverTask : {};
+  if (def.sddl) {
+    const read = holds(daclOf(def.sddl), STANDARD_ACCOUNT, READ_DATA);
+    facts.serverTask = { sddl: String(def.sddl).slice(0, 400), read: read.answer, by: read.by, secret: def.secret === true };
+    found.push('the server task\'s definition: a standard account ' + (read.answer === 'yes' ? 'may read it (' + read.by + ')' : read.answer === 'refused' ? 'is refused it (' + read.by + ')' : 'may not read it') + (def.secret === true ? ', and a secret is in it' : ', and no secret is in it'));
+  } else {
+    facts.serverTask = { error: def.error ? String(def.error).slice(0, 300) : 'not read' };
+    found.push('the server task\'s definition was not read (' + facts.serverTask.error + ')');
+  }
+  return verdict('recorded', found.join('; ') + '; the control tasks\' definitions as a standard account wait for U17 (#74)', facts);
 }
 
 /**
@@ -548,7 +553,40 @@ function judgeR13(r) {
   return verdict('recorded', 'read in ' + ms(r.ms) + ': ' + (r.tag || 'the release') + ' ' + imm + ', ' + digests + ' of ' + assets.length + ' assets with a SHA-256 digest; with no network, the words wait for U18 (#77)', facts);
 }
 
-const JUDGES = { R1: judgeR1, R2: judgeR2, R4: judgeR4, R5: judgeR5, R7: judgeR7, R8: judgeR8, R10: judgeR10, R12: judgeR12, R13: judgeR13 };
+/**
+ * R9 (U12 landed): the upgrade backup's time, beside R2. The server's own stop for an upgrade backs the data folder up
+ * for the way back; last-stop.json names the time it took (`backupMs`). Recorded, naming each size's time.
+ */
+function judgeR9(r) {
+  const sizes = Array.isArray(r.sizes) ? r.sizes : [];
+  const took = sizes.filter((s) => isMs(s.backupMs));
+  const facts = { sizes, emptyMs: r.emptyMs, largeMs: r.largeMs };
+  if (!took.length) {
+    const why = sizes.map((s) => s.name + ': ' + (s.error ? String(s.error).slice(0, 120) : s.saved === false ? 'the stop did not save, so no backup' : 'no backup time')).join('; ');
+    return verdict('not run', 'the upgrade\'s stop backed up no folder for the way back' + (why ? ' (' + why + ')' : ''), facts);
+  }
+  const words = took.map((s) => s.name + ' ' + ms(s.backupMs) + (s.saved ? ', saved' : ', not saved')).join('; ');
+  return verdict('recorded', 'the upgrade backup\'s time: ' + words + ' (beside R2)', facts);
+}
+
+/**
+ * R3′ (U12 landed): the server task's stop and its end. A stand-in server task runs launch.js serve (U12's action); each
+ * round it serves, is stopped at loopback with the proof, and ends with 0 saved, the task staying stopped. 10 of 10 the
+ * mark. The give-up and configuration refusal ending the task with 0 are launch.js serve's exit mapping, held on Linux.
+ */
+function judgeR3prime(r) {
+  const list = Array.isArray(r.rounds) ? r.rounds : [];
+  if (!list.length) return verdict('not run', 'the stand-in server task did not run');
+  const saved = list.filter((x) => x && x.saved === true && x.lastResult === 0).length;
+  const facts = { rounds: list, savedCount: r.savedCount, of: list.length };
+  const failing = list.map((x, i) => ({ x, i })).filter(({ x }) => !(x && x.saved === true && x.lastResult === 0));
+  if (saved >= 10) return verdict('recorded', saved + ' of ' + list.length + ' stopped at loopback, saved and ended the task with 0, staying stopped', facts);
+  const first = failing[0];
+  const why = first ? 'round ' + (first.i + 1) + ': ' + (first.x && first.x.error ? first.x.error : 'saved ' + !!(first.x && first.x.saved) + ', last result ' + (first.x ? first.x.lastResult : '?') + ', state ' + (first.x && first.x.state || '?')) : '';
+  return verdict('missed', saved + ' of ' + list.length + ' saved: the release notes name the failing case (' + why + ')', facts);
+}
+
+const JUDGES = { R1: judgeR1, R2: judgeR2, 'R3′': judgeR3prime, R4: judgeR4, R5: judgeR5, R7: judgeR7, R8: judgeR8, R9: judgeR9, R10: judgeR10, R12: judgeR12, R13: judgeR13 };
 
 /**
  * Every reading's verdict on what the lane measured (`raw`, tools/readings-take.js's record; anything else reads as

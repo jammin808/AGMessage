@@ -22,8 +22,9 @@
  *    that is kept (a file, a log). The installed node writes it into its token folder (AGM_TOKEN_DIR), a folder of its
  *    own that this PC's AGMessage admin reads, and takes no secret (ADMIN_TOKEN, ANTHROPIC_API_KEY) from its environment.
  *  - What the console says is kept: the server's output, read through a pipe, goes on to this console line by line and
- *    into data/logs/server.log (lib/serverlog.js: bounded, rotated, never the token, no blank line), with the watchdog's
- *    own lines; the Token line goes to the console alone. A console nobody reads holds no more than CONSOLE_MAX waiting:
+ *    into data/logs/server.log (the installed node's logs folder's, AGM_LOG_DIR, beside its data folder: lib/serverlog.js:
+ *    bounded, rotated, never the token, no blank line), with the watchdog's own lines; the Token line goes to the
+ *    console alone. A console nobody reads holds no more than CONSOLE_MAX waiting:
  *    the lines past it are in server.log alone. A server that cannot start as configured (3), or whose port or folder is
  *    held (75), has its own words, its last line on its error output, carried in the watchdog's line for it; a restart is
  *    handed the watchdog's line for the run before it (AGM_BEFORE), and the installed node, which has no window, records a
@@ -41,7 +42,7 @@ const fs = require('fs');
 const path = require('path');
 const { performance } = require('perf_hooks');
 const { SupervisorPolicy, BeatClock, asleepWords, EXIT, writeFileAtomic } = require('./lib/resilience');
-const { channelOf, isFullPath, taskTokenProblem, tokenLine, TOKEN_FILE, TOKEN_HERE } = require('./lib/startup');
+const { channelOf, isFullPath, serverLogFile, taskTokenProblem, tokenLine, TOKEN_FILE, TOKEN_HERE } = require('./lib/startup');
 const { ServerLog, Lines, redact } = require('./lib/serverlog');
 const dataformat = require('./lib/dataformat');
 const { BUILD } = require('./lib/version');
@@ -82,7 +83,7 @@ try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) {
 const env = { ...process.env, AGM_SUPERVISED: '1', AGM_TEED: '1', AGM_DATA_DIR: DATA_DIR, WS_NO_BUFFER_UTIL: '1', WS_NO_UTF_8_VALIDATE: '1' };
 if (!env.ADMIN_TOKEN) env.ADMIN_TOKEN = crypto.randomBytes(8).toString('hex');
 // The console kept: every line this watchdog and its server say, but the Token line, searched for the token by value.
-const serverLog = new ServerLog(path.join(DATA_DIR, 'logs', 'server.log'), {
+const serverLog = new ServerLog(serverLogFile(process.env, { dataDir: DATA_DIR, runs: channel.runs }), {
   maxBytes: Number(process.env.AGM_LOG_MAX) || undefined,
   secrets: [env.ADMIN_TOKEN],
   onFail: (words) => console.error('  [watchdog] ' + words),

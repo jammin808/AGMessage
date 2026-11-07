@@ -8,7 +8,8 @@
  *   readPortHolder, portHolderWords  a port already in use says who holds it, read once from the holder's own health at
  *                                  loopback with no token; the answer only chooses the words, nothing is decided on it
  *   channelOf                      the channel this copy runs in (AGM_RUNS) and, for the installed node, its three
- *                                  folders, read before the watchdog or the server writes anything
+ *                                  folders and its logs folder, read before the watchdog or the server writes anything
+ *   serverLogFile                  where the watchdog keeps its console: the installed node's logs folder, or data\logs
  *   taskTokenProblem, tokenLine    where the admin token is said: the installed node's watchdog takes no secret from its
  *                                  environment and writes the token into a folder of its own; the banner's Token line
  *                                  holds the token only on a console, where a person sits
@@ -210,7 +211,23 @@ function channelOf(env, { programDir, platform = process.platform }) {
     if (!isFullPath(dir, platform)) return { runs: asked, problem: `${name} is "${said}", which is not a full path. The installed node's ${what} folder is a full path outside ${programDir}.` };
     if (isInside(dir, programDir, platform)) return { runs: asked, problem: `${name} is ${said}, inside the program's folder ${programDir}. The installed node's ${what} folder is outside it, where an upgrade never replaces it.` };
   }
+  // Its logs folder, where the watchdog keeps server.log: the launcher's, outside the data folder (logs\ beside data\),
+  // so a refusal it says before the data folder may be written in still reaches the log. Unset, it is data\logs.
+  const logs = typeof env.AGM_LOG_DIR === 'string' ? env.AGM_LOG_DIR : '';
+  if (logs) {
+    const said = cleanText(logs, 260);
+    if (!isFullPath(logs, platform)) return { runs: asked, problem: `AGM_LOG_DIR is "${said}", which is not a full path. The installed node's logs folder is a full path outside ${programDir}.` };
+    if (isInside(logs, programDir, platform)) return { runs: asked, problem: `AGM_LOG_DIR is ${said}, inside the program's folder ${programDir}. The installed node's logs folder is outside it, where an upgrade never replaces it.` };
+  }
   return { runs: asked, problem: '' };
+}
+
+/**
+ * The file the watchdog keeps its console in (pure): the installed node's logs folder's server.log when the launcher names
+ * one (AGM_LOG_DIR, under 'task'; channelOf checks it), else the data folder's logs\server.log.
+ */
+function serverLogFile(env, { dataDir, runs }) {
+  return runs === 'task' && typeof env.AGM_LOG_DIR === 'string' && env.AGM_LOG_DIR ? path.join(env.AGM_LOG_DIR, 'server.log') : path.join(dataDir, 'logs', 'server.log');
 }
 
 /** The admin token's file in the installed node's token folder (AGM_TOKEN_DIR), which its watchdog writes. */
@@ -267,4 +284,4 @@ function tokenLine({ tty, runs, token, file }) {
   return '    Token: not shown here, since this output is not a window a person reads and may be kept. Start AGMessage in its own window to see it, or set ADMIN_TOKEN, 16 or more random letters and digits, before it starts.';
 }
 
-module.exports = { openerPlan, openBrowser, isFullPath, cloudflaredFile, noCloudflaredWords, readPortHolder, portHolderWords, holderOf, channelOf, CHANNELS, taskTokenProblem, tokenLine, TOKEN_FILE, TOKEN_HERE, TASK_SECRETS };
+module.exports = { openerPlan, openBrowser, isFullPath, serverLogFile, cloudflaredFile, noCloudflaredWords, readPortHolder, portHolderWords, holderOf, channelOf, CHANNELS, taskTokenProblem, tokenLine, TOKEN_FILE, TOKEN_HERE, TASK_SECRETS };

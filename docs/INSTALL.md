@@ -15,13 +15,16 @@ Windows Vista", https://learn.microsoft.com/en-us/windows/win32/services/interac
   when the .bat asks (`AGM_OPEN=1`). The installed node's channel is `task`: it never opens one, whatever `AGM_OPEN`
   holds.
 - **No window.** What a portable copy says in its window, the installed node says on its console, which its watchdog
-  keeps in `data\logs\server.log` (What it says, kept, below). The admin page's "This laptop" says what it knows and
+  keeps in `logs\server.log`, its logs folder beside `data\` (What it says, kept, below). The admin page's "This laptop" says what it knows and
   what Windows says; Open AGMessage and AGMessage status in the Start menu show the log's tail once the installer's
   units bring them.
 
 ## What it says, kept, and "This laptop"
 
-- **`data\logs\server.log`** (`supervise.js`, `lib/serverlog.js`). The watchdog reads its server's output through a
+- **`server.log`** (`supervise.js`, `lib/serverlog.js`), in the installed node's logs folder (`%ProgramData%\AGMessage\logs`,
+  which `launch.js serve` names in `AGM_LOG_DIR` and the watchdog's start checks as it checks the other folders), so a
+  refusal said before the data folder may be written in still reaches it; a portable copy's is `data\logs\server.log`.
+  The watchdog reads its server's output through a
   pipe, says each line on its own console, and appends it, with its time, to the log, with its own lines, and no blank
   line. Past 2 MB the file becomes `server.1.log`, replacing the one before, so the folder holds about 4 MB of it at
   most. A held port's tries (2,880 a day at the ladder's last step) were measured at 139 bytes each, the server's words
@@ -269,7 +272,7 @@ Linux processes frozen and thawed, and lab 1 is the show laptop's.
     so while it keeps being held that long, a server that hangs meanwhile is not killed until the watchdog runs on
     time for 10 s.
 - **The sleeps recorded.** Once the watchdog has ticked on time for 10 s after one, "asleep from 2026-11-02 14:02:03 to
-  14:20:11 UTC (18 min 8 s)" goes to its console, `data\watchdog.log` and `data\logs\server.log`; gaps with it awake
+  14:20:11 UTC (18 min 8 s)" goes to its console, `data\watchdog.log` and `server.log`; gaps with it awake
   less than that between (a throttled standby) are one sleep, with how many times it went. A sleep the watchdog is
   stopped in before then is said as it stops. The server is told each (one the watchdog stops in, ahead of the stop, so
   the stop saves it) and keeps it with the show day's peaks (`peaks.json`: each day's count and longest, and the newest
@@ -325,7 +328,8 @@ log), so the token is never in it (`supervise.js`, `lib/startup.js` `taskTokenPr
   outside the program's folder, and neither the data, uploads or key folder, inside one of them, nor holding one: whoever
   is given the token reads that folder and nothing else of the node. Else code 3 and why, before anything is written. The
   node never makes the folder; its access list is the installer's (SYSTEM and Administrators full control, the server's
-  task may write, this PC's AGMessage admin and the accounts it gives `token` may read).
+  task may modify, since the token is replaced by a rename, which needs delete; this PC's AGMessage admin and the
+  accounts it gives `token` may read; `machine.js prepare` and `install`, below).
 - **Written once it serves.** The watchdog writes the token into `admin-token` there when its server holds its folder and
   its port and asks for its banner's Token line, and at each restart after, the same token: a copy whose port or folder
   is held never writes over the token of the copy that serves. It is written whole, a temporary file in the token folder
@@ -344,11 +348,116 @@ log), so the token is never in it (`supervise.js`, `lib/startup.js` `taskTokenPr
   "AGMessage has no admin token on this PC yet: …" before the node has served, and never what a file that holds no token
   holds. It exits 0 when it printed the token, 2 when it did not, and 64 for a word it does not know. The source fence
   that holds every program `app/` runs to its absolute path (`test/loads.test.js`, `docs/ANALYSIS.md` §3.7) holds this
-  `reg.exe` (`path.win32.join(sys, 'reg.exe')`, run only for a `--sys` named from its drive), and `launch.js`'s
-  `schtasks.exe` and `machine.js`'s programs join it as U12 (#72) and U17 (#74) make them; `launch.js` requires Node's
-  built-ins only, by `node:`, which the same fence holds.
+  `reg.exe` (`path.win32.join(sys, 'reg.exe')`, run only for a `--sys` named from its drive), `launch.js status`'s
+  `schtasks.exe` and `reg.exe` and `machine.js`'s programs (below); `launch.js` and `machine.js` require Node's built-ins
+  only, by `node:`, which the same fence holds.
 - **The first admin account** is made with the token, as on every AGMessage: `/api/setup` takes it typed, or the
   token's sign-in made by this run, at the laptop, and never loopback alone (`docs/ACCOUNTS.md`, The first admin).
+
+## The machine's own commands, the server task, and the way back's backup
+
+The machine-level commands (`app/machine.js`) run elevated or as SYSTEM only, by the installer and, later, the control
+tasks and the checked upgrade. They require Node's built-ins only and run nothing but by its absolute path in the System32
+folder the installer passes (`{sys}`), from that folder: `schtasks.exe`, `icacls.exe`, `reg.exe` and
+`WindowsPowerShell\v1.0\powershell.exe`, never a bare name. `powershell.exe` runs one fixed script for each Windows fact
+no other program gives (a folder's owner by `Get-Acl`, the firewall's rules by NetSecurity's cmdlets, the port's holder by
+`Get-NetTCPConnection`, a code-integrity event by `Get-WinEvent`), each module imported by its manifest under Windows' own
+module folder, its values handed in by name in an environment of its own (the Windows folder, its drive and its `Temp`,
+and that module folder, each made from `{sys}`), never written into the script. `netsh.exe` is not used: a rule by
+program, protocol and port is NetSecurity's. No machine path
+is read from the environment; Inno passes `{sys}`, `{app}` and `{commonappdata}` as arguments. Every command takes
+`--out <file>`, where its result is written whole as JSON (`{v, verb, code, words, …}`), a refusal's too, never a token.
+Exit codes: 0 done, 2 not done (with why), 3 refused (a precondition a person must clear, fail closed), 64 a word it does
+not know, or an argument missing or malformed (a path that is not full from a drive or a share, `\ProgramData\…` among
+them). This build has `prepare`, `install`, `uninstall`, `preinstall-check`, `upgrade-stop`, `status` and `restore`;
+`import`, `control` and `upgrade` are later units (U14, U17, U18) and are refused as unknown until they land. The audit
+log is the server's alone: the machine appends to `machine\events.jsonl`, and the server turns each event into its audit
+row (U17).
+
+- **The machine folder, race-free** (`machine.js prepare`, at the installer's start). A non-recursive
+  `%ProgramData%\AGMessage`, at once its inheritance cut and SYSTEM and Administrators in full control, written by SID
+  (account names are localised), never `/T`. An existing folder is accepted only when the install record
+  (`HKLM\SOFTWARE\AGMessage`) shows an earlier install, or a prepare of this folder that no install finished (`Prepared`,
+  which the install removes), `lstat` shows a real directory (not a link or reparse point), and its owner (`Get-Acl`) is
+  SYSTEM or Administrators. The root is listed: one made empty and then found holding something another account added is
+  refused, nothing installed. Then each child, non-recursive, with its own grants, and in a root made by this run any
+  child already there is refused; in a root that was there, each one there must be a real directory before any grant
+  touches it: `data`, `uploads`, `keys` and `logs`, `token`, `machine\` with `inbox\`, `outbox\`, `work\` and `staged\`
+  (SYSTEM and Administrators only); and `setup\<128 random bits>\`, where any signed-in account may create a file and
+  none may list or read, its name given to the installer in `--out` alone and the folder removed at the install's end.
+- **The server task** `\AGMessage\Server` (`machine.js install`; `--app` is `{app}`, which holds `node\node.exe` and
+  `app\launch.js`). LocalService under a SID of its own (`NT TASK\AGMessage-Server`, `ProcessTokenSidType` unrestricted),
+  with `SeChangeNotifyPrivilege` alone (so `SeImpersonatePrivilege` is removed); a boot trigger; no execution time limit;
+  both battery settings false; `MultipleInstancesPolicy` `IgnoreNew`; `RestartOnFailure` 3 × 1 min; its action `node.exe`
+  on `launch.js serve`, both by their absolute paths, from `app\`, with the five folders and the port; its descriptor
+  (`D:P(A;;FA;;;SY)(A;;FA;;;BA)`) SYSTEM and Administrators only, so people start it through their control tasks (U17).
+  Its SID is read (`schtasks /ShowSid`) and given what it uses: modify on `data`, `uploads`, `keys` and `logs`, and on
+  `token`, since the watchdog replaces the token by a rename, which needs delete; read on `machine\events.jsonl`, that file
+  alone, never a list of `machine\`. The laptop's admin is given read on `token` and `logs` (Show the admin token,
+  AGMessage status) and its own `machine\inbox\<sid>\` (it may create and write files) and `machine\outbox\<sid>\` (it may
+  read). Every grant is checked: a SID not read or a grant that fails is not done (2), with no record written.
+- **The firewall rules** (answer 37). One for TCP on the port, one for UDP on 9928 (discovery), each naming the program
+  (`node.exe`), the protocol and the local port, the remote address `LocalSubnet`, on Private and Domain, and Public only
+  when ticked at install — never a rule on `node.exe` alone, which would let any account's inbound traffic reach any
+  script. Each install makes them again, so a changed port changes them.
+- **The one install record**, `HKLM\SOFTWARE\AGMessage` in the 64-bit view, written last: `InstallDir` (`{app}`),
+  `Version` (the install version, MAJOR.MINOR.BUILD from the build, the order an installer and an upgrade compare; a
+  local build is never installed), `SemVer` (the product's version, which the words say), `Previous` (the install
+  version an upgrade replaced), `Runs` (`task`), `Port`, `Admin` (the laptop's admin's SID), `AdminName` (its name, for
+  the words), `PublicFirewall` and `Signed`. The laptop's admin is found once, at the first install (`--admin` then
+  required); an upgrade keeps the record's, whoever runs it, and only the first install appends `machine.admin` to the
+  machine's events. No token or password is ever written to the record, a task's definition or a machine command's
+  `--out`.
+- **`launch.js serve`** is the server task's action, run by Task Scheduler as LocalService. It runs the watchdog
+  (`supervise.js`) in a process of its own, in an environment made of Windows' own names (`SystemRoot`, `TEMP` and the
+  like) and `AGM_RUNS=task`, the folders and the port from its arguments, and nothing else: no `NODE_OPTIONS`, no `AGM_…`
+  it was not handed. The watchdog's stop (0), its give-up and a configuration refusal (3) end `serve` with 0 after the
+  watchdog has written why (`watchdog.json`, `server.log`), so the task stays stopped and `RestartOnFailure` does not loop
+  it; only an unexpected end of the watchdog is non-zero, which it restarts.
+- **`launch.js status`** is the person's reader (Start → AGMessage → AGMessage status), run without an elevation, each
+  fact read, refused or absent and never a refusal taken for a fact: the server task's state and last result (by column,
+  never Windows' localised words), the record's admin and port, the tail of `server.log`; the data folder's
+  `last-stop.json` and `watchdog.log` are SYSTEM's, Administrators' and the server's, so to anyone else they read
+  refused, and are said so. **`machine.js status`** is the elevated reader: all of it, plus the port's holder pid and
+  whether a code-integrity event (Smart App Control) stopped `node.exe`, from one `powershell.exe`. Neither shows a token.
+- **`machine.js preinstall-check`** fails closed before an install or an upgrade lays a file. Nothing on the port: ready,
+  with or without a token (a first install has none). The installed AGMessage proving its token is asked how busy it is:
+  busy is refused without a typed reason (`/FORCE`), and one that does not answer within 5 s is refused, naming its pid.
+  Anything else on the port is refused with who holds it: "AGMessage 0.5.1 is running on port 3023 from a folder: press
+  Ctrl+C in its window, then continue" from its `/api/health`, or "Another program (pid 4120) holds port 3023: close it,
+  then continue".
+- **`machine.js upgrade-stop`** asks nothing when the disk is short of the room the backup takes (its copies and 1 GB
+  beside them), unless forced. Then the stop at loopback with the proof of the token, reason `upgrade`, who asked
+  (`--by`) and the reason typed: it waits for the server to end (its port closed, up to 2 minutes), reads
+  `last-stop.json` written after it asked, and says "AGMessage stopped for the upgrade and saved at 20:31; backup …". No
+  record, a stop that did not save, or no backup made (the record's `unbacked` says why) is refused (3) unless forced.
+- **`machine.js uninstall`** stops the server at loopback first (it saves; Task Scheduler's End, TerminateProcess, is
+  never the stop), waits for its port to close, then ends and removes every task in `\AGMessage\` (the server task, the
+  control task the record names for the laptop's admin and each account given a right, and any other the folder lists),
+  the firewall rules and the record, before any file goes; the data is kept unless the person ticks "Remove all AGMessage data from this PC"
+  (`/REMOVEDATA`), and then the keys are removed last (answer 43). Each removal is checked: what was left is named, and
+  the exit is 2.
+- **The way back's backup** (`app/lib/upgradebackup.js`). The server, the one writer, makes it at a stop this PC's machine
+  asked for an upgrade, once the audit log, every store and each dirty hall are saved and before `last-stop.json`, which
+  names it (`backup`, `backupMs`, or `unbacked`). It goes under `data\backups\upgrade-<build>-<time>-<suffix>\`: a hard
+  link to every file only ever replaced whole by a rename (each store, a hall's snapshot, every marker and record), which
+  costs no room and keeps the file as it was; a copy of a file written where it lies (an append-only log, a hall's op
+  log, the audit log, a `.bak`) and, where the uploads folder is on another volume, of each upload; `backups\` and `logs\`
+  are never in it. Two are kept, the newest. A disk short of room for the copies and the reserve refuses the backup,
+  leaving nothing.
+- **`machine.js restore`** lays one backup back for the way back, before the earlier build starts again (the installer's
+  U.6.1), refused while anything answers on the port. File by file: a file the backup holds whose live file is still the
+  same file (a hard link nothing replaced) is kept, any other is laid back, and a file the newer build made is removed;
+  the audit log and `watchdog.log` are never rolled back, since they carry what the newer build did, so the audit log
+  and its head in `keys\` still agree, and `keys\` is never touched.
+- **What only a Windows run proves.** `icacls`, `schtasks`, `reg` and NetSecurity's cmdlets applying; the task running as
+  LocalService with `SeChangeNotifyPrivilege` alone; the installer's life cycle (U13, U16). The pure parts — the argument
+  parsing, the folder order (never `/T`, and its refusals), the task's definition, the firewall rules, the record's shape,
+  Windows' answers read by column, the machine's wire half (matched to `lib/machinewire.js` and `lib/busy.js`), the stop
+  for an upgrade and its backup against a real server, the restore, and `launch.js serve` with the real watchdog — are
+  held on Linux (`test/machine.test.js`); on Windows the same file runs the read-only scripts (a real folder's owner, the
+  port's holder) through the machine's own hands. The Windows readings lane takes R3′ (U12's own task definition, its
+  stop-saves) and R9 (the backup's time), and R8 reads that definition back as a standard account.
 
 ## The version number, the release order and the data folder's format
 
@@ -388,7 +497,7 @@ log), so the token is never in it (`supervise.js`, `lib/startup.js` `taskTokenPr
 
 ## A portable copy on a PC where AGMessage is installed
 
-- `start-agmessage.bat` reads the install record (`Version` under `HKLM\SOFTWARE\AGMessage`, in the 64-bit view,
+- `start-agmessage.bat` reads the install record (`SemVer` under `HKLM\SOFTWARE\AGMessage`, in the 64-bit view,
   through `%SystemRoot%\System32\reg.exe`), and its banner says "AGMessage 0.6.0 is installed on this PC and starts
   with Windows. This window starts a separate portable copy."
 - A portable copy missing its files ends its words with "To use the installed AGMessage: Start -> AGMessage -> Open
@@ -434,11 +543,13 @@ a reading: the installer's life cycle in CI, when it lands, is a gate, as every 
   work folder, so it refuses, before it makes or removes anything, a machine that is not a GitHub-hosted runner, a work
   folder it did not make, and a `\AGMessage\Server` task it did not make (the installed node's). It is never run on the
   show laptop: lab 3 is taken there by hand.
-- **What it stands in for.** The server task, the control tasks and the installer are later units'. Until they land, R4,
-  R7 and R12 are taken under stand-in tasks with the server task's principal and settings (`\AGMessage\Server`:
-  LocalService under its own SID, `SeChangeNotifyPrivilege` only, no time limit, RestartOnFailure 3 × 1 min), R4's
-  action starting the bundle's own watchdog in the installed channel (`AGM_RUNS=task`, the four folders); R13 under a
-  stand-in task as SYSTEM, with no token. R4's `whoami /priv` and `/groups` are run by the task's action, whose token
+- **What it stands in for.** The control tasks and the installer are later units'; the server task is U12's
+  (`app/machine.js`). R3′ and R8 register U12's own definition under the lane's names (R3′ runs it on demand, its boot
+  trigger never firing; R8 reads it back and never runs it). R4, R7 and R12 are taken under stand-in tasks whose
+  principal and settings are that definition's (`\AGMessage\Server`: LocalService under its own SID,
+  `SeChangeNotifyPrivilege` only, no time limit, RestartOnFailure 3 × 1 min; `test/readings.test.js` holds them element
+  for element), their actions the lane's probes, R4's starting the bundle's own watchdog in the installed channel
+  (`AGM_RUNS=task`, the four folders); R13 under a stand-in task as SYSTEM, with no token. R4's `whoami /priv` and `/groups` are run by the task's action, whose token
   the watchdog and the server inherit (each is started with no token of its own); the server counts as serving only when
   health answers with the build the bundle's stamp names. R4's firewall rule is made and read back; that it matches a
   connection needs a client on another machine (Windows Firewall does not filter loopback), which is the show laptop's.
@@ -453,8 +564,8 @@ a reading: the installer's life cycle in CI, when it lands, is a gate, as every 
   starts the watchdog again the moment the old one has ended, as an upgrade's start is, and times the page back from the
   stop to its rejoin answered, trying again at the hall page's own pace (from 0.5 s, doubling to 2 s, each ±50 %, read
   from `public/reconnect.js` by its test); each round also records the watchdog's code and whether `last-stop.json`
-  says the stop saved. The seeded messages are from before the busy line's window (11 minutes before), so the stop is
-  the upgrade's own, needing no reason typed. R2 lays the newest release's payload whole, then this build over it, file by file,
+  says the stop saved. The seeded messages are from before the busy line's window (11 minutes before), so no stop
+  needs a reason typed; R1's is a plain stop, R9's the upgrade's, which also makes the way back's backup. R2 lays the newest release's payload whole, then this build over it, file by file,
   each inflated to a name of its own beside the one it replaces and renamed over it; R10 inflates `node.exe` alone into
   `%TEMP%` and runs it once, and a round counts only when it ran to exit 0. Every stand-in task and the firewall rule
   are removed at the end. A reading whose unit is not built yet reads "not run", naming the unit; that unit adds its step
@@ -474,19 +585,19 @@ a reading: the installer's life cycle in CI, when it lands, is a gate, as every 
 
 | Reading | What | Mark | A miss means | This build's lane | Measured |
 |---|---|---|---|---|---|
-| R1 | `gap.js` (the stop at loopback with the proof, not SIGUSR2) at an empty hall and at 20 × 10,000 | the default page back ≤ 1.5 s at the largest real hall | handoff is revisited (U.10) | taken with the bundle's own watchdog (a portable folder seeded per size): a start that settles the folder, then 3 rounds of a page seated, the stop at loopback with the proof of a token made for the reading, the next start at once and the page back at the hall page's own pace; the slowest round at the largest hall judged, as R2's and R10's are, its median said | 2026-11-03, build 0.6.0-dev.78+442583d: ✕ missed: at an empty hall: page back median 1.31 s, slowest 2.20 s over 3 rounds; at 20 halls × 10,000: page back median 2.34 s, slowest 4.94 s over 3 rounds; every stop saved (the slowest over 1.5 s at the largest) |
+| R1 | `gap.js` (the stop at loopback with the proof, not SIGUSR2) at an empty hall and at 20 × 10,000 | the default page back ≤ 1.5 s at the largest real hall | handoff is revisited (U.10) | taken with the bundle's own watchdog (a portable folder seeded per size): a start that settles the folder, then 3 rounds of a page seated, the stop at loopback with the proof of a token made for the reading (a stop, not an upgrade's: the backup an upgrade's stop makes is R9's, timed on its own), the next start at once and the page back at the hall page's own pace; the slowest round at the largest hall judged, as R2's and R10's are, its median said | 2026-11-03, build 0.6.0-dev.78+442583d: ✕ missed: at an empty hall: page back median 1.31 s, slowest 2.20 s over 3 rounds; at 20 halls × 10,000: page back median 2.34 s, slowest 4.94 s over 3 rounds; every stop saved (the slowest over 1.5 s at the largest) |
 | R2 | lay about 5,120 files and 188 MB over the previous payload, Defender on | ≤ 6 s together with R9 (a screen's "lost") | version folders (U.10) | taken: the zip laid on an empty folder, then 3 rounds of the newest release's payload laid whole and this build laid over it (over its own when that release's zip could not be had, said so), the slowest round judged; its mark waits for R9 | 2026-11-03, build 0.6.0-dev.78+442583d: ✕ missed: 5194 files, 181 MB laid over v0.5.1's payload, the slowest of 3 rounds 21.6 s: over 6 s alone, before R9's backup |
 | R3 | retired: it was B-service's (shawl's stop under `NT SERVICE\AGMessage`), which is not the shape (U.5) | — | — | — | — |
-| R3′ | the task: a stop at loopback with the proof saves and `last-stop.json` says so; the watchdog's give-up and a configuration refusal end the task with 0, and it stays stopped | 10 of 10 | the release notes name the failing case; a stop that does not save is said on "This laptop" | not run: needs U12 (#72), the server task (the stop at loopback with the proof is built: R1 takes it) | not measured |
-| R4 | under the task: `LOCALAPPDATA`, `os.homedir()`, UDP 9928 broadcast heard, a quick tunnel's URL returned with nothing written in the account's profile, a rule by program, protocol and port matching `node.exe` under the task, `whoami /priv` from the server's process, `schtasks /showsid` | `SeImpersonatePrivilege` absent, and the server serves with `SeChangeNotifyPrivilege` alone | the privilege list U12 sets is widened by the one privilege the reading names, with its reason | taken under the stand-in server task (U12, #72, puts its own task in its place): the token's privileges and groups (read by the task's action, which the server inherits), the task's SID, `LOCALAPPDATA` and the home folder, health answering with this bundle's build, UDP 9928 heard from this machine, a quick tunnel and the profile before and after, a rule by program, protocol and port made and read back; a client on another machine is the show laptop's | 2026-11-03, build 0.6.0-dev.78+442583d: ✓ met: the token holds SeChangeNotifyPrivilege alone, and the server served under it in 786 ms (0.6.0-dev.78+442583d). Beside it: the task's SID in the token; UDP 9928 heard yes (from this machine); a quick tunnel's address returned; files written or changed in the account's profile 0; a rule by program, protocol and port made and read back (TCP, 3124, LocalSubnet; no client on another machine to show it matching) |
+| R3′ | the task: a stop at loopback with the proof saves and `last-stop.json` says so; the watchdog's give-up and a configuration refusal end the task with 0, and it stays stopped | 10 of 10 | the release notes name the failing case; a stop that does not save is said on "This laptop" | taken (U12, #72): U12's own server task definition (`app/machine.js`), under the lane's name and with the lane's folders, run on demand (its boot trigger never fires), its action `launch.js serve` (`AGM_RUNS=task`); 10 rounds of a stop at loopback with the proof of a token its own server made, each saving and ending the task with 0, staying stopped; the give-up and configuration refusal ending it with 0 are `launch.js serve`'s exit mapping, held on Linux (`test/machine.test.js`) | not measured |
+| R4 | under the task: `LOCALAPPDATA`, `os.homedir()`, UDP 9928 broadcast heard, a quick tunnel's URL returned with nothing written in the account's profile, a rule by program, protocol and port matching `node.exe` under the task, `whoami /priv` from the server's process, `schtasks /showsid` | `SeImpersonatePrivilege` absent, and the server serves with `SeChangeNotifyPrivilege` alone | the privilege list U12 sets is widened by the one privilege the reading names, with its reason | taken under the stand-in server task, whose principal and settings are U12's own (`app/machine.js`, held element for element by `test/readings.test.js`), its action the lane's probe: the token's privileges and groups (read by the task's action, which the server inherits), the task's SID, `LOCALAPPDATA` and the home folder, health answering with this bundle's build, UDP 9928 heard from this machine, a quick tunnel and the profile before and after, a rule by program, protocol and port made and read back; a client on another machine is the show laptop's | 2026-11-03, build 0.6.0-dev.78+442583d: ✓ met: the token holds SeChangeNotifyPrivilege alone, and the server served under it in 786 ms (0.6.0-dev.78+442583d). Beside it: the task's SID in the token; UDP 9928 heard yes (from this machine); a quick tunnel's address returned; files written or changed in the account's profile 0; a rule by program, protocol and port made and read back (TCP, 3124, LocalSubnet; no client on another machine to show it matching) |
 | R5 | `Get-AuthenticodeSignature` on `node.exe`, `cloudflared.exe` and the installer | the first two Valid; the installer recorded | `README.txt` names the file Windows does not trust | taken for `node.exe` and `cloudflared.exe`; the installer once U13 (#73) builds it | 2026-11-03, build 0.6.0-dev.78+442583d: ✓ met: node.exe Valid (CN=OpenJS Foundation, O=OpenJS Foundation, L=San Francisco, S=California, C=US), cloudflared.exe Valid (CN="Cloudflare, Inc.", O="Cloudflare, Inc.", L=San Francisco, S=California, C=US, SERIALNUMBER=4710875, OID.2.5.4.15=Private Organization, OID.1.3.6.1.4.1.311.60.2.1.2=Delaware, OID.1.3.6.1.4.1.311.60.2.1.3=US); the installer not built yet (U13, #73) |
 | R6 | over-the-shoulder elevation: U.5.1's two readings of the account that started Setup; the user's own export (U14) run through `ExecAsOriginalUser` into the laptop's admin's inbox; an elevated read of another account's `%LOCALAPPDATA%\AGMessage` | both readings name the standard account | the admin page asks the person to choose, as U.5.1 says | not run: needs U13 (#73) and U14 (#75) | not measured |
 | R7 | the folder pipe's access list as libuv makes it (`CreateNamedPipeW(…, NULL)`, `crit-dl/pipe.c:596-599`) under the task's token, and whether a remote client reaches it | recorded | nothing machine-level writes the pipe any more (U8); the busy line's readers are named | taken: the stand-in server's folder pipe, who may read and write it, and whether a client reaches it through SMB at the runner's own names (a network logon on one machine; a second machine is the show laptop's) | 2026-11-03, build 0.6.0-dev.78+442583d: ✓ recorded: read: Everyone, Anonymous, SYSTEM, LOCAL SERVICE, Administrators; write: SYSTEM, LOCAL SERVICE, Administrators (1 pipe); through SMB at this machine's own names (a network logon; no second machine): \\localhost connected, \\runnervmhao91 connected |
-| R8 | `icacls C:\` and `icacls %ProgramData%` (may a standard account create `C:\node_modules` or `%ProgramData%\AGMessage`?); `schtasks /query /xml` of each task as a standard account: readable or not, and no secret in it | recorded | U11 and U12's order already assume the worst | taken: both access lists, read by SID (`icacls /save`); the tasks' definitions as a standard account once U12 (#72) and U17 (#74) make them | 2026-11-03, build 0.6.0-dev.78+442583d: ✓ recorded: C:\: a standard account may create a folder (Authenticated Users); C:\ProgramData: a standard account may create a folder (Users); the tasks' definitions as a standard account wait for U12 (#72) and U17 (#74) |
-| R9 | the upgrade backup's time at an empty hall and at 20 × 10,000 | recorded, beside R2 | as R2 | not run: needs U12 (#72), the upgrade's stop and its backup | not measured |
+| R8 | `icacls C:\` and `icacls %ProgramData%` (may a standard account create `C:\node_modules` or `%ProgramData%\AGMessage`?); `schtasks /query /xml` of each task as a standard account: readable or not, and no secret in it | recorded | U11 and U12's order already assume the worst | taken: both access lists, read by SID (`icacls /save`); U12's server task definition (`app/machine.js`), registered under the lane's folder and never run, its descriptor read back (may a standard account read it?) and its XML searched for a secret; the control tasks' definitions once U17 (#74) makes them | 2026-11-03, build 0.6.0-dev.78+442583d: ✓ recorded: C:\: a standard account may create a folder (Authenticated Users); C:\ProgramData: a standard account may create a folder (Users); the tasks' definitions as a standard account wait for U12 (#72) and U17 (#74) |
+| R9 | the upgrade backup's time at an empty hall and at 20 × 10,000 | recorded, beside R2 | as R2 | taken (U12, #72): the bundle's own watchdog serves a seeded folder (empty, and 20 × 10,000), the stop at loopback with the proof carries reason `upgrade` (the seeded messages are from before the busy window, so no reason is typed), the server backs the folder up for the way back (`app/lib/upgradebackup.js`), and `last-stop.json` names its time | not measured |
 | R10 | extracting `node.exe` to `%TEMP%` for each machine command, Defender on | recorded | over 5 s: an upgrade runs its checks with the installed `node.exe` | taken: 5 rounds, each extracted from the zip and run once, the slowest judged against 5 s; a round that did not run to exit 0 is said, and measured no command | 2026-11-03, build 0.6.0-dev.78+442583d: ✓ recorded: the slowest of 5 rounds 4.06 s (extracted, then run once): within 5 s |
 | R11 | a control task whose descriptor gives one standard account read and execute: that account runs it with `schtasks /run`; a second standard account is refused; the task runs as SYSTEM with `--for` that account's SID | 10 of 10 | the Start menu's acts fall back to an administrator's approval, and the release notes say so | not run: needs U17 (#74) | not measured |
-| R12 | RestartOnFailure on the server task: does a non-zero exit of the action start it again, and does exit 0 leave it stopped | recorded | U.5's second cost reads as measured | taken under two stand-ins with the server task's settings (U12, #72, puts its own task in their place), one whose action exits 1, then one whose action exits 0; a non-zero exit not started again, or a 0 started again, is the miss | 2026-11-03, build 0.6.0-dev.78+442583d: ✕ missed: a non-zero exit was not started again within 150.8 s; exit 0 left it stopped within 90.4 s |
+| R12 | RestartOnFailure on the server task: does a non-zero exit of the action start it again, and does exit 0 leave it stopped | recorded | U.5's second cost reads as measured | taken under two stand-ins with the server task's principal and settings (U12's own, `app/machine.js`, held element for element by `test/readings.test.js`), one whose action exits 1, then one whose action exits 0; a non-zero exit not started again, or a 0 started again, is the miss | 2026-11-03, build 0.6.0-dev.78+442583d: ✕ missed: a non-zero exit was not started again within 150.8 s; exit 0 left it stopped within 90.4 s |
 | R13 | from a control task as SYSTEM, `api.github.com`'s release answer for a published tag: `immutable` and each asset's `digest` read; with no network, the words | recorded | U18's offline words are the ones shown | taken online from the stand-in SYSTEM task (U17, #74, puts a control task in its place), for the newest release published (a refusal for the runner's rate limit reads "not run"); with no network, once U18 (#77) has its words | 2026-11-03, build 0.6.0-dev.78+442583d: ✓ recorded: read in 261 ms: v0.5.1 not immutable (U16, #78, turns immutable releases on), 3 of 3 assets with a SHA-256 digest; with no network, the words wait for U18 (#77) |
 
 R7's `crit-dl/pipe.c:596-599` is the plan's reading of libuv's `src/win/pipe.c`, where the folder's pipe is made with no

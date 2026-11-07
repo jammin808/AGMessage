@@ -211,8 +211,10 @@ A sentence and the files; the detail is the code's and the CHANGELOG's. A test n
 | HTTPS and certificate pins; the machine key, sealed secrets and the keys derived from it | `app/lib/tls.js`, `app/lib/secretbox.js` |
 | Health's readings and a show day's peaks | `app/lib/peaks.js` |
 | What a start opens, says and may write: nothing before the folder and the port are held; a secret made only where there is none | `app/lib/startup.js`, `app/lib/resilience.js`; test `startrules` |
-| Where the admin token is said, only where a person sits; Show the admin token | `app/supervise.js`, `app/launch.js`; test `admintoken` |
-| What the console says, kept (`server.log`), and "This laptop" | `app/lib/serverlog.js`, `app/lib/laptop.js`; test `laptop` |
+| Where the admin token is said, only where a person sits; Show the admin token; the installed node's console commands (serve, the task's action; status, the person's reader) | `app/supervise.js`, `app/launch.js`; tests `admintoken`, `machine` |
+| The installed node's machine-level commands, run elevated or as SYSTEM (the race-free folder, the server task, the firewall rules, the HKLM record, uninstall, preinstall-check, upgrade-stop, status, restore; Node's built-ins only, every program by its absolute path, the machine's own wire half) | `app/machine.js`; test `machine` |
+| The way back's backup of the data folder, made at an upgrade's stop (hard links and copies, two kept) | `app/lib/upgradebackup.js`; test `machine` |
+| What the console says, kept (`server.log`, in the logs folder `AGM_LOG_DIR` names under the task), and "This laptop" | `app/lib/serverlog.js`, `app/lib/laptop.js`; test `laptop` |
 | A sleep told from a hang; a live show kept awake (the power request) | `app/lib/power.js`, `app/lib/resilience.js` (`BeatClock`); test `sleep` |
 | How busy it is, and a stop that saves, asked at loopback with a proof of the token | `app/lib/busy.js`, `app/lib/machinewire.js`; test `busy` |
 | AI drafts and their brief | `app/lib/ai.js` |

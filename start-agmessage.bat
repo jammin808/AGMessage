@@ -10,11 +10,12 @@ for %%I in ("%~dp0.") do echo     from %%~fI
 echo   ================================================
 echo.
 
-REM An AGMessage installed on this PC is named first: the installer's one record, HKLM\SOFTWARE\AGMessage's Version.
+REM An AGMessage installed on this PC is named first: the installer's one record, HKLM\SOFTWARE\AGMessage's SemVer (the
+REM product's version; its Version is the install version MAJOR.MINOR.BUILD an upgrade compares, never said).
 REM reg.exe by its absolute path: cmd looks for a bare name in this folder before anywhere else. /reg:64 reads the 64-bit
 REM view, where the record is written, also when this window is a 32-bit cmd (whose reads would go to WOW6432Node).
 set "INSTALLED="
-for /f "tokens=1,2,*" %%a in ('call "%SystemRoot%\System32\reg.exe" query HKLM\SOFTWARE\AGMessage /v Version /reg:64 2^>nul') do if /i "%%a"=="Version" (
+for /f "tokens=1,2,*" %%a in ('call "%SystemRoot%\System32\reg.exe" query HKLM\SOFTWARE\AGMessage /v SemVer /reg:64 2^>nul') do if /i "%%a"=="SemVer" (
   set "INSTALLED=1"
   echo   AGMessage %%c is installed on this PC and starts with Windows.
   echo   This window starts a separate portable copy.

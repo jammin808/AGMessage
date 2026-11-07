@@ -527,6 +527,9 @@ const RUNS = [
   { file: 'server.js', program: 'CLOUDFLARED', why: 'this copy\'s own cloudflared, in bin beside app: lib/startup.js cloudflaredFile, from the folder app is in (__dirname\'s), or none' },
   { file: 'supervise.js', program: 'CHILD', why: 'fork runs this node.exe (process.execPath) on server.js beside the watchdog, by its path from __dirname, or on AGM_CHILD (a test\'s stand-in server), which a start refuses unless it is a full path (lib/startup.js isFullPath: from a drive or a share on Windows, never one the current drive or folder completes)' },
   { file: 'launch.js', program: "path.win32.join(sys, 'reg.exe')", why: 'reg.exe in the System32 folder --sys names (the installer\'s {sys}), named from its drive: adminName runs nothing otherwise' },
+  { file: 'launch.js', program: 'exe(name)', why: 'status: schtasks.exe and reg.exe in the System32 folder --sys names, by their absolute path (exe = path.win32.join(sys, name)); a --sys that is no drive path runs nothing' },
+  { file: 'launch.js', program: 'execPath', why: 'serve: process.execPath (or a test\'s stand-in) runs the watchdog supervise.js beside launch.js, by its absolute path from __dirname' },
+  { file: 'machine.js', program: 'exe(name)', why: 'the machine commands run schtasks.exe, icacls.exe, reg.exe and WindowsPowerShell\\v1.0\\powershell.exe in the System32 folder --sys names (the installer\'s {sys}), each by its absolute path (exe = path.win32.join(sys, name)), from that folder; hands refuses a --sys that is no drive path' },
   { file: 'lib/laptop.js', program: 'plan.file', why: 'readWindows runs windowsPlan\'s powershell.exe: lib/laptop.js powershellPlan, under a SystemRoot named from its drive, or no run' },
   { file: 'lib/power.js', program: 'p.file', why: 'the power request runs planOf()\'s powershell.exe: lib/laptop.js powershellPlan, as for "This laptop"' },
   { file: 'lib/startup.js', program: 'plan.file', why: 'openBrowser runs openerPlan\'s explorer.exe, under a SystemRoot named from its drive, or opens nothing' },
@@ -542,6 +545,7 @@ const RUNS = [
 /** Each place a function that starts a program is handed on as a value, and to whom: its calls are read there. */
 const HANDED = [
   { file: 'server.js', value: 'spawn', why: 'to lib/startup.js openBrowser, whose parameter spawn the fence reads (lib/startup.js plan.file, above)' },
+  { file: 'machine.js', value: 'run', why: 'the runner (childProcess.execFileSync, or a test\'s stand-in) to hands, directly and through holderPid, whose calls run(exe(name), …) the fence reads above (machine.js exe(name))' },
 ];
 /** The machine's own commands: Node's built-ins only, so a bug or a planted file in app\node_modules never runs as SYSTEM or as the person at the PC. */
 const MACHINE_FILES = ['launch.js', 'machine.js'];

@@ -72,6 +72,7 @@ const laptop = require('./lib/laptop');
 const power = require('./lib/power');
 const dataformat = require('./lib/dataformat');
 const laststop = require('./lib/laststop');
+const upgradebackup = require('./lib/upgradebackup');
 const { StageRecord, confidentialOf, whoSaid, didSaid, seenSaid } = require('./lib/stagerecord');
 const tunnelend = require('./lib/tunnelend');
 const busy = require('./lib/busy');
@@ -1370,6 +1371,8 @@ app.post(machinewire.PATHS.stop, machineBody, (req, res) => {
   const why = machinewire.STOP_WORDS[ask.reason];
   if (forced) audit.write(HOST_ACTOR, 'server.stop.forced', ask.by, 'stopped while busy (' + busy.words(line) + ') for ' + why + ': ' + ask.force, guard.clientIp(req));
   console.log('\n  Stopping for ' + why + ', asked at loopback by ' + ask.by + (forced ? ' while busy (' + busy.words(line) + '), with a reason typed' : '') + '.');
+  // An upgrade's stop backs the data folder up for the way back once it has saved, and its record names the backup.
+  stopBackup = ask.reason === 'upgrade';
   let gone = false;
   const go = () => { if (!gone) { gone = true; shutdown(resilience.EXIT.STOP); } };
   res.once('finish', go);
@@ -6070,6 +6073,7 @@ function stopTunnel() {
 
 // ---------------------------------------------------------------- lifecycle
 let shuttingDown = false;
+let stopBackup = false;   // this stop is an upgrade's: the data folder is backed up for the way back once it is saved
 /**
  * A stop: the audit log, the lanes and the halls that changed saved (`saveAll`), then its record written last
  * (data/last-stop.json, lib/laststop.js), saying it saved only when all of them were: the next start writes "AGMessage
@@ -6085,8 +6089,22 @@ function shutdown(code = 0) {
   if (serving) {
     console.log('\n  Saving…');
     const { unsaved, halls } = saveAll();
+    const at = Date.now();
+    // An upgrade's stop: the folder as it was just saved, backed up for the way back before the record that names it
+    // (lib/upgradebackup.js), the watchdog's beat sent while it runs. One that cannot be made is said and recorded, and the
+    // machine's upgrade-stop then refuses the upgrade unless a person forces it.
+    let backup = null;
+    if (stopBackup) {
+      try {
+        backup = upgradebackup.make({ dataDir: DATA_DIR, uploadDir: UPLOAD_DIR, build: BUILD.full, stopAt: at, saved: !unsaved.length, reserve: UPLOAD_MIN_FREE, beat });
+        console.log('  Backed up for the way back: ' + backup.name + ' (' + plural(backup.linked + backup.copied, 'file') + ', ' + Math.ceil(backup.bytes / 1024) + ' KB copied, in ' + backup.ms + ' ms).');
+      } catch (e) {
+        backup = { name: '', ms: null, error: e.words || String(e && e.message) };
+        console.error('  [save] ' + backup.error + '.');
+      }
+    }
     let rec = null;
-    try { rec = laststop.record(DATA_DIR, { at: Date.now(), build: BUILD.full, unsaved }); } catch (e) {
+    try { rec = laststop.record(DATA_DIR, { at, build: BUILD.full, unsaved, backup }); } catch (e) {
       console.error('  [save] ' + laststop.FILE + ' could not be written (' + (e.code || e.message) + '): the next start says AGMessage restarted in each hall');
     }
     if (rec && rec.saved) console.log('  Saved: the audit log, every store and ' + (halls ? plural(halls, 'hall') + ' that changed' : 'no hall, none having changed') + '.');

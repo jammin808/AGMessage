@@ -6284,6 +6284,84 @@ by default", with "Pins 3", a pinned message never cleared; "the admin" read as 
   `docs/ANALYSIS.md` (the typed cases), `CLAUDE.md`. `docs/NODES.md` and `docs/SHOWBUS.md` are unchanged: nothing of this
   reaches the Show Bus, the context or the hello.
 
+**The installed node's machine commands, and the server task's action** (the plan's Part 6, unit U12, with the owner's
+answers 35, 37 and 38; the code, its tests and a Linux stand-in for Windows — no build installs AGMessage yet)
+- **`app/machine.js`**, the machine-level commands, run elevated or as SYSTEM only, Node's built-ins only, every program
+  by its absolute path in the System32 folder the installer passes, from that folder (`schtasks.exe`, `icacls.exe`,
+  `reg.exe`, and `powershell.exe` for what no other program reads or makes: a folder's owner, the firewall's rules by
+  NetSecurity's cmdlets, the port's holder, a code-integrity event), no machine path read from its environment. It builds
+  `prepare`, `install`, `uninstall`, `preinstall-check`, `upgrade-stop`, `status` and `restore`; `import`, `control` and
+  `upgrade` are refused as unknown until their later units (U14, U17, U18). Every command writes its result whole to
+  `--out`, a refusal's too, never a token. Exit codes: 0 done, 2 not done, 3 refused (a precondition a person must clear),
+  64 a word it does not know or an argument missing or malformed.
+- **The machine folder, race-free** (`prepare`): a non-recursive `%ProgramData%\AGMessage` with inheritance cut and SYSTEM
+  and Administrators in full control, by SID, never `/T`; an existing one accepted only when HKLM shows an earlier install
+  (or a prepare no install finished), `lstat` shows a real directory and its owner is SYSTEM or Administrators; the root
+  listed, anything another account added meanwhile refused; then its children (`data`, `uploads`, `keys`, `logs`,
+  `token`, `machine\` with `inbox\`, `outbox\`, `work\` and `staged\`), each a real directory made or found before any
+  grant on it, and `setup\<128 random bits>\` where any signed-in account may drop a file and none may list or read, named
+  in `--out` alone and removed at the install's end.
+- **The server task** `\AGMessage\Server` (`install`): LocalService under its own SID (`ProcessTokenSidType` unrestricted,
+  `SeChangeNotifyPrivilege` alone), a boot trigger, no time limit, both battery settings false, `MultipleInstancesPolicy`
+  `IgnoreNew`, `RestartOnFailure` 3 × 1 min, its action `node.exe` on `launch.js serve` by their absolute paths in
+  `{app}`, its descriptor SYSTEM and Administrators only. Its SID may modify the folders it writes (`token\` too: the
+  watchdog replaces the token by a rename) and read `machine\events.jsonl` alone; the laptop's admin reads `token\` and
+  `logs\` and has its own `inbox\` and `outbox\`; every grant is checked. Beside it: the firewall rules, each by program,
+  protocol and local port (TCP the port, UDP 9928), `LocalSubnet`, Private and Domain, and Public only when ticked at
+  install — never a rule on `node.exe` alone; and the one install record `HKLM\SOFTWARE\AGMessage`, written last
+  (`InstallDir`, `Version` the install version MAJOR.MINOR.BUILD from the build, `SemVer`, `Previous`, `Runs`, `Port`,
+  `Admin`, `AdminName`, `PublicFirewall`, `Signed`), no token or password among them. The laptop's admin is recorded at
+  the first install only: an upgrade keeps it, and only the first appends `machine.admin` to `machine\events.jsonl`, which
+  the server turns into its audit row (U17).
+- **Stopping and checking before an install or an upgrade.** `preinstall-check` looks at the port first: nothing there is
+  ready, a first install with no token too; the installed AGMessage proving its token is asked how busy it is (busy
+  refused without a typed reason, silent for 5 s refused naming its pid); a portable copy or another program on the port
+  is refused with its words. `upgrade-stop` refuses before it asks anything when the disk is short of the backup's room,
+  then stops the server at loopback (reason `upgrade`, who asked, the reason typed), waits for it to end, reads the record
+  that stop wrote, and refuses (exit 3) a stop that did not save or made no backup, unless forced: "AGMessage stopped for
+  the upgrade and saved at 20:31; backup …". `uninstall` stops the server at loopback first (it saves; Task Scheduler's
+  End is never the stop), then removes every task of `\AGMessage\` (each control task the record names among them, should
+  the folder's listing not be read), the rules and the record before any file goes; the data is kept unless
+  `--remove-data`, and then the keys last; each removal is checked, and what is left is named (exit 2). Windows' answers
+  are read by column, never by their localised words.
+- **`launch.js serve`**, the server task's action: it runs the watchdog in a process of its own, in an environment of
+  Windows' own names and `AGM_RUNS=task`, the folders and the port from its arguments — nothing else of its own, no
+  `NODE_OPTIONS` and no `AGM_…` it was not handed. The watchdog's stop (0), its give-up and a configuration refusal (3) end
+  `serve` with 0 after the watchdog has written why, so the task stays stopped and `RestartOnFailure` does not loop it;
+  only an unexpected end of the watchdog is non-zero. **`launch.js status`**, the person's reader, without an elevation:
+  each fact read, refused or absent (the data folder's records, which only SYSTEM, Administrators and the server read,
+  said refused, never read as no stop), never the token; **`machine.js status`**, the elevated one, adds the port's
+  holder and a code-integrity event stopping `node.exe`.
+- **The way back's backup** (`lib/upgradebackup.js`): the server, the one writer, makes it at a stop this PC's machine asked
+  for an upgrade, once the audit log, every store and each dirty hall are saved and before `last-stop.json`, which names
+  it. A store, a snapshot and every marker is a hard link (no room, kept whatever a later build writes); an append-only
+  log, a `.bak` and (on another volume) an upload are copied; `backups\` and `logs\` are never in it. Two are kept. A disk
+  short of room for its copies and the reserve refuses it, leaving nothing. **`machine.js restore`** lays a backup back
+  file by file while nothing answers on the port: an unchanged hard link kept, a replaced file laid back, a file the newer
+  build made removed, and the audit log and `watchdog.log` never rolled back, so the audit log and its head still agree.
+- **The watchdog's console** (`supervise.js`): under the task it is kept in the logs folder the launcher names
+  (`AGM_LOG_DIR`, beside the data folder), so a refusal said before the data folder may be written in still reaches
+  `server.log`; `channelOf` checks that folder as it checks the others.
+- **`start-agmessage.bat`** names an installed AGMessage by the record's `SemVer` ("AGMessage 0.6.0 is installed on this
+  PC"), since `Version` is now the install version an upgrade compares.
+- Held on Linux (`test/machine.test.js`, and `machine.js` under the coverage gate): the argument parsing and its exit codes,
+  the folder order (never `/T`, the refusals for a root that is taken, a link or another account's, a child made after the
+  listing or that is a link), the server task's definition and its descriptor, the firewall rules, the record's shape,
+  Windows' answers read by column (an English and a German answer alike), the machine's wire half matched to
+  `lib/machinewire.js` vector for vector and the busy line read as `lib/busy.js` reads it, `upgrade-stop`, the backup and
+  the restore against a real server (a restore followed by a start), `preinstall-check`, `uninstall`'s failures, `--out`
+  for every verb, and `launch.js serve` with the real watchdog (a stop, a configuration refusal and a give-up each ending
+  it 0). On Windows the same file runs the read-only scripts on a real folder and port. The Windows evidence lane now takes
+  R3′ (U12's own task definition and its stop-saves) and R9 (the upgrade backup's time); R8 reads the server task's
+  definition back as a standard account; R4 and R12's stand-ins carry U12's principal and settings, held to `machine.js`
+  by a test; and R1's rounds are plain stops, so the backup an upgrade's stop makes is in R9 alone. What only a Windows run
+  proves — `icacls`, `schtasks`, `reg` and NetSecurity's cmdlets applying, the task running as LocalService — is the
+  installer job's and the lane's.
+- The papers: `CHANGELOG.md`, `docs/INSTALL.md`, `docs/ANALYSIS.md`, `docs/DESIGN.md`, `SECURITY.md` and `CLAUDE.md`.
+  `README.md` and `README.txt` are unchanged: nothing installs AGMessage yet, and the .bat's banner now says what
+  `README.txt` already says. `docs/NODES.md` is unchanged: no machine command reaches the Show Bus, the context or the
+  hello (the `install` context block is U3's).
+
 **Fixed**
 - An upload whose stored path is no file (a folder in its place) is refused as one that could not be checked, on every
   platform. The archive's check opened it and, on Windows, read a folder as an empty file, so it was refused in the

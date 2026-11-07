@@ -33,8 +33,10 @@ test('start-agmessage.bat: the install record, then the preflight, before anythi
   assert.ok(!/enabledelayedexpansion/i.test(text), 'no delayed expansion: it drops a "!" from the folder\'s own name');
 
   // The install record, read by reg.exe's absolute path, before the preflight's words.
-  const reg = firstLine(lines, /"%SystemRoot%\\System32\\reg\.exe" query HKLM\\SOFTWARE\\AGMessage \/v Version \/reg:64 /);
+  const reg = firstLine(lines, /"%SystemRoot%\\System32\\reg\.exe" query HKLM\\SOFTWARE\\AGMessage \/v SemVer \/reg:64 /);
   assert.ok(reg >= 0, 'the install record is read through %SystemRoot%\\System32\\reg.exe, in the 64-bit view whatever cmd runs it');
+  // Its words say the product's version (SemVer, 0.6.0), never the install version an upgrade compares (Version, 0.6.41).
+  assert.ok(firstLine(lines, /if \/i "%%a"=="SemVer" \(/) === reg, 'the line read is SemVer\'s');
   for (const { line } of lines) assert.ok(!/(^|[^\\\w])reg(\.exe)?(\s|"|$)/i.test(line), 'no bare reg: ' + line);
   assert.ok(firstLine(lines, /is installed on this PC and starts with Windows/) > reg, 'the installed line is said from what the record holds');
   const preflight = lines.filter(({ line }) => /^\s*if (not defined MISSING )?if not exist|^\s*if not exist/i.test(line));

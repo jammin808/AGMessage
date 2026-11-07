@@ -80,10 +80,13 @@ test('the register: R1-R13 as the plan\'s U7 table names them (R3 retired, R3′
     assert.ok(x.pass === 'recorded' || l.text.includes(x.pass), l.id + '\'s pass is in the plan\'s line');
   }
   // What this build cannot take names the unit whose code it measures; what it stands in for, the unit that ends it.
-  for (const id of ['R3′', 'R6', 'R9', 'R11']) assert.match(R.READINGS.find((x) => x.id === id).needs.join(' '), /U\d+ \(#\d+\)/, id);
-  // R1 waited for U8 (#36), the stop at loopback with the proof, which is built: the lane takes it now.
-  assert.equal(R.READINGS.find((x) => x.id === 'R1').needs, undefined, 'R1 waits for no unit');
-  for (const id of ['R4', 'R5', 'R7', 'R8', 'R12', 'R13']) assert.match(R.READINGS.find((x) => x.id === id).later.join(' '), /U\d+ \(#\d+\)/, id);
+  for (const id of ['R6', 'R11']) assert.match(R.READINGS.find((x) => x.id === id).needs.join(' '), /U\d+ \(#\d+\)/, id);
+  // R1 waits for no unit (U8, the stop at loopback with the proof, is built); R3′ and R9 waited for U12 (#72), which is
+  // built: the lane takes them now (the upgrade backup's time, and the server task's stop-saves).
+  for (const id of ['R1', 'R3′', 'R9']) assert.equal(R.READINGS.find((x) => x.id === id).needs, undefined, id + ' waits for no unit');
+  // R4, R7 and R12 took under a stand-in while U12 was not built; it is now, and their stand-in's settings are U12's.
+  for (const id of ['R5', 'R8', 'R13']) assert.match(R.READINGS.find((x) => x.id === id).later.join(' '), /U\d+ \(#\d+\)/, id);
+  for (const id of ['R4', 'R7', 'R12']) assert.equal(R.READINGS.find((x) => x.id === id).later, undefined, id + ' no longer waits for U12');
 });
 
 test('a reading that waits for a later unit is held to it: once that unit\'s code is in the tree, no reading may still wait for it', () => {
@@ -116,8 +119,8 @@ test('a reading that waits for a later unit is held to it: once that unit\'s cod
       }
     }
   }
-  // R1's U8, R3′'s and R9's left with U8 (#36): 13 units named across the readings that still wait.
-  assert.ok(named >= 13, 'every unit a reading waits for is asked');
+  // U12 (#72) landed, so R3′, R4, R7, R9 and R12 no longer wait: the readings still waiting name U13, U14, U17 and U18.
+  assert.ok(named >= 7, 'every unit a reading waits for is asked');
 });
 
 test('nothing measured is nothing met: every reading not run with why (or retired), every lab line not run, Defender not asked', () => {
@@ -133,8 +136,10 @@ test('nothing measured is nothing met: every reading not run with why (or retire
   assert.equal(byId(j, 'R13').words, 'no published release was named to read (none)');
   assert.match(byId(j, 'R11').words, /^needs U17 \(#74\)/, 'a reading of a later unit names it');
   // Even with a record, a reading whose unit has not landed is not judged.
-  assert.equal(byId(R.judge(raw({ 'R3′': { runs: 10 }, R11: { runs: 10 } })), 'R11').state, 'not run');
-  assert.match(byId(R.judge(raw({ 'R3′': { runs: 10 } })), 'R3′').words, /^needs U12 \(#72\)/);
+  assert.equal(byId(R.judge(raw({ R11: { runs: 10 } })), 'R11').state, 'not run');
+  // R3′ and R9 are the lane's now (U12 built): a record that is not their shape reads not run with why, never a unit.
+  assert.match(byId(R.judge(raw({ 'R3′': { runs: 10 } })), 'R3′').words, /the stand-in server task did not run/);
+  assert.match(byId(R.judge(raw({ R9: { runs: 10 } })), 'R9').words, /backed up no folder/);
 });
 
 test('Defender: on only when real-time monitoring and scanning on access came on, in its Normal mode, with C:\\ and D:\\ no longer excluded, and were still so at the end', () => {
@@ -251,7 +256,13 @@ test('R7 and R8: an access list read from its SDDL by SID: who may read and writ
   assert.equal(x.state, 'recorded');
   assert.deepEqual([x.facts['C:\\'].createFolder, x.facts['C:\\'].by], ['yes', 'Authenticated Users'], 'C:\\node_modules can be made');
   assert.deepEqual([x.facts['C:\\ProgramData'].createFolder, x.facts['C:\\ProgramData'].by], ['yes', 'Users'], '%ProgramData%\\AGMessage can be made');
-  assert.match(x.words, /wait for U12 \(#72\) and U17 \(#74\)$/);
+  assert.match(x.words, /the server task's definition was not read \(not read\); the control tasks' definitions as a standard account wait for U17 \(#74\)$/);
+  // U12's server task's definition, as app/machine.js writes it: its own descriptor read back says who may read it.
+  x = byId(R.judge(raw({ R8: { places: { 'C:\\': { sddl: ROOT_SDDL } }, serverTask: { sddl: require('../machine').SERVER_TASK_SDDL, bytes: 2400, secret: false } } })), 'R8');
+  assert.deepEqual([x.facts.serverTask.read, x.facts.serverTask.secret], ['no', false]);
+  assert.match(x.words, /the server task's definition: a standard account may not read it, and no secret is in it; the control tasks'/);
+  x = byId(R.judge(raw({ R8: { places: { 'C:\\': { sddl: ROOT_SDDL } }, serverTask: { sddl: 'D:(A;;FRFX;;;AU)', secret: true } } })), 'R8');
+  assert.match(x.words, /a standard account may read it \(Authenticated Users\), and a secret is in it/);
   // Inherit-only entries are not the folder's own; a deny first refuses; an entry not read assumes the worst.
   const acl = (d) => R.daclOf('D:' + d);
   assert.equal(R.holds(acl('(A;OICIIO;GA;;;AU)(A;OICI;0x1200a9;;;BU)'), R.STANDARD_ACCOUNT, 0x4).answer, 'no');
@@ -350,7 +361,7 @@ test('R1 as the lane takes it, on this machine with this checkout: halls seeded,
   const snap = JSON.parse(fs.readFileSync(path.join(work, 'seed', 'rooms', 'GAP002.json'), 'utf8'));
   assert.deepEqual([snap.code, snap.seq, snap.messages.length, snap.messages[2].seq, snap.messages[2].at], ['GAP002', 3, 3, 3, 1_800_000_000_000]);
   // By default its newest message is from before the busy line's window: a hall between shows, so the stop the reading
-  // asks is the upgrade's own and needs no reason typed.
+  // asks needs no reason typed.
   const before = Date.now();
   T.seedHalls(path.join(work, 'quiet'), { halls: 1, messages: 2 });
   const quiet = JSON.parse(fs.readFileSync(path.join(work, 'quiet', 'rooms', 'GAP001.json'), 'utf8'));
@@ -373,10 +384,13 @@ test('R1 as the lane takes it, on this machine with this checkout: halls seeded,
     assert.match(judged.words, /^at an empty hall: page back median .+; at 3 halls × 400: page back median .+; every stop saved/);
     // The token made for the reading is in no part of the record, and no 16 hex characters are either.
     assert.doesNotMatch(JSON.stringify(r), /[0-9a-f]{16}/);
-    // Each stop was the machine's at loopback, not a signal: the server said so as it stopped.
+    // Each stop was the machine's at loopback, not a signal: the server said so as it stopped. Each round's is a stop, not
+    // an upgrade's, so no backup for the way back is in the gap (R9 times that on its own), and the lane's own at its end.
     const log = fs.readFileSync(path.join(work, 'r1', 'large', 'data', 'logs', 'server.log'), 'utf8');
-    assert.equal((log.match(/Stopping for an upgrade, asked at loopback by the readings lane\./g) || []).length, 2, log.slice(-2000));
-    assert.equal((log.match(/Stopping for a stop, asked at loopback by the readings lane\./g) || []).length, 1, 'and the lane\'s own stop at its end');
+    assert.equal((log.match(/Stopping for a stop, asked at loopback by the readings lane\./g) || []).length, 3, log.slice(-2000));
+    assert.equal((log.match(/Stopping for an upgrade/g) || []).length, 0, 'no round is an upgrade\'s');
+    const backups = path.join(work, 'r1', 'large', 'data', 'backups');
+    assert.deepEqual((fs.existsSync(backups) ? fs.readdirSync(backups) : []).filter((n) => n.startsWith('upgrade-')), [], 'and no backup for the way back was made in the gap');
   } finally { fs.rmSync(work, { recursive: true, force: true }); }
 });
 
@@ -440,7 +454,7 @@ test('the notes: each miss with its fallback, then what was met, open and not ru
   assert.match(n, /\*\*Missed their mark:\*\*\n- R10: the slowest of 1 round 5\.40 s \(extracted, then run once\): over 5 s\. Mark: recorded\. So: over 5 s: an upgrade runs its checks with the installed `node\.exe`\.\n/);
   assert.match(n, /\*\*Met or recorded:\*\* R4 \(/);
   assert.match(n, /\*\*Open:\*\* R2 \(/);
-  assert.match(n, /\*\*Not run:\*\* R1 \(not taken by this lane\); R3′ \(needs U12 \(#72\)/);
+  assert.match(n, /\*\*Not run:\*\* R1 \(not taken by this lane\); R3′ \(not taken by this lane\)/);
   assert.match(n, /Lab 1 not run; Lab 2 not run; Lab 3 not run; Lab 4 2026-11-20, build 0\.6\.0\+41: node\.exe/);
   assert.ok(!n.includes('R3 ('), 'a retired reading is not listed as not run');
   const none = R.notes(null, '');
@@ -661,6 +675,18 @@ test('the stand-in tasks: U12\'s server task\'s principal and settings, one acti
   assert.equal(bytes.subarray(2).toString('utf16le'), xml);
   // Windows' own reading of a command line (CommandLineToArgvW).
   assert.deepEqual(['plain', 'two words', 'a"b', 'C:\\dir with space\\', ''].map(T.winArg), ['plain', '"two words"', '"a\\"b"', '"C:\\dir with space\\\\"', '""']);
+});
+
+test('the stand-ins of R4 and R12 run as U12\'s own server task: the lane\'s principal and settings are app/machine.js serverTaskXml\'s, element for element, and R3′ and R8 register that definition itself', () => {
+  const machine = require('../machine');
+  const block = (xml, tag) => { const m = new RegExp('<' + tag + '[^>]*>([\\s\\S]*?)</' + tag + '>').exec(xml); return m ? m[1].replace(/>\s+</g, '><').trim() : null; };   // eslint-disable-line security/detect-non-literal-regexp -- the test's own element names
+  const lane = T.taskXml({ description: 'x', ...T.SERVER_PRINCIPAL, restart: true, command: 'C:\\n.exe', cwd: 'C:\\' });
+  const own = machine.serverTaskXml({ node: 'C:\\n.exe', launch: 'C:\\a\\launch.js', data: 'C:\\d', uploads: 'C:\\u', keys: 'C:\\k', logs: 'C:\\l', token: 'C:\\t', port: 3023 });
+  for (const tag of ['Principals', 'Settings']) assert.equal(block(lane, tag), block(own, tag), tag);
+  assert.ok(block(own, 'Settings').includes('<RestartOnFailure><Interval>PT1M</Interval><Count>3</Count></RestartOnFailure>'));
+  const src = h.readSource(TAKE_JS);
+  assert.equal((src.match(/require\('\.\.\/app\/machine\.js'\)\.serverTaskXml\(\{ uri: /g) || []).length, 2, 'R3′ and R8 register machine.js\'s own definition under the lane\'s names');
+  assert.match(machine.serverTaskXml({ uri: T.DEFINITION_TASK, node: 'n', launch: 'C:\\l.js', data: 'd', uploads: 'u', keys: 'k', logs: 'l', token: 't', port: 1 }), /<URI>\\AGMessage-Readings\\Definition<\/URI>/);
 });
 
 test('the probes: a start recorded and its exit code; a profile\'s change listed; UDP heard; health waited for; a quick tunnel\'s address seen and the tunnel ended; GitHub\'s answer read', async () => {

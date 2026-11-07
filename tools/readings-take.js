@@ -16,7 +16,9 @@
  *            serving, a page seated, the stop at loopback with the proof of a token made for the reading, the next start
  *            at once, and the page back at the hall page's own pace, round by round
  *       R5   Windows' verdict on node.exe's and cloudflared.exe's signatures (Get-AuthenticodeSignature)
- *       R8   the access lists of C:\ and %ProgramData% (icacls /save: SIDs, never localised names)
+ *       R8   the access lists of C:\ and %ProgramData% (icacls /save: SIDs, never localised names), and U12's server
+ *            task's definition as app/machine.js writes it, registered under the lane's folder and never run: its
+ *            descriptor (who may read it) and its XML (no secret), read back through Task Scheduler's own object
  *       R4   a stand-in for U12's server task at \AGMessage\Server: LocalService, its own SID (Unrestricted), only
  *            SeChangeNotifyPrivilege, the task's settings; its action is this file's probe-server, which reads the token
  *            and the profile, hears UDP 9928, starts the bundle's watchdog under the installed channel (AGM_RUNS=task, the
@@ -60,6 +62,8 @@ const BUDGET_MS = 20 * 60 * 1000;
 const SERVER_TASK = '\\AGMessage\\Server';
 /** The stand-in server task's description: how the lane tells a task it made from the installed node's. */
 const STAND_IN = 'AGMessage readings: a stand-in for the server task';
+/** R8's task: U12's server task's definition, registered under the lane's own folder only to be read back. */
+const DEFINITION_TASK = '\\AGMessage-Readings\\Definition';
 const RESTART_TASKS = { nonZero: '\\AGMessage-Readings\\RestartNonZero', zero: '\\AGMessage-Readings\\RestartZero' };
 const RELEASE_TASK = '\\AGMessage-Readings\\Release';
 /** The file the lane writes in its work folder first: a folder without it is not the lane's to remove. */
@@ -247,7 +251,8 @@ function winArg(a) {
  * A task's definition (Task Scheduler's schema 1.3), started on demand only: its principal (`sid`; with `sidType` and
  * `privileges` for a service account, as U12's server task: its own SID, only the privileges it names), the server task's
  * settings (no time limit, both battery settings false, a new instance ignored while one runs, RestartOnFailure 3 × 1 min
- * when `restart`), and one action. Written as UTF-16 with its mark, as schtasks reads it.
+ * and a start that was missed made when it can, when `restart`: app/machine.js serverTaskXml's, held to it by
+ * test/readings.test.js), and one action. Written as UTF-16 with its mark, as schtasks reads it.
  */
 function taskXml({ description, sid, sidType = '', privileges = [], restart = false, command, args = [], cwd }) {
   const principal = [
@@ -273,7 +278,7 @@ function taskXml({ description, sid, sidType = '', privileges = [], restart = fa
     '    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>',
     '    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>',
     '    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>',
-    ...(restart ? ['    <RestartOnFailure>', '      <Interval>PT1M</Interval>', '      <Count>3</Count>', '    </RestartOnFailure>'] : []),
+    ...(restart ? ['    <RestartOnFailure>', '      <Interval>PT1M</Interval>', '      <Count>3</Count>', '    </RestartOnFailure>', '    <StartWhenAvailable>true</StartWhenAvailable>'] : []),
     '    <AllowStartOnDemand>true</AllowStartOnDemand>',
     '    <Enabled>true</Enabled>',
     '  </Settings>',
@@ -290,7 +295,7 @@ function taskXml({ description, sid, sidType = '', privileges = [], restart = fa
 }
 const utf16 = (text) => Buffer.concat([Buffer.from([0xFF, 0xFE]), Buffer.from(text, 'utf16le')]);
 
-/** U12's server task, as this build can stand in for it: LocalService under its own SID, SeChangeNotifyPrivilege only. */
+/** U12's server task's principal (app/machine.js serverTaskXml's): LocalService under its own SID, SeChangeNotifyPrivilege only. */
 const SERVER_PRINCIPAL = { sid: LOCAL_SERVICE, sidType: 'Unrestricted', privileges: ['SeChangeNotifyPrivilege'] };
 
 // ---------------------------------------------------------------- what the probes read (testable anywhere)
@@ -580,6 +585,7 @@ async function until(test, ms, every = 500) {
 const SCRIPTS = {
   signatures: String.raw`$ErrorActionPreference = 'Stop'; $out = @(); foreach ($p in ($env:AGM_READ_PATHS -split '\|')) { $s = Get-AuthenticodeSignature -LiteralPath $p; $out += @{ path = $p; status = [string]$s.Status; message = [string]$s.StatusMessage; signer = $(if ($s.SignerCertificate) { [string]$s.SignerCertificate.Subject } else { '' }); timestamped = [bool]$s.TimeStamperCertificate } }; ConvertTo-Json -InputObject $out -Depth 4 -Compress`,
   pipes: String.raw`$ErrorActionPreference = 'Stop'; $out = @(); foreach ($n in ($env:AGM_READ_PIPES -split '\|')) { $why = @(); $sddl = ''; $c = $null; try { $c = New-Object System.IO.Pipes.NamedPipeClientStream('.', $n, [System.IO.Pipes.PipeDirection]::In); $c.Connect(5000); $sddl = [string]$c.GetAccessControl().GetSecurityDescriptorSddlForm('All') } catch { $why += [string]$_.Exception.Message } finally { if ($c) { $c.Dispose() } }; if (-not $sddl) { try { $sddl = [string][System.IO.Directory]::GetAccessControl('\\.\pipe\' + $n).GetSecurityDescriptorSddlForm('All') } catch { $why += [string]$_.Exception.Message } }; if ($sddl) { $out += @{ name = $n; sddl = $sddl } } else { $out += @{ name = $n; error = ($why -join '; ') } } }; ConvertTo-Json -InputObject $out -Depth 4 -Compress`,
+  definition: String.raw`$ErrorActionPreference = 'Stop'; $s = New-Object -ComObject 'Schedule.Service'; $s.Connect(); $t = $s.GetFolder($env:AGM_TASK_FOLDER).GetTask($env:AGM_TASK_NAME); ConvertTo-Json -InputObject @{ sddl = [string]$t.GetSecurityDescriptor(4); xml = [string]$t.Xml } -Compress`,
   defender: String.raw`$ErrorActionPreference = 'Stop'; $s = Get-MpComputerStatus; $p = Get-MpPreference; ConvertTo-Json -InputObject @{ realtime = [bool]$s.RealTimeProtectionEnabled; onAccess = [bool]$s.OnAccessProtectionEnabled; antivirus = [bool]$s.AntivirusEnabled; service = [bool]$s.AMServiceEnabled; mode = [string]$s.AMRunningMode; exclusions = @($p.ExclusionPath | Where-Object { $_ }) } -Compress`,
 };
 
@@ -757,7 +763,8 @@ async function endWatchdog(w, wire, port, token) {
 }
 
 /**
- * One gap: a page seated in the hall `code`, the stop at loopback with the proof (reason "upgrade"), the watchdog's end,
+ * One gap: a page seated in the hall `code`, the stop at loopback with the proof (reason "stop": the backup an upgrade's
+ * stop makes for the way back is R9's, timed on its own beside R2, so this gap is the stop and the start alone), the watchdog's end,
  * the next watchdog started at once, as an upgrade's start is, and the page back at its own pace: rejoined, with what it
  * missed (`since`). Times from the stop's request: {stopMs (the watchdog gone), code (the watchdog's exit code), healthMs
  * (health answers), pageBackMs (the rejoin answered), tries, saved (data/last-stop.json says so)}, or {error}; and the
@@ -771,7 +778,7 @@ async function gapRound({ node, supervise, env, port, token, wire, code, dataDir
   const first = await page.emit('join', { roomCode: code, name: 'Gap reader', role: 'observer' });
   if (!first || !first.ok) { page.close(); return { result: { error: 'the page was not seated (' + String(first && first.error || 'no answer').slice(0, 120) + ')' }, watchdog: w }; }
   const t0 = now();
-  const asked = await wire.stop({ port, token, reason: 'upgrade', by: 'the readings lane' });
+  const asked = await wire.stop({ port, token, reason: 'stop', by: 'the readings lane' });
   if (!asked.ok || asked.status !== 200) { page.close(); return { result: { error: 'the stop was not taken: ' + (asked.words || JSON.stringify(asked.json || {}).slice(0, 200)) }, watchdog: w }; }
   const ended = await Promise.race([w.exited, sleep(15000).then(() => undefined)]);
   const stopMs = Math.round(now() - t0);
@@ -831,6 +838,96 @@ async function takeR1({ node, app, work, port }, { sizes = R1_SIZES, rounds = R1
       }
     } finally { await endWatchdog(w, wire, port, token); }
   }
+  return out;
+}
+
+/** The folders a server task's action (launch.js serve) is given, made under `work`. */
+function serveFolders(work, name) {
+  const folders = {};
+  for (const k of ['data', 'uploads', 'keys', 'logs', 'token']) { folders[k] = path.join(work, name, k); fs.mkdirSync(folders[k], { recursive: true }); }
+  return folders;
+}
+
+/**
+ * R9 (U12 landed): the upgrade backup's time, at an empty hall and at 20 × 10,000. The bundle's own watchdog serves a
+ * seeded folder (as R1), the stop at loopback with the proof carries reason "upgrade" (the seeded messages are from
+ * before the busy window, so no reason is typed), the server saves and backs the folder up for the way back
+ * (app/lib/upgradebackup.js), and last-stop.json names it: its time (`backupMs`) and bytes copied. {sizes: [{name,
+ * backupMs, bytes, data, saved}]}.
+ */
+async function takeR9({ node, app, work, port }, { sizes = R1_SIZES, startMs = 60000 } = {}) {
+  const wire = require('../app/lib/machinewire.js');
+  const supervise = path.join(app, 'supervise.js');
+  const token = crypto.randomBytes(8).toString('hex');
+  const out = { sizes: [] };
+  for (const size of sizes) {
+    const dir = path.join(work, 'r9', size.name);
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    const dataDir = path.join(dir, 'data');
+    seedHalls(dataDir, size);
+    const env = { ...process.env, AGM_DATA_DIR: dataDir, AGM_UPLOAD_DIR: path.join(dir, 'uploads'), AGM_KEY_DIR: path.join(dir, 'keys'), PORT: String(port), ADMIN_TOKEN: token };
+    for (const k of ['AGM_OPEN', 'AGM_RUNS', 'AGM_TOKEN_DIR', 'AGM_CHILD']) delete env[k];
+    const rec = { name: size.name, halls: size.halls, messages: size.messages };
+    out.sizes.push(rec);
+    const w = startWatchdog(node, supervise, env);
+    try {
+      const first = await waitHealth(port, { ms: startMs });
+      if (!first.ok) { rec.error = 'the bundle did not serve: ' + withoutSecrets(w.tail(), token).slice(-400); continue; }
+      const stopped = await wire.stop({ port, token, reason: 'upgrade', by: 'the readings lane' });
+      if (!stopped.ok || stopped.status !== 200) { rec.error = 'the stop was not taken: ' + (stopped.words || JSON.stringify(stopped.json || {}).slice(0, 200)); continue; }
+      await Promise.race([w.exited, sleep(20000)]);
+      try {
+        const lastStop = readJson(path.join(dataDir, 'last-stop.json'));
+        rec.saved = lastStop.saved === true;
+        rec.backup = typeof lastStop.backup === 'string' ? lastStop.backup : '';
+        rec.backupMs = Number.isFinite(lastStop.backupMs) ? lastStop.backupMs : null;
+        if (rec.backup) { try { rec.meta = readJson(path.join(dataDir, ...rec.backup.split('/'), 'backup.json')); } catch { /* the folder names it */ } }
+      } catch (e) { rec.error = 'no last-stop record: ' + e.message; }
+    } finally { await endWatchdog(w, wire, port, token); }
+  }
+  // Beside R2, which reads these two by name (tools/readings.js judgeR2): the backup's time at each size.
+  out.emptyMs = (out.sizes.find((s) => s.name === 'empty') || {}).backupMs;
+  out.largeMs = (out.sizes.find((s) => s.name === 'large') || {}).backupMs;
+  return out;
+}
+
+/**
+ * R3′ (U12 landed): the server task's stop and its end. U12's own server task's definition (app/machine.js
+ * serverTaskXml), under the lane's name and with the lane's folders, runs launch.js serve (AGM_RUNS=task); `rounds` times
+ * it is run, serves, and is stopped at loopback with the proof of a token its own server made; each round records whether the task ended with 0, stayed stopped, and
+ * last-stop.json says it saved. {rounds: [{saved, lastResult, state}], savedCount}. The give-up and configuration refusal
+ * ending the task with 0 are launch.js serve's exit mapping, held on Linux (test/machine.test.js); here the task's own
+ * stop-saves are counted, 10 of 10 the mark.
+ */
+async function takeR3prime(L, { node, app, work, port }, { rounds = 10, startMs = 60000 } = {}) {
+  const wire = require('../app/lib/machinewire.js');
+  const launch = path.join(app, 'launch.js');
+  const folders = serveFolders(work, 'r3');
+  const seedCode = seedHalls(folders.data, { halls: 1, messages: 50 })[0];
+  const task = '\\AGMessage-Readings\\Serve';
+  // U12's own definition (app/machine.js), its folders the lane's: run on demand here, its boot trigger never fired.
+  L.register(task, require('../app/machine.js').serverTaskXml({ uri: task, node, launch, ...folders, port }));
+  const out = { task, rounds: [], savedCount: 0 };
+  try {
+    for (let i = 0; i < rounds; i++) {
+      fs.rmSync(path.join(folders.data, 'last-stop.json'), { force: true });
+      const ran = L.schtasks(['/Run', '/TN', task]);
+      if (ran.code !== 0) { out.rounds.push({ error: 'schtasks could not run it: ' + (ran.err || ran.out).trim().slice(0, 160) }); continue; }
+      const served = await waitHealth(port, { ms: startMs });
+      if (!served.ok) { out.rounds.push({ error: 'did not serve' }); L.schtasks(['/End', '/TN', task]); continue; }
+      const token = tokenIn(folders.token);
+      const stopped = token ? await wire.stop({ port, token, reason: 'stop', by: 'the readings lane' }) : null;
+      await until(() => L.lastResult(task) !== null && !(/Running/i.test(L.schtasks(['/Query', '/TN', task, '/FO', 'LIST']).out)), 20000);
+      const q = L.schtasks(['/Query', '/TN', task, '/FO', 'LIST', '/V']).out;
+      let saved = false;
+      try { saved = readJson(path.join(folders.data, 'last-stop.json')).saved === true; } catch { saved = false; }
+      const lastResult = Number((/^Last Result:\s*(-?\d+)/m.exec(q) || [])[1]);
+      const state = (((/^Status:\s*(.+)$/m.exec(q) || [])[1] || '').trim()).slice(0, 40);
+      if (saved && lastResult === 0) out.savedCount++;
+      out.rounds.push({ saved, lastResult: Number.isFinite(lastResult) ? lastResult : null, state, stopOk: !!(stopped && stopped.ok && stopped.status === 200) });
+      if (seedCode && !saved) out.rounds[out.rounds.length - 1].code = seedCode;
+    }
+  } finally { L.remove(task); }
   return out;
 }
 
@@ -946,7 +1043,17 @@ async function take(o) {
       try { sddl = sddlOfSave(fs.readFileSync(file)); } catch { /* not saved: the error below says why */ }
       places[where] = sddl ? { sddl, icacls: shown.out.slice(0, 8192) } : { error: 'icacls /save ended with ' + saved.code + ': ' + (saved.err || saved.out).trim().slice(0, 300) };
     }
-    return { places };
+    // U12's server task's definition as app/machine.js writes it (registered here and never run, then removed): its
+    // descriptor, which says who may read it, and its XML, which holds no secret.
+    let serverTask;
+    const name = DEFINITION_TASK;
+    try {
+      const f = path.join(work, 'r8');
+      L.register(name, require('../app/machine.js').serverTaskXml({ uri: name, node, launch: path.join(root, 'app', 'launch.js'), data: path.join(f, 'data'), uploads: path.join(f, 'uploads'), keys: path.join(f, 'keys'), logs: path.join(f, 'logs'), token: path.join(f, 'token'), port: o.port }));
+      const back = L.ps(SCRIPTS.definition, { AGM_TASK_FOLDER: path.win32.dirname(name), AGM_TASK_NAME: path.win32.basename(name) });
+      serverTask = { sddl: String(back.sddl || ''), bytes: String(back.xml || '').length, secret: /ADMIN_TOKEN|ANTHROPIC|password|[0-9a-f]{32}/i.test(String(back.xml || '')) };
+    } catch (e) { serverTask = { error: e.message.slice(0, 300) }; } finally { L.remove(name); }
+    return { places, serverTask };
   });
 
   const r4dir = path.join(work, 'r4');
@@ -993,6 +1100,17 @@ async function take(o) {
   await reading('R12', () => {
     needsPayload();
     return takeR12(L, { node, self, dir: path.join(work, 'r12'), cwd: path.dirname(self) });
+  });
+
+  // R9 and R3′ (U12 landed): the upgrade backup's time, and the server task's stop-saves. Both drive the bundle's own
+  // server and watchdog (no installer), through app/lib/machinewire.js of this checkout.
+  await reading('R9', () => {
+    needsPayload();
+    return takeR9({ node, app: path.join(root, 'app'), work, port: o.port });
+  });
+  await reading('R3′', () => {
+    needsPayload();
+    return takeR3prime(L, { node, app: path.join(root, 'app'), work, port: o.port });
   });
 
   try {
@@ -1056,6 +1174,6 @@ module.exports = {
   zipEntries, memberParts, topFolder, releaseOf, layOut, extractOne, taskXml, winArg, utf16, SERVER_PRINCIPAL, SCRIPTS, lane, system32,
   snapshot, snapshotDiff, udpHeard, waitHealth, quickTunnel, readRelease, probeExit, parseArgs, main, TRYCF,
   sddlOfSave, pipeReach, keepTail, tokenIn, withoutSecrets, placeRefusal, takeR12, take,
-  seedHalls, pageSocket, paceMs, takeR1, R1_SIZES, R1_QUIET_MS, PAGE_PACE,
-  SERVER_TASK, STAND_IN, RESTART_TASKS, WORK_MARK, BUDGET_MS,
+  seedHalls, pageSocket, paceMs, takeR1, takeR9, takeR3prime, serveFolders, R1_SIZES, R1_QUIET_MS, PAGE_PACE,
+  SERVER_TASK, STAND_IN, DEFINITION_TASK, RESTART_TASKS, WORK_MARK, BUDGET_MS,
 };

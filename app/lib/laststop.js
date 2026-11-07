@@ -4,7 +4,8 @@
  *
  *   record   what a stop writes last, once it has saved the audit log, then every write lane, then each dirty hall:
  *            data/last-stop.json, {at, build, saved}, `saved` true only when every one of them was written, and when
- *            not, what was not (`unsaved`: a store's name, "the audit log", a count of halls; never a hall's code)
+ *            not, what was not (`unsaved`: a store's name, "the audit log", a count of halls; never a hall's code); a
+ *            stop for an upgrade names the backup it made after them (`backup`, `backupMs`) or why it made none
  *   take     at a start, once this copy holds its data folder: the record read by type, then moved aside to
  *            last-stop.seen.json (removed where it cannot be moved, and where it can be neither, kept as the one seen
  *            too, so the next start reads it as taken), so a crash or a kill after this start is never read as the stop
@@ -25,9 +26,14 @@ const { writeFileAtomic, readText } = require('./resilience');
 const FILE = 'last-stop.json';
 const SEEN = 'last-stop.seen.json';
 
-/** Write a stop's record into the data folder: {at, build, saved, unsaved?}. Throws when it cannot be written. */
-function record(dir, { at, build, unsaved = [] }) {
+/**
+ * Write a stop's record into the data folder: {at, build, saved, unsaved?}, and for a stop for an upgrade, the backup it
+ * made for the way back (lib/upgradebackup.js): `backup` its folder ('' when none was made), `backupMs` how long it took,
+ * and `unbacked`, why none was made. Throws when it cannot be written.
+ */
+function record(dir, { at, build, unsaved = [], backup = null }) {
   const rec = { at, build, saved: !unsaved.length, ...(unsaved.length ? { unsaved } : {}) };
+  if (backup) Object.assign(rec, { backup: backup.name || '', backupMs: Number.isFinite(backup.ms) ? backup.ms : null, ...(backup.error ? { unbacked: backup.error } : {}) });
   writeFileAtomic(path.join(dir, FILE), JSON.stringify(rec));
   return rec;
 }

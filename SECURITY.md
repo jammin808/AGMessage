@@ -336,9 +336,31 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   in the current folder and on `PATH` first, whatever the argument array. A fence reads every call in `app` that starts
   a program, however `child_process` and its functions are reached or named, and holds each to `process.execPath`, a
   full path, or a register row naming where its full path is made, with no shell; `child_process` handed on where the
-  fence cannot follow it fails. The machine's own commands (`launch.js`, and `machine.js` once it is made) require
+  fence cannot follow it fails. The machine's own commands (`launch.js`, and `machine.js`) require
   Node's built-ins only, and reach `require` no other way, so a planted package never runs as the person at the PC or,
   for `machine.js`, as SYSTEM.
+- The installed node's machine-level commands (`machine.js`, run elevated or as SYSTEM by the installer and, later, the
+  control tasks) make and defend the machine folder, the server task, the firewall rules and the one install record,
+  running Windows' programs by their absolute paths in the `{sys}` they are given, never a bare name, and reading no
+  machine path from their environment. The server task runs as LocalService under a SID of its own,
+  `SeChangeNotifyPrivilege` alone (so `SeImpersonatePrivilege` is removed), with no window and no entry in Services; its
+  definition's descriptor gives it to SYSTEM and Administrators only. Its data, uploads, keys, logs and token sit in
+  `%ProgramData%\AGMessage`, each folder with SYSTEM and Administrators in full control (by SID, inheritance cut, never
+  `/T`) and the task's SID only the rights it needs (modify where it writes, read on `machine\events.jsonl` alone), made
+  race-free before any file is laid: an existing root taken only when the record, a real-directory `lstat` and a
+  SYSTEM-or-Administrators owner all agree; a root made empty that another account then adds to, or a child that is a
+  link, refused before any grant touches it. The one-time `setup\<128 random bits>\` folder, where any signed-in account
+  may drop a file and none may list or read, is named to the installer alone and removed at the install's end. The
+  firewall rules name the program, the protocol and the local port, the local subnet only, never `node.exe` alone. No
+  token or password is written to the record, a task's definition or a command's `--out`. The machine appends events to
+  `machine\events.jsonl`; the server, the one writer of the audit log, turns each into a row. Before an install lays a
+  file, a port held by anything but this PC's AGMessage proving its token is refused, and a busy one without a typed
+  reason. An upgrade's stop backs the data folder up for the way back (hard links and copies, two kept) before its record
+  names it, and the upgrade is refused when that stop did not save or made no backup; `machine.js restore` lays a backup
+  back file by file, never the audit log, so its chain and head still agree. `launch.js serve`, the task's action, takes
+  each folder as an argument and hands the watchdog Windows' own names alone, so no `NODE_OPTIONS`, `AGM_…` or secret from
+  whatever started the task reaches the node; it ends with 0 on a stop, a give-up or a configuration refusal, so the task
+  stays stopped. What only a Windows run proves is the Windows jobs'; the rest is held on Linux (`test/machine.test.js`).
 - A seat On stage holds messages and nothing else, on the server, for the admin seated there too: it is given no upload
   token, and an upload token is checked again when it is used, against the seat its page holds then; the admin's move of
   a page to a seat that shares no file ends its token in the same tick, so that page uploads nothing more with the one it
