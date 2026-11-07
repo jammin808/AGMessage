@@ -74,13 +74,14 @@ function fakeWindows({ record = null, owner = 'O:SYG:SYD:PAI(A;OICI;FA;;;SY)(A;O
   };
   return { run, calls, reg: () => reg, tasks: has, xml };
 }
-/** The installed layout {app} holds: node\node.exe and app\launch.js. */
+/** The installed layout {app} holds: node\node.exe, app\launch.js and app\machine.js. */
 function appFolder() {
   const app = tmp('agm-app-');
   fs.mkdirSync(path.join(app, 'node'));
   fs.mkdirSync(path.join(app, 'app'));
   fs.writeFileSync(path.join(app, 'node', 'node.exe'), '');
   fs.writeFileSync(path.join(app, 'app', 'launch.js'), '');
+  fs.writeFileSync(path.join(app, 'app', 'machine.js'), '');
   return app;
 }
 /** A machine folder made by prepare on this disk (the Windows hands stood in for), its record none yet. */
@@ -94,7 +95,7 @@ function prepared() {
 // ---------------------------------------------------------------- the command line and its exit codes
 
 test('machine.js knows its commands, each with its own options; a later unit\'s verb names it; an unknown word, an option of another verb and one given twice are refused', () => {
-  assert.deepEqual(machine.VERBS, ['prepare', 'install', 'uninstall', 'preinstall-check', 'upgrade-stop', 'status', 'restore', 'whose', 'start', 'first-account']);
+  assert.deepEqual(machine.VERBS, ['prepare', 'install', 'uninstall', 'preinstall-check', 'upgrade-stop', 'status', 'restore', 'whose', 'start', 'first-account', 'control']);
   assert.deepEqual(machine.parse(['prepare', '--machine', W, '--sys', SYS]), { verb: 'prepare', opts: { '--machine': W, '--sys': SYS } });
   for (const [verb, unit] of Object.entries(machine.LATER)) assert.equal(machine.parse([verb]).problem, 'machine.js ' + verb + ' is built by ' + unit + '; it is not one of this build\'s commands (' + machine.VERBS.join(', ') + ').');
   assert.match(machine.parse(['zzz']).problem, /is not one of machine\.js's commands/);
@@ -141,14 +142,14 @@ test('the machine folder\'s children: SYSTEM and Administrators first; the task 
   assert.deepEqual([by.logs.admin, by.token.admin, by.data.admin, by.keys.admin], ['R', 'R', undefined, undefined]);
   assert.equal(by.machine.task, undefined, 'machine\\ is SYSTEM and Administrators only');
   assert.deepEqual(machine.MACHINE_SUBS, ['inbox', 'outbox', 'work', 'staged']);
-  assert.equal(machine.inboxGrant(ANA), '*' + ANA + ':(OI)(CI)W');
-  assert.equal(machine.outboxGrant(ANA), '*' + ANA + ':(OI)(CI)RX');
+  assert.deepEqual(machine.inboxGrants(ANA), ['*' + ANA + ':(WD)', '*' + ANA + ':(OI)(IO)W'], 'its inbox\\: add a file to the folder (never a folder or a junction), write the files in it');
+  assert.deepEqual(machine.outboxGrants(ANA), ['*' + ANA + ':(OI)(CI)RX']);
   assert.equal(machine.SETUP_GRANT, '*S-1-5-11:(WD,AD,WA)', 'any signed-in account may create a file there, none may list or read');
 });
 
 test('the server task\'s definition: node.exe on launch.js serve by their absolute paths from launch.js\'s folder, LocalService under its own SID, SeChangeNotifyPrivilege alone, a boot trigger, its descriptor SYSTEM and Administrators only', () => {
   const app = 'C:\\Program Files\\AGMessage';
-  const xml = machine.serverTaskXml({ node: app + '\\node\\node.exe', launch: app + '\\app\\launch.js', data: W + '\\data', uploads: W + '\\uploads', keys: W + '\\keys', logs: W + '\\logs', token: W + '\\token', port: 3023 });
+  const xml = machine.serverTaskXml({ node: app + '\\node\\node.exe', launch: app + '\\app\\launch.js', data: W + '\\data', uploads: W + '\\uploads', keys: W + '\\keys', logs: W + '\\logs', token: W + '\\token', events: W + '\\machine\\events.jsonl', port: 3023 });
   assert.match(xml, /^<\?xml version="1.0" encoding="UTF-16"\?>\r\n/);
   assert.match(xml, /<URI>\\AGMessage\\Server<\/URI>/);
   assert.match(xml, /<SecurityDescriptor>D:P\(A;;FA;;;SY\)\(A;;FA;;;BA\)<\/SecurityDescriptor>/, 'read and execute (full control) to SYSTEM and Administrators only, nothing inherited');
@@ -163,7 +164,7 @@ test('the server task\'s definition: node.exe on launch.js serve by their absolu
   assert.match(xml, /<MultipleInstancesPolicy>IgnoreNew<\/MultipleInstancesPolicy>/);
   assert.match(xml, /<RestartOnFailure><Interval>PT1M<\/Interval><Count>3<\/Count><\/RestartOnFailure>/);
   assert.match(xml, /<Command>C:\\Program Files\\AGMessage\\node\\node\.exe<\/Command>/);
-  assert.match(xml, /<Arguments>&quot;C:\\Program Files\\AGMessage\\app\\launch\.js&quot; serve --data C:\\ProgramData\\AGMessage\\data --uploads [^<]* --token C:\\ProgramData\\AGMessage\\token --port 3023<\/Arguments>/, 'launch.js by its absolute path, quoted for its space');
+  assert.match(xml, /<Arguments>&quot;C:\\Program Files\\AGMessage\\app\\launch\.js&quot; serve --data C:\\ProgramData\\AGMessage\\data --uploads [^<]* --token C:\\ProgramData\\AGMessage\\token --events C:\\ProgramData\\AGMessage\\machine\\events\.jsonl --port 3023<\/Arguments>/, 'launch.js by its absolute path, quoted for its space; the machine\'s events file, which the server reads');
   assert.match(xml, /<WorkingDirectory>C:\\Program Files\\AGMessage\\app<\/WorkingDirectory>/);
   // No secret in a task's definition: nothing shaped as a token, no password, no account of a person.
   assert.ok(!/[0-9a-f]{16}/.test(xml) && !/password|ADMIN_TOKEN|ANTHROPIC/i.test(xml) && !/S-1-5-21/.test(xml), 'no secret in the definition');
@@ -333,7 +334,8 @@ test('install: the task registered from its definition (then removed), its SID g
   for (const name of ['logs', 'token']) assert.ok(icacls.includes(path.join(root, name) + ' /grant:r *' + ANA + ':(OI)(CI)R'), name + ': the admin reads');
   assert.ok(icacls.includes(path.join(root, 'machine', 'events.jsonl') + ' /grant:r *' + TASK_SID + ':(R)'), 'events.jsonl alone, no list of machine\\');
   assert.ok(!icacls.some((a) => a.startsWith(path.join(root, 'machine') + ' ')), 'nothing granted on machine\\ itself');
-  assert.ok(icacls.includes(path.join(root, 'machine', 'inbox', ANA) + ' /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F *' + ANA + ':(OI)(CI)W'));
+  assert.ok(icacls.includes(path.join(root, 'machine', 'inbox', ANA) + ' /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F *' + ANA + ':(WD)'));
+  assert.ok(icacls.indexOf(path.join(root, 'machine', 'inbox', ANA) + ' /grant *' + ANA + ':(OI)(IO)W') > icacls.indexOf(path.join(root, 'machine', 'inbox', ANA) + ' /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F *' + ANA + ':(WD)'), 'the files\' grant added by a call of its own, after the access list');
   assert.ok(icacls.includes(path.join(root, 'machine', 'outbox', ANA) + ' /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F *' + ANA + ':(OI)(CI)RX'));
   const fw = win.calls.find((c) => c.name === 'powershell.exe');
   assert.deepEqual([fw.env.AGM_NODE, fw.env.AGM_PORT, fw.env.AGM_UDP, fw.env.AGM_PROFILES, fw.env.SystemRoot], [path.join(app, 'node', 'node.exe'), '3023', '9928', 'Domain,Private,Public', 'C:\\Windows']);
@@ -344,7 +346,13 @@ test('install: the task registered from its definition (then removed), its SID g
   assert.deepEqual([values.InstallDir, values.Version, values.SemVer, values.Previous, values.Admin, values.AdminName, values.PublicFirewall], [app, '0.6.41', '0.6.0', '', ANA, 'LAPTOP\\ana', '1']);
   assert.ok(win.calls.indexOf(reg[0]) > win.calls.indexOf(fw), 'the record is written last');
   const events = read(path.join(root, 'machine', 'events.jsonl')).trim().split('\n').map((l) => JSON.parse(l));
-  assert.deepEqual(events.map((e) => [e.kind, e.for]), [['machine.admin', ANA]]);
+  assert.deepEqual(events.map((e) => [e.seq, e.kind, e.by, e.for, e.rights]), [[1, 'machine.admin', { sid: ANA, name: 'LAPTOP\\ana' }, { sid: ANA, name: 'LAPTOP\\ana' }, ['token', 'start', 'stop', 'upgrade']]]);
+  assert.deepEqual(Object.keys(events[0]), ['seq', 'at', 'kind', 'by', 'for', 'rights', 'words'], 'the event\'s shape, no secret in it');
+  // The laptop's admin's own control task, from its definition: SYSTEM runs it, the admin alone may read and run it.
+  const control = win.xml[machine.controlTask(ANA)];
+  assert.ok(control && control.includes('<SecurityDescriptor>D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;' + ANA + ')</SecurityDescriptor>'), 'the admin\'s control task');
+  assert.ok(control.includes(path.join(app, 'app', 'machine.js') + ' control --for ' + ANA + ' --machine ' + root + ' --sys ' + SYS), 'its action fixed at registration');
+  assert.ok(!fs.readdirSync(path.join(root, 'machine', 'work')).length, 'no definition left in machine\\work\\');
   assert.ok(!fs.existsSync(path.join(root, 'setup')), 'setup\\ removed at the install\'s end');
   const rec = JSON.parse(read(out));
   assert.deepEqual([rec.v, rec.verb, rec.code, rec.taskSid, rec.version], [1, 'install', 0, TASK_SID, '0.6.41']);
@@ -691,6 +699,12 @@ test('uninstall: the server stopped at loopback first, then every task of \\AGMe
   const root = tmp('agm-uninst-');
   for (const d of ['data', 'uploads', 'keys', 'logs', 'token', 'machine']) fs.mkdirSync(path.join(root, d));
   fs.writeFileSync(path.join(root, 'token', 'admin-token'), h.TOKEN);
+  // A link left in an account's inbox\: each box is cleared entry by entry before the machine folder goes, so what it
+  // names is never reached.
+  const outside = tmp('agm-uninst-outside-');
+  fs.writeFileSync(path.join(outside, 'keep.txt'), 'not AGMessage\'s');
+  fs.mkdirSync(path.join(root, 'machine', 'inbox', ANA), { recursive: true });
+  fs.symlinkSync(outside, path.join(root, 'machine', 'inbox', ANA, 'away'), process.platform === 'win32' ? 'junction' : 'dir');
   const order = [];
   const win = fakeWindows({ record: { InstallDir: 'C:\\Program Files\\AGMessage', Port: '3023' }, tasks: [machine.SERVER_TASK, '\\AGMessage\\Control-' + ANA] });
   const run = (e, a, o) => { order.push(base(e) + ' ' + a[0]); return win.run(e, a, o); };
@@ -708,6 +722,7 @@ test('uninstall: the server stopped at loopback first, then every task of \\AGMe
   assert.equal(removed.at(-1), 'keys', 'the keys removed last');
   assert.ok(!removed.includes('setup'), 'a folder that was not there is not said removed');
   assert.ok(!fs.existsSync(root));
+  assert.equal(read(path.join(outside, 'keep.txt')), 'not AGMessage\'s', 'what a link in an inbox named untouched');
   assert.match(r.text, /^AGMessage stopped and saved \(stopped at \d\d:\d\d\)\. AGMessage is uninstalled, and its data removed from this PC\.$/);
   // Busy with no reason: refused, nothing removed.
   const root2 = tmp('agm-uninst2-');
@@ -724,6 +739,14 @@ test('uninstall: the server stopped at loopback first, then every task of \\AGMe
   r2 = await machine.run(['uninstall', '--machine', root3, '--sys', SYS, '--remove-data'], { run: win3.run, fsImpl: stuck });
   assert.equal(r2.code, 2);
   assert.match(r2.text, /AGMessage is not wholly uninstalled; left: .*uploads \(EBUSY\)/);
+  // An account's box that cannot be cleared (a folder holding a file): named, and the machine folder kept whole.
+  const root6 = tmp('agm-uninst6-');
+  fs.mkdirSync(path.join(root6, 'machine', 'inbox', ANA, 'full'), { recursive: true });
+  fs.writeFileSync(path.join(root6, 'machine', 'inbox', ANA, 'full', 'f'), 'x');
+  r2 = await machine.run(['uninstall', '--machine', root6, '--sys', SYS, '--remove-data'], { run: fakeWindows({ record: { Port: '3023' } }).run });
+  assert.equal(r2.code, 2);
+  assert.match(r2.text, /left: .*full \(/);
+  assert.ok(fs.existsSync(path.join(root6, 'machine', 'inbox', ANA, 'full', 'f')), 'the machine folder kept while a box is');
   // A folder listing Windows will not give: the control tasks the record implies (the laptop's admin's, each grantee's)
   // are removed all the same, by their names.
   const win5 = fakeWindows({ record: { Admin: ANA }, grants: { [BEN]: 'start,stop' }, noList: true, tasks: [machine.SERVER_TASK, '\\AGMessage\\Control-' + ANA, '\\AGMessage\\Control-' + BEN] });
@@ -816,7 +839,7 @@ test('status (elevated): the task read by column, the record\'s admin and port, 
   fs.mkdirSync(path.join(root, 'data'));
   fs.mkdirSync(path.join(root, 'logs'));
   fs.writeFileSync(path.join(root, 'logs', 'server.log'), 'a\nb\nc');
-  const win = fakeWindows({ record: { InstallDir: 'C:\\Program Files\\AGMessage', AdminName: 'LAPTOP\\ana', Port: '3023', Version: '0.6.41' }, tasks: [machine.SERVER_TASK] });
+  const win = fakeWindows({ record: { InstallDir: 'C:\\Program Files\\AGMessage', AdminName: 'LAPTOP\\ana', Port: '3023', Version: '0.6.41' }, tasks: [machine.SERVER_TASK], grants: { [BEN]: 'start,stop' } });
   const out = path.join(root, 'status.json');
   const r = await machine.run(['status', '--machine', root, '--sys', SYS, '--out', out], { run: win.run });
   assert.equal(r.code, 0, r.text);
@@ -828,7 +851,8 @@ test('status (elevated): the task read by column, the record\'s admin and port, 
   const ps = win.calls.find((c) => c.name === 'powershell.exe');
   assert.deepEqual([ps.env.AGM_PORT, ps.env.AGM_NODE_TAIL], ['3023', '\\Program Files\\AGMessage\\node\\node.exe']);
   assert.ok(!JSON.stringify(j).includes(h.TOKEN), 'no token in the record');
-  assert.match(r.text, /the server task: Bereit \(last result 0\)\n {2}port 3023: held by pid 4120\n {2}the laptop's admin: LAPTOP\\ana\n {2}the last stop: no record/);
+  assert.match(r.text, /the server task: Bereit \(last result 0\)\n {2}port 3023: held by pid 4120\n {2}the laptop's admin: LAPTOP\\ana\n {2}rights given: S-1-5-21-1-2-3-1002: start, stop\n {2}the last stop: no record/);
+  assert.deepEqual(j.facts.grants, { [BEN]: 'start,stop' });
 });
 
 test('--out is written for every verb, a refusal\'s too, whole and never a token: prepare\'s names its setup folder', async () => {
@@ -849,20 +873,22 @@ test('--out is written for every verb, a refusal\'s too, whole and never a token
 
 // ---------------------------------------------------------------- launch.js serve and status
 
-const serveArgs = (folders, port) => ['serve', '--data', folders.data, '--uploads', folders.uploads, '--keys', folders.keys, '--logs', folders.logs, '--token', folders.token, '--port', String(port)];
+const serveArgs = (folders, port) => ['serve', '--data', folders.data, '--uploads', folders.uploads, '--keys', folders.keys, '--logs', folders.logs, '--token', folders.token, '--events', folders.events, '--port', String(port)];
 function serveFolders() {
   const dir = tmp('agm-serve-');
   const folders = {};
   for (const k of ['data', 'uploads', 'keys', 'logs', 'token']) { folders[k] = path.join(dir, k); fs.mkdirSync(folders[k]); }
+  folders.events = path.join(dir, 'events.jsonl');
   return folders;
 }
 
 test('launch.js serve: the watchdog\'s environment is Windows\' own names and the arguments\' folders and port, nothing else; its stop and give-up end serve 0, an unexpected end non-zero', async () => {
-  const folders = { data: '/d', uploads: '/u', keys: '/k', logs: '/l', token: '/t' };
-  const a = launch.parse(['serve', '--data', '/d', '--uploads', '/u', '--keys', '/k', '--logs', '/l', '--token', '/t', '--port', '3023']);
+  const folders = { data: '/d', uploads: '/u', keys: '/k', logs: '/l', token: '/t', events: '/m/events.jsonl' };
+  const a = launch.parse(['serve', '--data', '/d', '--uploads', '/u', '--keys', '/k', '--logs', '/l', '--token', '/t', '--events', '/m/events.jsonl', '--port', '3023']);
   assert.deepEqual(a, { verb: 'serve', folders, port: 3023 });
+  assert.match(launch.parse(['serve', '--data', '/d', '--uploads', '/u', '--keys', '/k', '--logs', '/l', '--token', '/t', '--port', '3023']).problem, /launch\.js serve needs --events <file>, a full path/);
   const inherited = { SystemRoot: 'C:\\Windows', TEMP: 'C:\\Temp', NODE_OPTIONS: '--require C:\\planted.js', AGM_CHILD: '/x/server.js', AGM_TLS: '0', AGM_OPEN: '1', AGM_NODES: '0', ADMIN_TOKEN: 'aaaabbbbccccdddd', ANTHROPIC_API_KEY: 'k', PATH: 'C:\\planted', AGM_DATA_DIR: '/wrong' };   // secret-scan: fixture
-  assert.deepEqual(launch.taskEnv(a, inherited), { SystemRoot: 'C:\\Windows', TEMP: 'C:\\Temp', AGM_RUNS: 'task', AGM_DATA_DIR: '/d', AGM_UPLOAD_DIR: '/u', AGM_KEY_DIR: '/k', AGM_LOG_DIR: '/l', AGM_TOKEN_DIR: '/t', PORT: '3023' });
+  assert.deepEqual(launch.taskEnv(a, inherited), { SystemRoot: 'C:\\Windows', TEMP: 'C:\\Temp', AGM_RUNS: 'task', AGM_DATA_DIR: '/d', AGM_UPLOAD_DIR: '/u', AGM_KEY_DIR: '/k', AGM_LOG_DIR: '/l', AGM_TOKEN_DIR: '/t', AGM_MACHINE_EVENTS: '/m/events.jsonl', PORT: '3023' });
   const fake = (code, signal = null) => ({ on: (e, f) => { if (e === 'exit') setImmediate(() => f(code, signal)); return fake(code, signal); } });
   let seen = null;
   const stop = await launch.serve(a, { spawn: (exe, args, opts) => { seen = { exe, args, opts }; return fake(0); }, supervise: '/app/supervise.js', execPath: '/node', inherited });
@@ -937,17 +963,21 @@ test('launch.js status: the person\'s reader, each fact read, refused or absent 
   assert.equal(none.facts.lastStop.read, 'absent');
 });
 
-test('launch.js knows serve, token, status and open; a later unit\'s verb names its unit', () => {
+test('launch.js knows serve, token, status, open, start, stop and rights; a later unit\'s verb names its unit', () => {
   const said = [];
   const out = (t) => said.push(t);
   assert.equal(launch.main([], { out }), 64);
-  assert.equal(launch.main(['start'], { out }), 64);
+  assert.equal(launch.main(['upgrade'], { out }), 64);
   assert.equal(launch.main(['serve', '--data', '/tmp/x'], { out }), 64);
-  assert.match(said[0], /launch\.js knows serve, token, status or open\./);
-  assert.match(said[1], /launch\.js start is built by U17/);
+  assert.equal(launch.main(['start'], { out }), 64);
+  assert.equal(launch.main(['stop', '--machine', '/m', '--sys', 'System32'], { out }), 64);
+  assert.match(said[0], /launch\.js knows serve, token, status, open, start, stop or rights\./);
+  assert.match(said[1], /launch\.js upgrade is built by U18/);
   assert.match(said[2], /launch\.js serve needs --uploads/);
+  assert.match(said[3], /launch\.js start needs --machine <folder>/);
+  assert.match(said[4], /launch\.js stop needs --sys <folder>, the System32 folder named from its drive \(C:\\Windows\\System32\): whoami\.exe and schtasks\.exe are run from it\./);
   said.length = 0;
-  assert.equal(launch.main(['serve', '--data', '/d', '--uploads', '/u', '--keys', '/k', '--logs', '/l', '--token', '/t', '--port', '3023'], { out }), 64);
+  assert.equal(launch.main(['serve', '--data', '/d', '--uploads', '/u', '--keys', '/k', '--logs', '/l', '--token', '/t', '--events', '/e', '--port', '3023'], { out }), 64);
   assert.match(said[0], /serve is the server task's action/);
 });
 

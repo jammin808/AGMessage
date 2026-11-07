@@ -59,6 +59,9 @@ const rules = require('../verify/auditrules');
 
 const ROTATE_BYTES = 20 * 1024 * 1024;
 const WORDS_MAX = 300;   // an entry's words, in characters: a row written longer is cut at it
+// A Windows account's row (actor `windows`, the machine's events) names its accounts by SID, whole: the longest a SID can be
+// written ("S-1-", a 48-bit authority, fifteen sub-authorities). Every other actor's id is at most 40, its target 80.
+const SID_MAX = 184;
 const GENESIS = rules.GENESIS;
 const SLICE = 1000;        // lines checked between turns of the event loop
 const RECENT = 500;        // rows kept for the list
@@ -706,15 +709,18 @@ class AuditLog {
   _lag(seq, saved) { return Math.max(0, seq - (saved ? saved.seq : this.base)); }
 
   /**
-   * Record one action. `actor` {t:'account'|'admin'|'code'|'display'|'node'|'system', id, name}; `target` what it acted
-   * on (an id, a username, a hall code); `words` what happened, in plain words, never a secret.
+   * Record one action. `actor` {t:'account'|'admin'|'code'|'display'|'node'|'system'|'windows', id, name}; `target` what
+   * it acted on (an id, a username, a hall code; a Windows account's SID); `words` what happened, in plain words, never a
+   * secret. A `windows` row keeps its SIDs whole (SID_MAX), so no two accounts of one PC ever read as one.
    */
   write(actor, action, target = '', words = '', ip = '') {
     this.open();
+    const t = str(actor && actor.t, 12) || 'system';
+    const sids = t === 'windows';
     const e = {
       seq: this.seq + 1, at: Date.now(),
-      actor: { t: str(actor && actor.t, 12) || 'system', id: str(actor && actor.id, 40), name: str(actor && actor.name, 60) },
-      action: str(action, 40), target: str(target, 80), words: str(words, WORDS_MAX), ip: str(ip, 64), prev: this.last, l: this.l, k: this.kid,
+      actor: { t, id: str(actor && actor.id, sids ? SID_MAX : 40), name: str(actor && actor.name, 60) },
+      action: str(action, 40), target: str(target, sids ? SID_MAX : 80), words: str(words, WORDS_MAX), ip: str(ip, 64), prev: this.last, l: this.l, k: this.kid,
     };
     e.h = macOf(e, this.Ke);
     this.seq = e.seq; this.last = e.h;
@@ -1280,4 +1286,4 @@ class AuditLog {
   }
 }
 
-module.exports = { AuditLog, hashOf, macOf, kidOf, keysFrom, sealRecord, wordsWithList, LABELS, SHAPE, GENESIS, WORDS_MAX };
+module.exports = { AuditLog, hashOf, macOf, kidOf, keysFrom, sealRecord, wordsWithList, LABELS, SHAPE, GENESIS, WORDS_MAX, SID_MAX };

@@ -72,7 +72,22 @@
  *                     answers on the port: what the backup holds laid back, what it does not hold removed; the audit log and
  *                     watchdog.log, append-only evidence, are never rolled back.
  *
- *   import, control and upgrade are later units' (U14, U17, U18): until each lands its verb is refused as unknown.
+ *   control           --for <SID> --machine … --sys …
+ *                     An account's request, run as SYSTEM by its own control task (`\AGMessage\Control-<SID>`, whose
+ *                     descriptor lets that account alone, beside SYSTEM and Administrators, read and run it), so which task
+ *                     ran says whose request it is and nothing the request says can change that. The request is
+ *                     machine\inbox\<SID>\request.json, refused when lstat shows a link, a hard link or a reparse point,
+ *                     copied by its bytes into machine\work\ and read there: whole JSON of at most 4 KB, a known verb
+ *                     (start, stop, grant, revoke, handover; upgrade and back are U18's) and fields of their types. The
+ *                     right is read from the install record at that moment (the laptop's admin holds all four; Grants
+ *                     names the rest), the act done, its answer written into machine\outbox\<SID>\answer.json (that
+ *                     account reads it), and one machine event appended for an act done. grant, revoke and handover only
+ *                     from the laptop's admin's own task.
+ *                     --elevated --request <machine\work\file> --machine … --sys … [--out <file>]
+ *                     The same acts from an administrator's elevated console (a laptop whose admin account is gone): an
+ *                     administrator may do every one, each event naming that administrator; the answer goes to --out.
+ *
+ *   import and upgrade are later units' (U14, U18): until each lands its verb is refused as unknown.
  *
  * Every verb takes `--out <file>`: its result as JSON ({v, verb, code, words, …}), refusals too, never a token or a
  * password, written whole. Exit codes: 0 done; 2 not done, with the words of why; 3 refused, fail closed (a precondition
@@ -104,6 +119,22 @@ const SERVER_TASK = TASK_FOLDER + 'Server';
  * else; protected, so nothing is inherited from the folder. People start it through their own control tasks.
  */
 const SERVER_TASK_SDDL = 'D:P(A;;FA;;;SY)(A;;FA;;;BA)';
+/** An account's control task, by its SID: one per account with a right, the laptop's admin's among them. */
+const controlTask = (sid) => TASK_FOLDER + 'Control-' + sid;
+/**
+ * A control task's security descriptor: SYSTEM and Administrators in full control, and the one account it is for read
+ * and execute (FRFX), so it may run that task and no other account may (which rights let it run on demand is reading R11).
+ */
+const controlSddl = (sid) => 'D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;' + sid + ')';
+/** The rights the laptop's admin holds and gives (U.5.1): each to one person's account at a time. */
+const RIGHTS = Object.freeze(['token', 'start', 'stop', 'upgrade']);
+/** The verbs a request may name; upgrade and back are U18's, refused as unknown until it lands. */
+const CONTROL_VERBS = Object.freeze(['start', 'stop', 'grant', 'revoke', 'handover']);
+const CONTROL_LATER = Object.freeze({ upgrade: 'U18', back: 'U18' });
+/** The most of a request the control task reads: a request over this is refused whole. */
+const REQUEST_MAX = 4096;
+/** The integrity labels of an elevated token (High) and of SYSTEM's (System), by SID: never Windows' localised words. */
+const ELEVATED_LABELS = Object.freeze(['S-1-16-12288', 'S-1-16-16384']);
 /** The firewall rules' names: one for TCP (the port), one for UDP (discovery, 9928). */
 const RULE_TCP = 'AGMessage-Server-TCP';
 const RULE_UDP = 'AGMessage-Discovery-UDP';
@@ -389,9 +420,13 @@ const CHILDREN = Object.freeze([
 const MACHINE_SUBS = Object.freeze(['inbox', 'outbox', 'work', 'staged']);
 /** What any signed-in account may do in setup\<random>\: create a file, never list or read one. */
 const SETUP_GRANT = '*' + SID.authed + ':(WD,AD,WA)';
-/** An account's own inbox\<sid>\ (it may create and write files) and outbox\<sid>\ (it may read), inherited inside each. */
-const inboxGrant = (sid) => grant(sid, 'W');
-const outboxGrant = (sid) => grant(sid, 'RX');
+/**
+ * An account's own inbox\<sid>\: it may add a file to the folder (WD on the folder alone) and write the files in it (W,
+ * inherited by files alone), never make a folder or a junction there; and its outbox\<sid>\, which it may read (RX,
+ * inherited inside). Each list's first grant is set with the folder's access list, each other one added after it.
+ */
+const inboxGrants = (sid) => ['*' + sid + ':(WD)', '*' + sid + ':(OI)(IO)W'];
+const outboxGrants = (sid) => [grant(sid, 'RX')];
 
 /** One command-line argument as Windows reads it (CommandLineToArgvW), for a task's <Arguments>. */
 function winArg(a) {
@@ -405,11 +440,12 @@ const xmlText = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').re
  * The server task's definition (Task Scheduler's schema 1.3; pure): LocalService under its own SID (ProcessTokenSidType
  * Unrestricted, so the task's SID is derived from its path), SeChangeNotifyPrivilege alone, a boot trigger, no time limit,
  * both battery settings false, a new instance ignored while one runs, RestartOnFailure 3 × 1 min; its action node.exe on
- * launch.js serve, both by their absolute paths, from launch.js's folder, with the folders and the port; its descriptor
- * SERVER_TASK_SDDL. No token or password is in it. `uri` names it (the lane registers it under its own name).
+ * launch.js serve, both by their absolute paths, from launch.js's folder, with the folders, the machine's events file
+ * (machine\events.jsonl, which the server reads and never writes) and the port; its descriptor SERVER_TASK_SDDL. No token
+ * or password is in it. `uri` names it (the lane registers it under its own name).
  */
-function serverTaskXml({ node, launch, data, uploads, keys, logs, token, port, uri = SERVER_TASK }) {
-  const args = [launch, 'serve', '--data', data, '--uploads', uploads, '--keys', keys, '--logs', logs, '--token', token, '--port', String(port)];
+function serverTaskXml({ node, launch, data, uploads, keys, logs, token, events, port, uri = SERVER_TASK }) {
+  const args = [launch, 'serve', '--data', data, '--uploads', uploads, '--keys', keys, '--logs', logs, '--token', token, '--events', events, '--port', String(port)];
   return [
     '<?xml version="1.0" encoding="UTF-16"?>',
     '<Task version="1.3" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">',
@@ -452,6 +488,49 @@ function serverTaskXml({ node, launch, data, uploads, keys, logs, token, port, u
 }
 
 /**
+ * An account's control task's definition (Task Scheduler's schema 1.3; pure): SYSTEM, run on demand only (no trigger),
+ * a request queued behind one that runs, both battery settings false, at most 10 minutes; its action node.exe on
+ * machine.js control --for `sid`, both by their absolute paths, with the machine folder and the System32 folder, fixed at
+ * registration; its descriptor controlSddl(`sid`). No token or password is in it.
+ */
+function controlTaskXml({ sid, node, script, machine, sys, uri = controlTask(sid) }) {
+  const args = [script, 'control', '--for', sid, '--machine', machine, '--sys', sys];
+  return [
+    '<?xml version="1.0" encoding="UTF-16"?>',
+    '<Task version="1.3" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">',
+    '  <RegistrationInfo>',
+    '    <Description>AGMessage: one Windows account\'s requests (Start, Stop, Who may run AGMessage), run as SYSTEM.</Description>',
+    '    <URI>' + xmlText(uri) + '</URI>',
+    '    <SecurityDescriptor>' + controlSddl(sid) + '</SecurityDescriptor>',
+    '  </RegistrationInfo>',
+    '  <Triggers />',
+    '  <Principals>',
+    '    <Principal id="Author">',
+    '      <UserId>' + SID.system + '</UserId>',
+    '      <RunLevel>HighestAvailable</RunLevel>',
+    '    </Principal>',
+    '  </Principals>',
+    '  <Settings>',
+    '    <MultipleInstancesPolicy>Queue</MultipleInstancesPolicy>',
+    '    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>',
+    '    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>',
+    '    <ExecutionTimeLimit>PT10M</ExecutionTimeLimit>',
+    '    <AllowStartOnDemand>true</AllowStartOnDemand>',
+    '    <Enabled>true</Enabled>',
+    '  </Settings>',
+    '  <Actions Context="Author">',
+    '    <Exec>',
+    '      <Command>' + xmlText(node) + '</Command>',
+    '      <Arguments>' + xmlText(args.map(winArg).join(' ')) + '</Arguments>',
+    '      <WorkingDirectory>' + xmlText(pathOf(script).dirname(script)) + '</WorkingDirectory>',
+    '    </Exec>',
+    '  </Actions>',
+    '</Task>',
+    '',
+  ].join('\r\n');
+}
+
+/**
  * The firewall rules (answer 37; pure): the TCP rule on `node` for `port` and the UDP rule on `node` for discovery
  * (9928), each from the local subnet only, on Private and Domain, and Public only when `public`. A rule names the
  * program, the protocol and the local port, never node.exe alone, which would let any account's script take inbound
@@ -486,10 +565,60 @@ function recordValues({ dir, version, semver, previous = '', admin, adminName, p
   ];
 }
 
-/** A machine event appended to machine\events.jsonl, which the server turns into its audit row: no secret in it. */
-function machineEvent(machineDir, { kind, by = '', forSid = '', rights = '', words = '' }, fsImpl = fs) {
-  const line = JSON.stringify({ at: Date.now(), kind, by: said(by, 80), for: said(forSid, 80), rights: said(rights, 120), words: said(words, 200) }) + '\n';
-  fsImpl.appendFileSync(pathOf(machineDir).join(machineDir, 'events.jsonl'), line);
+/** An account as an event names it: its SID and the name Windows gave it (words only), each said. */
+const accountSaid = (a) => ({ sid: isSid(a && a.sid) ? a.sid : '', name: said((a && a.name) || '', 120) });
+/** The highest `seq` among a file's whole lines (pure): a line that is not an event's is passed over. */
+function lastSeqOf(text) {
+  let last = 0;
+  for (const line of String(text || '').split('\n')) {
+    let e;
+    try { e = JSON.parse(line); } catch { continue; /* not a whole line: a torn end, or not an event's */ }
+    if (e && Number.isSafeInteger(e.seq) && e.seq > last) last = e.seq;
+  }
+  return last;
+}
+/**
+ * How long an append waits for another's lock, and how old a lock is before it is taken as one a crash left: a lock is held
+ * for one read and one append, well under a second, and the stale age is below the wait, so a lock a crash left never
+ * outlasts an append's wait.
+ */
+const EVENT_LOCK_WAIT_MS = 10_000;
+const EVENT_LOCK_STALE_MS = 5000;
+const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+/**
+ * One machine event appended to machine\events.jsonl, which the server turns into its audit row: {seq, at, kind, by,
+ * for, rights, words}, `by` and `for` accounts ({sid, name}), `rights` the rights it names, never a token, a password or a
+ * path in a profile. The file is appended in place (its grant to the server's task is the file's own, so it is never
+ * replaced), under machine\events.lock, made only where none is, so two control tasks never take one seq; `seq` is one
+ * above the file's highest. Returns the seq.
+ */
+function appendEvent(machineDir, { kind, by = {}, forAccount = {}, rights = [], words = '' }, fsImpl = fs, { waitMs = EVENT_LOCK_WAIT_MS } = {}) {
+  const P = pathOf(machineDir);
+  const file = P.join(machineDir, 'events.jsonl');
+  const lock = P.join(machineDir, 'events.lock');
+  const until = Date.now() + waitMs;
+  let fd;
+  for (;;) {
+    try { fd = fsImpl.openSync(lock, 'wx'); break; } catch (e) {
+      if (e.code !== 'EEXIST') throw notDone('machine\\events.lock could not be made (' + (e.code || e.message) + ')');
+      let old;
+      try { old = Date.now() - fsImpl.statSync(lock).mtimeMs > EVENT_LOCK_STALE_MS; } catch { old = false; /* gone since: tried again at once */ }
+      if (old) { try { fsImpl.unlinkSync(lock); } catch { /* another took it first */ } continue; }
+      if (Date.now() >= until) throw notDone('machine\\events.jsonl stayed locked for ' + waitMs / 1000 + ' s');
+      pause(50);
+    }
+  }
+  try {
+    let text = '';
+    try { text = fsImpl.readFileSync(file, 'utf8'); } catch (e) { if (e.code !== 'ENOENT') throw notDone('machine\\events.jsonl could not be read (' + (e.code || e.message) + ')'); }
+    const seq = lastSeqOf(text) + 1;
+    const line = JSON.stringify({ seq, at: Date.now(), kind, by: accountSaid(by), for: accountSaid(forAccount), rights: rights.filter((r) => RIGHTS.includes(r)), words: said(words, 300) }) + '\n';
+    fsImpl.appendFileSync(file, (text && !text.endsWith('\n') ? '\n' : '') + line);
+    return seq;
+  } finally {
+    try { fsImpl.closeSync(fd); } catch { /* closed */ }
+    try { fsImpl.unlinkSync(lock); } catch { /* removed already */ }
+  }
 }
 
 /**
@@ -631,11 +760,11 @@ function programWords(list) {
 
 // ---------------------------------------------------------------- argument parsing
 
-/** The verbs built so far; import (U14), control (U17) and upgrade (U18) are refused as unknown until they land. */
-const VERBS = Object.freeze(['prepare', 'install', 'uninstall', 'preinstall-check', 'upgrade-stop', 'status', 'restore', 'whose', 'start', 'first-account']);
-const LATER = Object.freeze({ import: 'U14', control: 'U17', upgrade: 'U18' });
+/** The verbs built so far; import (U14) and upgrade (U18) are refused as unknown until they land. */
+const VERBS = Object.freeze(['prepare', 'install', 'uninstall', 'preinstall-check', 'upgrade-stop', 'status', 'restore', 'whose', 'start', 'first-account', 'control']);
+const LATER = Object.freeze({ import: 'U14', upgrade: 'U18' });
 /** The flags (no value). */
-const FLAGS = new Set(['--public', '--signed', '--remove-data', '--rollback']);
+const FLAGS = new Set(['--public', '--signed', '--remove-data', '--rollback', '--elevated']);
 /** Each verb's options, each at most once: any other is refused, never ignored. */
 const VERB_OPTS = Object.freeze({
   prepare: ['--machine', '--sys', '--out'],
@@ -648,6 +777,7 @@ const VERB_OPTS = Object.freeze({
   whose: ['--machine', '--sys', '--started', '--admin', '--out'],
   start: ['--machine', '--sys', '--port', '--build', '--out'],
   'first-account': ['--machine', '--port', '--account', '--build', '--out'],
+  control: ['--for', '--elevated', '--request', '--machine', '--sys', '--out'],
 });
 
 /** The command line, read: {verb, opts} or {problem}. No value is a path read from the environment: each is an argument. */
@@ -936,12 +1066,33 @@ function prepare(opts, { run = childProcess.execFileSync, fsImpl = fs } = {}) {
 
 // ---------------------------------------------------------------- install: the server task, the rules, the record
 
-/** The folder an account's own inbox\<sid>\ or outbox\<sid>\ is, made with SYSTEM, Administrators and its grant. */
-function accountFolder(H, fsImpl, root, box, sid, accountGrant) {
+/**
+ * The folder an account's own inbox\<sid>\ or outbox\<sid>\ is, made with SYSTEM, Administrators and its grants
+ * (inboxGrants, outboxGrants): the first set with the access list, each other one added by an icacls of its own, so no two
+ * grants to one SID ever meet in one call.
+ */
+function accountFolder(H, fsImpl, root, box, sid, accountGrants) {
   const P = pathOf(root);
   const dir = P.join(root, 'machine', box, sid);
-  makeFolder(fsImpl, dir, 'machine\\' + box + '\\' + sid, { fresh: false });
-  mustGrant(H, [dir, '/inheritance:r', '/grant:r', ...BASE_GRANTS, accountGrant], 'machine\\' + box + '\\' + sid);
+  const label = 'machine\\' + box + '\\' + sid;
+  makeFolder(fsImpl, dir, label, { fresh: false });
+  const [first, ...more] = accountGrants;
+  mustGrant(H, [dir, '/inheritance:r', '/grant:r', ...BASE_GRANTS, first], label);
+  for (const g of more) mustGrant(H, [dir, '/grant', g], label);
+}
+
+/**
+ * An account's control task registered from its definition (controlTaskXml), written as UTF-16 into machine\work\
+ * (SYSTEM and Administrators only) and removed once registered; not done, with Windows' words, when it is not.
+ */
+function registerControl(H, fsImpl, { root, sys, node, script, sid }) {
+  const P = pathOf(root);
+  const file = P.join(root, 'machine', 'work', 'control-' + crypto.randomBytes(6).toString('hex') + '.xml');
+  const xml = controlTaskXml({ sid, node, script, machine: root, sys });
+  fsImpl.writeFileSync(file, Buffer.concat([Buffer.from([0xFF, 0xFE]), Buffer.from(xml, 'utf16le')]), { flag: 'wx' });
+  const made = H.schtasks(['/Create', '/TN', controlTask(sid), '/XML', file, '/F']);
+  try { fsImpl.unlinkSync(file); } catch { /* left in machine\work\, which no one else reads; it holds no secret */ }
+  if (made.code !== 0) throw notDone('the control task ' + controlTask(sid) + ' could not be registered (' + (made.err || 'schtasks.exe ended with ' + made.code) + ').');
 }
 
 /**
@@ -962,7 +1113,8 @@ function install(opts, { run = childProcess.execFileSync, fsImpl = fs } = {}) {
   const A = pathOf(app);
   const node = A.join(app, 'node', 'node.exe');
   const launch = A.join(app, 'app', 'launch.js');
-  for (const f of [node, launch]) if (!fsImpl.existsSync(f)) throw usage('--app is ' + app + ', which holds no ' + f + ': it is the install\'s folder ({app}), the one that holds node\\node.exe and app\\launch.js.');
+  const script = A.join(app, 'app', 'machine.js');
+  for (const f of [node, launch, script]) if (!fsImpl.existsSync(f)) throw usage('--app is ' + app + ', which holds no ' + f + ': it is the install\'s folder ({app}), the one that holds node\\node.exe, app\\launch.js and app\\machine.js.');
   const record = readRecord(H);
   // The laptop's admin: found once, at the first install; an upgrade keeps the record's (only a handover changes it).
   const kept = isSid(record.values.Admin);
@@ -973,7 +1125,7 @@ function install(opts, { run = childProcess.execFileSync, fsImpl = fs } = {}) {
   const adminName = kept ? said(record.values.AdminName || '', 120) : said(opts['--admin-name'] || '', 120);
   const folder = (name) => P.join(root, name);
   // The server task, from its definition (UTF-16), in machine\work\ (SYSTEM and Administrators only), then removed.
-  const xml = serverTaskXml({ node, launch, data: folder('data'), uploads: folder('uploads'), keys: folder('keys'), logs: folder('logs'), token: folder('token'), port });
+  const xml = serverTaskXml({ node, launch, data: folder('data'), uploads: folder('uploads'), keys: folder('keys'), logs: folder('logs'), token: folder('token'), events: P.join(root, 'machine', 'events.jsonl'), port });
   const xmlFile = P.join(root, 'machine', 'work', 'server-task.xml');
   fsImpl.writeFileSync(xmlFile, Buffer.concat([Buffer.from([0xFF, 0xFE]), Buffer.from(xml, 'utf16le')]));
   const made = H.schtasks(['/Create', '/TN', SERVER_TASK, '/XML', xmlFile, '/F']);
@@ -992,9 +1144,12 @@ function install(opts, { run = childProcess.execFileSync, fsImpl = fs } = {}) {
   const events = P.join(root, 'machine', 'events.jsonl');
   try { fsImpl.appendFileSync(events, ''); } catch (e) { throw notDone('machine\\events.jsonl could not be made (' + (e.code || e.message) + ').'); }
   mustGrant(H, [events, '/grant:r', '*' + taskSid + ':(R)'], 'machine\\events.jsonl');
-  // The laptop's admin's own inbox\ and outbox\.
-  accountFolder(H, fsImpl, root, 'inbox', admin, inboxGrant(admin));
-  accountFolder(H, fsImpl, root, 'outbox', admin, outboxGrant(admin));
+  // The laptop's admin's own inbox\ and outbox\ and control task; on an upgrade, each account given a right has its
+  // control task registered again from this build's definition (its folders and grants are kept).
+  accountFolder(H, fsImpl, root, 'inbox', admin, inboxGrants(admin));
+  accountFolder(H, fsImpl, root, 'outbox', admin, outboxGrants(admin));
+  const grantees = Object.keys(readGrants(H)).filter((sid) => personSid(sid) && sid !== admin);
+  for (const sid of [admin, ...grantees]) registerControl(H, fsImpl, { root, sys: opts['--sys'], node, script, sid });
   // The firewall rules, by program, protocol and port.
   const rules = firewallRules({ node, port, public: !!opts['--public'] });
   const fw = H.powershell(PS_FIREWALL_ADD, { AGM_RULE_TCP: RULE_TCP, AGM_RULE_UDP: RULE_UDP, AGM_NODE: node, AGM_PORT: String(port), AGM_UDP: String(DISCOVERY_PORT), AGM_PROFILES: rules[0].profiles.join(',') });
@@ -1005,14 +1160,20 @@ function install(opts, { run = childProcess.execFileSync, fsImpl = fs } = {}) {
   const previous = opts['--rollback'] ? '' : record.values.Version && record.values.Version !== built.version ? record.values.Version : (record.values.Previous || '');
   for (const v of recordValues({ dir: app, version: built.version, semver: built.semver, previous, admin, adminName, port, public: !!opts['--public'], signed: !!opts['--signed'] })) writeValue(H, v);
   for (const mark of ['Prepared', 'Kept']) if (record.values[mark] !== undefined) H.reg(['delete', HKLM, '/v', mark, '/f', '/reg:64']);
-  if (!kept) machineEvent(folder('machine'), { kind: 'machine.admin', by: adminName || admin, forSid: admin, words: 'AGMessage installed; the laptop\'s admin is ' + (adminName || admin) }, fsImpl);
+  let unrecorded = '';
+  if (!kept) {
+    const who = { sid: admin, name: adminName };
+    try { appendEvent(folder('machine'), { kind: 'machine.admin', by: who, forAccount: who, rights: RIGHTS, words: 'AGMessage was installed on this PC; its admin here is ' + (adminName || admin) + ', with every right and the giving of them.' }, fsImpl); } catch (e) {
+      unrecorded = ' No machine event names its admin, so the audit log will not show it: ' + e.words + '.';
+    }
+  }
   // setup\ held the one-time readings of who started the installer; removed at the install's end.
   let setupLeft = '';
   try { fsImpl.rmSync(folder('setup'), { recursive: true, force: true }); } catch (e) { setupLeft = e.code || e.message; }
   const keptWords = kept && asked && asked !== admin ? ' The laptop\'s admin stays ' + (adminName || admin) + ' (an upgrade keeps it; a handover changes it).' : '';
   return {
     taskSid, admin, version: built.version, previous,
-    words: 'AGMessage ' + built.semver + ' (install version ' + built.version + ') is installed: the server task, the firewall rules and the record are set.' + keptWords + (setupLeft ? ' The setup folder could not be removed (' + said(setupLeft, 40) + '); it holds nothing anyone may read.' : ''),
+    words: 'AGMessage ' + built.semver + ' (install version ' + built.version + ') is installed: the server task, the firewall rules and the record are set.' + keptWords + unrecorded + (setupLeft ? ' The setup folder could not be removed (' + said(setupLeft, 40) + '); it holds nothing anyone may read.' : ''),
   };
 }
 
@@ -1194,15 +1355,16 @@ async function uninstall(opts, { run = childProcess.execFileSync, fsImpl = fs, n
       const r = H.icacls([dir, '/remove:g', ...sids.map((sid) => '*' + sid)]);
       if (r.code !== 0) left.push('the rights on ' + dir + ' (' + (r.err || 'icacls.exe ended with ' + r.code) + ')');
     }
+  }
+  // Each account's inbox\ and outbox\ removed entry by entry, never recursively (clearBox), before anything removes the
+  // machine folder whole, which is left while one of them is: a link left in one is taken, never what it names.
+  let boxLeft = false;
+  if (fsImpl.existsSync(root)) {
     for (const box of ['inbox', 'outbox']) {
       const dir = P.join(root, 'machine', box);
       let names = [];
-      try { names = fsImpl.readdirSync(dir); } catch (e) { if (e.code !== 'ENOENT') left.push(dir + ' (' + (e.code || e.message) + ')'); }
-      for (const name of names) {
-        const d = P.join(dir, name);
-        try { fsImpl.rmSync(d, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 }); } catch (e) { left.push(d + ' (' + (e.code || e.message) + ')'); continue; }
-        if (fsImpl.existsSync(d)) left.push(d);
-      }
+      try { names = fsImpl.readdirSync(dir); } catch (e) { if (e.code !== 'ENOENT') { left.push(dir + ' (' + (e.code || e.message) + ')'); boxLeft = true; } }
+      for (const name of names) { const why = clearBox(fsImpl, P.join(dir, name)); if (why) { left.push(why); boxLeft = true; } }
     }
   }
   // 5. The record; where the data is kept, the mark prepare takes it again by (HKLM, which only administrators write).
@@ -1221,7 +1383,7 @@ async function uninstall(opts, { run = childProcess.execFileSync, fsImpl = fs, n
   if (opts['--remove-data']) {
     for (const name of ['data', 'uploads', 'logs', 'token', 'machine', 'setup', 'keys']) {
       const dir = P.join(root, name);
-      if (!fsImpl.existsSync(dir)) continue;
+      if (!fsImpl.existsSync(dir) || (name === 'machine' && boxLeft)) continue;
       try { fsImpl.rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 }); } catch (e) { left.push(dir + ' (' + (e.code || e.message) + ')'); continue; }
       if (fsImpl.existsSync(dir)) left.push(dir); else removed.push(name);
     }
@@ -1381,6 +1543,8 @@ function statusWords(f) {
   const lines = ['AGMessage on this PC:', '  the server task: ' + f.task.state + (f.task.lastResult === null ? '' : ' (last result ' + f.task.lastResult + ')')];
   if (f.port) lines.push('  port ' + f.port + (f.portHolderPid ? ': held by pid ' + f.portHolderPid : f.portHolderError ? ': its holder not read (' + f.portHolderError + ')' : ': nothing holds it'));
   lines.push('  the laptop\'s admin: ' + (f.admin || (f.record === 'absent' ? 'no install record' : 'not recorded')));
+  const given = Object.entries(f.grants || {});
+  lines.push('  rights given: ' + (given.length ? given.map(([sid, rights]) => sid + ': ' + (grantRightsOf(rights).join(', ') || 'none')).join(' · ') : 'none'));
   if (f.lastStop.read === 'read') lines.push('  the last stop: ' + (f.lastStop.saved ? 'saved' + (f.lastStop.at ? ' at ' + clock(f.lastStop.at) : '') : 'not saved' + (f.lastStop.unsaved ? ' (' + f.lastStop.unsaved + ')' : '')));
   else lines.push('  the last stop: ' + (f.lastStop.read === 'absent' ? 'no record (AGMessage is serving, or it did not stop cleanly)' : 'its record could not be read (' + f.lastStop.code + ')'));
   if (f.codeIntegrity.found) lines.push('  Windows\' code integrity stopped node.exe (event ' + f.codeIntegrity.id + ', ' + f.codeIntegrity.at + '): Smart App Control may be on');
@@ -1472,7 +1636,14 @@ async function start(opts, { run = childProcess.execFileSync, fsImpl = fs, net: 
   const root = needPath(opts, '--machine');
   const H = hands(opts['--sys'], run);
   const port = needPort(opts);
-  const want = wantedBuild(opts);
+  return startAndProve({ H, root, port, fsImpl, n }, wantedBuild(opts));
+}
+/**
+ * The server task run and its server waited for until it proves it holds the token (as `want` when given): start's core.
+ * `end` (the installer's verify) ends one that has not proved itself in time; a person's Start (`end` false) never does,
+ * since the task may be the watchdog still starting or retrying a held port: it is left as it is, and its state said.
+ */
+async function startAndProve({ H, root, port, fsImpl = fs, n = {}, end = true }, want = '') {
   const waitMs = n.waitMs || START_WAIT_MS;
   const ran = H.schtasks(['/Run', '/TN', SERVER_TASK]);
   if (ran.code !== 0) throw notDone('The server task ' + SERVER_TASK + ' could not be started (' + (ran.err || 'schtasks.exe ended with ' + ran.code) + ').', { answered: false });
@@ -1491,13 +1662,20 @@ async function start(opts, { run = childProcess.execFileSync, fsImpl = fs, net: 
     if (Date.now() >= until) break;
     await sleep(POLL_MS);
   }
-  H.schtasks(['/End', '/TN', SERVER_TASK]);
-  await portCloses(port, { ms: 10_000, answers: n.portAnswers || portAnswers });
-  const tail = tailOf(fsImpl, pathOf(root).join(root, 'logs', 'server.log'), 8).lines;
   const why = seen ? 'it answered as build ' + seen + ', not ' + want
     : last.why === 'notoken' ? 'its token (token\\admin-token) was never there to read, so nothing could prove it is this PC\'s AGMessage'
       : last.why === 'unproven' ? failWords('unproven', port, ANSWER_MS)
         : 'nothing answered on port ' + port;
+  if (!end) {
+    const q = H.schtasks(['/Query', '/TN', SERVER_TASK, '/FO', 'CSV', '/NH', '/V']);
+    const st = q.code === 0 ? taskStateOf(q.out) : null;
+    const task = st ? st.state + (st.lastResult === null ? '' : ', last result ' + st.lastResult) : 'its state not read';
+    const line = tailOf(fsImpl, pathOf(root).join(root, 'logs', 'server.log'), 1).lines;
+    throw notDone('AGMessage is not answering yet: ' + why + ' within ' + Math.round(waitMs / 1000) + ' s. It was left as it is, since it may still be starting: the server task is ' + task + '. ' + (line.length ? 'The log\'s last line: "' + line[0].trim() + '".' : 'Its log holds nothing.') + ' Try Start AGMessage again in a minute; AGMessage status says more.', { answered: false, ran: true, task, build: seen });
+  }
+  H.schtasks(['/End', '/TN', SERVER_TASK]);
+  await portCloses(port, { ms: 10_000, answers: n.portAnswers || portAnswers });
+  const tail = tailOf(fsImpl, pathOf(root).join(root, 'logs', 'server.log'), 8).lines;
   throw notDone('AGMessage' + (want ? ' ' + want : '') + ' did not start: ' + why + ' within ' + Math.round(waitMs / 1000) + ' s, so it was stopped. ' + (tail.length ? 'The last lines of its log: ' + tail.join(' | ') : 'Its log holds nothing.'), { answered: false, build: seen, tail: tail.join('\n') });
 }
 
@@ -1550,6 +1728,537 @@ async function firstAccount(opts, { fsImpl = fs, net: n = {} } = {}) {
   }
   if (r.status >= 400 && r.status < 500) throw refusal(error || 'AGMessage did not make the account (' + r.status + ').', { made: false });
   throw notDone('AGMessage did not make the account (' + r.status + (error ? ': ' + error : '') + ').', { made: false });
+}
+
+// ---------------------------------------------------------------- control: an account's request, as SYSTEM
+
+/** The rights a Grants value names (pure): its known words, in RIGHTS' order; an unknown word gives nothing. */
+function grantRightsOf(value) {
+  const words = String(value || '').split(',').map((w) => w.trim().toLowerCase());
+  return RIGHTS.filter((r) => words.includes(r));
+}
+/** Rights as words: "start, stop" (pure). */
+const rightsWords = (list) => list.join(', ');
+/** Whether `whoami /groups /fo csv /nh` names an elevated token (pure): a High or System integrity label, by its SID column. */
+function elevatedOf(text) {
+  const rows = csvRows(text);
+  const sids = new Set(rows.map((r) => String(r[2] || '').trim()));
+  return ELEVATED_LABELS.some((l) => sids.has(l)) && sids.has(SID.admins);
+}
+/** The keys each verb's request may hold, beside id and verb. */
+const REQUEST_KEYS = Object.freeze({ start: [], stop: ['force'], grant: ['account', 'rights'], revoke: ['account', 'rights'], handover: ['account', 'confirm'] });
+const REQUEST_ID = /^[0-9a-f]{16,64}$/;
+/**
+ * A request read from its bytes (pure): {request} or {problem, id}. Whole JSON of at most REQUEST_MAX bytes, an object,
+ * `id` 16-64 hex characters and `verb` one of CONTROL_VERBS, with the keys of that verb alone, each of its type: `force`
+ * words (a stop's typed reason); `account` an account's name or SID; `rights` a list of RIGHTS, each once (a revoke's may
+ * be "all"); `confirm` the new admin's name typed again. Anything else is refused, never defaulted.
+ */
+function requestOf(bytes) {
+  const buf = Buffer.isBuffer(bytes) ? bytes : Buffer.from(String(bytes || ''), 'utf8');
+  if (buf.length > REQUEST_MAX) return { problem: 'Your request is over ' + REQUEST_MAX / 1024 + ' KB, so it was not read.' };
+  let j;
+  try { j = JSON.parse(buf.toString('utf8')); } catch { return { problem: 'Your request is not whole JSON, so it was not read.' }; }
+  if (!j || typeof j !== 'object' || Array.isArray(j)) return { problem: 'Your request is not a request (a JSON object).' };
+  const id = typeof j.id === 'string' && REQUEST_ID.test(j.id) ? j.id : '';
+  if (!id) return { problem: 'Your request carries no id of its shape (16 to 64 hex characters).' };
+  if (typeof j.verb !== 'string') return { problem: 'Your request names no verb.', id };
+  if (Object.hasOwn(CONTROL_LATER, j.verb)) return { problem: '"' + j.verb + '" is built by ' + CONTROL_LATER[j.verb] + '; this build\'s control task knows ' + CONTROL_VERBS.join(', ') + '.', id };
+  if (!CONTROL_VERBS.includes(j.verb)) return { problem: '"' + said(j.verb, 40) + '" is not a request AGMessage\'s control task knows (' + CONTROL_VERBS.join(', ') + ').', id };
+  const allowed = ['id', 'verb', ...REQUEST_KEYS[j.verb]];
+  const extra = Object.keys(j).find((k) => !allowed.includes(k));
+  if (extra !== undefined) return { problem: 'A ' + j.verb + ' request takes ' + (REQUEST_KEYS[j.verb].join(', ') || 'nothing more') + '; "' + said(extra, 40) + '" is not one of them.', id };
+  const request = { id, verb: j.verb };
+  if (j.verb === 'stop') {
+    if (j.force !== undefined && typeof j.force !== 'string') return { problem: 'A stop\'s force is the reason you typed, in words.', id };
+    request.force = said(j.force || '', 200);
+  }
+  if (REQUEST_KEYS[j.verb].includes('account')) {
+    const account = typeof j.account === 'string' ? said(j.account, 120) : '';
+    if (!account) return { problem: 'A ' + j.verb + ' request names one Windows account (LAPTOP\\ben).', id };
+    request.account = account;
+  }
+  if (REQUEST_KEYS[j.verb].includes('rights')) {
+    if (j.verb === 'revoke' && j.rights === 'all') request.rights = 'all';
+    else {
+      const list = Array.isArray(j.rights) ? j.rights : null;
+      if (!list || !list.length || list.length > RIGHTS.length || !list.every((r) => typeof r === 'string' && RIGHTS.includes(r)) || new Set(list).size !== list.length) {
+        return { problem: 'A ' + j.verb + ' request names its rights, each once, among ' + rightsWords(RIGHTS) + (j.verb === 'revoke' ? ' (or all)' : '') + '.', id };
+      }
+      request.rights = RIGHTS.filter((r) => list.includes(r));
+    }
+  }
+  if (j.verb === 'handover') {
+    if (typeof j.confirm !== 'string') return { problem: 'A handover is confirmed by typing the new admin\'s account name again (confirm).', id };
+    request.confirm = said(j.confirm, 120);
+  }
+  return { request };
+}
+
+/**
+ * A request taken from where it was left (an inbox's request.json, or an elevated console's file in machine\work\):
+ * lstat refuses a link, a hard link, a reparse point Windows reads as one, anything but a file and anything over
+ * REQUEST_MAX; the file opened is the one lstat saw (fstat's device and index alike); its bytes are copied into
+ * machine\work\ and read there. The file left is removed whatever it held, so no request is read twice. {bytes} or a
+ * refusal.
+ */
+function takeRequest(fsImpl, file, workDir) {
+  const P = pathOf(workDir);
+  let bytes;
+  try {
+    let st;
+    try { st = fsImpl.lstatSync(file); } catch (e) {
+      if (e.code === 'ENOENT') throw refusal('No request was waiting: run it from the Start menu again.', { none: true });
+      throw refusal('Your request could not be read (' + (e.code || e.message) + ').');
+    }
+    if (st.isSymbolicLink()) throw refusal('Your request is a link, which the control task never follows: it was not read.');
+    if (!st.isFile()) throw refusal('Your request is not a file: it was not read.');
+    if (st.nlink > 1) throw refusal('Your request is a link to another file (a hard link), which the control task never reads: it was not read.');
+    if (st.size > REQUEST_MAX) throw refusal('Your request is over ' + REQUEST_MAX / 1024 + ' KB, so it was not read.');
+    const fd = fsImpl.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+    try {
+      const ft = fsImpl.fstatSync(fd);
+      if (!ft.isFile() || ft.ino !== st.ino || ft.dev !== st.dev) throw refusal('Your request changed between its look and its read: it was not read.');
+      const buf = Buffer.alloc(REQUEST_MAX + 1);
+      let n = 0;
+      for (;;) { const got = fsImpl.readSync(fd, buf, n, buf.length - n, n); if (!got || n + got >= buf.length) { n += got; break; } n += got; }
+      if (n > REQUEST_MAX) throw refusal('Your request is over ' + REQUEST_MAX / 1024 + ' KB, so it was not read.');
+      bytes = Buffer.from(buf.subarray(0, n));
+    } finally { fsImpl.closeSync(fd); }
+  } finally {
+    // Whatever was left there goes, so nothing is read twice: a file or link by unlink, a folder or a junction (whose
+    // removal takes the junction, never what it names) by rmdir.
+    try { fsImpl.unlinkSync(file); } catch { try { fsImpl.rmdirSync(file); } catch { /* gone already, or a folder holding files: never read */ } }
+  }
+  // Read where only SYSTEM and Administrators write: the copy is what is read, never the file its account can change.
+  const copy = P.join(workDir, 'request-' + crypto.randomBytes(8).toString('hex') + '.json');
+  fsImpl.writeFileSync(copy, bytes, { flag: 'wx' });
+  try { return { bytes: fsImpl.readFileSync(copy) }; } finally { try { fsImpl.unlinkSync(copy); } catch { /* machine\work\'s, which no one else reads */ } }
+}
+
+/** The answer written for an account into its outbox\<sid>\answer.json, whole (a file beside it renamed over it). */
+function writeAnswer(fsImpl, outbox, answer) {
+  const P = pathOf(outbox);
+  const file = P.join(outbox, 'answer.json');
+  const tmp = P.join(outbox, 'answer-' + crypto.randomBytes(6).toString('hex') + '.tmp');
+  fsImpl.writeFileSync(tmp, JSON.stringify(answer), { flag: 'wx' });
+  try { fsImpl.renameSync(tmp, file); } catch (e) { try { fsImpl.unlinkSync(tmp); } catch { /* left beside it: no secret */ } throw e; }
+}
+
+/** The account a name or SID is, as Windows resolves it (PS_WHOSE's account), or a refusal in the giving's words. */
+function personFor(c, asked, act) {
+  const ps = c.H.powershell(PS_WHOSE, { AGM_SIDS: '', AGM_ACCOUNT: String(asked) });
+  const a = ps.account && typeof ps.account === 'object' ? ps.account : { error: ps.accountError || ps.error };
+  const who = said(a.name || asked, 120);
+  if (!isSid(a.sid) || a.translated !== true) throw refusal('"' + said(asked, 120) + '" is not an account Windows knows on this PC' + (a.error ? ' (' + said(a.error, 120) + ')' : '') + '. Name one person\'s account: LAPTOP\\ben.');
+  if (a.group === true || !personSid(a.sid)) throw refusal(who + ' is not one person\'s account (a group or a service). ' + (act === 'handover' ? 'Hand AGMessage\'s admin over to one person\'s account.' : 'Give rights to one person\'s account.'));
+  if (a.user !== true && a.profile !== true) throw refusal('Windows cannot confirm that ' + who + ' is one person\'s account on this PC: it is no local account and has never signed in here. Name a local account, or one that has signed in to this PC once.');
+  return { sid: a.sid, name: said(a.name || asked, 120) };
+}
+/** The names Windows gives these SIDs now (PS_WHOSE's names), each '' where it gives none. */
+function namesFor(c, sids) {
+  const list = sids.filter(isSid);
+  if (!list.length) return {};
+  const ps = c.H.powershell(PS_WHOSE, { AGM_SIDS: list.join(',') });
+  const names = ps.names && typeof ps.names === 'object' && !Array.isArray(ps.names) ? ps.names : {};
+  return Object.fromEntries(list.map((s) => [s, typeof names[s] === 'string' ? said(names[s], 120) : '']));
+}
+
+/** A Grants value written (one value per SID: its rights), or not done. */
+function writeGrant(H, sid, rights) {
+  const r = H.reg(['add', HKLM + '\\Grants', '/v', sid, '/t', 'REG_SZ', '/d', rights.join(','), '/f', '/reg:64']);
+  if (r.code !== 0) throw notDone('the install record\'s Grants for ' + sid + ' could not be written (' + (r.err || 'reg.exe ended with ' + r.code) + ')');
+}
+/** A Grants value removed: what was left, '' when it went (or was not there). */
+function removeGrant(H, sid) {
+  const r = H.reg(['delete', HKLM + '\\Grants', '/v', sid, '/f', '/reg:64']);
+  if (r.code === 0) return '';
+  return H.reg(['query', HKLM + '\\Grants', '/v', sid, '/reg:64']).code === 0 ? 'the install record\'s Grants for ' + sid + ' (' + (r.err || 'reg.exe ended with ' + r.code) + ')' : '';
+}
+/** The account's Grants value made `rights`, removed when there are none: '' when it is, else what stopped it. */
+function setGrant(H, sid, rights) {
+  if (!rights.length) return removeGrant(H, sid);
+  try { writeGrant(H, sid, rights); return ''; } catch (e) { return e.words; }
+}
+/** A task ended and removed: what was left ('' when it is gone). */
+function removeTask(H, tn) {
+  if (H.schtasks(['/Query', '/TN', tn]).code !== 0) return '';
+  const del = H.schtasks(['/Delete', '/TN', tn, '/F']);
+  return del.code !== 0 && H.schtasks(['/Query', '/TN', tn]).code === 0 ? 'the task ' + tn + ' (' + (del.err || 'schtasks.exe ended with ' + del.code) + ')' : '';
+}
+/**
+ * An account's inbox\<sid>\ or outbox\<sid>\ removed, never recursively: each entry by lstat, a folder (or a junction,
+ * which lstat shows as a link) by rmdir, which takes the junction and never what it names, anything else by unlink (a link
+ * by its own removal, never what it names); then the folder. What was left ('' when it is gone): a folder that holds
+ * files stays, and is said.
+ */
+function clearBox(fsImpl, dir) {
+  const P = pathOf(dir);
+  let names;
+  try { names = fsImpl.readdirSync(dir); } catch (e) { return e.code === 'ENOENT' ? '' : dir + ' (' + (e.code || e.message) + ')'; }
+  const left = [];
+  for (const name of names) {
+    const f = P.join(dir, name);
+    let st;
+    try { st = fsImpl.lstatSync(f); } catch (e) { if (e.code !== 'ENOENT') left.push(f + ' (' + (e.code || e.message) + ')'); continue; }
+    try {
+      if (st.isDirectory()) fsImpl.rmdirSync(f);
+      else { try { fsImpl.unlinkSync(f); } catch (e) { if (!st.isSymbolicLink()) throw e; fsImpl.rmdirSync(f); } }
+    } catch (e) { left.push(f + ' (' + (e.code || e.message) + ')'); }
+  }
+  if (left.length) return left.join('; ');
+  try { fsImpl.rmdirSync(dir); } catch (e) { if (e.code !== 'ENOENT') return dir + ' (' + (e.code || e.message) + ')'; }
+  return '';
+}
+
+/**
+ * What an account needs to send its requests: its inbox\ and outbox\ and its control task. None of them lets it do
+ * anything: the record's rights, read at each request, do.
+ *
+ * The `token` right is the read on token\, which Windows holds, so the record never names less than Windows grants: a read
+ * is given only once the record names the right, and taken back before the record stops naming it. A step that fails then
+ * leaves the record naming a read Windows does not grant (said, and put right by giving or taking back again), never a read
+ * the record does not name.
+ */
+function giveMeans(c, sid) {
+  accountFolder(c.H, c.fsImpl, c.root, 'inbox', sid, inboxGrants(sid));
+  accountFolder(c.H, c.fsImpl, c.root, 'outbox', sid, outboxGrants(sid));
+  registerControl(c.H, c.fsImpl, { root: c.root, sys: c.sys, node: c.node, script: c.script, sid });
+}
+/** An account's means taken away (it holds no right): its control task, inbox\ and outbox\. What was left, as words. */
+function dropMeans(c, sid) {
+  const P = pathOf(c.root);
+  return [removeTask(c.H, controlTask(sid)), ...['inbox', 'outbox'].map((box) => clearBox(c.fsImpl, P.join(c.root, 'machine', box, sid)))].filter(Boolean);
+}
+/** A read on token\ or logs\ given to `sid` (icacls /grant:r, by SID): '' when it is, else what stopped it. */
+function giveRead(c, name, sid) {
+  const dir = pathOf(c.root).join(c.root, name);
+  const r = c.H.icacls([dir, '/grant:r', grant(sid, 'R')]);
+  return r.code === 0 ? '' : 'the read on ' + dir + ' (' + (r.err || 'icacls.exe ended with ' + r.code) + ')';
+}
+/** A read on token\ or logs\ taken back from `sid` (icacls /remove:g, by SID): '' when it is, else what is left. */
+function takeGrant(c, name, sid) {
+  const dir = pathOf(c.root).join(c.root, name);
+  const r = c.H.icacls([dir, '/remove:g', '*' + sid]);
+  return r.code === 0 ? '' : 'the read on ' + dir + ' (' + (r.err || 'icacls.exe ended with ' + r.code) + ')';
+}
+/**
+ * The outbox\ folders of accounts that hold no right any more (the old admin's, kept after a handover for the answer it
+ * read), removed: never the laptop's admin's, a grantee's or `keep`'s.
+ */
+function sweepOutboxes(c, { admin, grants, keep }) {
+  const dir = pathOf(c.root).join(c.root, 'machine', 'outbox');
+  let names;
+  try { names = c.fsImpl.readdirSync(dir); } catch { return; /* none to sweep */ }
+  for (const sid of names) if (isSid(sid) && sid !== admin && sid !== keep && !Object.hasOwn(grants, sid)) clearBox(c.fsImpl, pathOf(dir).join(dir, sid));
+}
+
+/** The machine's events to be read now: the nudge at loopback, with the proof of the token; a server not answering is told nothing. */
+async function nudgeServer(c) {
+  const token = tokenFrom(c.root, c.fsImpl);
+  if (!token || !c.port) return null;
+  try {
+    const r = await (c.n.nudge || ((o) => ask({ ...o, method: 'POST', path: '/api/machine/events' })))({ port: c.port, token });
+    return r && r.ok && r.status === 200 && r.json && Number.isSafeInteger(r.json.written) ? r.json.written : null;
+  } catch { return null; /* the file is the authority: the server reads it at its next start */ }
+}
+/**
+ * An act's machine event appended: {seq, why}, `why` '' when it is, else the words saying it is not. The act stands
+ * either way and is answered as done: its answer says the audit log will not show it.
+ */
+function eventFor(c, ev) {
+  try { return { seq: appendEvent(c.machineDir, ev, c.fsImpl), why: '' }; } catch (e) {
+    return { seq: 0, why: ' No machine event says so, so the audit log will not show it: ' + ((e && e.words) || said(e && e.message, 200)) + '.' };
+  }
+}
+
+/** Why an account may not do `verb`, in its words: '' when it may. The rights are the install record's, read now. */
+function mayNot(c, verb) {
+  const asks = { start: 'start', stop: 'stop' }[verb];
+  const ask = c.adminName ? 'Ask ' + c.adminName + ', or an administrator.' : 'Ask this PC\'s AGMessage admin, or an administrator.';
+  if (c.elevated) return c.installed ? '' : 'AGMessage is not installed on this PC (no install record).';
+  if (!c.installed) return 'You have no AGMessage rights on this PC. Ask an administrator.';
+  if (!asks) return c.isAdmin ? '' : 'Only ' + (c.adminName || 'this PC\'s AGMessage admin') + ', this PC\'s AGMessage admin, can ' + ({ grant: 'give rights', revoke: 'take rights back', handover: 'hand AGMessage\'s admin over' })[verb] + '.';
+  if (c.rights.includes(asks)) return '';
+  if (!c.rights.length) return 'You have no AGMessage rights on this PC. ' + ask;
+  return 'You may not ' + asks + ' AGMessage on this PC (your rights here: ' + rightsWords(c.rights) + '). ' + ask;
+}
+/**
+ * A request read whole and refused for want of the right, as its machine event (`machine.refused`): who asked, what, and
+ * the rights it named. What the request names is never looked up: the account named is said as it was typed.
+ */
+function refusedEvent(c, req, why) {
+  const rights = req.verb === 'start' || req.verb === 'stop' ? [req.verb] : Array.isArray(req.rights) ? req.rights : [];
+  const asked = {
+    start: 'start AGMessage',
+    stop: 'stop AGMessage',
+    grant: 'give ' + req.account + ' ' + rightsWords(rights),
+    revoke: 'take back ' + (req.rights === 'all' ? 'every right' : rightsWords(rights)) + ' from ' + req.account,
+    handover: 'hand AGMessage\'s admin over to ' + req.account,
+  }[req.verb];
+  return eventFor(c, { kind: 'machine.refused', by: c.me, forAccount: c.me, rights, words: c.me.name + ' asked to ' + asked + ', and was refused: ' + why });
+}
+
+/**
+ * start: the server task run and its server waited for until it proves it holds the token; no event when it already
+ * serves. A server that has not proved itself in time is left as it is, never ended (it may be starting, or the watchdog
+ * retrying a held port): the answer says the task's state and the log's last line, and the event says it was asked.
+ */
+async function controlStart(c) {
+  const token = tokenFrom(c.root, c.fsImpl);
+  if (token) {
+    const h = await (c.n.hello || hello)({ port: c.port, token });
+    if (h.ok) return { already: true, words: 'AGMessage is already running (build ' + h.build + ').' };
+  }
+  let r;
+  try { r = await startAndProve({ H: c.H, root: c.root, port: c.port, fsImpl: c.fsImpl, n: c.n, end: false }); } catch (e) {
+    if (!e || e.ran !== true) throw e;
+    const ev = eventFor(c, { kind: 'machine.start', by: c.me, forAccount: c.me, words: c.me.name + ' ran AGMessage\'s server task; it was not answering within ' + Math.round((c.n.waitMs || START_WAIT_MS) / 1000) + ' s (the task: ' + e.task + ').' });
+    throw Object.assign(e, { words: e.words + ev.why, event: ev.seq });
+  }
+  const ev = eventFor(c, { kind: 'machine.start', by: c.me, forAccount: c.me, words: c.me.name + ' started AGMessage (build ' + r.build + ').' });
+  const audited = await nudgeServer(c);
+  return { started: true, build: r.build, audited, event: ev.seq, words: 'Started.' + ev.why };
+}
+/** stop: the stop at loopback with the proof, refused when busy until the person types a reason; it saves. */
+async function controlStop(c, req) {
+  const token = tokenFrom(c.root, c.fsImpl);
+  if (!token) throw refusal('AGMessage\'s token (token\\admin-token) could not be read, so it cannot be stopped at loopback. Ask an administrator.');
+  const s = await stopAndWait({ port: c.port, token, reason: 'stop', by: c.me.name || c.me.sid, force: req.force || '', n: c.n });
+  if (s.state === 'none') return { already: true, words: 'AGMessage is not running.' };
+  const rec = readLastStop(pathOf(c.root).join(c.root, 'data'), c.fsImpl);
+  const fresh = rec && !rec.unreadable && Number.isFinite(rec.at) && rec.at >= s.at;
+  const words = fresh && rec.saved ? 'Stopped, saved at ' + clock(rec.at) + '.' : 'Stopped, but its save record ' + (fresh ? 'says it did not save (' + (rec.unsaved || 'not all of it') + ')' : 'was not written') + '.';
+  const ev = eventFor(c, { kind: 'machine.stop', by: c.me, forAccount: c.me, words: c.me.name + ' stopped AGMessage' + (req.force ? ' while it was busy, with the reason "' + req.force + '"' : '') + ': ' + words });
+  return { saved: !!(fresh && rec.saved), at: fresh ? rec.at : null, event: ev.seq, words: words + ev.why };
+}
+/**
+ * grant: the rights asked added to the account's (U.5.1): its means first, then its Grants value, then, for `token`, its
+ * read on token\. A read Windows would not give is taken off the record again and said, the grant not done.
+ */
+async function controlGrant(c, req) {
+  const target = personFor(c, req.account, 'grant');
+  if (target.sid === c.admin) throw refusal(target.name + ' is this PC\'s AGMessage admin and holds every right already.');
+  const had = grantRightsOf(c.grants[target.sid]);
+  const add = req.rights.filter((r) => !had.includes(r));
+  if (!add.length) return { already: true, words: target.name + ' already holds ' + rightsWords(req.rights) + '.' };
+  let now = RIGHTS.filter((r) => had.includes(r) || add.includes(r));
+  giveMeans(c, target.sid);
+  const unwritten = setGrant(c.H, target.sid, now);
+  if (unwritten) {
+    if (!had.length) dropMeans(c, target.sid);
+    throw notDone('Nothing was given: ' + unwritten + '.', { rights: had });
+  }
+  let notGiven = '';
+  let back = '';
+  if (add.includes('token')) {
+    const why = giveRead(c, 'token', target.sid);
+    if (why) {
+      now = now.filter((r) => r !== 'token');
+      back = setGrant(c.H, target.sid, now);
+      notGiven = ' token was not given: ' + target.name + ' could not be given ' + why + '.' + (back ? ' The record still names token for ' + target.name + ', which Windows does not grant (' + back + '): take it back with "Take back from ' + target.name + ': token".' : '');
+    }
+  }
+  const given = add.filter((r) => now.includes(r));
+  if (!given.length) {
+    // Nothing given: an account the record names no right of loses the means made for it.
+    const left = had.length || back ? [] : dropMeans(c, target.sid);
+    throw notDone('Nothing was given.' + notGiven + (left.length ? ' Not yet removed: ' + left.join('; ') + '.' : ''), { rights: had });
+  }
+  // What the record names now: `token` too where it could not be taken off again.
+  const recorded = back ? RIGHTS.filter((r) => now.includes(r) || r === 'token') : now;
+  sweepOutboxes(c, { admin: c.admin, grants: { ...c.grants, [target.sid]: recorded.join(',') }, keep: c.me.sid });
+  const ev = eventFor(c, { kind: 'machine.grant', by: c.me, forAccount: target, rights: given, words: c.me.name + ' gave ' + target.name + ' ' + rightsWords(given) + ' (now ' + rightsWords(now) + ').' + notGiven });
+  const audited = await nudgeServer(c);
+  return { code: notGiven ? NOT_DONE : DONE, rights: recorded, audited, event: ev.seq, words: 'Given: ' + target.name + ' may now ' + rightsWords(now) + ' AGMessage on this PC.' + notGiven + ev.why };
+}
+/**
+ * revoke: the rights named taken from the account. `token` first, its read on token\ taken back, and only then the record
+ * (read at every request, so what it no longer names is refused at once, even if what follows fails); a read Windows would
+ * not take back stays on the record and is said, the revoke not done. With no right left, its control task, inbox\ and
+ * outbox\ go. A SID the record names is taken as it is, so an account Windows no longer knows can lose its rights.
+ */
+async function controlRevoke(c, req) {
+  let target;
+  if (isSid(req.account) && Object.hasOwn(c.grants, req.account)) target = { sid: req.account, name: namesFor(c, [req.account])[req.account] || req.account };
+  else {
+    const ps = c.H.powershell(PS_WHOSE, { AGM_SIDS: '', AGM_ACCOUNT: String(req.account) });
+    const a = ps.account && typeof ps.account === 'object' ? ps.account : {};
+    target = isSid(a.sid) ? { sid: a.sid, name: said(a.name || req.account, 120) } : null;
+  }
+  if (target && target.sid === c.admin) throw refusal(target.name + ' is this PC\'s AGMessage admin: hand AGMessage\'s admin over to someone else to take its rights.');
+  if (!target || !Object.hasOwn(c.grants, target.sid)) throw refusal(said(target ? target.name : req.account, 120) + ' has no AGMessage rights on this PC.');
+  const had = grantRightsOf(c.grants[target.sid]);
+  const take = req.rights === 'all' ? had : req.rights.filter((r) => had.includes(r));
+  if (!take.length) return { already: true, words: target.name + ' does not hold ' + rightsWords(req.rights) + '.' };
+  const tokenStays = take.includes('token') ? takeGrant(c, 'token', target.sid) : '';
+  const off = take.filter((r) => r !== 'token' || !tokenStays);
+  const stays = tokenStays ? ' ' + target.name + ' can still read the token: ' + tokenStays + ' could not be taken back, so the record still names token. Take it back again, or ask an administrator.' : '';
+  if (!off.length) throw notDone('Nothing was taken back.' + stays, { rights: had });
+  const left = had.filter((r) => !off.includes(r));
+  const recordWhy = setGrant(c.H, target.sid, left);
+  if (recordWhy) {
+    // The record is as it was, so every right it names still holds: only a read Windows already took back is taken.
+    const unrecorded = ' The record could not be written (' + recordWhy + '), so it still names ' + rightsWords(had) + ' for ' + target.name + ': take ' + (had.length === 1 ? 'it' : 'them') + ' back again.';
+    if (!off.includes('token')) throw notDone('Nothing was taken back.' + unrecorded + stays, { rights: had });
+    const ev = eventFor(c, { kind: 'machine.revoke', by: c.me, forAccount: target, rights: ['token'], words: c.me.name + ' took back the read on the token from ' + target.name + '.' + unrecorded });
+    const audited = await nudgeServer(c);
+    return { code: NOT_DONE, rights: had, audited, event: ev.seq, words: 'Taken back: only the read on the token, which ' + target.name + ' can no longer read.' + unrecorded + ev.why };
+  }
+  const gone = !left.length ? dropMeans(c, target.sid) : [];
+  const after = { ...c.grants };
+  if (left.length) after[target.sid] = left.join(','); else delete after[target.sid];
+  sweepOutboxes(c, { admin: c.admin, grants: after, keep: c.me.sid });
+  const ev = eventFor(c, { kind: 'machine.revoke', by: c.me, forAccount: target, rights: off, words: c.me.name + ' took back ' + rightsWords(off) + ' from ' + target.name + (left.length ? ' (still ' + rightsWords(left) + ')' : ', who now holds no right') + '.' + stays });
+  const audited = await nudgeServer(c);
+  return {
+    code: stays ? NOT_DONE : DONE, rights: left, audited, left: gone, event: ev.seq,
+    words: 'Taken back: ' + target.name + (left.length ? ' may now only ' + rightsWords(left) : ' has no AGMessage rights on this PC now') + '.' + stays
+      + (gone.length ? ' Not yet removed: ' + gone.join('; ') + '; its requests are refused all the same, since the record names no right of it.' : '') + ev.why,
+  };
+}
+/** The laptop's admin's reads, on token\ and logs\, given (again): what stopped one, as words. */
+const adminReads = (c, sid) => ['token', 'logs'].map((name) => giveRead(c, name, sid)).filter(Boolean);
+/**
+ * handover: AGMessage's admin given to another account, confirmed by its name typed again. The new admin's means first
+ * (inbox\, outbox\, control task); then the old admin's reads on token\ and logs\ taken back, and nothing handed over while
+ * one stays; then the record (Admin, AdminName; the new admin's own Grants value goes, since the admin holds every right);
+ * then the new admin's reads; the old admin's inbox\ now and its control task last, after this answer (it may be the task
+ * running this). The old admin keeps no right unless the new one gives it back. A handover to the admin itself gives its
+ * reads again, which puts right a handover whose reads Windows did not give.
+ */
+async function controlHandover(c, req) {
+  if (req.confirm.trim().toLowerCase() !== req.account.trim().toLowerCase()) throw refusal('To hand AGMessage\'s admin over, type the new admin\'s account name again exactly: "' + req.confirm + '" is not "' + req.account + '". Nothing was changed.');
+  const target = personFor(c, req.account, 'handover');
+  if (target.sid === c.admin) {
+    const missing = adminReads(c, target.sid);
+    if (missing.length) throw notDone(target.name + ' is this PC\'s AGMessage admin already, but could not be given ' + missing.join('; ') + '.');
+    return { already: true, words: target.name + ' is this PC\'s AGMessage admin already (its reads on the token and the logs given again).' };
+  }
+  const old = { sid: c.admin, name: c.adminName || c.admin };
+  giveMeans(c, target.sid);
+  // Nothing handed over: the old admin's reads given back, and the means made for an account the record names no right of
+  // taken away again.
+  const unhanded = (why) => {
+    const back = isSid(old.sid) ? adminReads(c, old.sid) : [];
+    if (!Object.hasOwn(c.grants, target.sid)) dropMeans(c, target.sid);
+    return notDone('Nothing was handed over: ' + why + (back.length ? ' ' + old.name + ', still the admin, could not be given back ' + back.join('; ') + ': hand AGMessage\'s admin over to ' + old.name + ' to give it again.' : ''));
+  };
+  if (isSid(old.sid)) {
+    const kept = ['token', 'logs'].map((name) => takeGrant(c, name, old.sid)).filter(Boolean);
+    if (kept.length) throw unhanded(old.name + ' would keep ' + kept.join('; ') + ', which could not be taken back.');
+  }
+  try { writeValue(c.H, { name: 'Admin', type: 'REG_SZ', value: target.sid }); } catch (e) { throw unhanded(e.words); }
+  const stuck = [];
+  let unnamed = '';
+  try { writeValue(c.H, { name: 'AdminName', type: 'REG_SZ', value: target.name }); } catch (e) { unnamed = ' The record\'s name for the admin could not be written (' + e.words.replace(/\.$/, '') + '), so its words may still name ' + old.name + '.'; }
+  if (Object.hasOwn(c.grants, target.sid)) stuck.push(removeGrant(c.H, target.sid));
+  const missing = adminReads(c, target.sid);
+  const notGiven = missing.length ? ' ' + target.name + ' could not be given ' + missing.join('; ') + ': hand AGMessage\'s admin over to ' + target.name + ' again to give it.' : '';
+  if (isSid(old.sid)) stuck.push(clearBox(c.fsImpl, pathOf(c.root).join(c.root, 'machine', 'inbox', old.sid)));
+  const grants = { ...c.grants };
+  delete grants[target.sid];
+  sweepOutboxes(c, { admin: target.sid, grants, keep: c.me.sid });
+  const ev = eventFor(c, { kind: 'machine.handover', by: c.me, forAccount: target, rights: RIGHTS, words: c.me.name + (c.elevated ? ' (an administrator)' : '') + ' handed AGMessage\'s admin on this PC over' + (isSid(old.sid) && old.sid !== c.me.sid ? ' from ' + old.name : '') + ' to ' + target.name + '; ' + (isSid(old.sid) ? old.name : 'the admin before') + ' keeps no right.' + notGiven });
+  const audited = await nudgeServer(c);
+  const leftWords = stuck.filter(Boolean);
+  return {
+    code: notGiven ? NOT_DONE : DONE, admin: target.sid, adminName: target.name, audited, left: leftWords, event: ev.seq,
+    words: target.name + ' is now this PC\'s AGMessage admin, with every right and the giving of them. ' + (isSid(old.sid) ? old.name : 'The admin before') + ' keeps none, unless ' + target.name + ' gives them back.' + notGiven + unnamed + (leftWords.length ? ' Not yet removed: ' + leftWords.join('; ') + '.' : '') + ev.why,
+    after: isSid(old.sid) ? () => removeTask(c.H, controlTask(old.sid)) : null,
+  };
+}
+
+const CONTROL_ACTS = Object.freeze({ start: controlStart, stop: controlStop, grant: controlGrant, revoke: controlRevoke, handover: controlHandover });
+
+/**
+ * control: one account's request, as SYSTEM from its control task (--for), or from an administrator's elevated console
+ * (--elevated, the request a file of machine\work\). Who asks is the task that ran (or the elevated account), never what
+ * the request says. The request taken (takeRequest) and read (requestOf); the right read from the install record now, a
+ * request refused for want of it a machine event of its own; the act done; under --for the answer written into that
+ * account's outbox\, refusals too ({v, id, verb, code, words, …}), but never when no request was waiting (the answer there
+ * may be another run's). An act done in part answers not done (2), with what it did.
+ */
+async function control(opts, { run = childProcess.execFileSync, fsImpl = fs, net: n = {} } = {}) {
+  const root = needPath(opts, '--machine');
+  const H = hands(opts['--sys'], run);
+  const P = pathOf(root);
+  const elevated = opts['--elevated'] === true;
+  if (elevated === (opts['--for'] !== undefined)) throw usage('machine.js control takes --for <SID> (its control task\'s) or --elevated --request <file> (an administrator\'s console), one of them.');
+  const me = accountOf(H.whoami(['/user', '/fo', 'csv', '/nh']).out);
+  let sid;
+  let file;
+  if (elevated) {
+    if (!me) throw refusal('Your Windows account could not be read (whoami.exe), so nothing was done.');
+    if (!elevatedOf(H.whoami(['/groups', '/fo', 'csv', '/nh']).out)) throw refusal('machine.js control --elevated runs in an administrator\'s elevated console: run Who may run AGMessage… as an administrator.');
+    const asked = String(opts['--request'] || '');
+    const rel = fullPath(asked) ? P.relative(P.join(root, 'machine', 'work'), asked).split(/[\\/]/) : [];
+    if (rel.length !== 1 || !/^[A-Za-z0-9.-]{1,60}$/.test(rel[0])) throw usage('--request is "' + said(asked, 120) + '", which is not a file of ' + P.join(root, 'machine', 'work') + '.');
+    sid = me.sid;
+    file = asked;
+  } else {
+    sid = String(opts['--for']);
+    if (!personSid(sid)) throw usage('--for is "' + said(sid, 80) + '", which is not one person\'s SID.');
+    if (!me || me.sid !== SID.system) throw refusal('machine.js control --for runs as SYSTEM, from that account\'s control task: run Who may run AGMessage… as an administrator instead.');
+    file = P.join(root, 'machine', 'inbox', sid, 'request.json');
+  }
+  const outbox = P.join(root, 'machine', 'outbox', sid);
+  const answer = (a) => { if (!elevated) { try { writeAnswer(fsImpl, outbox, { v: 1, ranAs: me ? me.sid : '', for: sid, ...a }); } catch { /* its outbox is gone: the account no longer holds a right */ } } };
+  let req;
+  try {
+    const got = requestOf(takeRequest(fsImpl, file, P.join(root, 'machine', 'work')).bytes);
+    if (got.problem) throw refusal(got.problem, { id: got.id || '' });
+    req = got.request;
+  } catch (e) {
+    if (!(e && e.none)) answer({ id: (e && e.id) || '', verb: '', code: e && e.refused ? REFUSED : NOT_DONE, words: (e && e.words) || said(e && e.message, 200) });
+    throw e;
+  }
+  const record = readRecord(H);
+  const grants = readGrants(H);
+  const admin = isSid(record.values.Admin) ? record.values.Admin : '';
+  const app = record.values.InstallDir || '';
+  const c = {
+    root, sys: opts['--sys'], H, fsImpl, n, elevated, machineDir: P.join(root, 'machine'),
+    installed: record.installed, admin, adminName: said(record.values.AdminName || '', 120), grants,
+    isAdmin: !elevated && !!admin && sid === admin,
+    rights: sid === admin ? [...RIGHTS] : grantRightsOf(grants[sid]),
+    port: Number(record.values.Port) || 0,
+    node: fullPath(app) ? pathOf(app).join(app, 'node', 'node.exe') : '', script: fullPath(app) ? pathOf(app).join(app, 'app', 'machine.js') : '',
+  };
+  const whoAsks = () => (elevated ? { sid: me.sid, name: me.name } : { sid, name: sid === admin ? (c.adminName || namesFor(c, [sid])[sid] || sid) : (namesFor(c, [sid])[sid] || sid) });
+  let result;
+  try {
+    const no = mayNot(c, req.verb);
+    if (no) {
+      // On an install, a request beyond the asker's rights is in the audit log: who asked, and what.
+      let ev = { why: '' };
+      if (c.installed) {
+        c.me = whoAsks();
+        ev = refusedEvent(c, req, no);
+        await nudgeServer(c);
+      }
+      throw refusal(no, { event: ev.seq || 0 });
+    }
+    if ((req.verb === 'start' || req.verb === 'stop') && !c.port) throw notDone('The install record names no port, so AGMessage cannot be asked: reinstall it.');
+    if (['grant', 'revoke', 'handover'].includes(req.verb) && !c.node) throw notDone('The install record names no install folder, so no control task can be made: reinstall AGMessage.');
+    c.me = whoAsks();
+    result = await CONTROL_ACTS[req.verb](c, req);
+  } catch (e) {
+    answer({ id: req.id, verb: req.verb, code: e && e.usage ? USAGE : e && e.refused ? REFUSED : NOT_DONE, words: (e && e.words) || said(e && e.message, 200), ...(e && e.busy ? { busy: true, forceable: true } : {}) });
+    throw Object.assign(e, { id: req.id });
+  }
+  const { after, code = DONE, ...told } = result;
+  answer({ id: req.id, verb: req.verb, code, ...told });
+  if (after) {
+    const stuck = after();
+    if (stuck) {
+      told.words += ' Not yet removed: ' + stuck + ', which refuses every request since the record no longer names that account.';
+      answer({ id: req.id, verb: req.verb, code, ...told });
+    }
+  }
+  const out = { id: req.id, ...told, ranAs: me ? me.sid : '', for: sid };
+  if (code !== DONE) throw notDone(told.words, out);
+  return out;
 }
 
 // ---------------------------------------------------------------- restore (the way back)
@@ -1636,6 +2345,7 @@ const OUT_FIELDS = Object.freeze([
   'root', 'setup', 'taskSid', 'admin', 'version', 'previous', 'removed', 'left', 'ready', 'running', 'busy', 'line', 'saved', 'backup', 'at', 'forced', 'facts', 'restored', 'unchanged',
   'programs', 'agree', 'adminName', 'approverName', 'startedSid', 'screenSid', 'choiceCount', 'choice1Sid', 'choice1Name', 'choice2Sid', 'choice2Name',
   'answered', 'build', 'needsAccount', 'tail', 'made', 'username', 'forceable',
+  'id', 'ranAs', 'for', 'started', 'already', 'audited', 'rights', 'event', 'ran', 'task',
 ]);
 
 /** Run one verb: {code, text, out}. */
@@ -1656,6 +2366,7 @@ async function run(argv, stand = {}) {
     else if (a.verb === 'whose') r = whose(a.opts, stand);
     else if (a.verb === 'start') r = await start(a.opts, stand);
     else if (a.verb === 'first-account') r = await firstAccount(a.opts, stand);
+    else if (a.verb === 'control') r = await control(a.opts, stand);
     else r = await restore(a.opts, stand);
     text = r.words || 'Done.';
   } catch (e) {
@@ -1688,9 +2399,10 @@ if (require.main === module) {
 }
 
 module.exports = {
-  main, run, parse, prepare, install, uninstall, preinstallCheck, upgradeStop, status, restore, whose, start, firstAccount,
+  main, run, parse, prepare, install, uninstall, preinstallCheck, upgradeStop, status, restore, whose, start, firstAccount, control,
+  controlTaskXml, controlTask, controlSddl, requestOf, takeRequest, clearBox, grantRightsOf, elevatedOf, appendEvent, lastSeqOf, RIGHTS, CONTROL_VERBS, CONTROL_LATER, REQUEST_MAX,
   personSid, accountOf, whoseOf, adminOf, serverProgram, programWords, outsideOwnChain, accountFile, startedFrom, proven, PS_WHOSE, PS_PROGRAMS, START_WAIT_MS, PROGRAMS_WAIT_MS,
-  CHILDREN, MACHINE_SUBS, BASE_GRANTS, SETUP_GRANT, inboxGrant, outboxGrant, serverTaskXml, winArg, firewallRules, recordValues, ownerSidOf, grant, machineEvent,
+  CHILDREN, MACHINE_SUBS, BASE_GRANTS, SETUP_GRANT, inboxGrants, outboxGrants, serverTaskXml, winArg, firewallRules, recordValues, ownerSidOf, grant,
   csvRows, taskStateOf, installOf, kindOf, NEVER_ROLLED_BACK, backupEstimate, readLastStop, fullPath,
   hello, ask, serverProof, askProof, sameProof, tokenOf, busyLineOf, busyIsBusy, BUSY_KEYS, hands, portAnswers, portCloses, healthOf, HELLO_SAYS, ASK_SAYS,
   PS_OWNER, PS_FIREWALL_ADD, PS_FIREWALL_REMOVE, PS_STATUS,

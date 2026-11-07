@@ -381,7 +381,7 @@ test('launch.js reads this PC\'s AGMessage admin from the install record by reg.
   assert.ok(!launch.TASK_PASSED.some((n) => /^(AGM_|NODE_|ADMIN|ANTHROPIC|PATH$)/i.test(n)), 'none of them AGMessage\'s, Node\'s, a secret or the search path');
 });
 
-test('launch.js knows serve, token, status and open, and refuses any other word; token takes --machine <full path> [--sys <System32 folder>]', () => {
+test('launch.js knows serve, token, status, open, start, stop and rights, and refuses any other word; token takes --machine <full path> [--sys <System32 folder>]', () => {
   const said = [];
   const out = (t) => said.push(t);
   const machine = tmp('agm-machine-');
@@ -397,8 +397,8 @@ test('launch.js knows serve, token, status and open, and refuses any other word;
   const fits = 'launch.js token takes --machine <folder> and --sys <folder>, each once and each with its folder; ';
   const needs = 'launch.js token needs --machine <folder>, the installed node\'s folder as a full path (%ProgramData%\\AGMessage).';
   assert.deepEqual(said, [
-    'launch.js knows serve, token, status or open.',
-    'launch.js knows serve, token, status or open. "boot" is not one of them.',
+    'launch.js knows serve, token, status, open, start, stop or rights.',
+    'launch.js knows serve, token, status, open, start, stop or rights. "boot" is not one of them.',
     needs,
     needs,
     fits + '"--print" does not fit.',

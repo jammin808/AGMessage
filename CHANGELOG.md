@@ -6460,6 +6460,94 @@ Linux stand-in for Windows — CI builds it on the next push; its life cycle, ru
   `SECURITY.md`, `THIRD-PARTY-NOTICES.md` and `CLAUDE.md`. `docs/NODES.md` is unchanged: nothing of the installer
   reaches the Show Bus, the context or the hello.
 
+**The laptop's admin, the rights it gives, and the control tasks** (the plan's Part 6, unit U17, with the owner's answers
+38 and 40; the code, its tests and a Linux stand-in for Windows, with the Windows readings lane taking R8, R11 and R13 on
+the next push; nothing of it has run on Windows yet)
+- **Four rights, one admin.** The Windows account that ran the install is this PC's AGMessage admin (`HKLM\SOFTWARE\AGMessage`
+  `Admin` and `AdminName`, written by `machine.js` alone). It holds `token` (reads the admin token: the break-glass sign-in,
+  Accept, the token's export, the first admin account), `start`, `stop` and `upgrade`, and alone gives them, each to one
+  person's account (a group, a service, or an account Windows cannot confirm is a person's here is refused: "Give rights
+  to one person's account."), takes them back, or hands the admin over. An account given rights cannot give them on.
+  `Grants` holds the rest, one value per SID; the record is read at every request, so a right taken back holds at once,
+  even if its control task is still there.
+- **One control task per account with a right**, `\AGMessage\Control-<SID>`: SYSTEM, run on demand only, requests queued,
+  10 minutes at most, its action `node.exe app\machine.js control --for <SID> --machine … --sys …` fixed at registration,
+  its descriptor `D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;<SID>)`, so that account alone may read and run it and which task
+  ran says whose request it is. The install registers the admin's (and on an upgrade each grantee's again from the new
+  definition); a grant registers one, a revoke of the last right removes it, and the uninstall removes them all.
+- **A request** (`machine.js control`, new): the person's `request.json` in `machine\inbox\<SID>\` (only that account may
+  add a file there and write it, never a folder or a junction) is taken only when `lstat` shows a file of its own (a link,
+  a hard link, a folder or one over 4 KB refused, and one swapped between the look and the open, and whatever was there
+  removed, so nothing is read twice), its bytes copied into `machine\work\` and read from that copy;
+  it must be whole JSON, an `id`, a known verb (`start`, `stop`, `grant`, `revoke`, `handover`; `upgrade` and `back` are
+  U18's) and only that verb's fields, each of its type. The answer, refusals too, goes to `machine\outbox\<SID>\answer.json`
+  (`{v, id, verb, code, words, ranAs, for, …}`), which that account may read; a run that finds no request waiting (a second
+  press, queued) writes none, since the one there may be another run's. An act done in part answers not done (2) with
+  what it did, and an act done whose event cannot be appended answers done, saying the audit log will not show it.
+  `start` runs the server task and waits for the server to prove it holds the token ("Started."; one already serving is
+  said and changes nothing); one not proving itself within 35 s is left as it is, never ended (it may still be starting,
+  and Task Scheduler's End is no stop), its task's state and the log's last line said; `stop` is the stop
+  at loopback with the proof, "Not stopped: AGMessage is busy (3 pages active, a countdown running). Type a reason to stop
+  it anyway." until a reason is typed, then "Stopped, saved at 20:31.". The `token` right is the read on `token\`, which
+  Windows holds, so the record never names less than Windows grants: `grant` makes the account's inbox and outbox and its
+  control task, writes its `Grants` value, and only then gives the read for `token` (one Windows will not give is taken
+  off the record again and said, not done); `revoke` takes the read back first, then the record, then what the account no
+  longer needs (a read Windows keeps stays on the record, said, not done); `handover`, confirmed by the new admin's name
+  typed again, makes the new admin's folders and task, takes the old admin's reads (handing nothing over while one stays),
+  rewrites the record, gives the new admin every right, its reads and the giving, and removes the old admin's inbox and,
+  last, after the answer, its control task; a handover to the admin itself gives its reads again. An account's folders
+  are removed entry by entry, never recursively, here and at the uninstall, so a link left in one is never followed. Its words: "You have no AGMessage rights on this PC. Ask LAPTOP\ana,
+  or an administrator." and "Only LAPTOP\ana, this PC's AGMessage admin, can give rights."
+- **An administrator's elevated console** (`machine.js control --elevated --request <machine\work\file>`, which
+  `launch.js` runs when it finds its token elevated: Administrators and a High integrity label, read by SID) may do every
+  act, so a laptop whose admin account is gone is handed over; its event names that administrator.
+- **The Start menu's Start AGMessage, Stop AGMessage… and Who may run AGMessage…** (`launch.js start`, `stop`, `rights`):
+  each writes the person's request (their SID from `whoami.exe`) into their inbox, runs their own control task
+  (`schtasks.exe /Run`, by its absolute path), waits for the answer to that request's id and says it. Stop asks for the
+  reason when busy and asks again with it (Enter leaves it running). Who may run lists the admin and each grant (names as
+  Windows gives them now, by one `powershell.exe`), and takes one line: "Give LAPTOP\ben: start, stop", "Take back from
+  LAPTOP\ben: stop" (or all), "Hand over to LAPTOP\ben", the last confirmed by typing the name again.
+- **The machine's events** (`machine\events.jsonl`, appended by `machine.js` alone, in place, under a lock so no two take
+  one seq, one older than 5 s, below an append's 10 s wait, taken as a crash's): `{seq, at, kind, by, for, rights, words}`, `by` and `for` Windows accounts by SID and name, never a token, a
+  password or a path in a profile. The server, the audit log's one writer, reads the file (`lib/machineevents.js`, new,
+  through `fs.promises`; `AGM_MACHINE_EVENTS`, which the server task now passes as `launch.js serve --events`) after the
+  hold and at each `POST /api/machine/events` (the nudge each act now sends, answered with how many rows were written),
+  and writes one row per event, in seq order: `machine.admin`, `machine.grant`, `machine.revoke`, `machine.handover`,
+  `machine.start`, `machine.stop`, `machine.refused` (a request read whole and refused for want of the right: who asked
+  and what, the account it names said as typed and never looked up; a request that is not one leaves none), and
+  `machine.upgrade`, `machine.upgrade.refused` and `machine.import` once U18 and U14 append them. A row names both
+  accounts by their whole SIDs (the audit log keeps a Windows actor's id and target up to a SID's 184 characters, where
+  any other actor's stay at 40 and 80): its actor the Windows account that asked (`{t: 'windows', id: <SID>, name}`), its
+  target the SID of the account acted for; its words the event's, the rights, when it was done ("· done 20:31 UTC on 7 Nov
+  2026", so a stop, written at the next start, keeps its own time) and the event's seq, the words giving way with an
+  ellipsis before that end is cut. The last seq written is kept in settings (`machineSeq`, which U15 keeps through an
+  archived event, as the plan now says) and named in each row, so a restart, even one before the settings were saved,
+  never writes an event twice or skips one. A line that is not an event
+  is passed over and said; a row never holds the token (taken out by value, in either case). A copy whose settings could
+  not be read writes none until they can.
+- **The readings lane**: R11 is taken (two standard accounts made for it, one the control task is for, as
+  `app/machine.js` registers it over a machine folder of the lane's: ten runs of `schtasks /run` from a task as that
+  account, each answered as SYSTEM for its SID, and ten from the second account, each refused; the met mark is 10 of 10);
+  R8 reads a control task's definition back (the account it is for may read and run it, another may not, no secret in
+  it); R13 runs with a control task's principal and settings, held to `controlTaskXml` element for element, and waits for
+  U18's words alone.
+- Held on Linux (`test/control.test.js`, new; `test/machine.test.js`, `test/readings.test.js`, `test/installer.test.js`):
+  a request not whole, over 4 KB, of an unknown verb or with a field of the wrong type refused with no event; a link, a
+  hard link or a file swapped after its look refused; a right taken back refused at once; giving, taking back and handing
+  over from an account that is not the admin refused, each a `machine.refused` event; a handover leaving the old admin no
+  right; the token's read and the record in their order when Windows refuses a step of a grant, a revoke or a handover;
+  an account's folders removed without following a link; the elevated console's handover; start (one not answering left
+  as it is) and stop with their events; an act whose event fails answered done; the events written as rows exactly once
+  across a nudge and restarts, in seq order, a local account's and an Entra ID account's SIDs whole, a stop's 200-character
+  reason and its own time kept, with no token in any row;
+  `launch.js` wired to `machine.js control` end to end. What only a Windows run proves: that a control task's descriptor
+  lets its one standard account run it on demand and refuses another (R11), that it runs as SYSTEM, the access lists of
+  the inbox and outbox, the account lookup, and the Start menu's consoles; the lab's line 7 (the admin as a standard
+  account, a second given `start` and `stop`, a third given nothing) is the show laptop's.
+- The papers: `README.md`, `README.txt` (the Start menu's items, who may run AGMessage), `docs/INSTALL.md` (The laptop's
+  admin and its rights; the machine's events), `docs/ACCOUNTS.md`, `docs/DESIGN.md`, `docs/ANALYSIS.md`, `SECURITY.md` and
+  `CLAUDE.md`. `docs/NODES.md` is unchanged: the context, the hello and the AI's brief carry none of it.
+
 **Fixed**
 - An upload whose stored path is no file (a folder in its place) is refused as one that could not be checked, on every
   platform. The archive's check opened it and, on Windows, read a folder as an empty file, so it was refused in the

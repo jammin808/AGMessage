@@ -623,7 +623,7 @@ test('the Start menu: each item is node.exe on launch.js, a verb launch.js knows
     const fields = new Map([...l.matchAll(/(\w+): "((?:[^"]|"")*)"/g)].map((m) => [m[1], m[2].replace(/""/g, '"')]));
     return { name: fields.get('Name'), file: fields.get('Filename'), params: fields.get('Parameters'), dir: fields.get('WorkingDir'), flags: /Flags:/.test(l) };
   });
-  assert.deepEqual(items.map((i) => i.name), ['{group}\\Open AGMessage', '{group}\\Show the admin token', '{group}\\AGMessage status'], 'the items this build has: Start, Stop, Upgrade, Go back and Who may run are later units\'');
+  assert.deepEqual(items.map((i) => i.name), ['{group}\\Open AGMessage', '{group}\\Show the admin token', '{group}\\Start AGMessage', '{group}\\Stop AGMessage...', '{group}\\Who may run AGMessage...', '{group}\\AGMessage status'], 'the items this build has, in the plan\'s order: Upgrade and Go back are a later unit\'s');
   const verbs = [];
   for (const i of items) {
     assert.equal(i.file, '{app}\\node\\node.exe', i.name + ': the signed node.exe, never a .bat or a program of its own');
@@ -638,7 +638,7 @@ test('the Start menu: each item is node.exe on launch.js, a verb launch.js knows
     assert.deepEqual([a.machine, a.sys], [MACHINE, SYS], i.name + ': its folders, as launch.js reads none from its environment');
     verbs.push(a.verb);
   }
-  assert.deepEqual(verbs, ['open', 'token', 'status']);
+  assert.deepEqual(verbs, ['open', 'token', 'start', 'stop', 'rights', 'status']);
 });
 
 test('the installer\'s code: every machine-level act is a machine.js command it knows, with options it takes; the password goes in a file of machine\\work\\, never a command line or the log', () => {

@@ -77,6 +77,8 @@ const { StageRecord, confidentialOf, whoSaid, didSaid, seenSaid } = require('./l
 const tunnelend = require('./lib/tunnelend');
 const busy = require('./lib/busy');
 const machinewire = require('./lib/machinewire');
+const { MachineEvents, seqOfRow: machineSeqOfRow } = require('./lib/machineevents');
+const { redact: redactSecrets } = require('./lib/serverlog');
 const { monitorEventLoopDelay } = require('perf_hooks');
 
 const { BUILD, parseBuild, compareBuilds } = require('./lib/version');
@@ -1380,11 +1382,28 @@ app.post(machinewire.PATHS.stop, machineBody, (req, res) => {
   machineStopping = { ok: true, stopping: true, forced, line };
   res.json(machineStopping);
 });
-// The machine's events are to be read: the nudge carries nothing. This copy keeps none to read, and says so.
-app.post(machinewire.PATHS.events, machineBody, (req, res) => {
+// The machine's events (lib/machineevents.js): the installed node's machine\events.jsonl, which only the machine's commands
+// append and which AGM_MACHINE_EVENTS names under the task, turned into audit rows by this server, the log's one writer:
+// each event once, in seq order, the last seq written kept in settings (and named in each row, so a restart before the
+// settings were saved still finds it). Read once this copy serves, after the banner, and at each nudge. A portable copy
+// keeps none. A row never holds the token: one that would is written without it, before its words are bounded.
+const MACHINE_EVENTS = RUNS === 'task' && typeof process.env.AGM_MACHINE_EVENTS === 'string' ? process.env.AGM_MACHINE_EVENTS : '';
+const machineEvents = MACHINE_EVENTS ? new MachineEvents({
+  file: MACHINE_EVENTS,
+  scrub: (t) => redactSecrets(t, [ADMIN_TOKEN]),
+  write: (row) => audit.write(row.actor, row.action, row.target, row.words),
+  lastSeq: () => Math.max(Number.isSafeInteger(settings.machineSeq) ? settings.machineSeq : 0, ...audit.latest(500).map(machineSeqOfRow)),
+  saveSeq: (seq) => { settings.machineSeq = seq; saveSettings(); },
+  blocked: () => (settingsRead.unread ? settingsRead.words + ', where the last machine event written is kept: they are written once it can be read' : ''),
+  log: (line) => console.log(line),
+}) : null;
+// The machine's events are to be read: the nudge carries nothing, and is answered once they are, with how many were written.
+app.post(machinewire.PATHS.events, machineBody, async (req, res) => {
   if (!machineAsked(req, res)) return;
   if (Buffer.isBuffer(req.body) && req.body.length) return res.status(400).json({ ok: false, error: 'The nudge carries nothing.' });
-  res.json({ ok: true, read: 0, words: 'Heard. This AGMessage keeps no machine events to read.' });
+  if (!machineEvents) return res.json({ ok: true, read: 0, words: 'Heard. This AGMessage keeps no machine events to read.' });
+  const r = await machineEvents.read();
+  res.json({ ok: true, read: r.read, written: r.written, words: r.words });
 });
 
 // A download, by its ticket (plan 4-§4.6.6): the form field `t`, a ticket `file:download` gave the page's socket, for this
@@ -6540,8 +6559,10 @@ holdDataFolder(() => front.listen(PORT, HOST, () => {
     console.log('  Saved rooms: ' + ROOMS_DIR);
     console.log('  Uploads:     ' + UPLOAD_DIR + '\n');
   });
-  // The tunnel's kept end, read once the banner is whole, so no line of it falls inside the banner.
+  // The tunnel's kept end, read once the banner is whole, so no line of it falls inside the banner; then the machine's
+  // events this copy has not written yet (an install's, a start's, a stop's, the rights given while it was down).
   bannerSaid.then(() => tunnelAtStart(Date.now()));
+  if (machineEvents) bannerSaid.then(() => machineEvents.read()).catch((e) => console.error('  Machine events: not read at start (' + (e && e.message ? e.message : e) + '); the next nudge or start reads them.'));
   // What the check at start found that the banner has not said is said once it answers and the banner is whole. Only
   // then, with this copy serving, may the browser open: the page it opens is this copy's (lib/startup.js), and a log that
   // needs the person at this laptop opens it on the admin page, where Health asks it.

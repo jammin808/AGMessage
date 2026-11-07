@@ -339,8 +339,8 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   fence cannot follow it fails. The machine's own commands (`launch.js`, and `machine.js`) require
   Node's built-ins only, and reach `require` no other way, so a planted package never runs as the person at the PC or,
   for `machine.js`, as SYSTEM.
-- The installed node's machine-level commands (`machine.js`, run elevated or as SYSTEM by the installer and, later, the
-  control tasks) make and defend the machine folder, the server task, the firewall rules and the one install record,
+- The installed node's machine-level commands (`machine.js`, run elevated or as SYSTEM by the installer and the control
+  tasks) make and defend the machine folder, the server task, the firewall rules and the one install record,
   running Windows' programs by their absolute paths in the `{sys}` they are given, never a bare name, and reading no
   machine path from their environment. The server task runs as LocalService under a SID of its own,
   `SeChangeNotifyPrivilege` alone (so `SeImpersonatePrivilege` is removed), with no window and no entry in Services; its
@@ -388,6 +388,38 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   last; data kept is left with SYSTEM and Administrators alone (every right the laptop's admin and each grantee were given
   on it taken back, their inbox and outbox folders removed), marked in HKLM (`Kept`) for an install to take again, which
   finds whose it is anew.
+- **The laptop's admin, its rights and the control tasks** (`docs/INSTALL.md`). The Windows account that ran the install
+  is this PC's AGMessage admin (`Admin`, by SID, in the install record, which `machine.js` alone writes); it holds
+  `token`, `start`, `stop` and `upgrade`, and alone gives them, each to one person's account (a group, a service or an
+  account Windows cannot confirm is a person's here is refused), takes them back or hands the admin over; an account
+  given rights cannot give them on. SYSTEM runs only the control tasks, one per account with a right
+  (`\AGMessage\Control-<SID>`), each `machine.js control --for <SID>` fixed at registration, its descriptor letting that
+  account alone (beside SYSTEM and Administrators) read and run it, so which task ran says whose request it is and nothing
+  in the request can change that. A request is read from that account's own inbox only when `lstat` shows a file of its
+  own (a link, a hard link, a reparse point Windows reads as a link, a folder or one over 4 KB refused, and removed so
+  nothing is read twice), the file opened checked to be the one `lstat` saw, its bytes copied into `machine\work\`
+  (SYSTEM and Administrators only) and read from that copy, never from a file its account can still change; it must be
+  whole JSON of a known verb with only that verb's fields, each of its type, and anything else is refused, never
+  defaulted. The right is read from the record at that moment, so one taken back holds at once even if its control task
+  could not be removed; grant, revoke and handover come only from the laptop's admin's own task. A request beyond its
+  asker's rights is refused and audited (`machine.refused`), the account it names never looked up. The `token` right is
+  the read on `token\`, which Windows holds, so the record never names less than Windows grants: a grant records the right
+  once its means are made and gives the read only after; a revoke takes the read back first, then the record; a handover
+  makes the new admin's folders and task, takes the old admin's reads (handing nothing over while one stays), rewrites
+  the record, then gives the new admin its reads, the old admin's control task last; a read Windows refuses to give or
+  take back is said and answered not done, and the record stays where it was. An account's inbox takes files, never a
+  folder or a junction, and its folders are removed entry by entry, never recursively, so a link is never followed. A
+  start never ends the server task (Task Scheduler's End is TerminateProcess, never the stop). An administrator's elevated console may do every act (a
+  laptop whose admin account is gone), refused when its token is not elevated (read by SID). What SYSTEM does is bounded
+  by the record and the request's verb: start runs the server task, stop is the server's own stop at loopback with the
+  proof, grant and revoke write the record's `Grants` and the account's own folders, task and token read. Each act done
+  is one event in `machine\events.jsonl` (appended in place, under a lock, never a token, a password or a path in a
+  profile), which the server, the audit log's one writer, turns into one row each, exactly once (the seq kept in settings
+  and named at each row's end, which its words never push past the cut), naming both accounts by their whole SIDs and
+  when the act was done, with the token taken out of any row by value; an act whose event cannot be appended is answered
+  done with words saying the log will not show it. A bug in `machine.js` runs as SYSTEM: it requires
+  Node's built-ins only, and its refusals are tests (`test/control.test.js`). Which descriptor rights let a standard
+  account run its task on demand, and that another is refused, is the Windows readings lane's R11, not yet run.
 - A seat On stage holds messages and nothing else, on the server, for the admin seated there too: it is given no upload
   token, and an upload token is checked again when it is used, against the seat its page holds then; the admin's move of
   a page to a seat that shares no file ends its token in the same tick, so that page uploads nothing more with the one it

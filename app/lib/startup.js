@@ -219,6 +219,14 @@ function channelOf(env, { programDir, platform = process.platform }) {
     if (!isFullPath(logs, platform)) return { runs: asked, problem: `AGM_LOG_DIR is "${said}", which is not a full path. The installed node's logs folder is a full path outside ${programDir}.` };
     if (isInside(logs, programDir, platform)) return { runs: asked, problem: `AGM_LOG_DIR is ${said}, inside the program's folder ${programDir}. The installed node's logs folder is outside it, where an upgrade never replaces it.` };
   }
+  // The machine's events file, which the server reads and never writes (machine\events.jsonl): the launcher's, a full
+  // path outside the program's folder, where only the machine's own commands write. Unset, the node reads none.
+  const events = typeof env.AGM_MACHINE_EVENTS === 'string' ? env.AGM_MACHINE_EVENTS : '';
+  if (events) {
+    const said = cleanText(events, 260);
+    if (!isFullPath(events, platform)) return { runs: asked, problem: `AGM_MACHINE_EVENTS is "${said}", which is not a full path. The installed node's machine events are a file outside ${programDir}.` };
+    if (isInside(events, programDir, platform)) return { runs: asked, problem: `AGM_MACHINE_EVENTS is ${said}, inside the program's folder ${programDir}. The machine's events are outside it, where only the machine's own commands write.` };
+  }
   return { runs: asked, problem: '' };
 }
 

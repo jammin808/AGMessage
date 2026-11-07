@@ -872,10 +872,12 @@ folder named from its drive or a network share, else none) and its `spawn` hande
 `CHILD` (`fork`: this `node.exe` on `server.js` beside it, or on a test's stand-in `AGM_CHILD`, which a start refuses
 with code 3 unless it is a full path by `isFullPath`, so on Windows never `\server.js` from the current drive's root or
 `C:server.js` on a drive's current folder, before anything runs or is written); `launch.js`'s
-`path.win32.join(sys, 'reg.exe')` (Show the admin token), `exe(name)` (`status`'s `schtasks.exe` and `reg.exe` in the
-System32 folder `--sys` names), `execPath` (`serve`'s watchdog, `supervise.js` beside it) and `plan.file` (`open`'s
-`openPlan`: `explorer.exe` in the Windows folder `--sys` sits in, named from its drive, or nothing is opened), with the
-runner `run` that `open` hands to `status`; `machine.js`'s `exe(name)` (its `schtasks.exe`, `icacls.exe`, `reg.exe`,
+`path.win32.join(sys, 'reg.exe')` (Show the admin token), `exe(name)` (`windowsHands`: `status`'s `schtasks.exe` and
+`reg.exe`, the requests' `whoami.exe` and `schtasks.exe /Run` of the person's own control task, and Who may run's
+`reg.exe` and `powershell.exe`, in the System32 folder `--sys` names), `execPath` (`serve`'s watchdog, `supervise.js`
+beside it, and an elevated console's `machine.js control --elevated` beside it) and `plan.file` (`open`'s `openPlan`:
+`explorer.exe` in the Windows folder `--sys` sits in, named from its drive, or nothing is opened), with the runner `run`
+that `open` hands to `status` and each request to `windowsHands` and `adminName`; `machine.js`'s `exe(name)` (its `schtasks.exe`, `icacls.exe`, `reg.exe`,
 `whoami.exe` and `WindowsPowerShell\v1.0\powershell.exe` in that System32 folder, each by its absolute path, the runner
 `run` handed to `hands` whose calls the fence reads there); `lib/laptop.js` and `lib/power.js`'s
 `powershellPlan` file; `lib/startup.js`'s `openerPlan` file; and the tests' own (the smoke's browser, the two preloads

@@ -5,10 +5,11 @@
  * It requires Node's own modules only, runs nothing but by its absolute path, and reads no machine path from its
  * environment: the installer passes each folder it needs as an argument.
  *
- *   serve --data <folder> --uploads <folder> --keys <folder> --logs <folder> --token <folder> --port <n>
+ *   serve --data <folder> --uploads <folder> --keys <folder> --logs <folder> --token <folder> --events <file> --port <n>
  *                              The server task's action (`\AGMessage\Server`): it runs the watchdog (supervise.js) in a
  *                              process of its own, by its absolute path beside this file, in an environment made of
- *                              Windows' own names (TASK_PASSED) and AGM_RUNS=task, the folders and the port from its
+ *                              Windows' own names (TASK_PASSED) and AGM_RUNS=task, the folders, the machine's events file
+ *                              (AGM_MACHINE_EVENTS, which the server reads into its audit log) and the port from its
  *                              arguments, nothing else of its own: no NODE_OPTIONS, no AGM_… it was not handed. The
  *                              watchdog's stop (0), its give-up and a configuration refusal (3) end this process with 0,
  *                              after the watchdog has written why (watchdog.json, server.log), so the task stays stopped
@@ -40,15 +41,33 @@
  *                              portable copy or another program on the port, something that does not answer, or nothing
  *                              serving, with the server task's state and last result, the log's last line and what to do.
  *
- * start, stop and rights (U17), upgrade and back (U18), and the account export and key removal (U14) are later units:
- * until each lands its verb is refused as unknown. A verb it does not know is refused, never defaulted. Exit codes: 0
- * done; 2 not done, with the words of why; 64 a verb or an argument it does not know, or one missing. In a console window
- * it waits for Enter before it ends, so the window that the Start menu opened stays until the person has read it; open
- * waits only when it did not open the browser.
+ *   start --machine <folder> --sys <folder>
+ *   stop --machine <folder> --sys <folder>
+ *   rights --machine <folder> --sys <folder>
+ *                              Start AGMessage, Stop AGMessage… and Who may run AGMessage…: the person's request, written
+ *                              as request.json into <folder>\machine\inbox\<SID>\ (their own SID, read by whoami.exe;
+ *                              only they may write there), then their own control task (`\AGMessage\Control-<SID>`) run
+ *                              with schtasks.exe /Run; it runs as SYSTEM, does what the install record lets that account
+ *                              do now, and answers into machine\outbox\<SID>\answer.json, which this waits for (by the
+ *                              request's id) and says. Stop asks for a reason when AGMessage is busy and asks again with
+ *                              it; Who may run lists the admin and the rights given and takes one line: "Give LAPTOP\ben:
+ *                              start, stop", "Take back from LAPTOP\ben: stop" (or all), or "Hand over to LAPTOP\ben",
+ *                              confirmed by typing the name again. An account with no control task, or none it may run, is
+ *                              told whom to ask. Run in an administrator's elevated console, each runs machine.js control
+ *                              --elevated by its absolute path beside this file instead, so an administrator can hand over
+ *                              a laptop whose admin account is gone.
+ *
+ * upgrade and back (U18), and the account export and key removal (U14) are later units: until each lands its verb is
+ * refused as unknown. A verb it does not know is refused, never defaulted. Exit codes: 0 done; 2 not done, with the words
+ * of why; 64 a verb or an argument it does not know, or one missing. In a console window it waits for Enter before it
+ * ends, so the window that the Start menu opened stays until the person has read it; open waits only when it did not open
+ * the browser.
  */
 const fs = require('node:fs');
+const crypto = require('node:crypto');
 const http = require('node:http');
 const path = require('node:path');
+const readline = require('node:readline');
 const childProcess = require('node:child_process');
 
 const DONE = 0;
@@ -104,12 +123,14 @@ function showToken({ machine, sys = '', read = fs.readFileSync, admin = adminNam
   return { code: DONE, text: 'AGMessage\'s admin token on this PC:\n\n    ' + text + '\n\nType it at Admin login on this PC. It holds while AGMessage serves; each start makes a new one. If it is not taken, AGMessage has started again or is not serving: show the token again once it serves.' };
 }
 
-// The verbs later units add are refused as unknown until each lands (U17's start/stop/rights, U18's upgrade/back, U14's
-// account export and key removal); the two U14 verbs are not enumerated here, so no landing-detector word for a later
-// unit sits in this build's tree (test/readings.test.js holds that).
-const LATER = Object.freeze({ start: 'U17', stop: 'U17', rights: 'U17', upgrade: 'U18', back: 'U18' });
+// The verbs later units add are refused as unknown until each lands (U18's upgrade/back, U14's account export and key
+// removal); the two U14 verbs are not enumerated here, so no landing-detector word for a later unit sits in this build's
+// tree (test/readings.test.js holds that).
+const LATER = Object.freeze({ upgrade: 'U18', back: 'U18' });
+/** The person's requests, each answered by their own control task. */
+const REQUESTS = Object.freeze(['start', 'stop', 'rights']);
 /** The commands this build knows, for the words of an unknown one. */
-const KNOWN = 'serve, token, status or open';
+const KNOWN = 'serve, token, status, open, start, stop or rights';
 
 /** Options read by `--name value`, each once; a value missing or a name twice is a problem. */
 function options(rest, allowed, verb) {
@@ -130,6 +151,7 @@ function parse(argv) {
   if (verb === 'serve') return parseServe(rest);
   if (verb === 'status') return parseStatus(rest);
   if (verb === 'open') return parseOpen(rest);
+  if (REQUESTS.includes(verb)) return parseOpen(rest, verb);
   if (LATER[verb]) return { problem: 'launch.js ' + verb + ' is built by ' + LATER[verb] + '; this build knows ' + KNOWN + '.' };
   if (verb !== 'token') return { problem: 'launch.js knows ' + KNOWN + '.' + (verb ? ' "' + said(verb, 40) + '" is not one of them.' : '') };
   const got = { '--machine': null, '--sys': null };
@@ -144,14 +166,14 @@ function parse(argv) {
   return { verb, machine, sys: sys || '' };
 }
 
-/** serve's command line: the five folders and the port, each required, each a full path (the port a number). */
+/** serve's command line: the five folders, the machine's events file and the port, each required, each a full path (the port a number). */
 function parseServe(rest) {
-  const o = options(rest, ['--data', '--uploads', '--keys', '--logs', '--token', '--port'], 'serve');
+  const o = options(rest, ['--data', '--uploads', '--keys', '--logs', '--token', '--events', '--port'], 'serve');
   if (o.problem) return { problem: o.problem };
   const folders = {};
-  for (const [opt, key] of [['--data', 'data'], ['--uploads', 'uploads'], ['--keys', 'keys'], ['--logs', 'logs'], ['--token', 'token']]) {
+  for (const [opt, key] of [['--data', 'data'], ['--uploads', 'uploads'], ['--keys', 'keys'], ['--logs', 'logs'], ['--token', 'token'], ['--events', 'events']]) {
     const v = o.got[opt];
-    if (!v || !path.isAbsolute(v)) return { problem: 'launch.js serve needs ' + opt + ' <folder>, a full path: the server task passes each.' };
+    if (!v || !path.isAbsolute(v)) return { problem: 'launch.js serve needs ' + opt + (key === 'events' ? ' <file>' : ' <folder>') + ', a full path: the server task passes each.' };
     folders[key] = v;
   }
   const port = Number(o.got['--port']);
@@ -170,15 +192,18 @@ function parseStatus(rest) {
   return { verb: 'status', machine, sys: sys || '', logs: o.got['--logs'] || '', port: Number(o.got['--port']) || 0, out: o.got['--out'] || '' };
 }
 
-/** open's command line: the machine folder and the System32 folder, each required, each a full path (--sys from its drive). */
-function parseOpen(rest) {
-  const o = options(rest, ['--machine', '--sys'], 'open');
+/**
+ * open's command line, and start's, stop's and rights': the machine folder and the System32 folder, each required, each a
+ * full path (--sys from its drive).
+ */
+function parseOpen(rest, verb = 'open') {
+  const o = options(rest, ['--machine', '--sys'], verb);
   if (o.problem) return { problem: o.problem };
   const machine = o.got['--machine'] || '';
-  if (!machine || !path.isAbsolute(machine)) return { problem: 'launch.js open needs --machine <folder>, the installed node\'s folder as a full path (%ProgramData%\\AGMessage).' };
+  if (!machine || !path.isAbsolute(machine)) return { problem: 'launch.js ' + verb + ' needs --machine <folder>, the installed node\'s folder as a full path (%ProgramData%\\AGMessage).' };
   const sys = o.got['--sys'] || '';
-  if (!DRIVE_PATH.test(sys)) return { problem: 'launch.js open needs --sys <folder>, the System32 folder named from its drive (C:\\Windows\\System32): the browser is opened from the Windows folder it sits in.' };
-  return { verb: 'open', machine, sys };
+  if (!DRIVE_PATH.test(sys)) return { problem: 'launch.js ' + verb + ' needs --sys <folder>, the System32 folder named from its drive (C:\\Windows\\System32)' + (verb === 'open' ? ': the browser is opened from the Windows folder it sits in.' : ': whoami.exe and schtasks.exe are run from it.') };
+  return { verb, machine, sys };
 }
 
 const SERVER_TASK = '\\AGMessage\\Server';
@@ -203,6 +228,23 @@ function tailOf(read, file, n) {
 }
 
 /**
+ * A program of the System32 folder `sys` names (the installer's {sys}), run by its absolute path from that folder with an
+ * argument array, its output read: {code, out, err}, code -1 (nothing run) for a `sys` that is no drive path. `run` is
+ * childProcess.execFileSync unless a test stands in for it. `env`, when given, is the whole environment it runs in.
+ */
+function windowsHands(sys, run = childProcess.execFileSync) {
+  const exe = (name) => path.win32.join(sys, name);
+  return (name, args, { timeout = 15000, env } = {}) => {
+    if (!DRIVE_PATH.test(String(sys || ''))) return { code: -1, out: '', err: '' };
+    try {
+      return { code: 0, out: String(run(exe(name), args, { cwd: sys, encoding: 'utf8', windowsHide: true, timeout, stdio: ['ignore', 'pipe', 'pipe'], ...(env ? { env } : {}) }) || ''), err: '' };
+    } catch (e) {
+      return { code: Number.isInteger(e && e.status) ? e.status : 1, out: String((e && e.stdout) || ''), err: said((e && (e.stderr || e.message)) || '', 300) };
+    }
+  };
+}
+
+/**
  * AGMessage status for the person: {code, text, facts}, each fact read, refused or absent, never a refusal taken for a
  * fact. The task's state and last result (schtasks /query /fo csv /nh /v, by column: no elevation, though the task's
  * descriptor may refuse this account), the record's admin and port (reg query, 64-bit view), server.log's tail (the
@@ -212,11 +254,7 @@ function tailOf(read, file, n) {
  * record holds no secret.
  */
 function statusOf({ machine, sys = '', logs = '', port = 0, read = fs.readFileSync, run = childProcess.execFileSync } = {}) {
-  const exe = (name) => path.win32.join(sys, name);
-  const call = (name, args) => {
-    if (!DRIVE_PATH.test(sys)) return { code: -1, out: '' };
-    try { return { code: 0, out: String(run(exe(name), args, { cwd: sys, encoding: 'utf8', windowsHide: true, timeout: 15000, stdio: ['ignore', 'pipe', 'ignore'] }) || '') }; } catch (e) { return { code: Number.isInteger(e && e.status) ? e.status : 1, out: String((e && e.stdout) || '') }; }
-  };
+  const call = windowsHands(sys, run);
   const q = call('schtasks.exe', ['/Query', '/TN', SERVER_TASK, '/FO', 'CSV', '/NH', '/V']);
   const row = q.code === 0 ? csvRows(q.out)[0] : null;
   let task;
@@ -336,6 +374,187 @@ async function openAgm({ machine, sys, run = childProcess.execFileSync, read = f
   return { code: NOT_DONE, opened: false, text: lines.join('\n') };
 }
 
+// ---------------------------------------------------------------- the person's requests: Start, Stop, Who may run
+
+/** An account from `whoami /user /fo csv /nh` (pure): its first row's name and SID, by position; null when there is none. */
+function accountOf(text) {
+  const row = csvRows(text)[0];
+  if (!row || row.length < 2) return null;
+  const sid = row[1].trim();
+  return /^S-1-[0-9-]{1,140}$/.test(sid) ? { name: said(row[0], 120), sid } : null;
+}
+/**
+ * Whether `whoami /groups /fo csv /nh` names an elevated administrator's token (pure): Administrators (S-1-5-32-544) and a
+ * High or System integrity label, by their SID column, never Windows' localised words.
+ */
+function elevatedOf(text) {
+  const sids = new Set(csvRows(text).map((r) => String(r[2] || '').trim()));
+  return sids.has('S-1-5-32-544') && (sids.has('S-1-16-12288') || sids.has('S-1-16-16384'));
+}
+/** An account's control task, by its SID (machine.js controlTask's name). */
+const controlTask = (sid) => '\\AGMessage\\Control-' + sid;
+/** The rights AGMessage's admin gives, in the words a person types them. */
+const RIGHT_WORDS = Object.freeze(['token', 'start', 'stop', 'upgrade']);
+/**
+ * One line typed at Who may run AGMessage… (pure): {request} for "Give LAPTOP\ben: start, stop", "Take back from
+ * LAPTOP\ben: stop" (or all), "Hand over to LAPTOP\ben", any letter case; else {problem}, an unknown right too.
+ */
+function rightsLineOf(line) {
+  const t = said(line, 300).replace(/\s+/g, ' ').trim();
+  const rightsOf = (words) => {
+    const list = words.toLowerCase().split(/\s*(?:,|\band\b|\s)\s*/).filter(Boolean);
+    const unknown = list.find((w) => !RIGHT_WORDS.includes(w));
+    if (unknown !== undefined) return { problem: '"' + unknown + '" is not a right AGMessage gives: its rights are ' + RIGHT_WORDS.join(', ') + '.' };
+    if (!list.length) return { problem: 'Name the rights after the colon: ' + RIGHT_WORDS.join(', ') + '.' };
+    return { rights: RIGHT_WORDS.filter((r) => list.includes(r)) };
+  };
+  let m = /^give (.+?)\s*:\s*(.*)$/i.exec(t);
+  if (m) { const r = rightsOf(m[2]); return r.problem ? r : { request: { verb: 'grant', account: m[1].trim(), rights: r.rights } }; }
+  m = /^take back from (.+?)\s*:\s*(.*)$/i.exec(t);
+  if (m) {
+    if (/^all$/i.test(m[2].trim())) return { request: { verb: 'revoke', account: m[1].trim(), rights: 'all' } };
+    const r = rightsOf(m[2]);
+    return r.problem ? r : { request: { verb: 'revoke', account: m[1].trim(), rights: r.rights } };
+  }
+  m = /^hand over to (.+)$/i.exec(t);
+  if (m) return { request: { verb: 'handover', account: m[1].trim() } };
+  return { problem: '"' + t.slice(0, 80) + '" is not one of the three: Give LAPTOP\\ben: start, stop · Take back from LAPTOP\\ben: stop (or all) · Hand over to LAPTOP\\ben.' };
+}
+
+/** How long each request waits for its answer: a stop may take two minutes to save, a start 35 s to answer. */
+const ANSWER_WAIT_MS = Object.freeze({ start: 90_000, stop: 180_000, grant: 90_000, revoke: 90_000, handover: 90_000 });
+const ANSWER_POLL_MS = 250;
+const wait = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
+
+/**
+ * One request of the person's, answered: {code, text, answer}. Who asks is read by whoami.exe (their SID). Not elevated,
+ * the request is written into their inbox\ and their own control task run (schtasks.exe /Run), and its answer waited for
+ * in their outbox\ by the request's id; a request that cannot be left there, or a control task this account cannot run,
+ * is told whom to ask. Elevated (an administrator's console), machine.js control --elevated is run by its absolute path
+ * beside this file, with the request a file of machine\work\. `run`, `read`, `write` and `remove` stand in for Node's own
+ * unless a test gives its own; `script` is machine.js.
+ */
+async function sendRequest({ machine, sys, request, run = childProcess.execFileSync, read = fs.readFileSync, write = fs.writeFileSync, remove = fs.rmSync, script = path.join(__dirname, 'machine.js'), execPath = process.execPath, waitMs = 0, pollMs = ANSWER_POLL_MS }) {
+  const call = windowsHands(sys, run);
+  const me = accountOf(call('whoami.exe', ['/user', '/fo', 'csv', '/nh']).out);
+  if (!me) return { code: NOT_DONE, text: 'Your Windows account could not be read (whoami.exe), so nothing was asked.' };
+  const id = crypto.randomBytes(12).toString('hex');
+  const body = JSON.stringify({ id, ...request });
+  const work = path.join(machine, 'machine', 'work');
+  if (elevatedOf(call('whoami.exe', ['/groups', '/fo', 'csv', '/nh']).out)) {
+    const file = path.join(work, 'request-' + id + '.json');
+    const out = path.join(work, 'answer-' + id + '.json');
+    try { write(file, body, { flag: 'wx' }); } catch (e) { return { code: NOT_DONE, text: 'The request could not be written into ' + work + ' (' + ((e && e.code) || 'EIO') + '), so nothing was asked.' }; }
+    try { run(execPath, [script, 'control', '--elevated', '--request', file, '--machine', machine, '--sys', sys, '--out', out], { cwd: path.dirname(script), encoding: 'utf8', windowsHide: true, timeout: 300_000, stdio: ['ignore', 'pipe', 'pipe'] }); } catch { /* its exit code is in its answer, read below */ }
+    let answer;
+    try { answer = JSON.parse(String(read(out, 'utf8'))); } catch { answer = null; /* no answer: said below */ }
+    try { remove(out, { force: true }); } catch { /* machine\work\'s, which only administrators read */ }
+    if (!answer || typeof answer.words !== 'string') return { code: NOT_DONE, text: 'machine.js control gave no answer, so what was done is not known: AGMessage status says what runs.' };
+    return { code: answer.code === 0 ? DONE : NOT_DONE, text: 'As an administrator: ' + said(answer.words, 600), answer };
+  }
+  const ask = (who) => 'You have no AGMessage rights on this PC. Ask ' + (who || 'this PC\'s AGMessage admin') + ', or an administrator.';
+  const inbox = path.join(machine, 'machine', 'inbox', me.sid, 'request.json');
+  const outbox = path.join(machine, 'machine', 'outbox', me.sid, 'answer.json');
+  try { write(inbox, body); } catch (e) {
+    const code = (e && e.code) || 'EIO';
+    if (code === 'EACCES' || code === 'EPERM' || code === 'ENOENT') return { code: NOT_DONE, text: ask(adminName({ sys, run, platform: 'win32' })) };
+    return { code: NOT_DONE, text: 'Your request could not be written (' + code + '): try again in a moment.' };
+  }
+  const ran = call('schtasks.exe', ['/Run', '/TN', controlTask(me.sid)]);
+  if (ran.code !== 0) return { code: NOT_DONE, text: ask(adminName({ sys, run, platform: 'win32' })) + (ran.code > 0 && ran.err ? ' (Windows: ' + ran.err.slice(0, 160) + ')' : '') };
+  const until = Date.now() + (waitMs || ANSWER_WAIT_MS[request.verb] || 90_000);
+  for (;;) {
+    let answer;
+    try { answer = JSON.parse(String(read(outbox, 'utf8'))); } catch { answer = null; /* not there yet, or being replaced */ }
+    if (answer && answer.id === id && typeof answer.words === 'string') return { code: answer.code === 0 ? DONE : NOT_DONE, text: said(answer.words, 600), answer };
+    if (Date.now() >= until) return { code: NOT_DONE, text: 'No answer from AGMessage\'s control task within ' + Math.round((waitMs || ANSWER_WAIT_MS[request.verb] || 90_000) / 1000) + ' s: it may still be working. AGMessage status says what runs.' };
+    await wait(pollMs);
+  }
+}
+
+/** A line the person types (readline on this console), or '' at the input's end. */
+function promptLine(question) {
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false });
+    let done = false;
+    const finish = (v) => { if (!done) { done = true; rl.close(); resolve(v); } };
+    rl.once('line', (l) => finish(String(l)));
+    rl.once('close', () => finish(''));
+    process.stdout.write(question);
+  });
+}
+
+/** Start AGMessage: {code, text}. */
+function startAgm({ out = () => {}, ...stand }) {
+  out('Asking AGMessage\'s control task to start AGMessage…');
+  return sendRequest({ ...stand, request: { verb: 'start' } });
+}
+/**
+ * Stop AGMessage…: {code, text}. A busy AGMessage is stopped only with a reason the person types ("Not stopped:
+ * AGMessage is busy (…). Type a reason to stop it anyway."), asked with it again; Enter alone leaves it running.
+ */
+async function stopAgm({ out = () => {}, prompt = promptLine, ...stand }) {
+  out('Asking AGMessage\'s control task to stop AGMessage (it saves first)…');
+  const r = await sendRequest({ ...stand, request: { verb: 'stop' } });
+  if (!(r.answer && r.answer.busy === true && r.answer.forceable === true)) return r;
+  out(r.text);
+  const force = said(await prompt('Reason (Enter leaves it running): '), 200);
+  if (!force) return { code: NOT_DONE, text: 'Left running: no reason was typed.' };
+  return sendRequest({ ...stand, request: { verb: 'stop', force } });
+}
+
+/** The fixed script that names SIDs (AGM_SIDS, comma-separated) as Windows does now: one line of ASCII JSON. */
+const PS_NAMES = String.raw`$ErrorActionPreference = 'Stop'; Import-Module ($PSHOME + '\Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1'); $o = @{}; foreach ($x in @(([string]$env:AGM_SIDS) -split ',')) { if ($x -match '^S-1-[0-9-]+$') { try { $o[$x] = [string](New-Object System.Security.Principal.SecurityIdentifier($x)).Translate([System.Security.Principal.NTAccount]).Value } catch { $o[$x] = '' } } }; $j = ConvertTo-Json -InputObject $o -Compress; (-join @(foreach ($c in $j.ToCharArray()) { if ([int]$c -gt 126) { '\u{0:x4}' -f [int]$c } else { [string]$c } }))`;
+/**
+ * Who may run AGMessage on this PC, as the install record says now (pure but for its reads): {admin, adminName, grants:
+ * [{sid, name, rights}]}. The record by reg.exe; the names by powershell.exe (by its absolute path, Windows' own module
+ * folder and folders made from `sys`), each '' where Windows names none.
+ */
+function whoMayRun({ sys, run = childProcess.execFileSync }) {
+  const call = windowsHands(sys, run);
+  const values = (text, pattern) => { const o = {}; for (const line of String(text).split(/\r?\n/)) { const m = pattern.exec(line); if (m) o[m[1]] = said(m[2], 120); } return o; };
+  const record = values(call('reg.exe', ['query', HKLM, '/reg:64']).out, /^ {4}([A-Za-z]{1,40}) {4}REG_[A-Z_]{2,20} {4}(.*)$/);
+  const given = values(call('reg.exe', ['query', HKLM + '\\Grants', '/reg:64']).out, /^ {4}(S-1-[0-9-]{1,120}) {4}REG_SZ {4}(.*)$/);
+  const sids = Object.keys(given);
+  let names = {};
+  if (sids.length) {
+    const root = path.win32.dirname(sys);
+    const r = call('WindowsPowerShell\\v1.0\\powershell.exe', ['-NoProfile', '-NonInteractive', '-NoLogo', '-Command', PS_NAMES],
+      { env: { SystemRoot: root, windir: root, SystemDrive: root.slice(0, 2), PSModulePath: path.win32.join(sys, 'WindowsPowerShell', 'v1.0', 'Modules'), AGM_SIDS: sids.join(',') } });
+    try { names = JSON.parse(r.out.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.startsWith('{')).pop() || '{}'); } catch { names = {}; /* the SIDs are said instead */ }
+  }
+  return {
+    admin: record.Admin || '', adminName: record.AdminName || '',
+    grants: sids.map((sid) => ({ sid, name: typeof names[sid] === 'string' ? said(names[sid], 120) : '', rights: RIGHT_WORDS.filter((r) => given[sid].toLowerCase().split(',').map((w) => w.trim()).includes(r)) })),
+  };
+}
+/** The list Who may run AGMessage… shows (pure). */
+function whoMayRunWords(w) {
+  const lines = ['Who may run AGMessage on this PC:', '  ' + (w.adminName || w.admin || 'no admin recorded') + ': this PC\'s AGMessage admin, with every right (' + RIGHT_WORDS.join(', ') + ') and the giving of them'];
+  for (const g of w.grants) lines.push('  ' + (g.name || g.sid + ' (an account Windows does not name now)') + ': ' + (g.rights.join(', ') || 'none'));
+  if (!w.grants.length) lines.push('  nobody else has a right here');
+  lines.push('', 'Type one line, or press Enter to close:', '  Give LAPTOP\\ben: start, stop', '  Take back from LAPTOP\\ben: stop      (or: all)', '  Hand over to LAPTOP\\ben', 'Rights: token (reads the admin token), start, stop, upgrade. Each is for one person\'s account.');
+  return lines.join('\n');
+}
+/**
+ * Who may run AGMessage…: {code, text}. The list, then one line typed (rightsLineOf); a handover confirmed by typing the
+ * new admin's name again. What the line asks is the control task's to decide: only the laptop's admin's (or an
+ * administrator's elevated console) is done.
+ */
+async function rightsAgm({ out = () => {}, prompt = promptLine, who = whoMayRun, ...stand }) {
+  out(whoMayRunWords(who({ sys: stand.sys, run: stand.run })));
+  const line = await prompt('> ');
+  if (!line.trim()) return { code: DONE, text: 'Nothing was changed.' };
+  const p = rightsLineOf(line);
+  if (p.problem) return { code: NOT_DONE, text: p.problem + ' Nothing was changed.' };
+  const request = p.request;
+  if (request.verb === 'handover') {
+    request.confirm = said(await prompt('Type ' + request.account + ' again to hand AGMessage\'s admin on this PC over to it (you keep no right unless it gives one back): '), 120);
+  }
+  out('Asking AGMessage\'s control task…');
+  return sendRequest({ ...stand, request });
+}
+
 /**
  * The names of the task's own environment the watchdog is handed: Windows' folders and the machine's names, which Node
  * and the programs the server runs by their absolute paths read (TMPDIR and HOME for the same off Windows). Nothing else:
@@ -344,7 +563,8 @@ async function openAgm({ machine, sys, run = childProcess.execFileSync, read = f
 const TASK_PASSED = Object.freeze(['SystemRoot', 'windir', 'SystemDrive', 'TEMP', 'TMP', 'TMPDIR', 'HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'ProgramData', 'ProgramFiles', 'COMPUTERNAME', 'NUMBER_OF_PROCESSORS', 'PROCESSOR_ARCHITECTURE']);
 /**
  * The watchdog's environment under the task (pure but for its default): TASK_PASSED as `inherited` holds them, then
- * AGM_RUNS=task and the folders and the port from serve's arguments. The one place launch.js reads its environment.
+ * AGM_RUNS=task and the folders, the machine's events file and the port from serve's arguments. The one place launch.js
+ * reads its environment.
  */
 function taskEnv(a, inherited = process.env) {
   const env = {};
@@ -352,7 +572,7 @@ function taskEnv(a, inherited = process.env) {
   return Object.assign(env, {
     AGM_RUNS: 'task',
     AGM_DATA_DIR: a.folders.data, AGM_UPLOAD_DIR: a.folders.uploads, AGM_KEY_DIR: a.folders.keys,
-    AGM_LOG_DIR: a.folders.logs, AGM_TOKEN_DIR: a.folders.token, PORT: String(a.port),
+    AGM_LOG_DIR: a.folders.logs, AGM_TOKEN_DIR: a.folders.token, AGM_MACHINE_EVENTS: a.folders.events, PORT: String(a.port),
   });
 }
 
@@ -381,14 +601,18 @@ function serve(a, { spawn = childProcess.spawn, supervise = path.join(__dirname,
 }
 
 /**
- * Runs one of the person's commands (token, status, open) and says its words: the exit code, or for open a promise of it
- * (it asks the port). serve runs through `serve`.
+ * Runs one of the person's commands (token, status, open, start, stop, rights) and says its words: the exit code, or for
+ * open and the requests a promise of it (they ask the port, or the control task). serve runs through `serve`.
  */
 function main(argv, { out = (t) => process.stdout.write(t + '\n'), ...stand } = {}) {
   const a = parse(argv);
   if (a.problem) { out(a.problem); return USAGE; }
   if (a.verb === 'serve') { out('launch.js serve is the server task\'s action (Task Scheduler runs it); it is not run from this console.'); return USAGE; }
   if (a.verb === 'open') return openAgm({ machine: a.machine, sys: a.sys, ...stand }).then((r) => { out(r.text); return r.code; });
+  if (REQUESTS.includes(a.verb)) {
+    const act = { start: startAgm, stop: stopAgm, rights: rightsAgm }[a.verb];
+    return act({ machine: a.machine, sys: a.sys, out, ...stand }).then((r) => { out(r.text); return r.code; });
+  }
   if (a.verb === 'status') {
     const r = statusOf({ machine: a.machine, sys: a.sys, logs: a.logs, port: a.port, ...stand });
     if (a.out) { try { fs.writeFileSync(a.out, JSON.stringify({ v: 1, ...r.facts })); } catch (e) { out('the status could not be written to ' + a.out + ' (' + (e.code || e.message) + ').'); return NOT_DONE; } }
@@ -411,7 +635,9 @@ if (require.main === module) {
       // The console the Start menu opened stays until the person has read it; a browser opened needs no reading.
       if (process.stdin.isTTY && !(argv[0] === 'open' && code === DONE)) {
         process.stdout.write('\nPress Enter to close this window.\n');
+        // A request's own question (readline) may have paused the console's input: it is taken up again for the Enter.
         process.stdin.once('data', () => process.stdin.pause());
+        process.stdin.resume();
       }
     };
     const code = main(argv);
@@ -419,4 +645,7 @@ if (require.main === module) {
   }
 }
 
-module.exports = { main, parse, serve, taskEnv, TASK_PASSED, statusOf, showToken, adminName, csvRows, openPlan, healthAt, openAgm, DEFAULT_PORT, DONE, NOT_DONE, USAGE };
+module.exports = {
+  main, parse, serve, taskEnv, TASK_PASSED, statusOf, showToken, adminName, csvRows, openPlan, healthAt, openAgm, DEFAULT_PORT, DONE, NOT_DONE, USAGE,
+  accountOf, elevatedOf, controlTask, rightsLineOf, sendRequest, startAgm, stopAgm, rightsAgm, whoMayRun, whoMayRunWords, windowsHands, PS_NAMES, RIGHT_WORDS, REQUESTS, ANSWER_WAIT_MS,
+};

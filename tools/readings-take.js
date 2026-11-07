@@ -18,8 +18,9 @@
  *       R5   Windows' verdict on node.exe's and cloudflared.exe's signatures (Get-AuthenticodeSignature), and on the
  *            installer's when --installer names the one the installer job built (unsigned: recorded)
  *       R8   the access lists of C:\ and %ProgramData% (icacls /save: SIDs, never localised names), and U12's server
- *            task's definition as app/machine.js writes it, registered under the lane's folder and never run: its
- *            descriptor (who may read it) and its XML (no secret), read back through Task Scheduler's own object
+ *            task's and U17's control task's definitions as app/machine.js writes them, each registered under the lane's
+ *            folder and never run: its descriptor (who may read it) and its XML (no secret), read back through Task
+ *            Scheduler's own object
  *       R4   a stand-in for U12's server task at \AGMessage\Server: LocalService, its own SID (Unrestricted), only
  *            SeChangeNotifyPrivilege, the task's settings; its action is this file's probe-server, which reads the token
  *            and the profile, hears UDP 9928, starts the bundle's watchdog under the installed channel (AGM_RUNS=task, the
@@ -28,7 +29,13 @@
  *            whether a client reaches it through SMB at this machine's own names
  *       R12  two stand-in tasks with the server task's settings (RestartOnFailure 3 × 1 min), each with a folder of its
  *            own: one whose action exits 1, measured and removed, then one whose action exits 0
- *       R13  a stand-in control task as SYSTEM reading GitHub's release answer for the newest published tag
+ *       R11  U17's control task as app/machine.js registers it for one standard account made for the reading, its action
+ *            the bundle's machine.js control: that account runs it (schtasks /run, from a task that runs as it), 10
+ *            rounds, each answered as SYSTEM for its SID (the runner has no install record, so each request is refused
+ *            for its rights, and nothing is started or stopped); a second standard account tries it 10 rounds and is
+ *            refused. Both accounts, their tasks and their profiles are removed at the end
+ *       R13  a task with a control task's principal and settings (SYSTEM) reading GitHub's release answer for the newest
+ *            published tag
  *     Each reading is taken on its own: one that fails is written with why, and the rest are taken. The record is
  *     written before the first reading and after each, and marked whole at the end, so a lane cut short still says what
  *     it took; a reading not begun within the lane's own bound (BUDGET_MS) is written as not run, so the job never
@@ -36,7 +43,7 @@
  *     It is CI's alone: it refuses a machine that is not a GitHub-hosted runner, a work folder it did not make, and a
  *     \AGMessage\Server task it did not make, before anything is made or removed. Exit 0 once the record is written, 2
  *     when it cannot be, 64 for a word it does not know, a run off Windows or a machine it refuses.
- *   node readings-take.js probe-server <dir> | probe-exit <dir> | probe-release <dir>
+ *   node readings-take.js probe-server <dir> | probe-exit <dir> | probe-release <dir> | probe-run <dir>
  *       what a stand-in task runs, from the copy the lane makes of this file: what a probe runs requires Node's own
  *       modules only (R1's step alone, run from the checkout, asks its server through app/lib/machinewire.js)
  *
@@ -65,8 +72,14 @@ const SERVER_TASK = '\\AGMessage\\Server';
 const STAND_IN = 'AGMessage readings: a stand-in for the server task';
 /** R8's task: U12's server task's definition, registered under the lane's own folder only to be read back. */
 const DEFINITION_TASK = '\\AGMessage-Readings\\Definition';
+const CONTROL_DEFINITION_TASK = '\\AGMessage-Readings\\ControlDefinition';
 const RESTART_TASKS = { nonZero: '\\AGMessage-Readings\\RestartNonZero', zero: '\\AGMessage-Readings\\RestartZero' };
 const RELEASE_TASK = '\\AGMessage-Readings\\Release';
+/** R11's tasks: the control task (machine.js's own definition, under the lane's folder) and one task as each account. */
+const R11_TASKS = { as: '\\AGMessage-Readings\\R11-As-' };
+/** R11's two standard accounts, made for the reading and removed after it: one the control task is for, one it is not. */
+const R11_USERS = Object.freeze({ own: 'agmr11own', other: 'agmr11other' });
+const R11_ROUNDS = 10;
 /** The file the lane writes in its work folder first: a folder without it is not the lane's to remove. */
 const WORK_MARK = '.agm-readings-work';
 const RULE = 'AGMessage-readings-R4';
@@ -255,9 +268,10 @@ function winArg(a) {
  * and a start that was missed made when it can, when `restart`: app/machine.js serverTaskXml's, held to it by
  * test/readings.test.js), and one action. Written as UTF-16 with its mark, as schtasks reads it.
  */
-function taskXml({ description, sid, sidType = '', privileges = [], restart = false, command, args = [], cwd }) {
+function taskXml({ description, sid, sidType = '', privileges = [], restart = false, instances = 'IgnoreNew', limit = 'PT0S', logon = '', command, args = [], cwd }) {
   const principal = [
     '      <UserId>' + xmlText(sid) + '</UserId>',
+    ...(logon ? ['      <LogonType>' + xmlText(logon) + '</LogonType>'] : []),
     '      <RunLevel>' + (sid === SYSTEM ? 'HighestAvailable' : 'LeastPrivilege') + '</RunLevel>',
     ...(sidType ? ['      <ProcessTokenSidType>' + xmlText(sidType) + '</ProcessTokenSidType>'] : []),
     ...(privileges.length ? ['      <RequiredPrivileges>', ...privileges.map((p) => '        <Privilege>' + xmlText(p) + '</Privilege>'), '      </RequiredPrivileges>'] : []),
@@ -275,10 +289,10 @@ function taskXml({ description, sid, sidType = '', privileges = [], restart = fa
     '    </Principal>',
     '  </Principals>',
     '  <Settings>',
-    '    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>',
+    '    <MultipleInstancesPolicy>' + xmlText(instances) + '</MultipleInstancesPolicy>',
     '    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>',
     '    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>',
-    '    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>',
+    '    <ExecutionTimeLimit>' + xmlText(limit) + '</ExecutionTimeLimit>',
     ...(restart ? ['    <RestartOnFailure>', '      <Interval>PT1M</Interval>', '      <Count>3</Count>', '    </RestartOnFailure>', '    <StartWhenAvailable>true</StartWhenAvailable>'] : []),
     '    <AllowStartOnDemand>true</AllowStartOnDemand>',
     '    <Enabled>true</Enabled>',
@@ -298,6 +312,8 @@ const utf16 = (text) => Buffer.concat([Buffer.from([0xFF, 0xFE]), Buffer.from(te
 
 /** U12's server task's principal (app/machine.js serverTaskXml's): LocalService under its own SID, SeChangeNotifyPrivilege only. */
 const SERVER_PRINCIPAL = { sid: LOCAL_SERVICE, sidType: 'Unrestricted', privileges: ['SeChangeNotifyPrivilege'] };
+/** U17's control task's principal and settings (app/machine.js controlTaskXml's): SYSTEM, a request queued, 10 minutes at most. */
+const CONTROL_PRINCIPAL = { sid: SYSTEM, instances: 'Queue', limit: 'PT10M' };
 
 // ---------------------------------------------------------------- what the probes read (testable anywhere)
 
@@ -500,6 +516,17 @@ function probeExit(dir) {
   return /^\d{1,3}$/.test(named) ? Number(named) : 1;
 }
 
+/**
+ * probe-run: R11's, as a task running as one standard account runs it: schtasks.exe /Run of the control task its plan
+ * names, by its absolute path, and its exit code and words written to ran.json (no secret: schtasks says only whether it ran).
+ */
+function probeRun(dir) {
+  const plan = readJson(path.join(dir, 'plan.json'));
+  const r = run(path.win32.join(system32(), 'schtasks.exe'), ['/Run', '/TN', String(plan.task)], { ms: 30000 });
+  writeJson(path.join(dir, 'ran.json'), { code: r.code, err: (r.err || r.out || '').trim().slice(0, 300), user: os.userInfo().username, at: Date.now() });
+  return 0;
+}
+
 /** probe-release: GitHub's answer for the plan's address, as SYSTEM reads it. */
 async function probeRelease(dir) {
   const plan = readJson(path.join(dir, 'plan.json'));
@@ -581,12 +608,17 @@ async function until(test, ms, every = 500) {
  *   pipes       each named pipe's security descriptor, as SDDL (owner, group and access list), read from a client's
  *               handle to it (GetSecurityInfo on the handle, as a kernel object), else through .NET by its name, else the
  *               reasons both gave; each read opens the pipe's client end, so it takes one of its server's instances
+ *   users       R11's two standard accounts made (AGM_R11_USERS, comma-separated, one password in AGM_R11_PASSWORD, never
+ *               written anywhere), each a member of Users, with its SID and whether it is an administrator (it must not be)
+ *   usersGone   those accounts removed, and the profiles a logon made for them
  *   defender    Defender's real-time monitoring, its scanning on access, its mode, and the paths it excludes
  */
 const SCRIPTS = {
   signatures: String.raw`$ErrorActionPreference = 'Stop'; $out = @(); foreach ($p in ($env:AGM_READ_PATHS -split '\|')) { $s = Get-AuthenticodeSignature -LiteralPath $p; $out += @{ path = $p; status = [string]$s.Status; message = [string]$s.StatusMessage; signer = $(if ($s.SignerCertificate) { [string]$s.SignerCertificate.Subject } else { '' }); timestamped = [bool]$s.TimeStamperCertificate } }; ConvertTo-Json -InputObject $out -Depth 4 -Compress`,
   pipes: String.raw`$ErrorActionPreference = 'Stop'; $out = @(); foreach ($n in ($env:AGM_READ_PIPES -split '\|')) { $why = @(); $sddl = ''; $c = $null; try { $c = New-Object System.IO.Pipes.NamedPipeClientStream('.', $n, [System.IO.Pipes.PipeDirection]::In); $c.Connect(5000); $sddl = [string]$c.GetAccessControl().GetSecurityDescriptorSddlForm('All') } catch { $why += [string]$_.Exception.Message } finally { if ($c) { $c.Dispose() } }; if (-not $sddl) { try { $sddl = [string][System.IO.Directory]::GetAccessControl('\\.\pipe\' + $n).GetSecurityDescriptorSddlForm('All') } catch { $why += [string]$_.Exception.Message } }; if ($sddl) { $out += @{ name = $n; sddl = $sddl } } else { $out += @{ name = $n; error = ($why -join '; ') } } }; ConvertTo-Json -InputObject $out -Depth 4 -Compress`,
   definition: String.raw`$ErrorActionPreference = 'Stop'; $s = New-Object -ComObject 'Schedule.Service'; $s.Connect(); $t = $s.GetFolder($env:AGM_TASK_FOLDER).GetTask($env:AGM_TASK_NAME); ConvertTo-Json -InputObject @{ sddl = [string]$t.GetSecurityDescriptor(4); xml = [string]$t.Xml } -Compress`,
+  users: String.raw`$ErrorActionPreference = 'Stop'; $p = ConvertTo-SecureString $env:AGM_R11_PASSWORD -AsPlainText -Force; $g = Get-LocalGroup -SID 'S-1-5-32-545'; $out = @(); foreach ($n in ($env:AGM_R11_USERS -split ',')) { if (Get-LocalUser -Name $n -ErrorAction SilentlyContinue) { Remove-LocalUser -Name $n }; $u = New-LocalUser -Name $n -Password $p -PasswordNeverExpires -AccountNeverExpires -Description 'AGMessage readings R11: removed after the reading'; try { Add-LocalGroupMember -Group $g -Member $u } catch { }; $out += @{ name = $n; sid = [string]$u.SID.Value; admin = [bool](@(Get-LocalGroupMember -SID 'S-1-5-32-544' | Where-Object { [string]$_.SID.Value -eq [string]$u.SID.Value }).Count) } }; ConvertTo-Json -InputObject @($out) -Compress`,
+  usersGone: String.raw`$ErrorActionPreference = 'Continue'; $sids = @(); foreach ($n in ($env:AGM_R11_USERS -split ',')) { $u = Get-LocalUser -Name $n -ErrorAction SilentlyContinue; if ($u) { $sids += [string]$u.SID.Value; Remove-LocalUser -Name $n } }; foreach ($p in @(Get-CimInstance -ClassName Win32_UserProfile)) { if ($sids -contains [string]$p.SID) { Remove-CimInstance -InputObject $p -ErrorAction SilentlyContinue } }; ConvertTo-Json -InputObject @{ removed = $sids.Count } -Compress`,
   defender: String.raw`$ErrorActionPreference = 'Stop'; $s = Get-MpComputerStatus; $p = Get-MpPreference; ConvertTo-Json -InputObject @{ realtime = [bool]$s.RealTimeProtectionEnabled; onAccess = [bool]$s.OnAccessProtectionEnabled; antivirus = [bool]$s.AntivirusEnabled; service = [bool]$s.AMServiceEnabled; mode = [string]$s.AMRunningMode; exclusions = @($p.ExclusionPath | Where-Object { $_ }) } -Compress`,
 };
 
@@ -600,11 +632,13 @@ function lane(work, sys) {
     if (r.code !== 0) throw new Error('powershell.exe ended with ' + r.code + ': ' + r.err.trim().slice(0, 300));
     return JSON.parse(r.out.trim());
   };
-  const register = (name, xml) => {
+  // A task that runs as an account with its password (R11's) is registered with them (/RU, /RP): the password goes to
+  // schtasks alone, on a runner thrown away after the job, and into no file or record.
+  const register = (name, xml, { user = '', password = '' } = {}) => {
     const file = path.join(work, name.replace(/\W+/g, '-') + '.xml');
     fs.writeFileSync(file, utf16(xml));
-    const r = schtasks(['/Create', '/TN', name, '/XML', file, '/F']);
-    if (r.code !== 0) throw new Error('schtasks could not register ' + name + ': ' + (r.err || r.out).trim().slice(0, 300));
+    const r = schtasks(['/Create', '/TN', name, '/XML', file, ...(user ? ['/RU', user, '/RP', password] : []), '/F']);
+    if (r.code !== 0) throw new Error('schtasks could not register ' + name + ': ' + withoutSecrets((r.err || r.out).trim(), password).slice(0, 300));
   };
   const lastResult = (name) => {
     const r = schtasks(['/Query', '/TN', name, '/FO', 'LIST', '/V']);
@@ -907,7 +941,7 @@ async function takeR3prime(L, { node, app, work, port }, { rounds = 10, startMs 
   const seedCode = seedHalls(folders.data, { halls: 1, messages: 50 })[0];
   const task = '\\AGMessage-Readings\\Serve';
   // U12's own definition (app/machine.js), its folders the lane's: run on demand here, its boot trigger never fired.
-  L.register(task, require('../app/machine.js').serverTaskXml({ uri: task, node, launch, ...folders, port }));
+  L.register(task, require('../app/machine.js').serverTaskXml({ uri: task, node, launch, ...folders, events: path.join(work, 'r3', 'events.jsonl'), port }));
   const out = { task, rounds: [], savedCount: 0 };
   try {
     for (let i = 0; i < rounds; i++) {
@@ -930,6 +964,77 @@ async function takeR3prime(L, { node, app, work, port }, { rounds = 10, startMs 
     }
   } finally { L.remove(task); }
   return out;
+}
+
+/**
+ * R11: U17's control task as app/machine.js registers it, for one standard account made for the reading; its action the
+ * bundle's machine.js control --for that account, over a machine folder of the lane's own (`root`). The runner has no
+ * install record, so every request the control task reads is refused for its rights and nothing is started or stopped
+ * (a machine that has one is refused before anything is made). Each round: a request with a fresh id left in that
+ * account's inbox, the task that runs as the account run, its schtasks /run's exit code read (probe-run), and the
+ * control task's answer to that id waited for in its outbox (`ranAs`, `for`). The second account's rounds run its own task,
+ * whose schtasks /run must be refused, and no answer must come. {sid, controlTask, own, other} (each round {code, err,
+ * answered, ranAs, for}); the accounts, their tasks and profiles removed whatever happened.
+ */
+async function takeR11(L, { node, script, self, work, sys }, { rounds = R11_ROUNDS, answerMs = 30000, quietMs = 5000 } = {}) {
+  // The control task acts only on what the install record lets it: on a machine with one, R11 would act on that install.
+  if (run(L.exe('reg.exe'), ['query', 'HKLM\\SOFTWARE\\AGMessage', '/reg:64']).code === 0) {
+    return { skipped: 'this machine has an AGMessage install record: R11\'s control task would act on it' };
+  }
+  const machine = require('../app/machine.js');
+  const dir = path.join(work, 'r11');
+  const root = path.join(dir, 'root');
+  // Letters of each kind and digits, from node:crypto, for the runner's password rules; never written anywhere.
+  const password = 'Aa1!' + crypto.randomBytes(18).toString('base64url');
+  const names = [R11_USERS.own, R11_USERS.other];
+  const made = [];
+  let controlName = '';
+  try {
+    const users = L.ps(SCRIPTS.users, { AGM_R11_USERS: names.join(','), AGM_R11_PASSWORD: password });
+    const list = (Array.isArray(users) ? users : [users]).filter((u) => u && /^S-1-[0-9-]+$/.test(String(u.sid)));
+    made.push(...list);
+    if (list.length !== 2) return { skipped: 'the two standard accounts were not made (' + list.length + ' of 2)' };
+    if (list.some((u) => u.admin === true)) return { skipped: 'an account made for the reading is an administrator, so it measures nothing of a standard account' };
+    const own = list.find((u) => u.name === R11_USERS.own);
+    const other = list.find((u) => u.name === R11_USERS.other);
+    for (const box of ['inbox', 'outbox']) fs.mkdirSync(path.join(root, 'machine', box, own.sid), { recursive: true });
+    fs.mkdirSync(path.join(root, 'machine', 'work'), { recursive: true });
+    controlName = '\\AGMessage-Readings\\Control-' + own.sid;
+    L.register(controlName, machine.controlTaskXml({ sid: own.sid, node, script, machine: root, sys, uri: controlName }));
+    const out = { sid: own.sid, controlTask: controlName, own: [], other: [] };
+    for (const [who, u] of [['own', own], ['other', other]]) {
+      const probe = path.join(dir, who);
+      fs.mkdirSync(probe, { recursive: true });
+      const granted = run(L.exe('icacls.exe'), [probe, '/grant', '*' + u.sid + ':(OI)(CI)M']);
+      if (granted.code !== 0) throw new Error('the ' + who + ' account was not granted its folder: ' + (granted.err || granted.out).trim().slice(0, 200));
+      writeJson(path.join(probe, 'plan.json'), { task: controlName });
+      const asName = R11_TASKS.as + who;
+      L.register(asName, taskXml({ description: 'AGMessage readings R11: schtasks /run of a control task, as ' + u.name, sid: u.sid, logon: 'Password', command: node, args: [self, 'probe-run', probe], cwd: path.dirname(self) }), { user: u.name, password });
+      try {
+        for (let i = 0; i < rounds; i++) {
+          const id = crypto.randomBytes(12).toString('hex');
+          const inbox = path.join(root, 'machine', 'inbox', own.sid, 'request.json');
+          const answerFile = path.join(root, 'machine', 'outbox', own.sid, 'answer.json');
+          fs.rmSync(path.join(probe, 'ran.json'), { force: true });
+          fs.writeFileSync(inbox, JSON.stringify({ id, verb: 'start' }));
+          const started = L.schtasks(['/Run', '/TN', asName]);
+          if (started.code !== 0) { out[who].push({ code: null, err: 'its task did not run: ' + (started.err || started.out).trim().slice(0, 200), answered: false }); fs.rmSync(inbox, { force: true }); break; }
+          const ran = await until(() => { try { return readJson(path.join(probe, 'ran.json')); } catch { return null; /* not written yet */ } }, answerMs);
+          // A task as the account that never ran its probe says why once: the rounds after it would wait the same.
+          if (!ran) { out[who].push({ code: null, err: 'the task as ' + u.name + ' wrote nothing within ' + answerMs / 1000 + ' s (last result ' + L.lastResult(asName) + ')', answered: false }); fs.rmSync(inbox, { force: true }); break; }
+          const answerOf = () => { try { const a = readJson(answerFile); return a && a.id === id ? a : null; } catch { return null; /* not written yet */ } };
+          const answer = await until(answerOf, who === 'own' ? answerMs : quietMs);
+          out[who].push({ code: ran.code, err: ran.code === 0 ? '' : ran.err, answered: !!answer, ranAs: answer ? String(answer.ranAs || '') : '', for: answer ? String(answer.for || '') : '', words: answer ? String(answer.words || '').slice(0, 200) : '' });
+          fs.rmSync(inbox, { force: true });
+        }
+      } finally { L.remove(asName); }
+    }
+    return out;
+  } finally {
+    // Its control task goes whatever a round threw, before the accounts it names.
+    if (controlName) await guarded(() => L.remove(controlName));
+    if (made.length) await guarded(() => L.ps(SCRIPTS.usersGone, { AGM_R11_USERS: names.join(',') }));
+  }
 }
 
 async function take(o) {
@@ -1052,11 +1157,22 @@ async function take(o) {
     const name = DEFINITION_TASK;
     try {
       const f = path.join(work, 'r8');
-      L.register(name, require('../app/machine.js').serverTaskXml({ uri: name, node, launch: path.join(root, 'app', 'launch.js'), data: path.join(f, 'data'), uploads: path.join(f, 'uploads'), keys: path.join(f, 'keys'), logs: path.join(f, 'logs'), token: path.join(f, 'token'), port: o.port }));
+      L.register(name, require('../app/machine.js').serverTaskXml({ uri: name, node, launch: path.join(root, 'app', 'launch.js'), data: path.join(f, 'data'), uploads: path.join(f, 'uploads'), keys: path.join(f, 'keys'), logs: path.join(f, 'logs'), token: path.join(f, 'token'), events: path.join(f, 'events.jsonl'), port: o.port }));
       const back = L.ps(SCRIPTS.definition, { AGM_TASK_FOLDER: path.win32.dirname(name), AGM_TASK_NAME: path.win32.basename(name) });
       serverTask = { sddl: String(back.sddl || ''), bytes: String(back.xml || '').length, secret: /ADMIN_TOKEN|ANTHROPIC|password|[0-9a-f]{32}/i.test(String(back.xml || '')) };
     } catch (e) { serverTask = { error: e.message.slice(0, 300) }; } finally { L.remove(name); }
-    return { places, serverTask };
+    // U17's control task's definition as app/machine.js writes it, for this lane's own account (a real SID; the
+    // descriptor is what is judged): registered here and never run, then removed.
+    let controlTask;
+    const ctl = CONTROL_DEFINITION_TASK;
+    try {
+      const me = /"(S-1-[0-9-]+)"/.exec(run(L.exe('whoami.exe'), ['/user', '/fo', 'csv', '/nh']).out);
+      if (!me) throw new Error('this account\'s SID was not read');
+      L.register(ctl, require('../app/machine.js').controlTaskXml({ uri: ctl, sid: me[1], node, script: path.join(root, 'app', 'machine.js'), machine: path.join(work, 'r8', 'machine'), sys }));
+      const back = L.ps(SCRIPTS.definition, { AGM_TASK_FOLDER: path.win32.dirname(ctl), AGM_TASK_NAME: path.win32.basename(ctl) });
+      controlTask = { sid: me[1], sddl: String(back.sddl || ''), bytes: String(back.xml || '').length, secret: /ADMIN_TOKEN|ANTHROPIC|password|[0-9a-f]{32}/i.test(String(back.xml || '')) };
+    } catch (e) { controlTask = { error: e.message.slice(0, 300) }; } finally { L.remove(ctl); }
+    return { places, serverTask, controlTask };
   });
 
   const r4dir = path.join(work, 'r4');
@@ -1105,6 +1221,11 @@ async function take(o) {
     return takeR12(L, { node, self, dir: path.join(work, 'r12'), cwd: path.dirname(self) });
   });
 
+  await reading('R11', () => {
+    needsPayload();
+    return takeR11(L, { node, script: path.join(root, 'app', 'machine.js'), self, work, sys });
+  });
+
   // R9 and R3′ (U12 landed): the upgrade backup's time, and the server task's stop-saves. Both drive the bundle's own
   // server and watchdog (no installer), through app/lib/machinewire.js of this checkout.
   await reading('R9', () => {
@@ -1123,7 +1244,7 @@ async function take(o) {
       const dir = path.join(work, 'r13');
       fs.mkdirSync(dir, { recursive: true });
       writeJson(path.join(dir, 'plan.json'), { url: 'https://api.github.com/repos/' + o.repo + '/releases/tags/' + o.tag });
-      L.register(RELEASE_TASK, taskXml({ description: 'AGMessage readings: GitHub\'s release answer, read as SYSTEM', sid: SYSTEM, command: node, args: [self, 'probe-release', dir], cwd: path.dirname(self) }));
+      L.register(RELEASE_TASK, taskXml({ description: 'AGMessage readings: GitHub\'s release answer, read as SYSTEM', ...CONTROL_PRINCIPAL, command: node, args: [self, 'probe-release', dir], cwd: path.dirname(self) }));
       const ran = L.schtasks(['/Run', '/TN', RELEASE_TASK]);
       if (ran.code !== 0) throw new Error('schtasks could not run the stand-in: ' + (ran.err || ran.out).trim().slice(0, 300));
       const answer = await until(() => { try { return readJson(path.join(dir, 'answer.json')); } catch { return null; /* not written yet */ } }, 60000);
@@ -1170,13 +1291,14 @@ async function main(argv) {
   if (a.error) { console.error(a.error); return 64; }
   if (a.verb === 'probe-exit' && a.positional.length === 1) return probeExit(a.positional[0]);
   if (a.verb === 'probe-release' && a.positional.length === 1) return probeRelease(a.positional[0]);
+  if (a.verb === 'probe-run' && a.positional.length === 1) return probeRun(a.positional[0]);
   if (a.verb === 'probe-server' && a.positional.length === 1) return probeServer(a.positional[0]);
   if (a.verb === 'take' && !a.positional.length && a.flags.zip && a.flags.defender && a.flags.out) {
     const port = Number(a.flags.port || 3124);
     if (!Number.isInteger(port) || port < 1024 || port > 65535) { console.error('readings-take: --port is a port from 1024 to 65535'); return 64; }
     return take({ zip: a.flags.zip, previous: a.flags.previous || '', defender: a.flags.defender, out: a.flags.out, work: a.flags.work || 'C:\\agm-readings', port, repo: a.flags.repo || '', tag: a.flags.tag || '', installer: a.flags.installer || '' });
   }
-  console.error('readings-take: take --zip <bundle.zip> --defender <defender.json> --out <raw.json> [--previous <zip>] [--work <folder>] [--port <n>] [--repo <owner/name> --tag <vX.Y.Z>] [--installer <exe>] | probe-server <dir> | probe-exit <dir> | probe-release <dir>');
+  console.error('readings-take: take --zip <bundle.zip> --defender <defender.json> --out <raw.json> [--previous <zip>] [--work <folder>] [--port <n>] [--repo <owner/name> --tag <vX.Y.Z>] [--installer <exe>] | probe-server <dir> | probe-exit <dir> | probe-release <dir> | probe-run <dir>');
   return 64;
 }
 
@@ -1185,9 +1307,9 @@ if (require.main === module) {
 }
 
 module.exports = {
-  zipEntries, memberParts, topFolder, releaseOf, layOut, extractOne, taskXml, winArg, utf16, SERVER_PRINCIPAL, SCRIPTS, lane, system32,
+  zipEntries, memberParts, topFolder, releaseOf, layOut, extractOne, taskXml, winArg, utf16, SERVER_PRINCIPAL, CONTROL_PRINCIPAL, SCRIPTS, lane, system32, takeR11, probeRun,
   snapshot, snapshotDiff, udpHeard, waitHealth, quickTunnel, readRelease, probeExit, parseArgs, main, TRYCF, installerSignature,
   sddlOfSave, pipeReach, keepTail, tokenIn, withoutSecrets, placeRefusal, takeR12, take,
   seedHalls, pageSocket, paceMs, takeR1, takeR9, takeR3prime, serveFolders, R1_SIZES, R1_QUIET_MS, PAGE_PACE,
-  SERVER_TASK, STAND_IN, DEFINITION_TASK, RESTART_TASKS, WORK_MARK, BUDGET_MS,
+  SERVER_TASK, STAND_IN, DEFINITION_TASK, CONTROL_DEFINITION_TASK, RESTART_TASKS, R11_TASKS, R11_USERS, R11_ROUNDS, WORK_MARK, BUDGET_MS,
 };

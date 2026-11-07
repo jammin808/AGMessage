@@ -360,8 +360,10 @@ start that cannot run says why in its window: a file missing beside the .bat, or
 
 On your own show laptop, the installer (`AGMessage-Setup-<version>-unsigned.exe`, from a release) installs AGMessage in
 Program Files, its data in `C:\ProgramData\AGMessage`, and serves it from boot with nobody signed in; the Windows account
-that runs it is AGMessage's admin on that PC, and its Start menu has Open AGMessage, Show the admin token and AGMessage
-status. It is unsigned: where Smart App Control is on, Windows blocks it. Venue laptops use the portable folder.
+that runs it is AGMessage's admin on that PC, and its Start menu has Open AGMessage, Show the admin token, Start
+AGMessage, Stop AGMessage…, Who may run AGMessage… and AGMessage status. That account starts and stops AGMessage with no
+administrator, and gives its rights (token, start, stop, upgrade) to other Windows accounts, takes them back or hands
+the admin over, each act a row of the audit log. It is unsigned: where Smart App Control is on, Windows blocks it. Venue laptops use the portable folder.
 [docs/INSTALL.md](docs/INSTALL.md) says how it installs, upgrades, goes back and uninstalls.
 
 ## Versions

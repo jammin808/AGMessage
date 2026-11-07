@@ -201,7 +201,7 @@ test('a rooms folder that is there but cannot be read stops the start with code 
   }
 });
 
-test('an unknown channel, and the installed node\'s folders unset, relative or inside the program\'s folder, are refused by the watchdog and the server before anything is written', async () => {
+test('an unknown channel, and the installed node\'s folders (and its machine events file) unset, relative or inside the program\'s folder, are refused by the watchdog and the server before anything is written', async () => {
   const base = tmp('agm-runs-');
   const inside = path.join(ROOT, 'u1-inside-uploads');
   const cases = [
@@ -211,6 +211,8 @@ test('an unknown channel, and the installed node\'s folders unset, relative or i
     [{ AGM_RUNS: 'task', AGM_DATA_DIR: 'data' }, 'AGM_DATA_DIR is "data", which is not a full path.'],
     [{ AGM_RUNS: 'task', AGM_UPLOAD_DIR: inside }, 'AGM_UPLOAD_DIR is ' + inside + ', inside the program\'s folder ' + path.dirname(ROOT) + '.'],
     [{ AGM_RUNS: 'task', AGM_KEY_DIR: '' }, 'the installed node needs its key folder in AGM_KEY_DIR, and it is not set.'],
+    [{ AGM_RUNS: 'task', AGM_MACHINE_EVENTS: 'machine/events.jsonl' }, 'AGM_MACHINE_EVENTS is "machine/events.jsonl", which is not a full path.'],
+    [{ AGM_RUNS: 'task', AGM_MACHINE_EVENTS: path.join(ROOT, 'events.jsonl') }, 'AGM_MACHINE_EVENTS is ' + path.join(ROOT, 'events.jsonl') + ', inside the program\'s folder ' + path.dirname(ROOT) + '.'],
   ];
   let i = 0;
   for (const file of ['supervise.js', 'server.js']) {

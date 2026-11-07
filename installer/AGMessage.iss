@@ -83,6 +83,9 @@ Source: "{srcexe}"; DestDir: "{app}\installers"; DestName: "AGMessage-Setup-{#In
 ; no machine path from its environment, so each folder is passed here.
 Name: "{group}\Open AGMessage"; Filename: "{app}\node\node.exe"; Parameters: """{app}\app\launch.js"" open --machine ""{commonappdata}\AGMessage"" --sys ""{sys}"""; WorkingDir: "{app}\app"; Comment: "Opens AGMessage in your browser, or says what it found"
 Name: "{group}\Show the admin token"; Filename: "{app}\node\node.exe"; Parameters: """{app}\app\launch.js"" token --machine ""{commonappdata}\AGMessage"" --sys ""{sys}"""; WorkingDir: "{app}\app"; Comment: "Shows AGMessage's admin token to its admin on this PC"
+Name: "{group}\Start AGMessage"; Filename: "{app}\node\node.exe"; Parameters: """{app}\app\launch.js"" start --machine ""{commonappdata}\AGMessage"" --sys ""{sys}"""; WorkingDir: "{app}\app"; Comment: "Starts AGMessage, for its admin on this PC and the accounts it gives start"
+Name: "{group}\Stop AGMessage..."; Filename: "{app}\node\node.exe"; Parameters: """{app}\app\launch.js"" stop --machine ""{commonappdata}\AGMessage"" --sys ""{sys}"""; WorkingDir: "{app}\app"; Comment: "Stops AGMessage, saved, for its admin on this PC and the accounts it gives stop"
+Name: "{group}\Who may run AGMessage..."; Filename: "{app}\node\node.exe"; Parameters: """{app}\app\launch.js"" rights --machine ""{commonappdata}\AGMessage"" --sys ""{sys}"""; WorkingDir: "{app}\app"; Comment: "Lists who may run AGMessage on this PC; its admin gives, takes back or hands over the rights"
 Name: "{group}\AGMessage status"; Filename: "{app}\node\node.exe"; Parameters: """{app}\app\launch.js"" status --machine ""{commonappdata}\AGMessage"" --sys ""{sys}"""; WorkingDir: "{app}\app"; Comment: "Says how AGMessage runs on this PC"
 
 [Code]
@@ -93,7 +96,7 @@ const
   SacEvaluating = 2;
   SacWords = 'Smart App Control is evaluating this PC. Once it turns itself on, Windows blocks unsigned programs: this installer, its uninstaller and the next AGMessage installer would no longer run. To keep installing and upgrading AGMessage here, turn Smart App Control off in Windows Security > App & browser control > Smart App Control.';
   QuietAdminWords = 'AGMessage needs to know whose it is: add /ADMIN=<account>.';
-  AdminRole = 'AGMessage''s admin on this PC is one Windows account, standard or administrator: it reads AGMessage''s admin token (Start > AGMessage > Show the admin token), with which it signs in at the laptop and makes the first admin account. Windows asks an administrator''s approval again only to upgrade or uninstall AGMessage.';
+  AdminRole = 'AGMessage''s admin on this PC is one Windows account, standard or administrator: it reads AGMessage''s admin token (Start > AGMessage > Show the admin token), with which it signs in at the laptop and makes the first admin account; it starts and stops AGMessage (Start AGMessage, Stop AGMessage...), and gives these rights to other accounts, takes them back or hands its admin over (Who may run AGMessage...). Windows asks an administrator''s approval again only to upgrade or uninstall AGMessage.';
   PublicWords = 'AGMessage answers phones, tablets and screens on this PC''s local subnet only, on Private and Domain networks. Windows makes every new network Public, so on fresh venue Wi-Fi nobody reaches AGMessage unless this is ticked, or that network is made Private in Windows'' settings.';
   AccountWords = 'AGMessage has no accounts yet. Make its first admin account now, to sign in with on AGMessage''s page; or leave these empty and make it later at Admin login on this PC, with the token (Start > AGMessage > Show the admin token).';
 

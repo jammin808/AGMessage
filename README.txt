@@ -423,14 +423,28 @@ AGMessage-Setup-<version>-unsigned.exe, on the same release page. It
 installs AGMessage in C:\Program Files\AGMessage, keeps its data in
 C:\ProgramData\AGMessage, and starts it with Windows, with nobody
 signed in. It has no window: Start -> AGMessage has Open AGMessage
-(opens it in your browser, or says what it found), Show the admin token
-and AGMessage status.
+(opens it in your browser, or says what it found), Show the admin token,
+Start AGMessage, Stop AGMessage..., Who may run AGMessage... and
+AGMessage status.
 - Run it from the Windows account you run shows from, standard or
   administrator: Windows asks an administrator's approval once. That
   account is AGMessage's admin on this PC, and reads its admin token
   (Start -> AGMessage -> Show the admin token). The installer says
   which account it found, and asks you to choose when two could be
   meant (an administrator typed their own password for it, say).
+- That account starts and stops AGMessage from the Start menu with no
+  administrator (Stop AGMessage... asks for a reason when people are
+  using it). If Start AGMessage says AGMessage is not answering yet, it
+  is left running and may still be starting: try again in a minute.
+  In Who may run AGMessage... it gives these rights to
+  another Windows account, one person's at a time, takes them back or
+  hands AGMessage over: type "Give LAPTOP\ben: start, stop", "Take back
+  from LAPTOP\ben: stop" (or all), or "Hand over to LAPTOP\ben". The
+  rights are token (reads the admin token), start, stop and upgrade.
+  Each one given, taken back or handed over is kept in the audit log.
+  An account with none is told whom to ask. If that account is ever
+  gone, an administrator runs Who may run AGMessage... as administrator
+  and hands it over.
 - "Also on Public networks (hotels, airports, fresh venue Wi-Fi)" is
   unticked: phones and tablets on this PC's local subnet reach it on
   Private and Domain networks only, until you tick it or make the
@@ -453,8 +467,8 @@ and AGMessage status.
   A busy AGMessage is uninstalled only with a reason, from a command
   prompt: "C:\Program Files\AGMessage\unins000.exe" /FORCE="why".
 - Close AGMessage's own consoles (Show the admin token, AGMessage
-  status) before an upgrade or an uninstall: either says so if one is
-  open.
+  status, Who may run AGMessage...) before an upgrade or an uninstall:
+  either says so if one is open.
 - If AGMessage does not answer after a first install, the installer
   says why. Its server task starts it with Windows, so restart the PC
   once the cause is cleared, or uninstall it and install it again.

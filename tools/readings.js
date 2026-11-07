@@ -97,7 +97,6 @@ const READINGS = [
     what: '`icacls C:\\` and `icacls %ProgramData%` (may a standard account create `C:\\node_modules` or `%ProgramData%\\AGMessage`?); `schtasks /query /xml` of each task as a standard account: readable or not, and no secret in it',
     mark: 'recorded',
     miss: 'U11 and U12\'s order already assume the worst',
-    later: ['U17 (#74): the control tasks\' definitions, read as a standard account'],
   },
   {
     id: 'R9',
@@ -118,7 +117,6 @@ const READINGS = [
     what: 'a control task whose descriptor gives one standard account read and execute: that account runs it with `schtasks /run`; a second standard account is refused; the task runs as SYSTEM with `--for` that account\'s SID',
     mark: '10 of 10',
     miss: 'the Start menu\'s acts fall back to an administrator\'s approval, and the release notes say so',
-    needs: ['U17 (#74): the control tasks'],
   },
   {
     id: 'R12',
@@ -131,7 +129,7 @@ const READINGS = [
     what: 'from a control task as SYSTEM, `api.github.com`\'s release answer for a published tag: `immutable` and each asset\'s `digest` read; with no network, the words',
     mark: 'recorded',
     miss: 'U18\'s offline words are the ones shown',
-    later: ['U17 (#74): a control task, in place of the stand-in', 'U18 (#77): the words with no network'],
+    later: ['U18 (#77): the words with no network'],
   },
 ];
 
@@ -176,6 +174,7 @@ const FILE_GENERIC = { read: 0x120089, write: 0x120116, execute: 0x1200A0, all: 
 const ADD_FILE = 0x2;          // FILE_ADD_FILE on a folder; FILE_WRITE_DATA on a pipe
 const ADD_SUBDIRECTORY = 0x4;  // FILE_ADD_SUBDIRECTORY on a folder
 const READ_DATA = 0x1;         // FILE_READ_DATA on a pipe
+const EXECUTE = 0x20;          // FILE_EXECUTE: on a task's descriptor, with read, what lets an account run it
 
 /** An ACE's rights as one mask, its generic rights mapped to a file's. NaN for a right SDDL does not name. */
 function rightsMask(text) {
@@ -478,7 +477,11 @@ function judgeR7(r) {
   return verdict('recorded', 'read: ' + (first.read.join(', ') || 'none') + '; write: ' + (first.write.join(', ') || 'none') + ' (' + lists.length + ' pipe' + (lists.length === 1 ? '' : 's') + '); ' + reach, { pipes: lists, remote });
 }
 
-/** R8: may a standard account make a folder at C:\ or in %ProgramData%, and read the server task's definition; the control tasks' wait for U17. */
+/**
+ * R8: may a standard account make a folder at C:\ or in %ProgramData%, and read the server task's and a control task's
+ * definitions (each as app/machine.js writes it, its own descriptor read back): the server task's no standard account,
+ * a control task's the one account it is for and no other.
+ */
 function judgeR8(r) {
   const places = r.places && typeof r.places === 'object' ? r.places : {};
   const found = [];
@@ -501,7 +504,43 @@ function judgeR8(r) {
     facts.serverTask = { error: def.error ? String(def.error).slice(0, 300) : 'not read' };
     found.push('the server task\'s definition was not read (' + facts.serverTask.error + ')');
   }
-  return verdict('recorded', found.join('; ') + '; the control tasks\' definitions as a standard account wait for U17 (#74)', facts);
+  // U17's control task's definition, for one account: that account may read and run it, a standard account's groups not.
+  const ctl = r.controlTask && typeof r.controlTask === 'object' ? r.controlTask : {};
+  if (ctl.sddl && /^S-1-[0-9-]+$/.test(String(ctl.sid || ''))) {
+    const aces = daclOf(ctl.sddl);
+    const other = holds(aces, STANDARD_ACCOUNT, READ_DATA);
+    const own = holds(aces, [ctl.sid], READ_DATA);
+    const runs = holds(aces, [ctl.sid], EXECUTE);
+    facts.controlTask = { sddl: String(ctl.sddl).slice(0, 400), sid: ctl.sid, read: other.answer, by: other.by, itsAccount: own.answer, itsAccountRuns: runs.answer, secret: ctl.secret === true };
+    found.push('a control task\'s definition: the account it is for ' + (own.answer === 'yes' && runs.answer === 'yes' ? 'may read and run it' : 'may not read and run it') + ', another standard account ' + (other.answer === 'yes' ? 'may read it (' + other.by + ')' : 'may not') + (ctl.secret === true ? ', and a secret is in it' : ', and no secret is in it'));
+  } else {
+    facts.controlTask = { error: ctl.error ? String(ctl.error).slice(0, 300) : 'not read' };
+    found.push('a control task\'s definition was not read (' + facts.controlTask.error + ')');
+  }
+  return verdict('recorded', found.join('; '), facts);
+}
+
+/**
+ * R11: a control task whose descriptor gives one standard account read and execute, as app/machine.js registers it: that
+ * account runs it with schtasks /run (its run's exit code 0 and the control task's answer to its request, written as
+ * SYSTEM for that account's SID: `ranAs` and `for`), a second standard account is refused (its run's exit code not 0, and
+ * no answer to the request left for it). Met at 10 of 10 each; a round the lane could not take is said.
+ */
+function judgeR11(r) {
+  const own = (Array.isArray(r.own) ? r.own : []).filter((x) => x && typeof x === 'object');
+  const other = (Array.isArray(r.other) ? r.other : []).filter((x) => x && typeof x === 'object');
+  const sid = String(r.sid || '');
+  const facts = { sid, own, other, controlTask: String(r.controlTask || '') };
+  if (!own.length || !other.length) return verdict('not run', 'the lane took no round ' + (!own.length ? 'for the account the control task is for' : 'for the second account') + (r.why ? ' (' + String(r.why).slice(0, 200) + ')' : ''), facts);
+  // A round whose task as the account never reported its run measured nothing of the control task: the lane's, not run.
+  const untaken = [...own, ...other].find((x) => x.code === null || x.code === undefined);
+  if (untaken) return verdict('not run', 'a run as a standard account was not taken: ' + String(untaken.err || 'no exit code').slice(0, 200), facts);
+  const ran = own.filter((x) => x.code === 0 && x.answered === true && x.ranAs === 'S-1-5-18' && x.for === sid).length;
+  const refused = other.filter((x) => x.code !== 0 && x.answered !== true).length;
+  const words = 'the account it is for ran it ' + ran + ' of ' + own.length + ' times, each answered as SYSTEM for its SID; a second standard account was refused ' + refused + ' of ' + other.length + ' times';
+  const firstBad = own.find((x) => !(x.code === 0 && x.answered === true && x.ranAs === 'S-1-5-18' && x.for === sid));
+  const why = firstBad ? ' (a round that did not: exit ' + firstBad.code + (firstBad.err ? ', ' + String(firstBad.err).slice(0, 120) : '') + (firstBad.answered ? ', answered as ' + firstBad.ranAs + ' for ' + firstBad.for : ', no answer') + ')' : '';
+  return verdict(ran === 10 && own.length === 10 && refused === 10 && other.length === 10 ? 'met' : 'missed', words + why, facts);
 }
 
 /**
@@ -586,7 +625,7 @@ function judgeR3prime(r) {
   return verdict('missed', saved + ' of ' + list.length + ' saved: the release notes name the failing case (' + why + ')', facts);
 }
 
-const JUDGES = { R1: judgeR1, R2: judgeR2, 'R3′': judgeR3prime, R4: judgeR4, R5: judgeR5, R7: judgeR7, R8: judgeR8, R9: judgeR9, R10: judgeR10, R12: judgeR12, R13: judgeR13 };
+const JUDGES = { R1: judgeR1, R2: judgeR2, 'R3′': judgeR3prime, R4: judgeR4, R5: judgeR5, R7: judgeR7, R8: judgeR8, R9: judgeR9, R10: judgeR10, R11: judgeR11, R12: judgeR12, R13: judgeR13 };
 
 /**
  * Every reading's verdict on what the lane measured (`raw`, tools/readings-take.js's record; anything else reads as

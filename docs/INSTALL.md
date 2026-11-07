@@ -1,10 +1,10 @@
 # AGMessage installed on a Windows PC
 
 *Begun with 0.6.0's start window; the installer's units (`docs/plan/0.6.0/PLAN.md` Part 6, U.9) write the rest of this
-paper. The installer (`installer/AGMessage.iss`, The installer below) is built by CI from the portable zip; giving rights
-to other accounts, the import of a portable folder and an upgrade with no administrator are later units', and its life
-cycle in CI (install, upgrade, the way back, uninstall, run for real) is the installer job's still to come. Venue laptops
-run the portable folder ([README.txt](../README.txt)).*
+paper. The installer (`installer/AGMessage.iss`, The installer below) is built by CI from the portable zip; the import of
+a portable folder and an upgrade with no administrator are later units', and its life cycle in CI (install, upgrade, the
+way back, uninstall, run for real) is the installer job's still to come. Venue laptops run the portable folder
+([README.txt](../README.txt)).*
 
 ## It opens no browser and has no window
 
@@ -192,9 +192,9 @@ watchdog and the server read it, and these rules, before either writes anything 
 ## The busy line, and the stop at loopback
 
 Both channels (the plan's Part 6, unit U8, with the owner's answer 39, "busy as proposed, and a busy server stopped only
-with a typed reason"). The machine's commands that ask it (the upgrade's stop and check, Stop AGMessage…, Go back) are
-the installer's units'; what they will ask is built and tested here, against the server and against programs that are
-not it.
+with a typed reason"). The machine's commands ask it: the installer's checks and the upgrade's stop, and Stop
+AGMessage… (a control task, below); Go back is a later unit's. Each is tested here against the server and against
+programs that are not it.
 
 - **The busy line** (`lib/busy.js`) is one line of counts, and nothing else: no name, code, token or path. `active`, the
   pages active in the last 10 minutes, a page being a person in a room (the room's key, a hall's code for its Main room,
@@ -239,8 +239,8 @@ not it.
   a reason to stop it anyway.", and with one it stops and writes `server.stop.forced` (who asked, why, what was live, the
   words typed). Its window and `server.log` say "Stopping for an upgrade, asked at loopback by LAPTOP\ana". A stop
   asked while one is under way is answered with what is being done (`already`) and says and writes nothing more. The
-  machine event naming who asked (`machine.stop`) is the control tasks' unit's; until it lands the nudge to read the
-  machine's events is answered and reads none.
+  machine event naming who asked (`machine.stop`) is appended by the control task that asked (below), and the nudge reads
+  the machine's events into the audit log, answering how many rows it wrote; a portable copy keeps none, and says so.
 - **On the data folder's pipe**, once it serves, the copy that holds the folder answers whoever connects with the busy
   line and ends the connection: a read, never a command (nothing machine-level writes the pipe). A pipe's default access
   lets Everyone and the anonymous account read it (reading R7), and whatever took its name first answers in its place,
@@ -356,8 +356,8 @@ log), so the token is never in it (`supervise.js`, `lib/startup.js` `taskTokenPr
 
 ## The machine's own commands, the server task, and the way back's backup
 
-The machine-level commands (`app/machine.js`) run elevated or as SYSTEM only, by the installer and, later, the control
-tasks and the checked upgrade. They require Node's built-ins only and run nothing but by its absolute path in the System32
+The machine-level commands (`app/machine.js`) run elevated or as SYSTEM only, by the installer, the control tasks (below)
+and, later, the checked upgrade. They require Node's built-ins only and run nothing but by its absolute path in the System32
 folder the installer passes (`{sys}`), from that folder: `schtasks.exe`, `icacls.exe`, `reg.exe` and
 `WindowsPowerShell\v1.0\powershell.exe`, never a bare name. `powershell.exe` runs one fixed script for each Windows fact
 no other program gives (a folder's owner by `Get-Acl`, the firewall's rules by NetSecurity's cmdlets, the port's holder by
@@ -369,10 +369,10 @@ is read from the environment; Inno passes `{sys}`, `{app}` and `{commonappdata}`
 `--out <file>`, where its result is written whole as JSON (`{v, verb, code, words, …}`), a refusal's too, never a token.
 Exit codes: 0 done, 2 not done (with why), 3 refused (a precondition a person must clear, fail closed), 64 a word it does
 not know, or an argument missing or malformed (a path that is not full from a drive or a share, `\ProgramData\…` among
-them). This build has `prepare`, `install`, `uninstall`, `preinstall-check`, `upgrade-stop`, `status` and `restore`;
-`import`, `control` and `upgrade` are later units (U14, U17, U18) and are refused as unknown until they land. The audit
-log is the server's alone: the machine appends to `machine\events.jsonl`, and the server turns each event into its audit
-row (U17).
+them). This build has `prepare`, `install`, `uninstall`, `preinstall-check`, `upgrade-stop`, `status`, `restore`, `whose`,
+`start`, `first-account` and `control`; `import` and `upgrade` are later units (U14, U18) and are refused as unknown until
+they land. The audit log is the server's alone: the machine appends to `machine\events.jsonl`, and the server turns each
+event into its audit row (The machine's events, below).
 
 - **The machine folder, race-free** (`machine.js prepare`, at the installer's start). A non-recursive
   `%ProgramData%\AGMessage`, at once its inheritance cut and SYSTEM and Administrators in full control, written by SID
@@ -389,13 +389,16 @@ row (U17).
   `app\launch.js`). LocalService under a SID of its own (`NT TASK\AGMessage-Server`, `ProcessTokenSidType` unrestricted),
   with `SeChangeNotifyPrivilege` alone (so `SeImpersonatePrivilege` is removed); a boot trigger; no execution time limit;
   both battery settings false; `MultipleInstancesPolicy` `IgnoreNew`; `RestartOnFailure` 3 × 1 min; its action `node.exe`
-  on `launch.js serve`, both by their absolute paths, from `app\`, with the five folders and the port; its descriptor
-  (`D:P(A;;FA;;;SY)(A;;FA;;;BA)`) SYSTEM and Administrators only, so people start it through their control tasks (U17).
+  on `launch.js serve`, both by their absolute paths, from `app\`, with the five folders, the machine's events file
+  (`--events`, `machine\events.jsonl`) and the port; its descriptor (`D:P(A;;FA;;;SY)(A;;FA;;;BA)`) SYSTEM and
+  Administrators only, so people start it through their control tasks (below).
   Its SID is read (`schtasks /ShowSid`) and given what it uses: modify on `data`, `uploads`, `keys` and `logs`, and on
   `token`, since the watchdog replaces the token by a rename, which needs delete; read on `machine\events.jsonl`, that file
   alone, never a list of `machine\`. The laptop's admin is given read on `token` and `logs` (Show the admin token,
   AGMessage status) and its own `machine\inbox\<sid>\` (it may create and write files) and `machine\outbox\<sid>\` (it may
-  read). Every grant is checked: a SID not read or a grant that fails is not done (2), with no record written.
+  read), and its own control task. On an upgrade each account given a right has its control task registered again from
+  this build's definition. Every grant is checked: a SID not read or a grant that fails is not done (2), with no record
+  written.
 - **The firewall rules** (answer 37). One for TCP on the port, one for UDP on 9928 (discovery), each naming the program
   (`node.exe`), the protocol and the local port, the remote address `LocalSubnet`, on Private and Domain, and Public only
   when ticked at install — never a rule on `node.exe` alone, which would let any account's inbound traffic reach any
@@ -410,7 +413,8 @@ row (U17).
   `--out`.
 - **`launch.js serve`** is the server task's action, run by Task Scheduler as LocalService. It runs the watchdog
   (`supervise.js`) in a process of its own, in an environment made of Windows' own names (`SystemRoot`, `TEMP` and the
-  like) and `AGM_RUNS=task`, the folders and the port from its arguments, and nothing else: no `NODE_OPTIONS`, no `AGM_…`
+  like) and `AGM_RUNS=task`, the folders, the machine's events file (`AGM_MACHINE_EVENTS`) and the port from its
+  arguments, and nothing else: no `NODE_OPTIONS`, no `AGM_…`
   it was not handed. The watchdog's stop (0), its give-up and a configuration refusal (3) end `serve` with 0 after the
   watchdog has written why (`watchdog.json`, `server.log`), so the task stays stopped and `RestartOnFailure` does not loop
   it; only an unexpected end of the watchdog is non-zero, which it restarts.
@@ -466,6 +470,112 @@ row (U17).
   held on Linux (`test/machine.test.js`); on Windows the same file runs the read-only scripts (a real folder's owner, the
   port's holder) through the machine's own hands. The Windows readings lane takes R3′ (U12's own task definition, its
   stop-saves) and R9 (the backup's time), and R8 reads that definition back as a standard account.
+
+## The laptop's admin, its rights and the control tasks
+
+The plan's Part 6, unit U17, with the owner's answers 38 ("The admin will be whoever does the install. They can add
+permissions or handover to another account.") and 40. The Windows account that ran the install is this PC's AGMessage
+admin, standard or administrator (`Admin`, its SID, and `AdminName`, its name for the words, in the install record). In
+the pages "the laptop's admin" is that Windows account; "admin account" stays an AGMessage account with the admin role.
+
+| Right | What it lets the account do | How Windows holds it |
+|---|---|---|
+| `token` | read the laptop's token: the break-glass sign-in, Accept, the token's export, the first admin account | read on `%ProgramData%\AGMessage\token\` |
+| `start` | Start AGMessage | the account's control task runs the server task |
+| `stop` | Stop AGMessage…, with a typed reason when busy | the account's control task stops the server at loopback, saved |
+| `upgrade` | Upgrade AGMessage…, and Go back to build N (a later unit's, U18) | the account's control task, after U18's checks |
+
+- **Who holds them.** The laptop's admin holds all four, and alone gives them, takes them back or hands the admin over.
+  An account given rights cannot give them on. Each right goes to one person's account (a local account, or one that has
+  signed in to this PC); a group, a service, or an account Windows cannot confirm is a person's is refused: "Give rights
+  to one person's account." `Grants` (`HKLM\SOFTWARE\AGMessage\Grants`, one value per SID: its rights, `start,stop`)
+  holds the rest. Holding the token includes a stop by hand, since the token is the node's whole admin; `stop` alone is
+  for an account that should stop the node and never hold the token. A member of Administrators can still do everything
+  through an elevation.
+- **One control task per account with a right**, `\AGMessage\Control-<SID>`: SYSTEM, run on demand only (no trigger),
+  a request queued behind one that runs, both battery settings false, 10 minutes at most; its action `node.exe` on
+  `app\machine.js control --for <SID> --machine C:\ProgramData\AGMessage --sys C:\Windows\System32`, both by their absolute
+  paths, fixed at registration; its descriptor `D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;<SID>)`, read and execute for that
+  account alone beside SYSTEM and Administrators. So which task ran says whose request it is, and nothing the request
+  says can change that. Which rights let a standard account run it on demand is reading R11.
+- **A request.** `launch.js` (run as the person, never elevated by itself) reads their SID (`whoami.exe`), writes
+  `request.json` (`{id, verb, …}`) into `machine\inbox\<SID>\`, where only that account may add a file and write it (no
+  folder and no junction: the folder's own grant is `WD`, the files' an inherited `W`), and runs their control
+  task (`schtasks.exe /Run`). The control task, as SYSTEM, refuses a request file that `lstat` shows as a link, a hard
+  link, a folder or over 4 KB (whatever was there is removed, so nothing is read twice), copies its bytes into
+  `machine\work\` and reads that copy: whole JSON, an `id`, a known verb (`start`, `stop`, `grant`, `revoke`, `handover`;
+  `upgrade` and `back` are U18's) and only that verb's fields, each of its type; an unknown word is refused, never
+  defaulted. It reads the right from the record at that moment, so a right taken back holds at once even if removing its
+  task failed; it acts, writes `answer.json` (`{v, id, verb, code, words, ranAs, for, …}`, refusals too) into
+  `machine\outbox\<SID>\`, which that account may read, and appends one machine event for an act done, and one
+  (`machine.refused`: who asked, what, and the rights it named, the account it names said as typed and never looked up)
+  for a request read whole and refused for want of the right, so an account asking beyond its rights is in the audit
+  log. A request that is not one leaves no event; a run that finds no request waiting (a second press, queued behind the
+  first) writes no answer either, since the one there may be the run's before it. An act done in part answers not done
+  (2) with what it did; an act done whose event cannot be appended answers done, saying the audit log will not show it.
+  `launch.js` waits for the answer to its request's id and prints its words.
+- **The acts.** `start` runs the server task and waits for its server to prove it holds the token ("Started."; one already
+  serving is said, and changes nothing). One that has not proved itself within 35 s is left as it is, never ended, since
+  it may still be starting or its watchdog retrying a held port, and Task Scheduler's End is no stop: the answer, not done
+  (2), says the task's state and the log's last line, and the event says the start was asked. `stop` is the stop at
+  loopback with the proof, `by` the account's name, which a busy server refuses with its busy line's counts: "Not
+  stopped: AGMessage is busy (3 pages active, a countdown running). Type a reason to stop it anyway." until the person
+  types one (Stop AGMessage… asks for it and asks again; Enter leaves it running), then
+  "Stopped, saved at 20:31." The `token` right is the read on `token\`, which Windows holds, so the record never names less
+  than Windows grants: a read is given only once the record names it and taken back before the record stops naming it.
+  `grant` makes the account's `inbox\` and `outbox\` and its control task, writes its `Grants` value, and only then, for
+  `token`, gives its read on `token\`; a read Windows will not give is taken off the record again and said, the rest
+  given, not done (2). `revoke` takes back the read on `token\` first, then writes the record (read at every request, so
+  what it no longer names is refused at once), then, with no right left, removes the control task, `inbox\` and
+  `outbox\`; a read Windows keeps stays on the record and is said, not done. A SID the record names is taken as typed,
+  so an account Windows no longer knows can lose its rights. `handover`, confirmed by typing the new admin's name again,
+  makes the new admin's folders and control task first, then takes the old admin's reads on `token\` and `logs\` (and
+  hands nothing over while one stays), then rewrites `Admin` and `AdminName` (the new admin's own `Grants` value goes),
+  then gives the new admin its reads, then removes the old admin's `inbox\`, and its control task last, after the
+  answer; the old admin keeps no right unless the new one gives it back. A new admin Windows will not give its reads is
+  said (2), and a handover to the admin itself gives them again. An account's folders are removed entry by entry, never
+  recursively, so a link left in one is taken and never what it names; uninstall does the same before the machine
+  folder goes. The words:
+  "You have no AGMessage rights on this PC. Ask LAPTOP\ana, or an administrator." and "Only LAPTOP\ana, this PC's
+  AGMessage admin, can give rights."
+- **Who may run AGMessage…** (`launch.js rights`) lists the admin and each grant (the names as Windows gives them now, by
+  one `powershell.exe`), then takes one line: "Give LAPTOP\ben: start, stop", "Take back from LAPTOP\ben: stop" (or all),
+  "Hand over to LAPTOP\ben". Run in an administrator's elevated console (Administrators and a High integrity label, read
+  by SID), each of Start, Stop and Who may run runs `machine.js control --elevated --request <machine\work\file>` beside
+  it instead, which may do every act, so a laptop whose admin account is gone is handed over; its event names that
+  administrator.
+- **The machine's events.** `machine\events.jsonl` is appended by `machine.js` alone, in place (the server's task reads
+  that one file by its own grant), under `machine\events.lock`, so no two control tasks take one seq (a lock is held for
+  one read and one append; one older than 5 s, below an append's 10 s wait, was left by a crash and is taken): `{seq, at,
+  kind, by, for, rights, words}`, `by` and `for` Windows accounts (`{sid, name}`), never a token, a password or a path in
+  a profile.
+  The server (`lib/machineevents.js`), the audit log's one writer, reads the file after the hold and at each nudge
+  (`POST /api/machine/events`, which each act sends), and writes one row per event in seq order: `machine.admin`,
+  `machine.grant`, `machine.revoke`, `machine.handover`, `machine.start`, `machine.stop`, `machine.refused` (and
+  `machine.upgrade`, `machine.upgrade.refused` and `machine.import`, which U18 and U14 append). A row names both
+  accounts by SID, whole, since names are localised and can be renamed: its actor the Windows account that asked
+  (`{t: 'windows', id: <SID>, name}`), its target the SID of the account acted for; its words the event's (naming both by
+  name), then the rights it names, when it was done ("· done 20:31 UTC on 7 Nov 2026", the event's own time: a stop's row
+  is written at the next start) and its seq ("· machine event 7"). The words give way, with an ellipsis, before that end
+  is cut, the token taken out first. The last seq written is kept in settings (`machineSeq`), and a start takes the higher of
+  that and the seq the log's newest rows name, so a restart, even one before the settings were saved, never writes an
+  event twice or skips one. A line that is not an event is passed over and said on the console; a row never holds the
+  token (taken out by value, in either case). A copy whose settings could not be read writes none until they can. The
+  file, not the nudge, is the authority: an event the server missed is written at its next start.
+- **Where it shows.** "This laptop" lists the laptop's admin and each grant, to admin accounts and the token; AGMessage
+  status, run elevated, lists them too. The context, the hello and the AI's brief carry none of it: a Windows account's
+  name is not the show network's business.
+- **What only a Windows run proves**, and is not yet run: that a control task's descriptor lets its one standard account
+  run it on demand and refuses another, and that it then runs as SYSTEM (R11, the lane's); the inbox's and outbox's access
+  lists; the account lookup; the Start menu's consoles; lab 7 (the admin as a standard account, a second given `start` and
+  `stop`, a third given nothing). The pure parts and the acts are held on Linux (`test/control.test.js`): the request's
+  shape and its refusals, a link, a hard link and a file swapped after its look refused, the rights read at each request
+  and a refusal for want of one in the log, giving, taking back and handing over (from the admin, an elevated
+  administrator, and refused from anyone else), the token's read and the record in their order when Windows refuses a
+  step, an account's folders removed without following a link, start (one not answering left as it is) and stop with
+  their events, `launch.js` wired to `machine.js control` end to end, and the events written by a real installed-channel
+  server exactly once across a nudge and restarts, in seq order, a local account's and an Entra ID account's SIDs whole,
+  a stop's long reason and its own time kept, with no token in any row.
 
 ## The installer
 
@@ -551,8 +661,9 @@ each run, against its release's digest and its publisher's signature; it is buil
   `/api/health` once: the installed node answering opens `http://localhost:<port>` in the person's browser by
   `explorer.exe`, by its absolute path in the Windows folder `{sys}` sits in, and the console closes; a portable copy or
   another program on the port, a port that does not answer within 3 s, or nothing serving is said, with the server task's
-  state, the log's last line and what to do, and the console stays until Enter. Start, Stop, Upgrade, Go back to build N
-  and Who may run AGMessage… are later units' (U17, U18).
+  state, the log's last line and what to do, and the console stays until Enter. **Start AGMessage**, **Stop
+  AGMessage…** and **Who may run AGMessage…** (`launch.js start`, `stop`, `rights`) ask the person's own control task
+  (The laptop's admin, its rights and the control tasks, above). Upgrade and Go back to build N are a later unit's (U18).
 - **The uninstall** asks "Remove all AGMessage data from this PC?", No the default (the uninstaller has no pages, so the
   box the plan names unticked is a question whose default is No; `/REMOVEDATA` quietly), then `machine.js uninstall
   --app` refuses while a console of the Start menu is open, stops the server at loopback (it saves), removes every task
@@ -661,14 +772,21 @@ a reading: the installer's life cycle in CI, when it lands, is a gate, as every 
   work folder, so it refuses, before it makes or removes anything, a machine that is not a GitHub-hosted runner, a work
   folder it did not make, and a `\AGMessage\Server` task it did not make (the installed node's). It is never run on the
   show laptop: lab 3 is taken there by hand.
-- **What it stands in for.** The control tasks are a later unit's, and the installer is the installer job's, whose file R5
-  reads (the lane waits for that job and is never held by it); the server task is U12's
-  (`app/machine.js`). R3′ and R8 register U12's own definition under the lane's names (R3′ runs it on demand, its boot
+- **What it stands in for.** The installer is the installer job's, whose file R5 reads (the lane waits for that job and is
+  never held by it); the server task is U12's and the control tasks U17's (`app/machine.js`). R11 registers U17's own
+  control task definition for one of two standard accounts it makes for the reading (removed with their tasks and
+  profiles at its end), its action the bundle's `machine.js control` over a machine folder of the lane's: the runner has no
+  install record, so each request is refused for its rights and nothing is started or stopped (a machine with an
+  AGMessage install record is refused before anything is made). Each of ten rounds leaves a request with a fresh id
+  in that account's inbox, runs a task that runs as the account (by its password, given to `schtasks` alone and written
+  nowhere) whose probe runs `schtasks /run` of the control task, and waits for the answer to that id (`ranAs`, `for`); the
+  second account's ten rounds must be refused, with no answer. R8 also reads a control task's definition back. R3′ and R8 register U12's own definition under the lane's names (R3′ runs it on demand, its boot
   trigger never firing; R8 reads it back and never runs it). R4, R7 and R12 are taken under stand-in tasks whose
   principal and settings are that definition's (`\AGMessage\Server`: LocalService under its own SID,
   `SeChangeNotifyPrivilege` only, no time limit, RestartOnFailure 3 × 1 min; `test/readings.test.js` holds them element
   for element), their actions the lane's probes, R4's starting the bundle's own watchdog in the installed channel
-  (`AGM_RUNS=task`, the four folders); R13 under a stand-in task as SYSTEM, with no token. R4's `whoami /priv` and `/groups` are run by the task's action, whose token
+  (`AGM_RUNS=task`, the four folders); R13 under a task with U17's control task's principal and settings (SYSTEM, a request queued, 10 minutes at most), held to
+that definition element for element, with no token. R4's `whoami /priv` and `/groups` are run by the task's action, whose token
   the watchdog and the server inherit (each is started with no token of its own); the server counts as serving only when
   health answers with the build the bundle's stamp names. R4's firewall rule is made and read back; that it matches a
   connection needs a client on another machine (Windows Firewall does not filter loopback), which is the show laptop's.
@@ -712,12 +830,12 @@ a reading: the installer's life cycle in CI, when it lands, is a gate, as every 
 | R5 | `Get-AuthenticodeSignature` on `node.exe`, `cloudflared.exe` and the installer | the first two Valid; the installer recorded | `README.txt` names the file Windows does not trust | taken for `node.exe` and `cloudflared.exe`, and for the installer the installer job built for the run (recorded: it is unsigned; a job that built none is said) | 2026-11-03, build 0.6.0-dev.78+442583d: ✓ met: node.exe Valid (CN=OpenJS Foundation, O=OpenJS Foundation, L=San Francisco, S=California, C=US), cloudflared.exe Valid (CN="Cloudflare, Inc.", O="Cloudflare, Inc.", L=San Francisco, S=California, C=US, SERIALNUMBER=4710875, OID.2.5.4.15=Private Organization, OID.1.3.6.1.4.1.311.60.2.1.2=Delaware, OID.1.3.6.1.4.1.311.60.2.1.3=US); the installer not built yet (U13, #73) |
 | R6 | over-the-shoulder elevation: U.5.1's two readings of the account that started Setup; the user's own export (U14) run through `ExecAsOriginalUser` into the laptop's admin's inbox; an elevated read of another account's `%LOCALAPPDATA%\AGMessage` | both readings name the standard account | the admin page asks the person to choose, as U.5.1 says | not run: needs U14 (#75); the readings of who started Setup need a standard account and an administrator's typed approval, the show laptop's (lab 7's first account) | not measured |
 | R7 | the folder pipe's access list as libuv makes it (`CreateNamedPipeW(…, NULL)`, `crit-dl/pipe.c:596-599`) under the task's token, and whether a remote client reaches it | recorded | nothing machine-level writes the pipe any more (U8); the busy line's readers are named | taken: the stand-in server's folder pipe, who may read and write it, and whether a client reaches it through SMB at the runner's own names (a network logon on one machine; a second machine is the show laptop's) | 2026-11-03, build 0.6.0-dev.78+442583d: ✓ recorded: read: Everyone, Anonymous, SYSTEM, LOCAL SERVICE, Administrators; write: SYSTEM, LOCAL SERVICE, Administrators (1 pipe); through SMB at this machine's own names (a network logon; no second machine): \\localhost connected, \\runnervmhao91 connected |
-| R8 | `icacls C:\` and `icacls %ProgramData%` (may a standard account create `C:\node_modules` or `%ProgramData%\AGMessage`?); `schtasks /query /xml` of each task as a standard account: readable or not, and no secret in it | recorded | U11 and U12's order already assume the worst | taken: both access lists, read by SID (`icacls /save`); U12's server task definition (`app/machine.js`), registered under the lane's folder and never run, its descriptor read back (may a standard account read it?) and its XML searched for a secret; the control tasks' definitions once U17 (#74) makes them | 2026-11-03, build 0.6.0-dev.78+442583d: ✓ recorded: C:\: a standard account may create a folder (Authenticated Users); C:\ProgramData: a standard account may create a folder (Users); the tasks' definitions as a standard account wait for U12 (#72) and U17 (#74) |
+| R8 | `icacls C:\` and `icacls %ProgramData%` (may a standard account create `C:\node_modules` or `%ProgramData%\AGMessage`?); `schtasks /query /xml` of each task as a standard account: readable or not, and no secret in it | recorded | U11 and U12's order already assume the worst | taken: both access lists, read by SID (`icacls /save`); U12's server task definition (`app/machine.js`), registered under the lane's folder and never run, its descriptor read back (may a standard account read it?) and its XML searched for a secret; U17's control task definition the same way, for the lane's own account (may that account read and run it, and another standard account not?) | 2026-11-03, build 0.6.0-dev.78+442583d: ✓ recorded: C:\: a standard account may create a folder (Authenticated Users); C:\ProgramData: a standard account may create a folder (Users); the tasks' definitions as a standard account wait for U12 (#72) and U17 (#74) |
 | R9 | the upgrade backup's time at an empty hall and at 20 × 10,000 | recorded, beside R2 | as R2 | taken (U12, #72): the bundle's own watchdog serves a seeded folder (empty, and 20 × 10,000), the stop at loopback with the proof carries reason `upgrade` (the seeded messages are from before the busy window, so no reason is typed), the server backs the folder up for the way back (`app/lib/upgradebackup.js`), and `last-stop.json` names its time | not measured |
 | R10 | extracting `node.exe` to `%TEMP%` for each machine command, Defender on | recorded | over 5 s: an upgrade runs its checks with the installed `node.exe` | taken: 5 rounds, each extracted from the zip and run once, the slowest judged against 5 s; a round that did not run to exit 0 is said, and measured no command | 2026-11-03, build 0.6.0-dev.78+442583d: ✓ recorded: the slowest of 5 rounds 4.06 s (extracted, then run once): within 5 s |
-| R11 | a control task whose descriptor gives one standard account read and execute: that account runs it with `schtasks /run`; a second standard account is refused; the task runs as SYSTEM with `--for` that account's SID | 10 of 10 | the Start menu's acts fall back to an administrator's approval, and the release notes say so | not run: needs U17 (#74) | not measured |
+| R11 | a control task whose descriptor gives one standard account read and execute: that account runs it with `schtasks /run`; a second standard account is refused; the task runs as SYSTEM with `--for` that account's SID | 10 of 10 | the Start menu's acts fall back to an administrator's approval, and the release notes say so | taken: U17's control task (`app/machine.js`) for one of two standard accounts the lane makes, its action the bundle's `machine.js control`; ten runs from a task as that account, each answer read for `ranAs` and `for`, and ten from the second account, each to be refused; the accounts, their tasks and profiles removed | not measured |
 | R12 | RestartOnFailure on the server task: does a non-zero exit of the action start it again, and does exit 0 leave it stopped | recorded | U.5's second cost reads as measured | taken under two stand-ins with the server task's principal and settings (U12's own, `app/machine.js`, held element for element by `test/readings.test.js`), one whose action exits 1, then one whose action exits 0; a non-zero exit not started again, or a 0 started again, is the miss | 2026-11-03, build 0.6.0-dev.78+442583d: ✕ missed: a non-zero exit was not started again within 150.8 s; exit 0 left it stopped within 90.4 s |
-| R13 | from a control task as SYSTEM, `api.github.com`'s release answer for a published tag: `immutable` and each asset's `digest` read; with no network, the words | recorded | U18's offline words are the ones shown | taken online from the stand-in SYSTEM task (U17, #74, puts a control task in its place), for the newest release published (a refusal for the runner's rate limit reads "not run"); with no network, once U18 (#77) has its words | 2026-11-03, build 0.6.0-dev.78+442583d: ✓ recorded: read in 261 ms: v0.5.1 not immutable (U16, #78, turns immutable releases on), 3 of 3 assets with a SHA-256 digest; with no network, the words wait for U18 (#77) |
+| R13 | from a control task as SYSTEM, `api.github.com`'s release answer for a published tag: `immutable` and each asset's `digest` read; with no network, the words | recorded | U18's offline words are the ones shown | taken online from a task with U17's control task's principal and settings (SYSTEM), for the newest release published (a refusal for the runner's rate limit reads "not run"); with no network, once U18 (#77) has its words | 2026-11-03, build 0.6.0-dev.78+442583d: ✓ recorded: read in 261 ms: v0.5.1 not immutable (U16, #78, turns immutable releases on), 3 of 3 assets with a SHA-256 digest; with no network, the words wait for U18 (#77) |
 
 R7's `crit-dl/pipe.c:596-599` is the plan's reading of libuv's `src/win/pipe.c`, where the folder's pipe is made with no
 security attributes, so Windows gives it the default descriptor for the token that makes it.

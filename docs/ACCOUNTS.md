@@ -531,7 +531,14 @@ typed". The password reaches `machine.js` in a file only SYSTEM
 and Administrators may read, which it removes before it asks, and is never in a command line, a URL or the installer's
 log. Left empty, the first admin is made at Admin login as above, with the token from Start → AGMessage → Show the
 admin token. The Windows account that ran the installer is **the laptop's admin** (a Windows account, `docs/INSTALL.md`),
-not an admin account: it reads the token, and an admin account is AGMessage's own.
+not an admin account: it reads the token, and an admin account is AGMessage's own. It also starts and stops AGMessage
+from the Start menu, and gives these Windows rights (`token`, `start`, `stop`, `upgrade`) to other Windows accounts,
+takes them back or hands the laptop's admin over (Who may run AGMessage…, docs/INSTALL.md's The laptop's admin, its rights
+and the control tasks). Each is a row of the audit log (`machine.grant`, `machine.revoke`, `machine.handover`,
+`machine.start`, `machine.stop`, the install's `machine.admin`, and `machine.refused` for a request beyond its asker's
+rights), its actor the Windows account that asked (`t: 'windows'`, its whole SID and name) and its target the SID of the
+account acted for, never an AGMessage account; its words name both by name and end with when it was done. A Windows right gives no AGMessage account anything: an account given `token`
+reads the token, and signs in with it as anyone at the laptop does.
 
 **Where the token is said.** The watchdog makes the token and says it only where a person sits: the banner's Token line,
 under Admin login, holds it in a console window (the portable folder's black window), and never in output that is kept
@@ -539,7 +546,7 @@ under Admin login, holds it in a console window (the portable folder's black win
 own. The installed node has no window: its watchdog writes the token into `admin-token` in its token
 folder (`AGM_TOKEN_DIR`, `%ProgramData%\AGMessage\token`), once its server serves. That folder is one of its own, which
 this PC's AGMessage admin (the Windows account that installed it) and the accounts it gives `token` may read (the
-installer's units set its access list and add the Start menu; no build installs AGMessage yet). Start → AGMessage → Show
+installer sets its access list, and a grant of `token` adds that account's read). Start → AGMessage → Show
 the admin token runs `launch.js token`, which prints it in the person's own console, or says "This PC's AGMessage admin
 has not given you the token: ask LAPTOP\ana". The file is replaced whole each time the node serves and is left when it
 stops, so the token it holds is the one the node last served with. The installed node takes no `ADMIN_TOKEN` (nor
