@@ -2504,15 +2504,18 @@ function importFolders(fsImpl, P, base, parts, made) {
  * access list of the folder it lands in and never its own. Its bytes' SHA-256.
  */
 function copyPart(fsImpl, part, to, size) {
+  // The part is named by its own name in the words, never by its path under the account's inbox, so a long profile path
+  // cannot push the reason past the words' bound.
+  const name = String(part).split(/[\\/]/).pop();
   const st = fsImpl.lstatSync(part, { bigint: true });
-  if (st.isSymbolicLink() || !st.isFile() || st.nlink > 1n) throw Object.assign(new Error(part + ' is not a part the export wrote (a link, or not a file)'), { code: 'ELINK' });
-  if (st.size !== BigInt(size)) throw Object.assign(new Error(part + ' is ' + st.size + ' bytes, not the ' + size + ' its manifest names'), { code: 'ESIZE' });
+  if (st.isSymbolicLink() || !st.isFile() || st.nlink > 1n) throw Object.assign(new Error(name + ' is not a part the export wrote (a link, or not a file)'), { code: 'ELINK' });
+  if (st.size !== BigInt(size)) throw Object.assign(new Error(name + ' is ' + st.size + ' bytes, not the ' + size + ' its manifest names'), { code: 'ESIZE' });
   const hash = crypto.createHash('sha256');
   const src = fsImpl.openSync(part, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
   let dst = null;
   try {
     const ft = fsImpl.fstatSync(src, { bigint: true });
-    if (!ft.isFile() || !sameFile(ft, st)) throw Object.assign(new Error(part + ' changed between its look and its read'), { code: 'ECHANGED' });
+    if (!ft.isFile() || !sameFile(ft, st)) throw Object.assign(new Error(name + ' changed between its look and its read'), { code: 'ECHANGED' });
     dst = fsImpl.openSync(to, 'wx');
     const buf = Buffer.alloc(IMPORT_CHUNK);
     for (;;) {

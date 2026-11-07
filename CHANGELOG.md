@@ -6621,6 +6621,10 @@ next push; nothing of it has run on Windows yet)
   the context, the hello and the AI's brief carry none of it.
 
 **Fixed**
+- The portable import names a part of its bundle by the part's own name when it refuses one ("0000021.part is not a
+  part the export wrote (a link, or not a file)"). It named the part by its whole path under the account's inbox, and the
+  words are cut at 200 characters, so on a Windows profile the reason itself was cut away ("(a link, or )"); CI's Windows
+  run found it.
 - The installer's build accepts the installer it built. `installer/build-installer.ps1` reads the version back from the
   file it compiled and compares it with the build's, and read its strings with the padding Windows' version resource
   keeps after them, so CI's first build of it (run 96) refused "0.6.0.96" padded with blanks as not "0.6.0.96". The

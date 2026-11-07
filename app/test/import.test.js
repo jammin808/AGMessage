@@ -450,7 +450,7 @@ test('take lays nothing it cannot vouch for: no answer, an export that refused, 
   else fs.symlinkSync(outside, path.join(x.dir, machine.importPart(last)));
   r = await take(x);
   assert.equal(r.code, machine.NOT_DONE);
-  assert.match(r.text, /^The import did not lay .+ \(.+ is not a part the export wrote \(a link, or not a file\)\)\. What it copied was taken out again\. Nothing was removed from the portable folder or your profile\.$/);
+  assert.match(r.text, /^The import did not lay .+ \(\d+\.part is not a part the export wrote \(a link, or not a file\)\)\. What it copied was taken out again\. Nothing was removed from the portable folder or your profile\.$/);
   clean(x.root);
   // A part whose bytes changed after the export read them.
   x = await exported();
