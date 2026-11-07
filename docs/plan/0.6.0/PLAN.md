@@ -101,6 +101,10 @@ AGMessage 0.6.0 is one release, made of the 81 units of §0.6 in that order. The
     7-§17.7). A Board device of the owner's below the page floor (5-§15.10) is not supported, and the floor is not
     lowered for it ("Keep these as mim", §0.4.10): it is a ✕ that holds the tag until the owner retires it from the
     Board or replaces it (answer 22).
+  - Before the tag, the owner turns on the repository's immutable releases (Settings, the Releases section, Enable release
+    immutability). It is the owner's setting alone, which no workflow's token reads or changes, and it applies only to
+    releases published after it is on: #78's release job reads each release back once it is published and fails one that
+    is not immutable, and U18 takes no other (§0.8 C2, #78 as built).
 - **The order of authority where the parts disagree:**
   1. the owner's answers (§0.4);
   2. Part 7, the Board addendum (the newest);
@@ -559,6 +563,10 @@ A unit's local id is the one its part uses. The global number is the one a commi
     first release after 0.6.0. #78 turns immutable releases on inside 0.6.0: "Release assets cannot be modified or
     deleted" and "Git tags cannot be moved"
     (https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases).
+  - *As built (#78): immutable releases are the repository's setting, its owner's to turn on; no workflow's token reads or
+    changes it, so no unit can. #78's release job reads each release back once it is published and fails one GitHub does
+    not read as immutable, and U18 refuses every check until the setting is on. A release published while it is off stays
+    mutable for good, so the owner turns it on before v0.6.0 is tagged (§0.2, the close).*
 - **C3. Part 5's unit 31 "may slip to 0.6.x without touching another unit"** (5-§11, the cut line).
   - Part 5's own "18 and 20 need 31", and Part 7's "20a needs … arch-ux 31 (header): this view is its simple branch",
     say otherwise.
@@ -743,7 +751,7 @@ part's text stands in its place), **Read with** (the owner's answers are registe
 | 5-§11. Units (adds to the list) | **Amended by** Part 0 §0.6 governs the order and the cut line; unit 31 cannot slip (Part 0 §0.8 C3). |
 | 6-Owner's answers (2026-10-27) | **Read with** Part 0 §0.4.9. |
 | 6-U.5.1 The laptop's admin (answer 38) | **Amended by** 3-K.9 (the `token` right also adopts accounts held aside, #80). |
-| 6-U.7 Units | **Amended by** Part 0 §0.6 (the global build order; U18 before U16, §0.8 C2); 2-S.2 on U8's busy line (§0.8 C4); #36 as built (U8's note: the hello's challenge, the stop's `force`, the wire U12, U17 and U18 speak); #74 as built (U17's note: the rows' SIDs and end, `machine.refused`, the token's read and the record, a start that never ends the task; U15 keeps `settings.machineSeq`); 3-K.9 (#80: U2's `/api/setup` takes the typed token in both channels; U12's `keys\stores\`; U14 carries `stores\` and verifies that no account is held aside; U15's claim, pin and finish, and Archive this event… refused while accounts are held aside; U17's `token` row). |
+| 6-U.7 Units | **Amended by** Part 0 §0.6 (the global build order; U18 before U16, §0.8 C2); 2-S.2 on U8's busy line (§0.8 C4); #36 as built (U8's note: the hello's challenge, the stop's `force`, the wire U12, U17 and U18 speak); #74 as built (U17's note: the rows' SIDs and end, `machine.refused`, the token's read and the record, a start that never ends the task; U15 keeps `settings.machineSeq`); 3-K.9 (#80: U2's `/api/setup` takes the typed token in both channels; U12's `keys\stores\`; U14 carries `stores\` and verifies that no account is held aside; U15's claim, pin and finish, and Archive this event… refused while accounts are held aside; U17's `token` row); #78 as built (U16's note: immutable releases the owner's setting, read back once a release is published and turned on before the tag; the attestation's check the release job's; lab 7 only where Windows refused the account's logon; the import verified into a machine folder never started). |
 | 6-U.8 Tests | **Amended by** 3-K.13 (U15's row gains the claim, the pin and a `.partial` no claim names). |
 | 6-U.9 Papers | **Amended by** 3-K.14 (`docs/INSTALL.md` names `keys\stores\` and the import's carrying it). |
 | 7-§11. Units (adds to the list) | **Amended by** Part 0 §0.6 governs the order; 20a lands before stage 25 and T after it (Part 0 §0.8 C1); 20b and 20d must land (Part 0 §0.2). |
@@ -11517,6 +11525,21 @@ Each is one commit, `AGMessage 0.6.0, unit Un: <what landed>`. Every reader is n
       `ci.yml:179-182`). The release job verifies its own attestations with `gh attestation verify`.
     - **Immutable releases are turned on**, which U18 relies on: "Release assets cannot be modified or deleted" and "Git
       tags cannot be moved" (https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases).
+    - *As built (#78), which `docs/INSTALL.md` (The installer's life cycle in CI, and the release's provenance) governs:
+      immutable releases are the repository's setting, its owner's alone (no workflow's token reads or changes it), so the
+      release job reads each release back once it is published and fails one that is not immutable, and the owner turns
+      the setting on before v0.6.0 is tagged (§0.2, §0.8 C2); "the attestation covers the installer" is the release job's,
+      which attests the zips, the installer and `SHA256SUMS.payload` and verifies each with `gh attestation verify` before it
+      publishes (a tag's run alone makes an attestation), held on Linux by `test/provenance.test.js`, not a counted test of
+      the life cycle's job; the release waits for the life cycle's job and is held by it; this build is the installer job's,
+      the build before it and a build that does not start stamped from its payload (at build 1, the highest build of the line
+      below), and the release order is this build above the newest release by the build its notes name; the standard
+      account's test leaves its control task to lab 7 only where Windows refused that account's logon (schtasks' words at
+      registration, or a logon refused as its task's result with no line written), and fails on anything else; the import's
+      verification runs into a machine folder the life cycle makes and never starts, since a quiet install starts its node
+      and the installer's import page is offered to a person alone, and its refusal on the installed node that served;
+      a junction and another account's folder are refused before the first install and, past the record's check, at the
+      root an uninstall kept; every test and hook is bounded, and the life cycle's step holds them all.*
 17. **[#74]** **unit U17: the laptop's admin, the rights it gives, and the control tasks (answer 38).**
     - **The record.** `Admin`, `AdminName` and `Grants` in `HKLM\SOFTWARE\AGMessage`, written by `machine.js` only
       (U12). The install appends `machine.admin`.

@@ -159,14 +159,19 @@ node ../tools/stamp-build.js --print                  # the version this checkou
 CI (`.github/workflows/ci.yml`): `analyze` (lint, secret scan, version), `test-linux` (Node 24 and 26, coverage,
 Chrome smoke), `test-crlf` (the suites on Linux on a checkout with Windows' CR LF line ends), `test-windows` (tests, Edge
 smoke), `package` (the stamped portable zip, also an artifact of its own unwrapped, CycloneDX SBOM, SHA256SUMS),
-`installer` (the installer built from that zip on `windows-2025`, Inno Setup pinned and checked, never run),
+`installer` (the installer built from that zip on `windows-2025`, Inno Setup pinned and checked, never run there),
+`lifecycle` (the installer's life cycle run for real on `windows-2025`, elevated, Defender back on first: the release order
+asked, the build before this one and one that does not start made from the same payload, `installer/test/*.test.js` run
+and every test they declare counted; a gate, which the release waits for),
 `readings` (the Windows evidence lane on `windows-2025`, for every push, a `v*` tag and a run asked for by hand, one
 at a time per ref and never cancelled once it runs, a newer push's waiting its turn; each other job is cancelled by a
 newer push of its ref through a group of its own, never the whole run's; its actions pinned by commit:
 Defender turned back on first, then the readings of that zip, judged against their marks; they inform and never hold) and, on a `v*` tag that names
 `app/package.json`'s version, above every release already published and every other version tagged (asked again as its
-first step, one release job at a time), `release` with the zip, the installer and a build-provenance attestation, waiting for the lane and never
-held by it, its notes saying each reading that missed its mark.
+first step, one release job at a time), `release` with the zip, the installer and a build-provenance attestation of the zips, the
+installer and `SHA256SUMS.payload`, each verified before it publishes and the release read back for `immutable` once it
+has (immutable releases are the repository's setting, its owner's to turn on before the tag), once the life cycle passed, waiting for
+the lane and never held by it, its notes saying each reading that missed its mark.
 `.github/workflows/security.yml`: CodeQL `security-extended`, the dependency audit (npm's packages and the vendored libraries), dependency review on pull requests.
 
 ## Where things live
@@ -218,6 +223,7 @@ A sentence and the files; the detail is the code's and the CHANGELOG's. A test n
 | The portable import, once, before the installed node's first start: the installer's page, the export as the person into their inbox, the elevated copy and its verify (counts, keys, sealed values, fingerprint, chain, and what the node's own start refuses), each side's facts read by one reader that writes nothing, then the old copies of the keys removed and the portable folder marked as moved, which it no longer starts on; no copy of the bundle kept once an import ends | `app/lib/importfacts.js`, `app/launch.js`, `app/machine.js`, `app/lib/dataformat.js`, `installer/AGMessage.iss`; test `import` |
 | The laptop's admin and the rights it gives (token, start, stop, upgrade): one control task per account, run as SYSTEM, which reads that account's request and the record's rights and acts; the machine's events, appended by the machine and written by the server as audit rows, each once | `app/machine.js` (`control`), `app/launch.js`, `app/lib/machineevents.js`, `app/server.js` (`/api/machine/events`); test `control` |
 | The checked upgrade, with no administrator: an installer the person names or the newest release, staged and checked by their control task against its immutable release on GitHub (the repository the build was stamped from, the asset's digest, newer only, not busy), then run by a runner of its own (a task, outside Program Files), one at a time, once their console has closed; Go back to build N from the kept installer and the upgrade's backup; each outcome a machine event once it is seen | `app/machine.js` (`control`, `upgrade`), `app/launch.js`, `installer/AGMessage.iss` (`/UPGRADEBY`), `tools/stamp-build.js`; test `upgrade`, GitHub's answer for one release in `app/test/fixtures/` |
+| The installer's life cycle in CI, run for real on an elevated Windows runner and refusing any other machine: installed, upgraded from the build before, refused, rolled back, gone back from and uninstalled, each step's words held to the code's on Linux, every test it declares counted; the release order it asks first; the other two builds made from one payload; the release's attestations, their check, and its immutability read back | `installer/test/` (`lifecycle.test.js`, `hands.js`, `expect.js`, `as-account.js`), `tools/lifecycle.js`, `tools/provenance.js`, `.github/workflows/ci.yml` (`lifecycle`, `release`); tests `lifecycle`, `provenance` |
 | The installer: one per-machine Inno Setup script (its pages, refusals, silent switches, Start menu, the way back and the uninstall, every machine-level act a `machine.js` command), built by CI from the portable zip's stage without its .bat files, with the defines read from that stage; the licence texts of the two programs the folder and the installer ship | `installer/AGMessage.iss`, `installer/build-installer.ps1`, `tools/installer-defines.js`, `licenses/nodejs/`, `licenses/cloudflared/`, `THIRD-PARTY-NOTICES.md`; tests `installer`, `vendor` |
 | The way back's backup of the data folder, made at an upgrade's stop (hard links and copies, two kept) | `app/lib/upgradebackup.js`; test `machine` |
 | What the console says, kept (`server.log`, in the logs folder `AGM_LOG_DIR` names under the task), and "This laptop" | `app/lib/serverlog.js`, `app/lib/laptop.js`; test `laptop` |

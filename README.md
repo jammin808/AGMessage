@@ -418,8 +418,13 @@ extracts it and starts the bundle once (its own Node and watchdog must answer `/
 within 30 s), runs both .bat files under cmd on Windows, builds the installer from that zip on `windows-2025`
 (`installer/AGMessage.iss`, Inno Setup 7.1.0 pinned by hash and checked against its release's digest and its publisher's
 signature; `installer/build-installer.ps1` lays the zip's stage down without its two .bat files and writes
-`SHA256SUMS.payload` beside it; it is built there, never run), and a `v*` tag publishes a release with the zip, the
-installer and a build-provenance attestation, its notes saying each reading that missed its mark. For every push, a tag and a run asked for by hand
+`SHA256SUMS.payload` beside it), runs the installer's life cycle for real on `windows-2025`, elevated, with Defender back
+on (`installer/test/`: installed, upgraded from the build before it, refused, rolled back, gone back from and
+uninstalled, the build before and a build that does not start made from the same payload; every test it declares must
+run and pass, `tools/lifecycle.js`), and a `v*` tag publishes a release, once that life cycle passed, with the zip, the
+installer and a build-provenance attestation of the zips, the installer and its payload's sums, each verified with
+`gh attestation verify` before it publishes, the release read back for its immutability once it has (`tools/provenance.js`),
+its notes saying each reading that missed its mark. For every push, a tag and a run asked for by hand
 (Actions, CI, Run workflow), it takes the Windows readings of that zip on `windows-2025` with Defender's real-time
 monitoring turned back on first (the evidence lane, its actions pinned by commit: what each reading is, its mark and
 what a miss means are in [docs/INSTALL.md](docs/INSTALL.md)), one lane at a time per branch, never cancelled once it

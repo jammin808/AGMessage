@@ -382,7 +382,7 @@ test('R12 and R13: Task Scheduler\'s restarts and GitHub\'s answer recorded; the
   x = byId(R.judge(raw({ R13: { tag: 'v0.5.1', status: 200, ms: 640, immutable: false, assets: [{ name: 'a.zip', digest }, { name: 'SHA256SUMS', digest: '' }], rateRemaining: 58 } })), 'R13');
   assert.equal(x.state, 'recorded');
   assert.deepEqual([x.facts.immutable, x.facts.assets.length], [false, 2]);
-  assert.match(x.words, /v0\.5\.1 not immutable \(U16, #78, turns immutable releases on\), 1 of 2 assets with a SHA-256 digest/);
+  assert.match(x.words, /v0\.5\.1 not immutable \(published while the repository's immutable releases were off: its owner turns them on, Settings, the Releases section\), 1 of 2 assets with a SHA-256 digest/);
   assert.equal(byId(R.judge(raw({ R13: { status: 403, rateRemaining: 0, assets: [] } })), 'R13').state, 'not run', 'the runner\'s rate limit says nothing of the laptop');
   x = byId(R.judge(raw({ R13: { status: 0, failure: 'ENOTFOUND', assets: [] } })), 'R13');
   assert.deepEqual([x.state, x.words], ['missed', 'GitHub\'s answer was not read from the SYSTEM task (ENOTFOUND)']);
@@ -1107,7 +1107,8 @@ test('the lane in CI: windows-2025, every action pinned by its commit, no creden
 test('the release waits for the lane and never is held by it: its notes carry the readings, or say there are none', () => {
   const ci = read('.github/workflows/ci.yml');
   const release = job(ci, 'release');
-  assert.match(release, /\n {4}if: \$\{\{ !cancelled\(\) && startsWith\(github\.ref, 'refs\/tags\/v'\) && needs\.package\.result == 'success' && needs\.installer\.result == 'success' \}\}\n {4}needs: \[package, installer, readings\]\n/);
+  assert.match(release, /\n {4}if: \$\{\{ !cancelled\(\) && startsWith\(github\.ref, 'refs\/tags\/v'\) && needs\.package\.result == 'success' && needs\.installer\.result == 'success' && needs\.lifecycle\.result == 'success' \}\}\n {4}needs: \[package, installer, lifecycle, readings\]\n/);
+  assert.ok(!/needs\.readings\.result/.test(release), 'whatever the lane found and however it ended');
   const sparse = release.slice(release.indexOf('sparse-checkout: |'), release.indexOf('sparse-checkout-cone-mode'));
   for (const f of ['tools/readings.js', 'docs/INSTALL.md']) assert.ok(sparse.split('\n').some((l) => l.trim() === f), f + ' is checked out: the notes\' tool and the lab lines\' record');
   const dl = release.indexOf('name: agmessage-readings-$' + '{{ github.sha }}');

@@ -26,7 +26,11 @@ layers and closes the wire's words both ways; an in-tree secret scan; CodeQL (`s
 registry signatures and provenance; dependency review on pull requests; the tests, the coverage gate and the browser
 smoke on Linux and Windows. A release is published only when its version is above every release before it and every other
 version tagged, so the newest release is always the highest number, by its version and by its build. A release carries its SBOM (CycloneDX), `SHA256SUMS` and a build-provenance attestation
-(`gh attestation verify <zip> --repo <owner>/AGMessage`). The SBOM lists npm's packages and the browser libraries
+of its zips, its installer and `SHA256SUMS.payload` (the SHA-256 of every file the installer lays down), each verified by
+the release job (every action it runs pinned by its commit) before it publishes (`gh attestation verify <file> --repo <owner>/AGMessage`, as anyone checks a download),
+and it is published only once the installer's life cycle passed on `windows-2025` (installed, upgraded, refused, rolled
+back, gone back from and uninstalled, every test it declares run). Once published, the release is read back from GitHub:
+one that is not immutable fails its job, saying so. The SBOM lists npm's packages and the browser libraries
 vendored in `app/public/vendor`, each of those with its file's SHA-256 and the libraries bundled in it, read from the
 bundle as the zip extracts it. Each vendored file is its package's file byte for byte, listed in
 `app/public/vendor/VENDOR.json` with where it came from, its package's digest and its SHA-256; a test fails the build on
@@ -427,7 +431,10 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   be the tag the file's name (or the newest release's tag) names, of the repository the build was stamped from
   (`build.json` `repo`), its addresses all under that repository, published, `immutable: true` (its assets can no longer be
   modified or deleted, nor its tag moved), with one asset of the file's exact name whose `digest` is `sha256:` and the
-  staged copy's SHA-256; until immutable releases are turned on (unit U16), every check is refused, fail closed. GitHub is
+  staged copy's SHA-256. Immutable releases are the repository's own setting, its owner's to turn on, and apply to
+  releases published after: a release published while it is off is never immutable, every check of it is refused, fail
+  closed, and the release job that published it fails, saying so. A workflow's token cannot read the setting, so the owner
+  turns it on before v0.6.0 is tagged. GitHub is
   asked over https with Node's own certificate authorities and no token, and a download follows redirects to https only,
   never past the size the release gives. A named installer is taken from the account's inbox only when `lstat` shows a
   file of its own (no link, no hard link, the file opened the one `lstat` saw, of its size), copied by its bytes into

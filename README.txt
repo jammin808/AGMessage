@@ -532,6 +532,15 @@ status.
   runs on node.exe, which carries its publisher's signature; whether
   Smart App Control then keeps it starting has not been measured on the
   show laptop yet.
+- Checking a download. Not signed, the installer, the zip and
+  SHA256SUMS.payload (the SHA-256 of every file the installer lays
+  down) each carry a build-provenance attestation instead: with GitHub's
+  command line,
+      gh attestation verify AGMessage-Setup-<version>-unsigned.exe -R jammin808/AGMessage
+  says it was built by AGMessage's own CI from the release's commit. A
+  release is published only once the installer has been installed,
+  upgraded, refused, rolled back, gone back from and uninstalled on a
+  Windows machine by that CI, each step checked.
 - Silently, by an administrator: AGMessage-Setup-...-unsigned.exe
   /VERYSILENT /ADMIN=LAPTOP\ana (a first install must name whose it is:
   one person's account, local or one that has signed in to this PC once;

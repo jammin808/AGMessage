@@ -6363,7 +6363,7 @@ answers 35, 37 and 38; the code, its tests and a Linux stand-in for Windows — 
   hello (the `install` context block is U3's).
 
 **The installer** (the plan's Part 6, unit U13, with the owner's answers 36, 37, 38, 39 and 43; the code, its tests and a
-Linux stand-in for Windows — CI builds it on the next push; its life cycle, run for real, is a later unit's)
+Linux stand-in for Windows — CI builds it on the next push; its life cycle, run for real, is the life cycle job's, U16)
 - **`installer/AGMessage.iss`**, Inno Setup 7.1 (PlayMap's tool and skeleton), `AGMessage-Setup-<version>-unsigned.exe`:
   per machine, Program Files\AGMessage only and no folder page (another folder, `/DIR=` included, refused before
   anything changes), one fixed `AppId`, `PrivilegesRequired=admin` with no per-user override, `CloseApplications=no` (Inno
@@ -6706,8 +6706,8 @@ nothing of it run on Windows yet)
 
 **An upgrade the laptop's admin or a granted account starts needs no administrator, checked against its release** (the
 plan's Part 6, unit U18, with the owner's answers 36 and 38; the code and its tests on Linux, GitHub's answers stood in
-for; nothing of it has run on Windows yet, and until immutable releases are turned on (unit U16, #78) every check is
-refused, fail closed)
+for; nothing of it has run on Windows yet, and until the repository's immutable releases are turned on (its owner's
+setting, which unit U16's release job reads back) every check is refused, fail closed)
 - **Upgrade AGMessage…** (Start → AGMessage; `launch.js upgrade`, new), for the laptop's admin and an account given
   `upgrade`: the person's own control task looks up AGMessage's newest release on GitHub and says whether it is newer
   ("The newest release is AGMessage 0.6.1 (AGMessage-Setup-0.6.1-unsigned.exe, 38 MB); this PC has AGMessage 0.6.0 (build
@@ -6816,6 +6816,107 @@ refused, fail closed)
 - The papers: `README.md`, `README.txt` (Upgrading an installed AGMessage), `docs/INSTALL.md` (The checked upgrade, and
   Go back to build N), `docs/DESIGN.md`, `SECURITY.md` and `CLAUDE.md`. `docs/NODES.md` is unchanged: nothing of it
   reaches the wire, the context or the AI's brief.
+
+**The installer's life cycle in CI, and its provenance; immutable releases read back** (the plan's Part 6, unit U16, with
+the owner's answers 34 and 38; the job, its tests and their pure parts on Linux: the job's first run is the next push's,
+and immutable releases are the repository's own setting, which its owner turns on before v0.6.0 is tagged)
+- **`lifecycle`** (CI, new), on `windows-2025`, elevated, after the installer job, for every push, a tag and a run asked
+  for by hand: Defender's real-time monitoring back on first (`tools/defender-on.ps1`); Inno Setup 7.1.0 pinned and
+  checked as the installer job pins it; every action pinned by its commit; every step bounded inside the job's 290 minutes,
+  the life cycle's step (215) holding every bound its tests and hooks declare, so a run slow inside them is never cut short
+  with nothing said.
+  **The release order** first (`tools/lifecycle.js order`, new): this build's install version must be above the newest
+  release's, read from the build its notes name on their first line ("Build 0.5.1+51.89104d8."), or an AGMessage installed
+  from that release would refuse its installer; a release whose notes name no release build of its own version, a list
+  or notes that cannot be read, stop the job. Then **three builds from one payload**: this build's installer, the installer
+  job's, the one a release ships; the build before it, the zip's stage stamped one build lower (at build 1, the highest
+  build of the line below, its `package.json` that line's version); and the next build, whose server ends at once with
+  code 1 (`tools/lifecycle.js stage`, new, its commit, channel and repository kept), each built by
+  `installer/build-installer.ps1`.
+- **The life cycle** (`installer/test/lifecycle.test.js`, new: 32 node:test tests run one after another, each leaving what
+  the next begins from; its hands on Windows `installer/test/hands.js`, its expectations `installer/test/expect.js`, and
+  `installer/test/as-account.js`, a probe a task runs as a standard account): a quiet first install with no `/ADMIN=`,
+  another `/DIR=`, a junction and a folder another account owns at `%ProgramData%\AGMessage`, and a portable copy on the
+  port, each refused with its words and nothing made (the folder and the junction's target left as they were); the build
+  before this one installed for the runner's account by `/ADMIN=` (recorded in HKLM, its server task, its admin's control
+  task and both firewall rules made, `machine.admin` appended, its server proving the token), given a first admin account,
+  a hall, a code guest's messages and its sealed context token at loopback, and busy; an upgrade refused while busy with no
+  reason, and while a silent program holds the port, naming that program's pid; the upgrade to this build with a reason
+  typed, keeping the halls, messages, accounts, every sealed value, the certificate's fingerprint, the machine key and the
+  audit log's head (`lib/importfacts.js` before and after), both installers kept and Go back to build N offered, its stop's
+  record saved with the backup it made, and the stop timed to the new build's first proof, reported in the job's summary;
+  a downgrade and the same build refused with words, the same server serving on; every installed file the payload's
+  (`SHA256SUMS.payload`) and nothing else but Inno Setup's own and the kept installers; no Users, Authenticated Users,
+  Everyone or CREATOR OWNER entry on the machine folder, `keys`, `data` or `logs`; no `SeImpersonatePrivilege` in the server's
+  token, read through the token itself (`OpenProcessToken`); the zip's `start-agmessage.bat` run from a throwaway folder
+  naming the installed build in its banner and ending with 3 with the server's words for the installed node's port, and a
+  portable copy first on that port leaving `server.log` saying another copy holds it and the installed node serving once it
+  is stopped (unit S's "On an installed PC"); a local standard account given `start` and `stop` running its own control task
+  as SYSTEM, a stop with its reason that saved and a start, one machine event each naming it; no token, password or stored
+  password in the server task's or a control task's definition; the import refused, with its words, on the node that has
+  served, and run whole (stage, the export as the account whose profile holds the keys, the take and its verify, forget-keys,
+  finish) into a machine folder of its own that never started, the copy's facts the portable folder's, its keys removed, the
+  folder marked and refused at its next start; nothing written in Program Files\AGMessage while AGMessage runs; a file held
+  open rolling the upgrade back by Inno Setup's own rollback, the record as it was and the earlier server started again; a
+  build that does not start replaced by the build before it, which answers, its data laid back (the installer's exit 3);
+  the watchdog's give-up, its server ending at once seven times, leaving the server task stopped with 0 past
+  RestartOnFailure's minute; the uninstall keeping the data (the tasks, the rules and the record removed, `Kept` and `Port`
+  left, every account's right taken back, the stop's record saved); the kept root set aside for a junction, and the kept
+  root given to another account, each refused at the next install by `prepare`'s own check past the record's (a link, its
+  owner), nothing laid and the root put back as it was; an install again taking it, and the uninstall with
+  `/REMOVEDATA` removing it with the record; and no token or password, of the installed node or a portable copy, in any
+  installer's or uninstaller's log. Every message it writes into the job's log, its TAP report and its report that quotes
+  what a program said carries each token and password it knows as its label. It refuses any machine but an elevated GitHub-hosted runner with no install record, no
+  install folder and no machine folder, before anything is made.
+- **Counted** (`tools/lifecycle.js count`, new): the run's TAP report against the life cycle's files: every test they declare
+  ran and passed, by its name, and nothing failed, was skipped, left to do, cancelled or run undeclared; a file that skips,
+  marks a test to do, runs only some, nests a test or a suite, or names a test with no literal is refused as it is read.
+  The job's summary says the counts; its artifact, `agmessage-lifecycle-<commit>`, keeps every installer's log and the
+  life cycle's report.
+- **Where the runner cannot.** The standard account's control task runs where the runner runs a second account's process;
+  the test leaves it to lab 7 on the show laptop (having read the grant, the record and the task) only where Windows refused
+  the account's logon: schtasks' words at the probe's registration, or its task's last result a logon refused (a bad user
+  name or password, a logon type not granted, no password kept) with no line written (`installer/test/expect.js`
+  `logonRefused`). The probe writes its first line as it starts, so a probe that ran as the account is asserted step by
+  step, waited for as long as its own longest run (its bounds in its plan), and one that ran and did not finish fails, as
+  does a task that started no probe for any other reason (node.exe in Program Files that the account cannot run among them).
+  The import's verify goes into a machine folder of its own, with the installed node's
+  `machine.js`, `launch.js` and facts reader, since a quiet install starts its node and the import page is a person's.
+- **The release's provenance**: the release job attests the zips, the installer and `SHA256SUMS.payload`, through which
+  the attestation reaches every file the installer lays down (`tools/provenance.js subjects`, new, which refuses a release
+  missing one), verifies each before it publishes (`gh attestation verify`, held to `.github/workflows/ci.yml`, the tag, the
+  commit and a GitHub-hosted runner), and publishes only once the life cycle passed, every action it uses pinned by its
+  commit and its checkout keeping no credential; its notes give the command to check a
+  download (`gh attestation verify <file> -R jammin808/AGMessage`).
+- **Immutable releases**, which a checked upgrade takes alone (U18), are the repository's own setting, its owner's to turn on
+  (Settings, the Releases section, Enable release immutability), for releases published after: nothing in CI changes a
+  setting. Once a release is published, its job reads it back (`tools/provenance.js immutable`, new) and fails when it is not
+  immutable, its words saying the setting is off, what that costs and who turns it on. R13's words for a release read as
+  not immutable say the same. GitHub gives a workflow's token no read of the setting, so it is read back from the release
+  itself, once published, and a release published while it is off stays mutable for good: **before v0.6.0 is tagged, the
+  owner turns immutable releases on** (an item of the close, #81, recorded in the plan's §0.2), or 0.6.0 ships a release no
+  installed AGMessage takes as a checked upgrade and its release job fails. The way back's own installer log
+  (`{tmp}\rollback.log`) goes with Inno Setup's temporary folder, so it is not kept or searched; no token or password is on
+  that installer's command line.
+- Held on Linux (`test/lifecycle.test.js`, `test/provenance.test.js`, new; `test/readings.test.js`): the two stamps and
+  their order, the defines reading them, the broken server's end; the release order and its refusals; the count on real TAP
+  reports (passed, failed, a file that throws as it loads, a file not run, one not declared, each uncounted form); the life
+  cycle's own file held to the plan's list, every item with its test and every test an item's; its refusals of a machine;
+  its plan; every word it expects held to the installer's script (each `Refuse` rendered), to `machine.js`'s own commands
+  run on stand-ins (`prepare`, `preinstall-check` for a portable copy, a silent port and a busy AGMessage, `upgrade-stop`,
+  `servedWords`, and `prepare` past the record's check for the kept root as a link and as another account's), to
+  `lib/startup.js`, `lib/dataformat.js` and the .bat; its readers of a log, the record, an access list, the payload's sums,
+  a snapshot, the events and a secret, and the scrub of what it quotes; Windows' refusal of the standard account's logon
+  read from schtasks' words and its task's result, signed or not, and nothing else taken for one; the probe run here (its
+  first line before its plan is read, its bounds the plan's, its end said however it ends) and its longest run inside its
+  task's limit and its test's bound; every test and hook of the life cycle bounded, and their sum inside its step's; the
+  job's shape; the release's subjects, its verify, its read back, its actions pinned by commit, and the immutability judged
+  as `machine.js` judges a release. What only the job's run proves is everything the life
+  cycle runs; its first run is the next push's.
+- The papers: `README.md`, `README.txt` (Checking a download), `docs/INSTALL.md` (The installer's life cycle in CI, and
+  the release's provenance), `docs/ANALYSIS.md`, `docs/DESIGN.md`, `SECURITY.md`, `CLAUDE.md`, and the plan (the close's
+  item for immutable releases in §0.2, and U16's and §0.8 C2's notes as built). `docs/NODES.md` is unchanged: nothing of
+  it reaches the wire, the context or the AI's brief.
 
 **Fixed**
 - The portable import names a part of its bundle by the part's own name when it refuses one ("0000021.part is not a

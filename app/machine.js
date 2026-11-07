@@ -2446,8 +2446,8 @@ const under = (url, prefix) => typeof url === 'string' && url.toLowerCase().star
 /**
  * GitHub's release answer judged for an installer (pure): {asset: {name, size, digest, id, url}}, `digest` the SHA-256
  * GitHub gives (hex), or {why, words}. The release must be `v<semver>` of `repo` (its API address and its page both under
- * that repository), published (no draft) and immutable (U16 turns immutable releases on, so until then every check is
- * refused here, fail closed); one asset must have the exact name `name`, be uploaded whole, of a size an installer has,
+ * that repository), published (no draft) and immutable (the repository's own setting, its owner's to turn on: a release
+ * published while it is off is never immutable, and every check of it is refused here, fail closed); one asset must have the exact name `name`, be uploaded whole, of a size an installer has,
  * under that repository's assets, and give a digest of the form `sha256:<64 hex>`.
  */
 function releaseJudged(rel, { repo, semver, name }) {

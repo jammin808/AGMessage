@@ -619,7 +619,7 @@ function judgeR13(r) {
   if ((r.status === 403 || r.status === 429) && r.rateRemaining === 0) return verdict('not run', 'GitHub refused this runner\'s address for its rate limit (HTTP ' + r.status + '), which says nothing of the show laptop\'s', facts);
   if (r.status !== 200) return verdict('missed', 'GitHub\'s answer was not read from the SYSTEM task (' + (r.status ? 'HTTP ' + r.status : String(r.failure || 'no answer')) + ')', facts);
   const digests = assets.filter((a) => a && /^sha256:[0-9a-f]{64}$/.test(String(a.digest || ''))).length;
-  const imm = r.immutable === true ? 'immutable' : r.immutable === false ? 'not immutable (U16, #78, turns immutable releases on)' : 'no `immutable` in the answer';
+  const imm = r.immutable === true ? 'immutable' : r.immutable === false ? 'not immutable (published while the repository\'s immutable releases were off: its owner turns them on, Settings, the Releases section)' : 'no `immutable` in the answer';
   return verdict('recorded', 'read in ' + ms(r.ms) + ': ' + (r.tag || 'the release') + ' ' + imm + ', ' + digests + ' of ' + assets.length + ' assets with a SHA-256 digest; ' + offlineWords(off), facts);
 }
 

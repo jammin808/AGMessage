@@ -3,8 +3,9 @@
 *Begun with 0.6.0's start window; the installer's units (`docs/plan/0.6.0/PLAN.md` Part 6, U.9) write the rest of this
 paper. The installer (`installer/AGMessage.iss`, The installer below) is built by CI from the portable zip, and imports a
 portable folder before the installed node's first start (The import of a portable folder, below), and is upgraded with
-no administrator once checked against its release (The checked upgrade, and Go back to build N, below); its life cycle in
-CI (install, upgrade, the way back, uninstall, run for real) is the installer job's still to come. Venue laptops run the portable folder
+no administrator once checked against its release (The checked upgrade, and Go back to build N, below); its life cycle runs
+for real in CI on every push, elevated on `windows-2025`, and a release is published only once it passed (The installer's
+life cycle in CI, and the release's provenance, below). Venue laptops run the portable folder
 ([README.txt](../README.txt)).*
 
 ## It opens no browser and has no window
@@ -468,7 +469,7 @@ event into its audit row (The machine's events, below).
   the server looks past its place only in the audit log's newest 500 rows, and every machine event since the backup would
   otherwise be written to the log a second time at the earlier build's first start.
 - **What only a Windows run proves.** `icacls`, `schtasks`, `reg` and NetSecurity's cmdlets applying; the task running as
-  LocalService with `SeChangeNotifyPrivilege` alone; the installer's life cycle (U13, U16). The pure parts — the argument
+  LocalService with `SeChangeNotifyPrivilege` alone (the life cycle reads the server's own token, below). The pure parts — the argument
   parsing, the folder order (never `/T`, and its refusals), the task's definition, the firewall rules, the record's shape,
   Windows' answers read by column, the machine's wire half (matched to `lib/machinewire.js` and `lib/busy.js`), the stop
   for an upgrade and its backup against a real server, the restore, and `launch.js serve` with the real watchdog — are
@@ -683,11 +684,12 @@ each run, against its release's digest and its publisher's signature; it is buil
   Control's enforcement Windows blocks the installer and it never runs, so its words are in `README.txt` and the release
   notes; while Smart App Control evaluates, the installer runs and its first page says so (PlayMap's page). The installed
   node runs on `node.exe`, which R5 reads as Valid; whether Smart App Control keeps it starting is lab 4's, not run.
-- **What only a Windows run proves**, and is not yet run: that ISCC compiles the script (the installer job, on the next
-  push); the install, the upgrade, the way back and the uninstall themselves, the readings of whose it is under
-  over-the-shoulder elevation (R6: the lane takes the import's export as a standard account, and the two readings stay the
-  show laptop's), the import page itself, the Start menu's consoles and the browser opening, and the
-  first admin account made from the page (the installer's life cycle, U16). The pure parts are held on Linux
+- **What only a Windows run proves**: that ISCC compiles the script (the installer job); the install, the upgrade, the
+  refusals, the way back and the uninstall themselves, quietly, as an administrator runs them (the life cycle job, below);
+  and, never run on a runner, the wizard's pages: the readings of whose it is under over-the-shoulder elevation (R6: the
+  lane takes the import's export as a standard account, and the two readings stay the show laptop's), the import page
+  itself, the Start menu's consoles and the browser opening, and the first admin account made from the page (lab 7, and
+  the owner's walk of the installer). The pure parts are held on Linux
   (`test/installer.test.js`): the script by its text (its `[Setup]`, files, Start menu items parsed by `launch.js`'s own
   reader, every `machine.js` command and option it names, the password's path, the switches and refusals), the defines
   and the portable stage holding every file the installer needs, and every `machine.js` command it runs (`whose` with
@@ -701,8 +703,11 @@ each run, against its release's digest and its publisher's signature; it is buil
 The plan's Part 6, unit U18, with the owner's answers 36 ("unsigned") and 38: an upgrade the laptop's admin, or an
 account it gave `upgrade`, starts needs no administrator, when the machine can check the installer against its release
 on GitHub. Without a signature (answer 36) the release's published digest takes its place, fixed by immutable releases:
-until those are turned on for the repository (unit U16, #78) GitHub reads every release `immutable: false`, and every
-check is refused, fail closed. An administrator may always run the installer itself, as at the install.
+those are the repository's own setting, its owner's to turn on (Settings, the Releases section, Enable release
+immutability), and they apply only to releases published after; a release published while they are off reads
+`immutable: false` for good, its check is refused, fail closed, and the release job that published it fails, saying so
+(The installer's life cycle in CI, and the release's provenance, below). An administrator may always run the installer
+itself, as at the install.
 
 - **Upgrade AGMessage…** (`launch.js upgrade`, as the person). It first says the last upgrade's or go back's outcome this
   account asked for (with the last lines of its installer's log when it was not done, since the person cannot read the
@@ -819,8 +824,9 @@ check is refused, fail closed. An administrator may always run the installer its
   and Go back read it); Inno taking `/UPGRADEBY`, `CheckForMutexes` and `CreateMutex` on `Global\AGMessageSetup` across
   sessions, and replacing the files under a runner with no console open; GitHub's answer and a download from the show
   laptop's network and its proxy, if any (R13 reads GitHub's answer as SYSTEM on the runner, and the words with no
-  network); the Start menu's two consoles; and the upgrade's life cycle (unit U16) and lab 7 (Upgrade, online and
-  offline, and Go back from a standard account). The pure parts and the acts are held on Linux (`test/upgrade.test.js`,
+  network); the Start menu's two consoles; and lab 7 (Upgrade, online and offline, and Go back from a standard account).
+  The installer's own upgrade, its refusals and its way back are the life cycle job's (below); a checked upgrade run by
+  a control task as SYSTEM is not among them, since it needs a release newer than the build under test. The pure parts and the acts are held on Linux (`test/upgrade.test.js`,
   with GitHub's answer for one release as a fixture in its REST API's shape).
 
 ## The import of a portable folder, before the first start
@@ -893,8 +899,10 @@ its keys leave the account's profile, which every portable folder of that accoun
   it names.
 - **What only a Windows run proves**: that the export, run by `ExecAsOriginalUser` over an administrator's approval,
   writes into its inbox under those grants and the import reads it (R6 takes the export as a standard account by a task
-  with its logon; the over-the-shoulder readings are the show laptop's), the import page itself, and the installer's life
-  cycle around it (U16). The rest is held on Linux (`test/import.test.js`): a real portable copy seeded, stopped, exported,
+  with its logon; the over-the-shoulder readings are the show laptop's) and the import page itself. The life cycle job
+  (below) runs the import's machine-level half for real: refused on the installed node that has served, and a portable
+  copy of the zip, seeded and stopped, exported as its account, taken and verified elevated into a machine folder that has
+  never started, its keys forgotten and the folder refused at its next start. The rest is held on Linux (`test/import.test.js`): a real portable copy seeded, stopped, exported,
   taken, verified and forgotten, the installed node started on it under the task, and the portable copy refused at its
   next start; each refusal, each check that does not pass, the copy taken out again and the bundle cleared, and
   `forget-keys` removing nothing without the verdict and naming a removal that failed with its path.
@@ -1004,12 +1012,85 @@ https://support.microsoft.com/kb/950934): the admin archives the event on the ad
 - The .bat's preflight, its exit codes, the browser opener and the clean copy are the portable folder's alone: the
   installed node has no .bat.
 
+## The installer's life cycle in CI, and the release's provenance
+
+The plan's Part 6, unit U16. CI's `lifecycle` job installs, upgrades, refuses, rolls back, goes back from and uninstalls
+AGMessage for real, on `windows-2025`, elevated (a hosted runner's account is an administrator, never prompted), for every
+push, a tag and a run asked for by hand; the release is published only once it passed. A test is a gate, never a
+reading.
+
+- **The job.** Defender's real-time monitoring back on first (`tools/defender-on.ps1`, as the readings lane does); Inno
+  Setup 7.1.0 pinned and checked as the installer job pins it; every action pinned by its commit, every step bounded
+  inside the job's bound, and the life cycle's own step holding every bound its tests and hooks declare (`test/lifecycle.test.js`
+  sums them), so a run slow inside its tests' bounds is never cut short with nothing said. Then **the release order** (`tools/lifecycle.js order`): this build's install version must be
+  above the newest release's, read from the build its notes name on their first line ("Build 0.6.0+41.abc1234.", as the
+  release job writes them), or an AGMessage installed from that release would refuse this build's installer; a list or
+  notes that cannot be read stop the job. Then **three builds from one payload**: this build's installer, the installer
+  job's (the one a release ships); the build before it, the zip's stage stamped one build lower (at build 1, the highest
+  build of the line below); and the next build, whose server ends at once with code 1 (`tools/lifecycle.js stage`), each
+  built by `installer/build-installer.ps1`, which checks the version the file carries.
+- **The life cycle** (`installer/test/lifecycle.test.js`, node:test, one test after another, each leaving what the next
+  begins from): a quiet first install with no `/ADMIN=`, another `/DIR=`, a junction or a folder another account made at
+  `%ProgramData%\AGMessage`, and a portable copy on the port, each refused with its words and nothing made; the build
+  before this one installed for the runner's account (`/ADMIN=`, recorded in HKLM with its build, its tasks and rules made,
+  its server proving the token), given a first admin account, a hall and its messages at loopback (busy); an upgrade with no
+  reason refused while busy, and one while a silent program holds the port refused naming its pid; the upgrade to this
+  build with its reason typed, keeping halls, messages, accounts, every sealed value, the certificate's fingerprint and the
+  audit log's head, its stop's `last-stop.json` saved with the backup it made, the stop timed to the new build's first proof
+  and reported; a downgrade and the same build refused with words; every installed file the payload's (`SHA256SUMS.payload`)
+  and nothing else; no Users, Authenticated Users, Everyone or CREATOR OWNER entry on the machine folder, `keys`, `data` or
+  `logs`; no `SeImpersonatePrivilege` in the server's token, read from the token itself; the zip's `start-agmessage.bat` on
+  the installed PC naming the installed build and ending with 3, and a portable copy first on the port leaving the installed
+  node's `server.log` saying another copy holds it, the node serving once it is stopped (unit S's "On an installed PC"); a
+  local standard account given `start` and `stop` running its own control task, a probe run by a task as that account
+  (`installer/test/as-account.js`), its steps asserted; no secret in the
+  server task's or a control task's definition; the import refused on the node that served, and run whole into a machine
+  folder of its own that never started (a quiet install starts its node, and the import page is a person's); nothing
+  written in Program Files\AGMessage while AGMessage runs; a file held open rolling the upgrade back, the earlier server
+  running again; a build that does not start replaced by the build before it, which answers, with its data laid back; the
+  watchdog's give-up leaving the server task stopped past RestartOnFailure's minute; the uninstall keeping the data (the
+  tasks, the rules and the record removed, every account's right taken back); the kept root set aside for a junction, then
+  given to another account, each refused at the next install by `prepare`'s own checks past the record's (a real directory,
+  SYSTEM's or Administrators'), nothing laid and the root put back; an install again taking it, and the uninstall with
+  `/REMOVEDATA` removing it; and no token or password in any installer's log. The way back's own installer log
+  (`{tmp}\rollback.log`) goes with Inno Setup's temporary folder, so it is not kept or searched (no token or password is on
+  that installer's command line); every message the life cycle writes into the job's log, its TAP report and its report that
+  quotes what a program said carries each token and password it knows as its label. What each step must say is
+  `installer/test/expect.js`'s, which `test/lifecycle.test.js` holds to the installer's script, `machine.js`,
+  `lib/startup.js`, `lib/dataformat.js` and the .bat on Linux. The life cycle refuses any machine but an elevated
+  GitHub-hosted runner with no AGMessage on it, before anything is made.
+- **Where the runner cannot.** The standard account's test is left to lab 7 on the show laptop (its grant, the record and
+  its control task still read) only where Windows refused the account's logon: schtasks' words when the probe's task is
+  registered, or the task's last result a logon refused (a bad user name or password, a logon type not granted, no
+  password kept by policy) with no line written (`installer/test/expect.js` `logonRefused`). The probe writes its first line
+  as it starts; a probe that ran is waited for as long as its own longest run (its bounds in its plan) and asserted step by
+  step, and any other failure, a task that started no probe (a node.exe the account cannot run) or one that did not finish,
+  fails the test. The import's verify goes into a machine folder the life cycle makes and never starts, with the installed
+  node's `machine.js`, `launch.js` and facts reader in the import page's order: a quiet install starts its node, and the
+  import page is offered to a person alone, never to a quiet install, so the page itself stays the owner's walk.
+- **Counted.** `tools/lifecycle.js count` reads the run's TAP report: every test the life cycle's files declare must have
+  run and passed by its name, none failed, skipped, left to do or cancelled, and a file that skips, marks a test to do,
+  runs only some or nests one is refused as it is read. The job's summary says the counts, the upgrade's stop-to-health
+  and what the runner could not take; its artifact, `agmessage-lifecycle-<commit>`, keeps every installer's log.
+- **The release's provenance.** The release job attests the zips, the installer and `SHA256SUMS.payload`, through which the
+  attestation reaches every file the installer lays down (`tools/provenance.js subjects`, which refuses a release missing
+  one), then verifies each before it publishes, as a person checking a download does:
+  `gh attestation verify <file> -R jammin808/AGMessage` (the job also holds the signer to `.github/workflows/ci.yml`, the
+  tag, the commit and a GitHub-hosted runner). The release notes give that command.
+- **Immutable releases.** A checked upgrade (above) takes only an immutable release, whose assets cannot be modified or
+  deleted and whose tag cannot be moved. That is the repository's own setting, its owner's to turn on (Settings, the
+  Releases section, Enable release immutability), for releases published after it is on; nothing in CI changes a setting.
+  Once a release is published, its job reads it back from GitHub's API (`tools/provenance.js immutable`): one that is not
+  immutable fails the job, its words saying the setting is off, what that costs and who turns it on. A workflow's token
+  cannot read the setting itself, and a release published while it is off stays mutable for good, so **the owner turns it
+  on before v0.6.0 is tagged** (an item of the close, the plan's §0.2).
+
 ## The Windows readings and the lab lines
 
 What is measured on Windows before anything installed is trusted (the 0.6.0 plan's Part 6, unit U7). **The readings
 inform each release and never hold it** (the owner's answer 34): each mark stays a mark, and a reading that misses it is
 written in the release's notes, here and on the hour-before-doors card, with the fallback its unit names. A test is not
-a reading: the installer's life cycle in CI, when it lands, is a gate, as every test is.
+a reading: the installer's life cycle in CI is a gate, as every test is (below).
 
 - **The lane.** CI's `readings` job runs on `windows-2025`, every action in it pinned by its commit, once the package
   job has built the zip, for every push, a `v*` tag and a run asked for by hand (Actions, CI, Run workflow), never for a
