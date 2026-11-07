@@ -6625,6 +6625,12 @@ next push; nothing of it has run on Windows yet)
   part the export wrote (a link, or not a file)"). It named the part by its whole path under the account's inbox, and the
   words are cut at 200 characters, so on a Windows profile the reason itself was cut away ("(a link, or )"); CI's Windows
   run found it.
+- Three tests read what a slow runner had not done yet, each found on CI's Windows run: the inputs test that wants every
+  case answered gave a handler 400 ms before calling it silent (now 5 s, that test alone; one that never answers is
+  still the fault it finds); the
+  chat-view test read the support view's copy of a relayed state as soon as the person's own page had its two (it now
+  waits for both pages); the upgrade stop's test gave the wait for the server's programs 300 ms, which a runner's timers
+  could end one ask early (it now waits for the ask that finds nothing running). Nothing that ships changed.
 - The installer's build accepts the installer it built. `installer/build-installer.ps1` reads the version back from the
   file it compiled and compares it with the build's, and read its strings with the padding Windows' version resource
   keeps after them, so CI's first build of it (run 96) refused "0.6.0.96" padded with blanks as not "0.6.0.96". The

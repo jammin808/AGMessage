@@ -883,7 +883,8 @@ test('a person\'s chat view: the join\'s view by the seat, the admin\'s choice f
   gilView.emit('userState:push', { key: 'theme', value: 'light' });
   gil2.emit('userState:push', { key: 'theme', value: 'dark' });
   const pushes = (s) => heard.get(s).filter(([ev]) => ev === 'userState:push').map(([, v]) => v);
-  await until(() => pushes(gil).length === 2, 4000, 'Gil\'s page told both');
+  // Each page is told on its own socket, so the support view's copy is waited for too, never read as soon as Gil's are in.
+  await until(() => pushes(gil).length === 2 && pushes(gilView).length >= 1, 4000, 'Gil\'s page told both, the support view the person\'s');
   assert.deepEqual(pushes(gil), [{ key: 'theme', value: 'light', support: true }, { key: 'theme', value: 'dark' }]);
   assert.deepEqual(pushes(gilView), [{ key: 'theme', value: 'dark' }], 'the support view hears the person\'s, never with support');
 

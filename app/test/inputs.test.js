@@ -26,6 +26,9 @@ const SHAPES = [null, 7, 'x', true, [], {}, NULLS, { code: {}, id: [], roomCode:
 
 // Each send: with an answer callback (the server may answer it) or without; either way at most 400 ms is waited.
 const send = (s, ev, arg) => new Promise((resolve) => { s.timeout(400).emit(ev, arg, (err, r) => resolve(err ? 'silence' : r)); });
+// Where every case must be answered, a handler that never answers is the fault looked for, and one that answers is given a
+// slow runner's time to do it (a Windows runner has kept a refusal past 400 ms): 'silence' then means no answer at all.
+const ask = (s, ev, arg) => new Promise((resolve) => { s.timeout(5000).emit(ev, arg, (err, r) => resolve(err ? 'silence' : r)); });
 
 test('every socket event survives every argument shape, from every kind of socket', { timeout: 180_000 }, async (t) => {
   const srv = await startServer();
@@ -216,7 +219,7 @@ test('client values are read by their type: a value String() cannot convert reac
     sendBack: 'Say which of them this room sends back into: a list of their keys.',
   };
   for (const [s, ev, arg] of cases) {
-    const r = await send(s, ev, arg);
+    const r = await ask(s, ev, arg);
     assert.notEqual(r, 'silence', ev + ' ' + JSON.stringify(arg) + ' is answered');
     if (ev === 'react') assert.deepEqual(r, { ok: false, error: 'Say whether to add the reaction or take it away.' }, 'a reaction\'s `on` that is no boolean is read, and refused');
     if (ev === 'admin:tunnelUntil') assert.deepEqual(r, { ok: false, error: 'Give the end as a time of day, HH:MM by this laptop\'s clock (for example 23:30).' }, 'an end that is no string is read, and refused');
@@ -313,7 +316,7 @@ test('client values are read by their type: a value String() cannot convert reac
   assert.ok(!audit.body.entries.some((e) => e.action === 'page.push'), 'a take in the wrong type shows nothing, and so is not audited');
   assert.ok(!audit.body.entries.some((e) => e.action === 'room.guestWeb'), 'a switch in the wrong type switches nothing, and so is not audited');
   assert.ok(!audit.body.entries.some((e) => e.action === 'stagewatch.send' || e.action === 'stagewatch.propose'), 'a line with a push in the wrong type sends nothing, and so is not audited');
-  assert.equal((await send(ctl, 'page:status', { code: hall })).board.seq, 0, 'and nothing was numbered');
-  assert.deepEqual((await send(guest, 'join', { roomCode: hall, name: 'Rita', role: 'research', uid: rita.identity })).pins, [], 'and nothing pinned for the guest');
-  assert.deepEqual((await send(ctl, 'room:settings', { code: hall })).sendFrom, [], 'and no room may send into the hall');
+  assert.equal((await ask(ctl, 'page:status', { code: hall })).board.seq, 0, 'and nothing was numbered');
+  assert.deepEqual((await ask(guest, 'join', { roomCode: hall, name: 'Rita', role: 'research', uid: rita.identity })).pins, [], 'and nothing pinned for the guest');
+  assert.deepEqual((await ask(ctl, 'room:settings', { code: hall })).sendFrom, [], 'and no room may send into the hall');
 });

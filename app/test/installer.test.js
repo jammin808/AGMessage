@@ -493,7 +493,9 @@ test('the programs of {app}: the server task\'s own told from a person\'s consol
   win = windows({ programs: () => ({ programs: asked++ < 2 ? [watchdog] : [] }) });
   fs.mkdirSync(path.join(root, 'data'));
   const saved = { stop: async () => { fs.writeFileSync(path.join(root, 'data', 'last-stop.json'), JSON.stringify({ at: Date.now() + 1000, saved: true, backup: 'backups/upgrade-0.6.0+40.abc1234-20261107T010000Z-abcdef' })); return stop(); } };
-  r = await machine.run(['upgrade-stop', '--machine', root, '--sys', SYS, '--port', '3023', '--app', APP], { run: win.run, net: { ...net, ...saved } });
+  // Given time for three of the stop's asks (POLL_MS apart) whatever a runner's timers do: the wait ends at the ask that
+  // finds nothing still running, never at its bound.
+  r = await machine.run(['upgrade-stop', '--machine', root, '--sys', SYS, '--port', '3023', '--app', APP], { run: win.run, net: { ...net, ...saved, programsWaitMs: 10000 } });
   assert.equal(r.code, 0, r.text);
   assert.ok(asked >= 3, 'asked again until the watchdog had ended');
 });
