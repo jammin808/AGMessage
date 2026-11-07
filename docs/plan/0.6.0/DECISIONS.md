@@ -252,3 +252,12 @@ from changing that person's choice?
 - Reading: the lock is the admin's alone to set and lift (`theAdmin()`), and it keeps the choice from the person's own
   device. A manager who holds the right to set a person's view may still change the choice of a locked clock, and the
   lock stays on it. That is how unit 20b was built (§17.3), so nothing changes. No "(to confirm)" remains.
+
+## Immutable releases: done by the owner (2026-11-07)
+
+> "I have enabled release immutability"
+
+- The repository's immutable releases are on (Settings, the Releases section), the item of the close in the plan's §0.2.
+  Every release published from now on, v0.6.0 among them, is immutable: its assets cannot be modified or deleted and its
+  tag cannot be moved, which a checked upgrade (U18, #77) requires. The releases published before stay as they were;
+  none is newer than an installed 0.6.0, so no checked upgrade is asked of one.

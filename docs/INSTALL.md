@@ -704,7 +704,7 @@ The plan's Part 6, unit U18, with the owner's answers 36 ("unsigned") and 38: an
 account it gave `upgrade`, starts needs no administrator, when the machine can check the installer against its release
 on GitHub. Without a signature (answer 36) the release's published digest takes its place, fixed by immutable releases:
 those are the repository's own setting, its owner's to turn on (Settings, the Releases section, Enable release
-immutability), and they apply only to releases published after; a release published while they are off reads
+immutability), on since 2026-11-07, and they apply only to releases published after; a release published while they are off reads
 `immutable: false` for good, its check is refused, fail closed, and the release job that published it fails, saying so
 (The installer's life cycle in CI, and the release's provenance, below). An administrator may always run the installer
 itself, as at the install.
@@ -1082,8 +1082,8 @@ reading.
   Releases section, Enable release immutability), for releases published after it is on; nothing in CI changes a setting.
   Once a release is published, its job reads it back from GitHub's API (`tools/provenance.js immutable`): one that is not
   immutable fails the job, its words saying the setting is off, what that costs and who turns it on. A workflow's token
-  cannot read the setting itself, and a release published while it is off stays mutable for good, so **the owner turns it
-  on before v0.6.0 is tagged** (an item of the close, the plan's §0.2).
+  cannot read the setting itself, and a release published while it is off stays mutable for good, so the owner turns it
+  on before v0.6.0 is tagged (an item of the close, the plan's §0.2): **it has been on since 2026-11-07**.
 
 ## The Windows readings and the lab lines
 

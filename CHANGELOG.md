@@ -6706,8 +6706,9 @@ nothing of it run on Windows yet)
 
 **An upgrade the laptop's admin or a granted account starts needs no administrator, checked against its release** (the
 plan's Part 6, unit U18, with the owner's answers 36 and 38; the code and its tests on Linux, GitHub's answers stood in
-for; nothing of it has run on Windows yet, and until the repository's immutable releases are turned on (its owner's
-setting, which unit U16's release job reads back) every check is refused, fail closed)
+for; nothing of it has run on Windows yet. A check takes only an immutable release, the repository's setting, which its
+owner turned on on 2026-11-07 and unit U16's release job reads back; every release published before then is refused,
+fail closed)
 - **Upgrade AGMessage…** (Start → AGMessage; `launch.js upgrade`, new), for the laptop's admin and an account given
   `upgrade`: the person's own control task looks up AGMessage's newest release on GitHub and says whether it is newer
   ("The newest release is AGMessage 0.6.1 (AGMessage-Setup-0.6.1-unsigned.exe, 38 MB); this PC has AGMessage 0.6.0 (build
@@ -6819,7 +6820,7 @@ setting, which unit U16's release job reads back) every check is refused, fail c
 
 **The installer's life cycle in CI, and its provenance; immutable releases read back** (the plan's Part 6, unit U16, with
 the owner's answers 34 and 38; the job, its tests and their pure parts on Linux: the job's first run is the next push's,
-and immutable releases are the repository's own setting, which its owner turns on before v0.6.0 is tagged)
+and immutable releases are the repository's own setting, which its owner turned on on 2026-11-07, before v0.6.0)
 - **`lifecycle`** (CI, new), on `windows-2025`, elevated, after the installer job, for every push, a tag and a run asked
   for by hand: Defender's real-time monitoring back on first (`tools/defender-on.ps1`); Inno Setup 7.1.0 pinned and
   checked as the installer job pins it; every action pinned by its commit; every step bounded inside the job's 290 minutes,
@@ -6893,9 +6894,9 @@ and immutable releases are the repository's own setting, which its owner turns o
   setting. Once a release is published, its job reads it back (`tools/provenance.js immutable`, new) and fails when it is not
   immutable, its words saying the setting is off, what that costs and who turns it on. R13's words for a release read as
   not immutable say the same. GitHub gives a workflow's token no read of the setting, so it is read back from the release
-  itself, once published, and a release published while it is off stays mutable for good: **before v0.6.0 is tagged, the
-  owner turns immutable releases on** (an item of the close, #81, recorded in the plan's §0.2), or 0.6.0 ships a release no
-  installed AGMessage takes as a checked upgrade and its release job fails. The way back's own installer log
+  itself, once published, and a release published while it is off stays mutable for good. The owner turned immutable
+  releases on on 2026-11-07 (an item of the close, #81, recorded in the plan's §0.2), so v0.6.0 and every release after it
+  are published immutable; the releases before it stay as they were, and none of them is newer than an installed 0.6.0. The way back's own installer log
   (`{tmp}\rollback.log`) goes with Inno Setup's temporary folder, so it is not kept or searched; no token or password is on
   that installer's command line.
 - Held on Linux (`test/lifecycle.test.js`, `test/provenance.test.js`, new; `test/readings.test.js`): the two stamps and

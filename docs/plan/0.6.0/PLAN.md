@@ -102,7 +102,7 @@ AGMessage 0.6.0 is one release, made of the 81 units of §0.6 in that order. The
     lowered for it ("Keep these as mim", §0.4.10): it is a ✕ that holds the tag until the owner retires it from the
     Board or replaces it (answer 22).
   - Before the tag, the owner turns on the repository's immutable releases (Settings, the Releases section, Enable release
-    immutability). It is the owner's setting alone, which no workflow's token reads or changes, and it applies only to
+    immutability). **Done: the owner turned them on on 2026-11-07.** It is the owner's setting alone, which no workflow's token reads or changes, and it applies only to
     releases published after it is on: #78's release job reads each release back once it is published and fails one that
     is not immutable, and U18 takes no other (§0.8 C2, #78 as built).
 - **The order of authority where the parts disagree:**
@@ -566,7 +566,8 @@ A unit's local id is the one its part uses. The global number is the one a commi
   - *As built (#78): immutable releases are the repository's setting, its owner's to turn on; no workflow's token reads or
     changes it, so no unit can. #78's release job reads each release back once it is published and fails one GitHub does
     not read as immutable, and U18 refuses every check until the setting is on. A release published while it is off stays
-    mutable for good, so the owner turns it on before v0.6.0 is tagged (§0.2, the close).*
+    mutable for good, so the owner turns it on before v0.6.0 is tagged (§0.2, the close). The owner turned it on on
+    2026-11-07, so every release from v0.6.0 on is published immutable.*
 - **C3. Part 5's unit 31 "may slip to 0.6.x without touching another unit"** (5-§11, the cut line).
   - Part 5's own "18 and 20 need 31", and Part 7's "20a needs … arch-ux 31 (header): this view is its simple branch",
     say otherwise.
@@ -11528,7 +11529,7 @@ Each is one commit, `AGMessage 0.6.0, unit Un: <what landed>`. Every reader is n
     - *As built (#78), which `docs/INSTALL.md` (The installer's life cycle in CI, and the release's provenance) governs:
       immutable releases are the repository's setting, its owner's alone (no workflow's token reads or changes it), so the
       release job reads each release back once it is published and fails one that is not immutable, and the owner turns
-      the setting on before v0.6.0 is tagged (§0.2, §0.8 C2); "the attestation covers the installer" is the release job's,
+      the setting on before v0.6.0 is tagged (§0.2, §0.8 C2), which the owner did on 2026-11-07; "the attestation covers the installer" is the release job's,
       which attests the zips, the installer and `SHA256SUMS.payload` and verifies each with `gh attestation verify` before it
       publishes (a tag's run alone makes an attestation), held on Linux by `test/provenance.test.js`, not a counted test of
       the life cycle's job; the release waits for the life cycle's job and is held by it; this build is the installer job's,

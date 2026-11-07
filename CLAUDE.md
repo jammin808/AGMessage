@@ -170,7 +170,7 @@ Defender turned back on first, then the readings of that zip, judged against the
 `app/package.json`'s version, above every release already published and every other version tagged (asked again as its
 first step, one release job at a time), `release` with the zip, the installer and a build-provenance attestation of the zips, the
 installer and `SHA256SUMS.payload`, each verified before it publishes and the release read back for `immutable` once it
-has (immutable releases are the repository's setting, its owner's to turn on before the tag), once the life cycle passed, waiting for
+has (immutable releases are the repository's setting, on since 2026-11-07), once the life cycle passed, waiting for
 the lane and never held by it, its notes saying each reading that missed its mark.
 `.github/workflows/security.yml`: CodeQL `security-extended`, the dependency audit (npm's packages and the vendored libraries), dependency review on pull requests.
 
