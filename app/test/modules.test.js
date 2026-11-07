@@ -1583,6 +1583,9 @@ const ANY_ROOM = {
     'a hall\'s countdown screens told again to the pages in each of its rooms, Main or side, whose person may send to them',
     'a message from On stage followed for where it also went is read in its room by its key, wherever it sits',
   ],
+  'lib/importfacts.js': [
+    'an import counts every room, Main or side, and the messages each holds, alike in the portable folder and the installed node',
+  ],
   'lib/handlers/rooms.js': [
     'a hall full of rooms says how many it holds',
     'a room by its key, Main or side: renamed, its code switched or renewed, its list of rooms that may send in set, its settings read; and each room such a list names',

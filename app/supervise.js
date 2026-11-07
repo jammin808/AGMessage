@@ -16,7 +16,8 @@
  *    port or data folder held by another program (tried again on the ladder, never counted as a crash), 82 restart now.
  *  - The channel (AGM_RUNS) and, for the installed node, its folders are checked before anything is written; an unknown
  *    channel, a data folder that cannot be made, or one a build of a higher format wrote (or whose format marker cannot
- *    be read, lib/dataformat.js), stops it with code 3 and the words of why, on its console alone.
+ *    be read, lib/dataformat.js), or one an import took into the AGMessage installed on this PC (its moved.json), stops it
+ *    with code 3 and the words of why, on its console alone.
  *  - The admin token is made once here and handed to every restart, so a restart doesn't change it. It is said only where
  *    a person sits: once its server serves and asks, the banner's Token line holds it on a console and never in output
  *    that is kept (a file, a log). The installed node writes it into its token folder (AGM_TOKEN_DIR), a folder of its
@@ -75,6 +76,9 @@ const TOKEN_PATH = channel.runs === 'task' ? path.join(process.env.AGM_TOKEN_DIR
 // and again once it holds the folder.
 const formatRefused = dataformat.refusal(dataformat.read(DATA_DIR), { dataDir: DATA_DIR, build: BUILD.full });
 if (formatRefused) cannotStart(formatRefused);
+// A portable folder an import took (its `moved.json`) is refused the same way, before anything is written in it.
+const movedRefused = dataformat.movedRefusal(dataformat.movedOf(DATA_DIR), { dataDir: DATA_DIR });
+if (movedRefused) cannotStart(movedRefused);
 try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) {
   cannotStart('the data folder ' + DATA_DIR + ' cannot be made (' + (e.code || e.message) + '). Choose a folder this Windows account can write to (AGM_DATA_DIR), or fix that one\'s permissions.');
 }

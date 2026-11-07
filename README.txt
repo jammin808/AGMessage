@@ -452,6 +452,27 @@ AGMessage status.
 - If AGMessage is busy (people are using it now), the installer shows
   how busy and asks why you stop it now; the reason is kept in its
   audit log. Upgrade between shows.
+- Bringing a portable folder's events in: on a first install, before
+  AGMessage first starts, the installer asks whether to start with no
+  halls or import a portable AGMessage folder. First upgrade that folder
+  to the same build as the installer, start it once and stop it (Ctrl+C
+  in its window). Run the installer from the Windows account that ran
+  the folder: its keys are in that account's profile. The import copies
+  the folder's halls, messages, files, accounts, screens and keys, then
+  checks what it copied (the counts, every sealed value, the
+  certificate's fingerprint, the audit log) and says which check did not
+  pass. It refuses a machine key, certificate or server secret the
+  installed AGMessage would not start on, and says what to do; an
+  import that does not go on leaves no copy of the folder's keys on
+  this PC. Once the check passes, the folder no longer starts (its
+  start-agmessage.bat says where AGMessage is now; the original is kept
+  as start-agmessage.bat.moved), and its keys are removed from your
+  account's %LOCALAPPDATA%\AGMessage and from the folder. Any other
+  portable AGMessage folder this account runs uses those keys too: its
+  saved Stagewatch and AI keys and its screens' links stop opening. It
+  is refused once AGMessage has started; then the folder's events stay
+  in it, or uninstall AGMessage with its data removed and install it
+  again.
 - Its last page makes the first admin account, or leave it empty and
   make it at Admin login with the token.
 - An upgrade stops AGMessage (it saves and keeps a copy of its data

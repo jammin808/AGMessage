@@ -548,8 +548,9 @@ test('launch.js open: the browser opened by explorer.exe by its absolute path in
   assert.deepEqual([r.code, r.opened], [0, true]);
   assert.equal(r.text, 'Opening AGMessage 0.6.0 (build 0.6.0+41.abc1234) at http://localhost:3123 in your browser.', 'the port the install record names');
   assert.deepEqual(spawned.map((s) => [s.file, s.args, s.opts.detached, s.opts.stdio, s.unref]), [['C:\\Windows\\explorer.exe', ['http://localhost:3123'], true, 'ignore', true]]);
-  // The console stays only when it did not open the browser.
-  assert.match(h.readSource(path.join(h.ROOT, 'launch.js')), /if \(process\.stdin\.isTTY && !\(argv\[0\] === 'open' && code === DONE\)\) \{/);
+  // The console stays only when it did not open the browser; the import's steps, the installer's hidden runs, never wait.
+  assert.match(h.readSource(path.join(h.ROOT, 'launch.js')), /if \(process\.stdin\.isTTY && !\(argv\[0\] === 'open' && code === DONE\) && !IMPORT_STEPS\.includes\(argv\[0\]\)\) \{/);
+  assert.deepEqual(launch.IMPORT_STEPS, ['export', 'forget-keys']);
 });
 
 test('launch.js open: anything but the installed node is said, with what to do, and nothing is opened: a portable copy, another program, a silent port, nothing serving', async () => {
@@ -652,7 +653,7 @@ test('the Start menu: each item is node.exe on launch.js, a verb launch.js knows
 
 test('the installer\'s code: every machine-level act is a machine.js command it knows, with options it takes; the password goes in a file of machine\\work\\, never a command line or the log', () => {
   const verbs = [...new Set([...CODE.matchAll(/Machine\('([a-z-]+)'/g)].map((m) => m[1]))];
-  assert.deepEqual(verbs.sort(), ['first-account', 'install', 'preinstall-check', 'prepare', 'restore', 'start', 'upgrade-stop', 'whose']);
+  assert.deepEqual(verbs.sort(), ['first-account', 'import', 'install', 'preinstall-check', 'prepare', 'restore', 'start', 'upgrade-stop', 'whose']);
   for (const v of verbs) assert.ok(machine.VERBS.includes(v), v);
   assert.ok(machine.VERBS.includes('uninstall') && /' uninstall --machine '/.test(CODE), 'the uninstaller runs the installed machine.js uninstall');
   const known = new Set(Object.values(machine.VERB_OPTS).flat());
@@ -678,6 +679,63 @@ test('the installer\'s code: every machine-level act is a machine.js command it 
   assert.match(CODE, /FileName := MachineDir \+ '\\machine\\work\\account\.txt';/);
   assert.match(CODE, /Machine\('first-account', '--machine ' \+ Arg\(MachineDir\) \+ ' --port ' \+ IntToStr\(Port\) \+ ' --build ' \+ Arg\('\{#Full\}'\) \+ ' --account ' \+ Arg\(FileName\), Json, Words\);\n {2}DeleteFile\(FileName\);/, 'sent only to this build\'s server, proven');
   assert.ok(!/Log\([^)]*(?:Lines|AccountPage)/.test(CODE), 'nothing of the page is logged');
+});
+
+test('the installer\'s import, before the first start: a first install shown to a person alone, for the account that started Setup; stage, its export as that account, the take, its forget-keys as that account, the finish, in that order; the start waits for it', () => {
+  const run = CODE.slice(CODE.indexOf('\nfunction RunImport('), CODE.indexOf('\nfunction MakeAccount()'));
+  const steps = [...run.matchAll(/Machine\('import', '--step (\w+)|ExecAsOriginalUser\(ExpandConstant\('\{app\}\\node\\node\.exe'\), Launch \+ ' ([a-z-]+) /g)].map((m) => m[1] || m[2]);
+  assert.deepEqual(steps, ['stage', 'export', 'take', 'forget-keys', 'finish'], 'the plan\'s order: nothing removed before the verify');
+  // Each step as the installer writes it, its values stood in for, is a command line machine.js or launch.js reads.
+  const fill = { AdminSid: 'S-1-5-21-1-2-3-1001', MachineDir: MACHINE, "ExpandConstant('{sys}')": SYS, "ExpandConstant('{app}')": 'C:\\Program Files\\AGMessage', Folder: path.join(os.tmpdir(), 'Desktop', 'AGMessage'), Id: 'a'.repeat(24), Port: '3023' };
+  /** A Pascal string expression of literals, Arg(…) and IntToStr(Port) joined by +, as the argument list it makes. */
+  const argvOf = (expr) => expr.split(' + ').flatMap((piece) => {
+    const lit = /^'(.*)'$/.exec(piece);
+    if (lit) return lit[1].split(/\s+/).filter(Boolean);
+    const arg = /^(?:Arg|IntToStr)\((.+)\)$/.exec(piece);
+    assert.ok(arg && Object.hasOwn(fill, arg[1]), 'a value the test stands in for: ' + piece);
+    return [fill[arg[1]]];
+  });
+  const machineSteps = [...run.matchAll(/Machine\('import', (.+?), Json, Words\);/g)].map((m) => ['import', ...argvOf(m[1])]);
+  assert.equal(machineSteps.length, 3);
+  for (const argv of machineSteps) assert.equal(machine.parse(argv).problem, undefined, argv.join(' ') + ': ' + machine.parse(argv).problem);
+  assert.equal(machine.parse(machineSteps[2]).opts['--sys'], SYS, 'finish reads the install record, to name the account as the machine does');
+  // An import that does not go on is cleared (its bundle holds the portable folder's keys): after an export that did not
+  // run or refused, after a take that did not pass, after a finish that could not end it, at Start with no halls and at
+  // Setup's end.
+  const clear = CODE.slice(CODE.indexOf('\nprocedure ImportClear()'), CODE.indexOf('\nfunction RunImport('));
+  const clearStep = /Machine\('import', (.+?), Json, Words\)/.exec(clear);
+  assert.ok(clearStep, 'ImportClear runs machine.js import --step clear');
+  const clearArgv = ['import', ...argvOf(clearStep[1])];
+  assert.deepEqual([machine.parse(clearArgv).problem, machine.parse(clearArgv).opts['--step']], [undefined, 'clear']);
+  assert.match(clear, /if not ImportOpen then Exit;\n {2}ImportOpen := False;/, 'once for each import made ready');
+  assert.match(run, /Exit;\n {2}end;\n {2}ImportOpen := True;/, 'an import is open once stage has made it ready');
+  assert.equal((run.match(/\n {4}ImportClear\(\);\n/g) || []).length, 3, 'the export not run, the export refused, the take not passed');
+  assert.match(run, /if ImportFinished then ImportOpen := False else ImportClear\(\);/, 'finish clears it itself; one not finished is cleared');
+  assert.match(CODE, /if ImportChoicePage\.SelectedValueIndex = 0 then\n {4}begin\n {6}ImportClear\(\);\n {6}Result := StartNow\(\);/);
+  const deinit = CODE.slice(CODE.indexOf('\nprocedure DeinitializeSetup()'));
+  assert.ok(deinit.indexOf('ImportClear();') > 0 && deinit.indexOf('ImportClear();') < deinit.indexOf('if StartDeferred then'), 'Setup\'s end clears an import left open before it starts AGMessage');
+  const launchSteps = [...run.matchAll(/Launch \+ ' ([a-z-]+) (.+?), ExpandConstant\('\{app\}\\app'\), SW_HIDE, ewWaitUntilTerminated, Code\)/g)].map((m) => [m[1], ...argvOf("'" + m[2])]);
+  assert.deepEqual(launchSteps.map((a) => a[0]), ['export', 'forget-keys']);
+  for (const argv of launchSteps) {
+    const a = launch.parse(argv);
+    assert.equal(a.problem, undefined, argv.join(' ') + ': ' + a.problem);
+    assert.deepEqual([a.source, a.machine, a.sys], [fill.Folder, MACHINE, SYS], argv[0] + ': the folder the person chose, the machine folder, Windows\' own');
+  }
+  assert.ok(launch.parse(launchSteps[0]).port === 3023 && launch.parse(launchSteps[1]).id === fill.Id, 'the port asked; the id the export gave');
+  // The export's answer read where it leaves it, its id carried to forget-keys and the finish.
+  assert.match(run, /Said := Utf8File\(MachineDir \+ '\\machine\\inbox\\' \+ AdminSid \+ '\\import\\export\.json'\);\n {2}Id := JsonText\(Said, 'id'\);/);
+  // Offered on a first install a person sees, for the account that started Setup (its export runs as it), and only then.
+  assert.match(CODE, /Result := not Installed and not Rollback and not WizardSilent and \(StartedSid <> ''\) and \(CompareText\(StartedSid, AdminSid\) = 0\);/);
+  assert.match(CODE, /StartedSid := JsonText\(Json, 'startedSid'\);/, 'the account that started Setup, from whose\'s first reading');
+  // The first start waits for the import page; a page never passed starts it at the end, as the task would at boot.
+  const post = CODE.slice(CODE.indexOf('\nprocedure CurStepChanged('), CODE.indexOf('\nfunction GetCustomSetupExitCode()'));
+  assert.ok(post.indexOf('if PartsSet and ImportOffered() then') > post.indexOf("Machine('install'") && post.indexOf('if PartsSet and ImportOffered() then') < post.indexOf("Machine('start'"), 'install, then the import page, then the start');
+  assert.match(CODE, /if ImportFinished then\n {6}Result := StartNow\(\)\n {4}else if RunImport\(Trim\(ImportDirPage\.Values\[0\]\)\) then\n {6}Result := StartNow\(\)\n {4}else\n {6}Result := False;/, 'a refusal keeps the page; an import whose copies did not all go keeps its words once');
+  assert.match(CODE, /if StartDeferred then\n {2}begin\n {4}StartDeferred := False;\n {4}Machine\('start'/);
+  // The import pages exist on a first install alone, before the first admin account's.
+  const wizard = CODE.slice(CODE.indexOf('\nprocedure InitializeWizard()'), CODE.indexOf('\n// Whether AGMessage is busy now'));
+  assert.ok(wizard.indexOf('if not Installed then\n  begin\n    ImportChoicePage := ') > 0 && wizard.indexOf('ImportDirPage := CreateInputDirPage(ImportChoicePage.ID') > 0 && wizard.indexOf('AccountPage := CreateInputQueryPage(AfterID') > wizard.indexOf('ImportDirPage := '));
+  assert.match(CODE, /ImportWords = '.*It copies and never moves, then checks what it copied\. Once that check passes, the old copies of its keys are removed from your Windows account \(%LOCALAPPDATA%\\AGMessage, which every portable AGMessage folder of this account uses\) and from the folder \(app\\data\\secret\.key\), and the folder is marked as moved: it no longer starts\./, 'the page says so before Import is pressed');
 });
 
 test('the installer\'s switches and refusals: /ADMIN, /PUBLICFIREWALL, /FORCE, /ROLLBACK and /REMOVEDATA; an older or the same build refused with words; /ROLLBACK only to the recorded Previous', () => {

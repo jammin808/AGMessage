@@ -363,7 +363,10 @@ Program Files, its data in `C:\ProgramData\AGMessage`, and serves it from boot w
 that runs it is AGMessage's admin on that PC, and its Start menu has Open AGMessage, Show the admin token, Start
 AGMessage, Stop AGMessage…, Who may run AGMessage… and AGMessage status. That account starts and stops AGMessage with no
 administrator, and gives its rights (token, start, stop, upgrade) to other Windows accounts, takes them back or hands
-the admin over, each act a row of the audit log. It is unsigned: where Smart App Control is on, Windows blocks it. Venue laptops use the portable folder.
+the admin over, each act a row of the audit log. A first install can bring a portable folder's halls, messages, files,
+accounts, screens, keys and audit log in, once, before it first starts: the installer's import page copies them,
+checks every count, key, sealed value, the certificate's fingerprint and the audit chain, and only then removes that
+folder's keys from your profile and marks it so it no longer starts. It is unsigned: where Smart App Control is on, Windows blocks it. Venue laptops use the portable folder.
 [docs/INSTALL.md](docs/INSTALL.md) says how it installs, upgrades, goes back and uninstalls.
 
 ## Versions

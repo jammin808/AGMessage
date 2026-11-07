@@ -34,6 +34,11 @@
  *            rounds, each answered as SYSTEM for its SID (the runner has no install record, so each request is refused
  *            for its rights, and nothing is started or stopped); a second standard account tries it 10 rounds and is
  *            refused. Both accounts, their tasks and their profiles are removed at the end
+ *       R6   U14's export as a standard account made for the reading (a task with its logon, as Inno's ExecAsOriginalUser
+ *            runs it) of a stand-in portable folder into its own import folder, which the bundle's machine.js import
+ *            --step stage made with its grants; the bundle's machine.js import --step take reading and verifying it
+ *            elevated; and an elevated read of that account's %LOCALAPPDATA%\AGMessage. The plan's two readings under
+ *            over-the-shoulder elevation need a desktop no runner has: they are the show laptop's, and the record says so
  *       R13  a task with a control task's principal and settings (SYSTEM) reading GitHub's release answer for the newest
  *            published tag
  *     Each reading is taken on its own: one that fails is written with why, and the rest are taken. The record is
@@ -43,7 +48,7 @@
  *     It is CI's alone: it refuses a machine that is not a GitHub-hosted runner, a work folder it did not make, and a
  *     \AGMessage\Server task it did not make, before anything is made or removed. Exit 0 once the record is written, 2
  *     when it cannot be, 64 for a word it does not know, a run off Windows or a machine it refuses.
- *   node readings-take.js probe-server <dir> | probe-exit <dir> | probe-release <dir> | probe-run <dir>
+ *   node readings-take.js probe-server <dir> | probe-exit <dir> | probe-release <dir> | probe-run <dir> | probe-export <dir>
  *       what a stand-in task runs, from the copy the lane makes of this file: what a probe runs requires Node's own
  *       modules only (R1's step alone, run from the checkout, asks its server through app/lib/machinewire.js)
  *
@@ -80,6 +85,9 @@ const R11_TASKS = { as: '\\AGMessage-Readings\\R11-As-' };
 /** R11's two standard accounts, made for the reading and removed after it: one the control task is for, one it is not. */
 const R11_USERS = Object.freeze({ own: 'agmr11own', other: 'agmr11other' });
 const R11_ROUNDS = 10;
+/** R6's standard account, made for the reading and removed after it: the one whose export the elevated import reads. */
+const R6_USER = 'agmr6export';
+const R6_TASK = '\\AGMessage-Readings\\R6-Export';
 /** The file the lane writes in its work folder first: a folder without it is not the lane's to remove. */
 const WORK_MARK = '.agm-readings-work';
 const RULE = 'AGMessage-readings-R4';
@@ -524,6 +532,28 @@ function probeRun(dir) {
   const plan = readJson(path.join(dir, 'plan.json'));
   const r = run(path.win32.join(system32(), 'schtasks.exe'), ['/Run', '/TN', String(plan.task)], { ms: 30000 });
   writeJson(path.join(dir, 'ran.json'), { code: r.code, err: (r.err || r.out || '').trim().slice(0, 300), user: os.userInfo().username, at: Date.now() });
+  return 0;
+}
+
+/**
+ * probe-export: R6's, as a task running as one standard account runs it, as Inno's ExecAsOriginalUser runs launch.js for
+ * the account that started Setup: a file made in that account's own %LOCALAPPDATA%\AGMessage (which the lane, elevated,
+ * then reads), and the bundle's launch.js export of the plan's portable folder into that account's import folder, by
+ * their absolute paths. Its exit code, its words' tail and where its profile is written to ran.json (no secret: the
+ * export writes none).
+ */
+function probeExport(dir) {
+  const plan = readJson(path.join(dir, 'plan.json'));
+  const local = String(process.env.LOCALAPPDATA || '');
+  let made;
+  try {
+    if (!DRIVE_PATH.test(local)) throw new Error('no LOCALAPPDATA named from its drive');
+    fs.mkdirSync(path.join(local, 'AGMessage'), { recursive: true });
+    fs.writeFileSync(path.join(local, 'AGMessage', 'r6-probe.txt'), 'R6\n');
+    made = 'made';
+  } catch (e) { made = String((e && (e.code || e.message)) || 'not made').slice(0, 120); }
+  const r = run(process.execPath, [String(plan.launch), 'export', '--source', String(plan.source), '--machine', String(plan.machine), '--sys', system32()], { ms: 120000 });
+  writeJson(path.join(dir, 'ran.json'), { code: r.code, out: (r.out + r.err).trim().slice(-600), local, made, user: os.userInfo().username, at: Date.now() });
   return 0;
 }
 
@@ -1037,6 +1067,78 @@ async function takeR11(L, { node, script, self, work, sys }, { rounds = R11_ROUN
   }
 }
 
+/**
+ * R6 (U14 landed): what a runner can take of over-the-shoulder elevation. The plan's two readings of the account that
+ * started Setup need a desktop where one account starts the installer and an administrator approves its elevation with
+ * their own credentials (UAC's prompt), which no runner has: they stay the show laptop's, and the record says so. What the
+ * lane takes: one standard account made for the reading; its import folder made by the bundle's machine.js import --step
+ * stage, elevated, with that account's own grants, over a machine folder of the lane's own; that account's export (the
+ * bundle's launch.js export, run by a task with its logon, as Inno's ExecAsOriginalUser runs it) of a stand-in portable
+ * folder last run by this build into that folder; the bundle's machine.js import --step take reading that bundle elevated
+ * and verifying it; and this lane, elevated, reading the file the account's probe made in its %LOCALAPPDATA%\AGMessage.
+ * {sid, stage, export, take, profileRead}; the account, its task and its profile removed whatever happened.
+ */
+async function takeR6(L, { node, root, self, work, sys }, { exportMs = 150000 } = {}) {
+  const dir = path.join(work, 'r6');
+  const machineRoot = path.join(dir, 'ProgramData', 'AGMessage');
+  const source = path.join(dir, 'portable', 'AGMessage');
+  const password = 'Aa1!' + crypto.randomBytes(18).toString('base64url');
+  let made = false;
+  try {
+    const users = L.ps(SCRIPTS.users, { AGM_R11_USERS: R6_USER, AGM_R11_PASSWORD: password });
+    const u = (Array.isArray(users) ? users : [users]).find((x) => x && x.name === R6_USER && /^S-1-[0-9-]+$/.test(String(x.sid)));
+    made = !!u;
+    if (!u) return { skipped: 'the standard account was not made' };
+    if (u.admin === true) return { skipped: 'the account made for the reading is an administrator, so it measures nothing of a standard account' };
+    // The machine folder's own children and machine\'s, as prepare makes them (their grants are the import's to set).
+    for (const sub of ['data', 'uploads', 'keys', 'logs', 'token', path.join('machine', 'inbox'), path.join('machine', 'outbox'), path.join('machine', 'work')]) fs.mkdirSync(path.join(machineRoot, sub), { recursive: true });
+    // A stand-in portable folder last run by this build in the format it writes (its facts reader names both), with nothing
+    // sealed in it.
+    fs.mkdirSync(path.join(source, 'app', 'data'), { recursive: true });
+    const blank = path.join(dir, 'blank');
+    fs.mkdirSync(blank, { recursive: true });
+    const built = run(node, [path.join(root, 'app', 'lib', 'importfacts.js'), '--data', blank, '--keys', blank], { ms: 60000 });
+    const facts = (() => { try { return JSON.parse(built.out.trim().split(/\r?\n/).pop()).facts; } catch { return {}; } })();
+    const build = typeof facts.build === 'string' ? facts.build : '';
+    const current = facts.format && Number.isSafeInteger(facts.format.current) ? facts.format.current : 0;
+    if (!build || !current) return { skipped: 'the bundle\'s build and format were not read (' + (built.err || built.out).trim().slice(0, 200) + ')' };
+    writeJson(path.join(source, 'app', 'data', 'format.json'), { format: current, build, at: Date.now() });
+    fs.writeFileSync(path.join(source, 'start-agmessage.bat'), '@echo off\r\n');
+    const probe = path.join(dir, 'probe');
+    fs.mkdirSync(probe, { recursive: true });
+    for (const f of [probe, path.join(dir, 'portable')]) {
+      const granted = run(L.exe('icacls.exe'), [f, '/grant', '*' + u.sid + ':(OI)(CI)M']);
+      if (granted.code !== 0) throw new Error('the account was not granted ' + f + ': ' + (granted.err || granted.out).trim().slice(0, 200));
+    }
+    const out = { sid: u.sid };
+    const step = (name, args) => {
+      const said = path.join(dir, name + '.json');
+      const r = run(node, [path.join(root, 'app', 'machine.js'), 'import', '--step', name, '--for', u.sid, '--machine', machineRoot, ...args, '--out', said], { ms: 300000 });
+      let rec;
+      try { rec = readJson(said); } catch { rec = {}; /* no record: its exit code says what it did */ }
+      return { code: r.code, words: String(rec.words || (r.err || r.out).trim()).slice(0, 400), verified: rec.verified === true };
+    };
+    out.stage = step('stage', ['--sys', sys]);
+    if (out.stage.code !== 0) return out;
+    writeJson(path.join(probe, 'plan.json'), { launch: path.join(root, 'app', 'launch.js'), source, machine: machineRoot });
+    L.register(R6_TASK, taskXml({ description: 'AGMessage readings R6: launch.js export, as ' + u.name, sid: u.sid, logon: 'Password', limit: 'PT10M', command: node, args: [self, 'probe-export', probe], cwd: path.dirname(self) }), { user: u.name, password });
+    try {
+      const started = L.schtasks(['/Run', '/TN', R6_TASK]);
+      if (started.code !== 0) { out.export = { code: null, err: 'its task did not run: ' + (started.err || started.out).trim().slice(0, 200) }; return out; }
+      const ran = await until(() => { try { return readJson(path.join(probe, 'ran.json')); } catch { return null; /* not written yet */ } }, exportMs);
+      if (!ran) { out.export = { code: null, err: 'the task as ' + u.name + ' wrote nothing within ' + exportMs / 1000 + ' s (last result ' + L.lastResult(R6_TASK) + ')' }; return out; }
+      let said = {};
+      try { said = readJson(path.join(machineRoot, 'machine', 'inbox', u.sid, 'import', 'export.json')); } catch (e) { said = { words: 'its answer was not read elevated (' + (e.code || e.message) + ')' }; }
+      out.export = { code: ran.code, words: String(said.words || ran.out || '').slice(0, 400), user: String(ran.user || ''), made: String(ran.made || '') };
+      out.take = step('take', ['--app', root, '--source', source, '--sys', sys]);
+      try { fs.readFileSync(path.join(String(ran.local), 'AGMessage', 'r6-probe.txt')); out.profileRead = { ok: true }; } catch (e) { out.profileRead = { ok: false, code: String((e && e.code) || 'EIO') }; }
+      return out;
+    } finally { L.remove(R6_TASK); }
+  } finally {
+    if (made) await guarded(() => L.ps(SCRIPTS.usersGone, { AGM_R11_USERS: R6_USER }));
+  }
+}
+
 async function take(o) {
   if (process.platform !== 'win32') { console.error('readings-take: the readings are Windows\'; nothing was taken'); return 64; }
   const work = path.resolve(o.work);
@@ -1226,6 +1328,11 @@ async function take(o) {
     return takeR11(L, { node, script: path.join(root, 'app', 'machine.js'), self, work, sys });
   });
 
+  await reading('R6', () => {
+    needsPayload();
+    return takeR6(L, { node, root, self, work, sys });
+  });
+
   // R9 and R3′ (U12 landed): the upgrade backup's time, and the server task's stop-saves. Both drive the bundle's own
   // server and watchdog (no installer), through app/lib/machinewire.js of this checkout.
   await reading('R9', () => {
@@ -1292,13 +1399,14 @@ async function main(argv) {
   if (a.verb === 'probe-exit' && a.positional.length === 1) return probeExit(a.positional[0]);
   if (a.verb === 'probe-release' && a.positional.length === 1) return probeRelease(a.positional[0]);
   if (a.verb === 'probe-run' && a.positional.length === 1) return probeRun(a.positional[0]);
+  if (a.verb === 'probe-export' && a.positional.length === 1) return probeExport(a.positional[0]);
   if (a.verb === 'probe-server' && a.positional.length === 1) return probeServer(a.positional[0]);
   if (a.verb === 'take' && !a.positional.length && a.flags.zip && a.flags.defender && a.flags.out) {
     const port = Number(a.flags.port || 3124);
     if (!Number.isInteger(port) || port < 1024 || port > 65535) { console.error('readings-take: --port is a port from 1024 to 65535'); return 64; }
     return take({ zip: a.flags.zip, previous: a.flags.previous || '', defender: a.flags.defender, out: a.flags.out, work: a.flags.work || 'C:\\agm-readings', port, repo: a.flags.repo || '', tag: a.flags.tag || '', installer: a.flags.installer || '' });
   }
-  console.error('readings-take: take --zip <bundle.zip> --defender <defender.json> --out <raw.json> [--previous <zip>] [--work <folder>] [--port <n>] [--repo <owner/name> --tag <vX.Y.Z>] [--installer <exe>] | probe-server <dir> | probe-exit <dir> | probe-release <dir> | probe-run <dir>');
+  console.error('readings-take: take --zip <bundle.zip> --defender <defender.json> --out <raw.json> [--previous <zip>] [--work <folder>] [--port <n>] [--repo <owner/name> --tag <vX.Y.Z>] [--installer <exe>] | probe-server <dir> | probe-exit <dir> | probe-release <dir> | probe-run <dir> | probe-export <dir>');
   return 64;
 }
 
@@ -1307,7 +1415,7 @@ if (require.main === module) {
 }
 
 module.exports = {
-  zipEntries, memberParts, topFolder, releaseOf, layOut, extractOne, taskXml, winArg, utf16, SERVER_PRINCIPAL, CONTROL_PRINCIPAL, SCRIPTS, lane, system32, takeR11, probeRun,
+  zipEntries, memberParts, topFolder, releaseOf, layOut, extractOne, taskXml, winArg, utf16, SERVER_PRINCIPAL, CONTROL_PRINCIPAL, SCRIPTS, lane, system32, takeR11, probeRun, takeR6, probeExport, R6_USER, R6_TASK,
   snapshot, snapshotDiff, udpHeard, waitHealth, quickTunnel, readRelease, probeExit, parseArgs, main, TRYCF, installerSignature,
   sddlOfSave, pipeReach, keepTail, tokenIn, withoutSecrets, placeRefusal, takeR12, take,
   seedHalls, pageSocket, paceMs, takeR1, takeR9, takeR3prime, serveFolders, R1_SIZES, R1_QUIET_MS, PAGE_PACE,

@@ -530,7 +530,9 @@ rules (no account yet, the laptop, the token, the password's checks) decide and 
 typed". The password reaches `machine.js` in a file only SYSTEM
 and Administrators may read, which it removes before it asks, and is never in a command line, a URL or the installer's
 log. Left empty, the first admin is made at Admin login as above, with the token from Start → AGMessage → Show the
-admin token. The Windows account that ran the installer is **the laptop's admin** (a Windows account, `docs/INSTALL.md`),
+admin token. A portable folder imported on the installer's page before (`docs/INSTALL.md`, The import of a portable
+folder) brings its accounts, their passwords' hashes, sessions and side rooms as they were, so the node has accounts and
+this page is not shown; the accounts are counted alike on both sides before the portable folder's keys go. The Windows account that ran the installer is **the laptop's admin** (a Windows account, `docs/INSTALL.md`),
 not an admin account: it reads the token, and an admin account is AGMessage's own. It also starts and stops AGMessage
 from the Start menu, and gives these Windows rights (`token`, `start`, `stop`, `upgrade`) to other Windows accounts,
 takes them back or hands the laptop's admin over (Who may run AGMessage…, docs/INSTALL.md's The laptop's admin, its rights

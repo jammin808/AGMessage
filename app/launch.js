@@ -57,15 +57,30 @@
  *                              --elevated by its absolute path beside this file instead, so an administrator can hand over
  *                              a laptop whose admin account is gone.
  *
- * upgrade and back (U18), and the account export and key removal (U14) are later units: until each lands its verb is
- * refused as unknown. A verb it does not know is refused, never defaulted. Exit codes: 0 done; 2 not done, with the words
- * of why; 64 a verb or an argument it does not know, or one missing. In a console window it waits for Enter before it
- * ends, so the window that the Start menu opened stays until the person has read it; open waits only when it did not open
- * the browser.
+ *   export --source <portable folder> --machine <folder> --sys <folder> [--port <n>]
+ *   forget-keys --source <portable folder> --machine <folder> --sys <folder> --id <the import's id>
+ *                              The portable import's two steps as the person (U14), run by the installer as the Windows
+ *                              account that started it (Inno's ExecAsOriginalUser), hidden, before the installed node's
+ *                              first start. export writes a bundle of the portable folder's contents (its data and uploads,
+ *                              and this account's machine key, certificate and audit records: files only, never a link)
+ *                              into that account's own import folder, machine\inbox\<SID>\import\, which the elevated
+ *                              machine.js import reads; it refuses a copy running on the folder, a folder last run by
+ *                              another build, keys that are not this account's, a key, certificate or secret the installed
+ *                              node would not start on, and an audit log that does not check. Once
+ *                              machine.js import has verified the copy (its verdict in machine\outbox\<SID>\import.json),
+ *                              forget-keys marks the folder as moved and removes the old copies: this account's
+ *                              %LOCALAPPDATA%\AGMessage and the folder's app\data\secret.key, each checked and said. Each
+ *                              leaves its answer in the import folder (export.json, forget.json) for the installer.
+ *
+ * upgrade and back (U18) are a later unit's: until it lands their verbs are refused as unknown. A verb it does not know is
+ * refused, never defaulted. Exit codes: 0 done; 2 not done, with the words of why; 64 a verb or an argument it does not
+ * know, or one missing. In a console window it waits for Enter before it ends, so the window that the Start menu opened
+ * stays until the person has read it; open waits only when it did not open the browser, and the import's steps never.
  */
 const fs = require('node:fs');
 const crypto = require('node:crypto');
 const http = require('node:http');
+const os = require('node:os');
 const path = require('node:path');
 const readline = require('node:readline');
 const childProcess = require('node:child_process');
@@ -123,14 +138,14 @@ function showToken({ machine, sys = '', read = fs.readFileSync, admin = adminNam
   return { code: DONE, text: 'AGMessage\'s admin token on this PC:\n\n    ' + text + '\n\nType it at Admin login on this PC. It holds while AGMessage serves; each start makes a new one. If it is not taken, AGMessage has started again or is not serving: show the token again once it serves.' };
 }
 
-// The verbs later units add are refused as unknown until each lands (U18's upgrade/back, U14's account export and key
-// removal); the two U14 verbs are not enumerated here, so no landing-detector word for a later unit sits in this build's
-// tree (test/readings.test.js holds that).
+// The verbs a later unit adds are refused as unknown until it lands (U18's upgrade and back).
 const LATER = Object.freeze({ upgrade: 'U18', back: 'U18' });
 /** The person's requests, each answered by their own control task. */
 const REQUESTS = Object.freeze(['start', 'stop', 'rights']);
+/** The portable import's two steps run as the account that started the installer, hidden: neither waits for Enter. */
+const IMPORT_STEPS = Object.freeze(['export', 'forget-keys']);
 /** The commands this build knows, for the words of an unknown one. */
-const KNOWN = 'serve, token, status, open, start, stop or rights';
+const KNOWN = 'serve, token, status, open, start, stop, rights, export or forget-keys';
 
 /** Options read by `--name value`, each once; a value missing or a name twice is a problem. */
 function options(rest, allowed, verb) {
@@ -152,6 +167,7 @@ function parse(argv) {
   if (verb === 'status') return parseStatus(rest);
   if (verb === 'open') return parseOpen(rest);
   if (REQUESTS.includes(verb)) return parseOpen(rest, verb);
+  if (IMPORT_STEPS.includes(verb)) return parseImport(rest, verb);
   if (LATER[verb]) return { problem: 'launch.js ' + verb + ' is built by ' + LATER[verb] + '; this build knows ' + KNOWN + '.' };
   if (verb !== 'token') return { problem: 'launch.js knows ' + KNOWN + '.' + (verb ? ' "' + said(verb, 40) + '" is not one of them.' : '') };
   const got = { '--machine': null, '--sys': null };
@@ -204,6 +220,31 @@ function parseOpen(rest, verb = 'open') {
   const sys = o.got['--sys'] || '';
   if (!DRIVE_PATH.test(sys)) return { problem: 'launch.js ' + verb + ' needs --sys <folder>, the System32 folder named from its drive (C:\\Windows\\System32)' + (verb === 'open' ? ': the browser is opened from the Windows folder it sits in.' : ': whoami.exe and schtasks.exe are run from it.') };
   return { verb, machine, sys };
+}
+
+/**
+ * export's and forget-keys' command line: the portable folder (--source), the machine folder and the System32 folder, each
+ * required, each a full path; export's --port (the installed node's, asked whether an AGMessage answers there) and
+ * forget-keys' --id (the import its verdict must name), each the one its step takes.
+ */
+function parseImport(rest, verb) {
+  const o = options(rest, ['--source', '--machine', '--sys', verb === 'export' ? '--port' : '--id'], verb);
+  if (o.problem) return { problem: o.problem };
+  for (const name of ['--source', '--machine']) {
+    const v = o.got[name] || '';
+    if (!v || !path.isAbsolute(v)) return { problem: 'launch.js ' + verb + ' needs ' + name + ' <folder>, a full path' + (name === '--source' ? ' (the portable AGMessage folder, the one that holds start-agmessage.bat).' : ' (%ProgramData%\\AGMessage).') };
+  }
+  const sys = o.got['--sys'] || '';
+  if (!DRIVE_PATH.test(sys)) return { problem: 'launch.js ' + verb + ' needs --sys <folder>, the System32 folder named from its drive (C:\\Windows\\System32): whoami.exe is run from it.' };
+  const a = { verb, source: o.got['--source'], machine: o.got['--machine'], sys };
+  if (verb === 'export') {
+    const port = o.got['--port'] === undefined ? 0 : Number(o.got['--port']);
+    if (!Number.isInteger(port) || port < 0 || port > 65535) return { problem: 'launch.js export\'s --port is a port from 1 to 65535.' };
+    return { ...a, port };
+  }
+  const id = o.got['--id'] || '';
+  if (!/^[0-9a-f]{24}$/.test(id)) return { problem: 'launch.js forget-keys needs --id <the import\'s id>, as its export named it.' };
+  return { ...a, id };
 }
 
 const SERVER_TASK = '\\AGMessage\\Server';
@@ -555,6 +596,348 @@ async function rightsAgm({ out = () => {}, prompt = promptLine, who = whoMayRun,
   return sendRequest({ ...stand, request });
 }
 
+// ---------------------------------------------------------------- the portable import: the export, and the keys' removal
+
+/** The import's folder in an account's own inbox (machine.js import --step stage makes it): it may add files there, never a folder. */
+const importDirOf = (machine, sid) => path.join(machine, 'machine', 'inbox', sid, 'import');
+/** The import's verdict, written by the elevated import into the account's own outbox, which it may read. */
+const verdictOf = (machine, sid) => path.join(machine, 'machine', 'outbox', sid, 'import.json');
+const MANIFEST = 'manifest.json';
+const EXPORT_SAID = 'export.json';
+const FORGET_SAID = 'forget.json';
+/** A part of the bundle by its place in the manifest: its name is the bundle's own, never a source file's. */
+const partOf = (i) => String(i).padStart(7, '0') + '.part';
+/** The most files a bundle carries, and the room AGMessage keeps beside it on the machine folder's disk. */
+const BUNDLE_FILES_MAX = 500000;
+const BUNDLE_RESERVE = 1024 ** 3;
+const COPY_CHUNK = 1024 * 1024;
+/** A path inside a carried folder: names a folder may hold, '/' between them, none '.' or '..', REL_MAX at most (pure). */
+const REL_MAX = 240;
+const REL_NAME = /^[^\\/:*?"<>|\p{Cc}]{1,200}$/u;
+function relOk(rel) {
+  if (typeof rel !== 'string' || !rel || rel.length > REL_MAX) return false;
+  return rel.split('/').every((n) => REL_NAME.test(n) && n !== '.' && n !== '..');
+}
+/** What a portable data folder holds that the import leaves: its copies, its console, its watchdog's own, an import's mark. */
+const DATA_LEFT = new Set(['backups', 'logs', 'watchdog.json', 'watchdog.seen.json', 'watchdog.log', 'moved.json']);
+/** What a portable key folder holds that the import carries (answer 42): the machine key, the certificate, the audit records. */
+const KEYS_CARRIED = Object.freeze(['machine.key', 'tls.json', 'audit']);
+/**
+ * Whether the import carries a file, by its place (`data`, `uploads` or `keys`) and its path inside it (pure): never a
+ * temporary file or one a save left part way; of the data folder, all but DATA_LEFT; of the key folder, KEYS_CARRIED.
+ */
+function carried(area, rel) {
+  const parts = String(rel).split('/');
+  if (/\.tmp$/i.test(parts[parts.length - 1]) || parts.some((p) => p.startsWith('.partial-'))) return false;
+  if (area === 'data') return !DATA_LEFT.has(parts[0]);
+  if (area === 'keys') return parts.length === 1 ? parts[0] === 'machine.key' || parts[0] === 'tls.json' : parts[0] === 'audit';
+  return area === 'uploads';
+}
+/** A portable folder's own places (pure): its data and uploads folders and its start file, as start-agmessage.bat runs it. */
+function portableOf(source) {
+  return { data: path.join(source, 'app', 'data'), uploads: path.join(source, 'app', 'uploads'), bat: path.join(source, 'start-agmessage.bat') };
+}
+/**
+ * The key folder a portable copy run by this Windows account keeps (pure but for its defaults): %LOCALAPPDATA%\AGMessage,
+ * as lib/secretbox.js keyDir names it, on Windows; ~/.agmessage elsewhere. The account's own profile, read where its
+ * portable copy reads it: no machine path is.
+ */
+function profileKeys({ platform = process.platform, env = process.env, home = os.homedir() } = {}) {
+  if (platform === 'win32' && typeof env.LOCALAPPDATA === 'string' && DRIVE_PATH.test(env.LOCALAPPDATA)) return path.win32.join(env.LOCALAPPDATA, 'AGMessage');
+  return path.join(home, '.agmessage');
+}
+/** Whether `a` is `b` or inside it, as the platform compares folders (pure). */
+function within(a, b, platform = process.platform) {
+  const norm = (p) => { const r = path.resolve(p).replace(/[\\/]+$/, ''); return platform === 'win32' ? r.toLowerCase() : r; };
+  const x = norm(a);
+  const y = norm(b);
+  return x === y || x.startsWith(y + path.sep);
+}
+
+/**
+ * Why the import refuses a portable folder, from its facts (lib/importfacts.js, read as this account), in words, or '' (pure):
+ * a copy running on it (with what its busy line says), an import's mark on it, a folder last run by another build (U6's
+ * format.json), keys that are not in this account's profile (another Windows account's, or none, while the folder holds
+ * what a key sealed), a machine key, certificate or server secret the installed node would not start on (what its own start
+ * refuses: server.js taskKeysProblem), and an audit log that does not check. `profile` is the key folder its facts were read
+ * with.
+ */
+function exportRefusal(f, { source, profile }) {
+  if (!f || typeof f !== 'object' || !f.format || !f.key || !f.sealed || !f.cert || !f.chain) return 'The portable folder\'s facts could not be read.';
+  if (f.held) return 'The portable AGMessage in ' + source + ' is running' + (f.busy ? ' (it says it is ' + said(f.busy, 200) + ')' : '') + ': press Ctrl+C in its window, then import again.';
+  if (f.moved === 'moved') return 'This folder\'s AGMessage was imported already (app\\data\\moved.json): its halls are in the AGMessage installed on this PC.';
+  if (f.moved !== 'none') return 'This folder\'s import mark (app\\data\\moved.json) could not be read, so whether it was imported already cannot be told.';
+  if (f.format.state !== 'read' || !f.format.build || f.format.build !== f.build || f.format.format !== f.format.current) {
+    const last = f.format.state === 'read' ? (f.format.build ? 'AGMessage ' + f.format.build + (f.format.build === f.build ? ' in format ' + f.format.format + ', which this build does not write' : '') : 'a build its format marker does not name')
+      : f.format.state === 'none' ? 'AGMessage 0.5 or earlier, or by none (app\\data holds no format.json)' : 'a build its format marker does not say (it could not be read)';
+    return 'This folder was last run by ' + last + ', and this AGMessage is ' + f.build + ': the import takes only a folder last run by this same build. Upgrade the portable folder to this build (README.txt, Upgrading), start it once and stop it, then import again.';
+  }
+  const keyed = f.sealed.total > 0 || !!f.chain.newestKid || f.cert.state !== 'absent';
+  const another = 'This folder\'s keys are another Windows account\'s: install from that account.';
+  if (keyed && f.key.state === 'absent') return another + ' (No machine key is in this account\'s profile, ' + profile + ', and the folder holds what one sealed.)';
+  // A key, certificate or secret the installed node's own start refuses is never carried: it would not start on it.
+  const never = (can) => ', and the installed AGMessage never starts on one it cannot ' + can + '.';
+  if (f.key.state !== 'absent' && f.key.state !== 'key') {
+    return 'The machine key in this account\'s profile (' + path.join(profile, 'machine.key') + ') ' + (f.key.code === 'EBADKEY' ? 'is not a key AGMessage made' : 'could not be read (' + (f.key.code || 'not a key') + ')') + never('read')
+      + (keyed ? ' The folder\'s sealed values cannot be carried without it: put back the copy it had, then import again.' : ' Nothing in the folder was sealed with it: move it aside, then import again.');
+  }
+  if (f.sealed.open < f.sealed.total) return another + ' (' + (f.sealed.total - f.sealed.open) + ' of ' + f.sealed.total + ' sealed values do not open with the machine key in ' + profile + ': ' + f.sealed.shut.join(', ') + '.)';
+  if (f.chain.newestKid && f.chain.newestKid !== f.key.kid) return another + ' (Its audit log is keyed with another machine key than the one in ' + profile + '.)';
+  if (f.cert.state !== 'absent' && f.cert.state !== 'ok' && f.cert.state !== 'renew') {
+    return 'The certificate in this account\'s profile (' + path.join(profile, 'tls.json') + ') cannot be used (' + (f.cert.code || f.cert.state) + ')' + never('use') + ' Put back the copy it had; or move it aside, and the installed AGMessage makes a new one, which every device is asked to trust again. Then import again.';
+  }
+  if (f.secret !== 'read' && f.secret !== 'absent') {
+    return 'The folder\'s server secret (app\\data\\secret.key) could not be read or holds no server secret' + never('read') + ' Put back the copy it had; or move it aside, and the guests\' and invite links made with it no longer hold. Then import again.';
+  }
+  if (!f.chain.done || f.chain.mark === 'broken') return 'The portable folder\'s audit log does not check (' + said(f.chain.words, 300) + '). Start the portable copy, see Admin → Health, accept what it found there if it is yours to accept, stop it, then import again.';
+  return '';
+}
+
+/**
+ * The facts of a data folder and its key folder (pure but for its child): lib/importfacts.js beside this file, run by this
+ * node.exe as a process of its own (`runFile`, childProcess.execFileSync unless a test stands in for it), its one line of JSON
+ * read: {facts} or {error}.
+ */
+function factsAt({ data, keys, runFile = childProcess.execFileSync, script = path.join(__dirname, 'lib', 'importfacts.js') }) {
+  let out;
+  try {
+    out = String(runFile(process.execPath, [script, '--data', data, '--keys', keys], { cwd: __dirname, encoding: 'utf8', windowsHide: true, timeout: 600_000, maxBuffer: 16 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] }) || '');
+  } catch (e) { out = String((e && e.stdout) || ''); if (!out.trim()) return { error: said((e && (e.code || e.message)) || 'no answer', 160) }; }
+  let j;
+  try { j = JSON.parse(out.split(/\r?\n/).filter((l) => l.startsWith('{')).pop() || ''); } catch { return { error: 'its answer is not whole' }; }
+  if (j && j.facts && typeof j.facts === 'object') return { facts: j.facts };
+  return { error: said((j && j.error) || 'no facts in its answer', 200) };
+}
+
+/** Whether a folder of a place may hold a file the import carries (pure): a folder that may not is never walked. */
+const holds = (area, rel) => carried(area, rel + '/f');
+/** Whether two stats name one file, by its device and its file id read whole (`{bigint: true}`: an NTFS id past 2^53 is not a Number). */
+const sameFile = (a, b) => BigInt(a.ino) === BigInt(b.ino) && BigInt(a.dev) === BigInt(b.dev);
+
+/**
+ * The files of one place of a source the import carries, by lstat, none followed: {files: [{area, rel, abs, size, ino,
+ * dev}]}; {link} naming the first link, junction, or anything that is neither a file nor a folder, met anywhere in what it
+ * carries (an import carries files, never what a link names); or {over} once more than `max` files are seen, the walk
+ * stopped there. `only` names the top-level entries walked (the key folder's); a folder that holds nothing the import
+ * carries (a data folder's backups and logs) is never walked; a place not there carries nothing.
+ */
+function filesOf(area, root, { only = null, fsImpl = fs, max = BUNDLE_FILES_MAX } = {}) {
+  const files = [];
+  let link = '';
+  let over = false;
+  const look = (p) => { try { return fsImpl.lstatSync(p, { bigint: true }); } catch (e) { if (e.code === 'ENOENT') return null; throw e; } };
+  const walk = (abs, rel) => {
+    for (const name of fsImpl.readdirSync(abs).sort()) {
+      if (link || over) return;
+      if (only && !rel && !only.includes(name)) continue;
+      const r = rel ? rel + '/' + name : name;
+      const p = path.join(abs, name);
+      const st = look(p);
+      if (!st) continue;
+      if (st.isSymbolicLink() || !(st.isDirectory() || st.isFile())) { link = p; return; }
+      if (st.isDirectory()) { if (holds(area, r)) walk(p, r); continue; }
+      if (!carried(area, r)) continue;
+      if (files.length >= max) { over = true; return; }
+      files.push({ area, rel: r, abs: p, size: Number(st.size), ino: st.ino, dev: st.dev });
+    }
+  };
+  const st = look(root);
+  if (!st) return { files };
+  if (st.isSymbolicLink() || !st.isDirectory()) return { link: root };
+  walk(root, '');
+  return link ? { link } : over ? { over: true } : { files };
+}
+
+/** A file's bytes copied into a new file (never over one), each through its own handle: {size, sha256}. Contents only. */
+function copyBytes(fsImpl, from, to, seen) {
+  const hash = crypto.createHash('sha256');
+  // Opened without following a link, and the file read is the file the walk saw: one swapped for a link or another file
+  // between the two is refused, never copied.
+  const src = fsImpl.openSync(from, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+  let dst = null;
+  let size = 0;
+  try {
+    const ft = fsImpl.fstatSync(src, { bigint: true });
+    if (!ft.isFile() || (seen && !sameFile(ft, seen))) throw Object.assign(new Error(from + ' changed between its look and its read'), { code: 'ECHANGED' });
+    dst = fsImpl.openSync(to, 'wx');
+    const buf = Buffer.alloc(COPY_CHUNK);
+    for (;;) {
+      const n = fsImpl.readSync(src, buf, 0, buf.length, null);
+      if (!n) break;
+      hash.update(buf.subarray(0, n));
+      for (let off = 0; off < n;) off += fsImpl.writeSync(dst, buf, off, n - off);
+      size += n;
+    }
+  } finally {
+    fsImpl.closeSync(src);
+    if (dst !== null) fsImpl.closeSync(dst);
+  }
+  return { size, sha256: hash.digest('hex') };
+}
+/**
+ * The portable folder chosen and its app\ folder, each a real folder and never a link or junction (pure but for lstat):
+ * the path of the first that is a link, or ''. One not there is said by what reads it next.
+ */
+function linkedSource(fsImpl, at) {
+  const linkAt = (p) => { try { return fsImpl.lstatSync(p).isSymbolicLink(); } catch { return false; /* not there: said by the data folder's own look */ } };
+  for (const p of [at, path.join(at, 'app')]) if (linkAt(p)) return p;
+  return '';
+}
+const MBs = (n) => (n < 1024 * 1024 ? Math.ceil(n / 1024) + ' KB' : Math.ceil(n / (1024 * 1024)) + ' MB');
+
+/**
+ * Export, the portable import's first step (U14): run as the Windows account that started the installer (Inno's
+ * ExecAsOriginalUser), never elevated, it writes a bundle of the portable folder's contents into that account's own
+ * import folder (machine\inbox\<SID>\import\, made by machine.js import --step stage): the data folder, the uploads, and
+ * the machine key, certificate and audit records from this account's profile, each file's bytes as a part, then the
+ * manifest naming each part's place, size and SHA-256 with the source's facts. Refused, with nothing exported: a folder
+ * that is not a portable AGMessage's, or this PC's installed one; an AGMessage answering on the installed node's port; a
+ * copy running on the folder (with what its busy line says); an import's mark on it; a folder last run by another build;
+ * keys that are not this account's; a machine key, certificate or server secret the installed node would not start on; an
+ * audit log that does not check; the folder or its app\ a link or junction, or one anywhere in what it carries; more files
+ * than a bundle carries (the walk stopped there); a disk short of the room. Its answer is export.json beside the bundle,
+ * which the installer reads: {code, text, id}. A bundle left part way is cleared by machine.js import (take, or clear).
+ */
+async function exportPortable({ source, machine, sys, port = 0, run = childProcess.execFileSync, fsImpl = fs, facts = factsAt, profile = profileKeys(), ask = healthAt }) {
+  const me = accountOf(windowsHands(sys, run)('whoami.exe', ['/user', '/fo', 'csv', '/nh']).out);
+  if (!me) return { code: NOT_DONE, text: 'Your Windows account could not be read (whoami.exe), so nothing was exported.' };
+  const dir = importDirOf(machine, me.sid);
+  const id = crypto.randomBytes(12).toString('hex');
+  // The account may add files to its import folder and write them, and nothing more (it may not even read the folder's
+  // attributes): its first answer, that the export did not finish, is what tells whether the folder was made ready for it,
+  // and stays as its answer should the export stop part way.
+  try { fsImpl.writeFileSync(path.join(dir, EXPORT_SAID), JSON.stringify({ v: 1, id, code: NOT_DONE, words: 'The export did not finish: nothing was exported.' })); } catch (e) {
+    return { code: NOT_DONE, text: 'The import was not made ready for ' + me.name + ' on this PC (' + dir + ': ' + ((e && e.code) || 'EIO') + '): it is run from AGMessage\'s installer, as the Windows account that started it.' };
+  }
+  const answer = (code, text, more = {}) => {
+    try { fsImpl.writeFileSync(path.join(dir, EXPORT_SAID), JSON.stringify({ v: 1, id, code, words: text, ...more })); } catch (e) {
+      return { code: NOT_DONE, text: text + ' (Its answer could not be left for the installer: ' + ((e && e.code) || 'EIO') + '.)' };
+    }
+    return { code, text, id, ...more };
+  };
+  const refuse = (text) => answer(NOT_DONE, text + ' Nothing was exported.');
+  const at = path.resolve(source);
+  const own = portableOf(at);
+  const linked = linkedSource(fsImpl, at);
+  if (linked) return refuse(linked + ' is a link or a junction: an import reads the portable folder itself, never what a link names. Choose the folder it names.');
+  let data;
+  try { data = fsImpl.lstatSync(own.data); } catch { data = null; /* none: said below */ }
+  if (!data || !data.isDirectory() || data.isSymbolicLink()) return refuse(at + ' holds no portable AGMessage\'s data (app\\data): choose the folder that holds start-agmessage.bat.');
+  if (within(at, machine) || within(machine, at) || within(at, path.dirname(__dirname)) || within(path.dirname(__dirname), at)) return refuse(at + ' is the AGMessage installed on this PC, not a portable folder.');
+  if (port) {
+    const h = await ask(port);
+    if (h.state === 'agm') return refuse('AGMessage ' + h.version + ' answers on port ' + port + ': a portable copy is still running. Press Ctrl+C in its window, then import again.');
+    if (h.state === 'silent') return refuse('Something on port ' + port + ' did not answer within ' + OPEN_ASK_MS / 1000 + ' s: a portable copy may still be saving. Wait until its window says it stopped, then import again.');
+  }
+  const read = facts({ data: own.data, keys: profile });
+  if (read.error) return refuse('The portable folder could not be read (' + read.error + ').');
+  const why = exportRefusal(read.facts, { source: at, profile });
+  if (why) return refuse(why);
+  const files = [];
+  for (const [area, root, only] of [['data', own.data, null], ['uploads', own.uploads, null], ['keys', profile, KEYS_CARRIED]]) {
+    let r;
+    try { r = filesOf(area, root, { only, fsImpl, max: BUNDLE_FILES_MAX - files.length }); } catch (e) { return refuse(root + ' could not be read (' + ((e && e.code) || 'EIO') + ').'); }
+    if (r.link) return refuse(r.link + ' is a link or a junction: an import carries files, never what a link names.');
+    if (r.over) return refuse('The portable folder holds more than the ' + BUNDLE_FILES_MAX + ' files an import carries.');
+    files.push(...r.files);
+  }
+  const odd = files.find((x) => !relOk(x.rel));
+  if (odd) return refuse(odd.abs + ' has a name an import does not carry.');
+  const bytes = files.reduce((n, x) => n + x.size, 0);
+  let free;
+  try { const s = fsImpl.statfsSync(dir); free = s.bavail * s.bsize; } catch { free = null; /* not read: the copy says when the disk is full */ }
+  if (free !== null && free < bytes + BUNDLE_RESERVE) return refuse('The disk of ' + machine + ' has ' + MBs(free) + ' free; the import takes ' + MBs(bytes) + ' there and AGMessage keeps ' + MBs(BUNDLE_RESERVE) + ' beside it: free some space, then import again.');
+  const rows = [];
+  for (const [i, x] of files.entries()) {
+    try { rows.push({ area: x.area, rel: x.rel, ...copyBytes(fsImpl, x.abs, path.join(dir, partOf(i)), x) }); } catch (e) { return refuse(x.abs + ' could not be copied into the bundle (' + ((e && e.code) || 'EIO') + ').'); }
+  }
+  const manifest = { v: 1, id, sid: me.sid, at: Date.now(), source: at, build: read.facts.build, facts: read.facts, files: rows };
+  try { fsImpl.writeFileSync(path.join(dir, MANIFEST), JSON.stringify(manifest), { flag: 'wx' }); } catch (e) { return refuse('The bundle\'s manifest could not be written (' + ((e && e.code) || 'EIO') + ').'); }
+  const f = read.facts;
+  const n = (count, one) => count + ' ' + one + (count === 1 ? '' : 's');
+  return answer(DONE, 'The portable folder is exported for the import: ' + n(rows.length, 'file') + ' (' + MBs(bytes) + '), with ' + n(f.halls, 'hall') + ', ' + n(f.messages, 'message') + ', ' + n(f.accounts, 'account') + ' and ' + n(f.screens, 'screen') + '.');
+}
+
+/**
+ * The start file a portable folder's import leaves in its place (pure): it names the AGMessage installed on this PC and
+ * the day, and starts nothing. Every word is its own or a build's characters, so cmd reads nothing it would run.
+ */
+function movedBat({ build, at }) {
+  const b = String(build || '').replace(/[^0-9A-Za-z.+-]/g, '').slice(0, 80) || 'its build';
+  const day = new Date(at).toISOString().slice(0, 10);
+  return ['@echo off', 'title AGMessage', 'echo.', 'echo   This AGMessage folder was moved into the AGMessage installed on this PC', 'echo   (build ' + b + ') on ' + day + '. Its halls, accounts and keys are there now,',
+    'echo   and this copy no longer starts.', 'echo.', 'echo   Open it from Start ^> AGMessage ^> Open AGMessage.', 'echo   The start file this folder had is kept beside this one: start-agmessage.bat.moved',
+    'echo.', 'pause', 'exit /b 3', ''].join('\r\n');
+}
+/** A file or folder removed and looked for again: {ok, path, why?, was}: `was` false when there was none to remove. */
+function removeChecked(fsImpl, p, folder) {
+  let was = true;
+  try { fsImpl.lstatSync(p); } catch (e) { if (e.code === 'ENOENT') was = false; }
+  if (!was) return { ok: true, path: p, was };
+  try { fsImpl.rmSync(p, { recursive: folder, force: true, maxRetries: 3, retryDelay: 200 }); } catch (e) { return { ok: false, path: p, was, why: (e && e.code) || 'EIO' }; }
+  try { fsImpl.lstatSync(p); return { ok: false, path: p, was, why: 'still there' }; } catch (e) { return e.code === 'ENOENT' ? { ok: true, path: p, was } : { ok: false, path: p, was, why: e.code || 'EIO' }; }
+}
+
+/**
+ * Forget the keys, the portable import's last step (answer 42): run as the account that started the installer, once the
+ * elevated import has verified what it copied. Only a verdict of the import's own (machine\outbox\<SID>\import.json, which
+ * only SYSTEM and Administrators write) that names this import (`id`) and this folder, and says verified, lets it do
+ * anything; nor does it reach through a link (the folder or its app\ a link or junction); otherwise nothing is removed.
+ * Then the source is marked (app\data\moved.json, and its start file replaced by one naming the installed AGMessage, the
+ * original kept as start-agmessage.bat.moved), and the old copies removed, each checked and said: this account's
+ * %LOCALAPPDATA%\AGMessage (the machine key, the certificate, the audit records) and the folder's app\data\secret.key.
+ * One that fails names its path; a mark that was not made says the folder may still start, and is not done either. Its
+ * answer is forget.json in the import folder.
+ */
+function forgetKeys({ source, machine, sys, id, run = childProcess.execFileSync, fsImpl = fs, profile = profileKeys(), now = Date.now }) {
+  const me = accountOf(windowsHands(sys, run)('whoami.exe', ['/user', '/fo', 'csv', '/nh']).out);
+  if (!me) return { code: NOT_DONE, text: 'Your Windows account could not be read (whoami.exe), so nothing was removed.' };
+  const at = path.resolve(source);
+  const answerFile = path.join(importDirOf(machine, me.sid), FORGET_SAID);
+  const answer = (code, text, more) => {
+    try { fsImpl.writeFileSync(answerFile, JSON.stringify({ v: 1, id, code, words: text, ...more })); } catch { /* the import's last step says no answer came */ }
+    return { code, text, ...more };
+  };
+  let verdict = null;
+  try { const st = fsImpl.lstatSync(verdictOf(machine, me.sid)); if (st.isFile() && st.size <= 1024 * 1024) verdict = JSON.parse(String(fsImpl.readFileSync(verdictOf(machine, me.sid), 'utf8'))); } catch { verdict = null; /* none: nothing was verified */ }
+  if (!verdict || verdict.verified !== true || verdict.id !== id || typeof verdict.source !== 'string' || !within(verdict.source, at) || !within(at, verdict.source)) {
+    return answer(NOT_DONE, 'No import of ' + at + ' into this PC\'s AGMessage was verified, so nothing was removed: the keys stay where they are.', { verified: false });
+  }
+  const linked = linkedSource(fsImpl, at);
+  if (linked) return answer(NOT_DONE, linked + ' is a link or a junction now, so nothing was removed: the keys stay where they are. Remove %LOCALAPPDATA%\\AGMessage and the folder\'s app\\data\\secret.key yourself, and never start that folder again.', { verified: true, moved: false });
+  const own = portableOf(at);
+  const t = now();
+  // The mark first: the installed node serves these halls now, so this folder never starts them again.
+  let moved;
+  try {
+    const tmp = path.join(own.data, 'moved.json.' + crypto.randomBytes(4).toString('hex') + '.tmp');
+    fsImpl.writeFileSync(tmp, JSON.stringify({ v: 1, at: t, build: said(verdict.build || '', 80), to: 'the AGMessage installed on this PC' }), { flag: 'wx' });
+    fsImpl.renameSync(tmp, path.join(own.data, 'moved.json'));
+    moved = { ok: true };
+  } catch (e) { moved = { ok: false, path: path.join(own.data, 'moved.json'), why: (e && e.code) || 'EIO' }; }
+  let bat;
+  try {
+    fsImpl.lstatSync(own.bat);
+    try { fsImpl.lstatSync(own.bat + '.moved'); } catch { fsImpl.renameSync(own.bat, own.bat + '.moved'); }
+    fsImpl.writeFileSync(own.bat, movedBat({ build: verdict.build, at: t }));
+    bat = { ok: true, state: 'replaced' };
+  } catch (e) { bat = e && e.code === 'ENOENT' ? { ok: true, state: 'none' } : { ok: false, state: 'failed', path: own.bat, why: (e && e.code) || 'EIO' }; }
+  const keys = removeChecked(fsImpl, profile, true);
+  const secret = removeChecked(fsImpl, path.join(own.data, 'secret.key'), false);
+  const left = [keys, secret].filter((x) => !x.ok);
+  const them = left.length === 1 ? 'it' : 'them';
+  const copies = left.length
+    ? 'The import is verified, but not every old copy is gone: ' + left.map((x) => x.path + ' (' + x.why + ')').join('; ') + '. Remove ' + them + ' yourself: the keys of the halls this PC\'s AGMessage now serves are in ' + them + '.'
+    : 'The import is verified, so the old copies are gone: ' + (keys.was ? profile + ' (the machine key, the certificate and the audit records)' : 'this account\'s profile held no AGMessage keys') + ' and ' + (secret.was ? path.join(own.data, 'secret.key') + ' were removed' : 'the folder held no secret.key') + '.';
+  // The mark and the start file, said apart: a folder not marked could start again beside the installed node, under the
+  // same Show Bus id; a start file not replaced is only words, since the mark refuses its start.
+  const mark = !moved.ok
+    ? ' The folder is not marked as moved (' + moved.path + ': ' + moved.why + '), so it could still start, beside the installed AGMessage and with its halls: never start it again, and delete it once you no longer need it.'
+    : ' ' + at + ' is marked as moved: it no longer starts' + (bat.state === 'replaced' ? ' (its start file says where AGMessage is now; the original is start-agmessage.bat.moved).'
+      : bat.ok ? '.' : '. Its start file could not be replaced (' + bat.path + ': ' + bat.why + '), so starting it only says why it does not start.');
+  return answer(left.length || !moved.ok ? NOT_DONE : DONE, copies + mark, { verified: true, moved: moved.ok, bat: bat.state, keys: { ok: keys.ok, was: keys.was }, secret: { ok: secret.ok, was: secret.was } });
+}
+
 /**
  * The names of the task's own environment the watchdog is handed: Windows' folders and the machine's names, which Node
  * and the programs the server runs by their absolute paths read (TMPDIR and HOME for the same off Windows). Nothing else:
@@ -601,14 +984,17 @@ function serve(a, { spawn = childProcess.spawn, supervise = path.join(__dirname,
 }
 
 /**
- * Runs one of the person's commands (token, status, open, start, stop, rights) and says its words: the exit code, or for
- * open and the requests a promise of it (they ask the port, or the control task). serve runs through `serve`.
+ * Runs one of the person's commands (token, status, open, start, stop, rights) or one of the import's steps (export,
+ * forget-keys) and says its words: the exit code, or for open, export and the requests a promise of it (they ask the port,
+ * or the control task). serve runs through `serve`.
  */
 function main(argv, { out = (t) => process.stdout.write(t + '\n'), ...stand } = {}) {
   const a = parse(argv);
   if (a.problem) { out(a.problem); return USAGE; }
   if (a.verb === 'serve') { out('launch.js serve is the server task\'s action (Task Scheduler runs it); it is not run from this console.'); return USAGE; }
   if (a.verb === 'open') return openAgm({ machine: a.machine, sys: a.sys, ...stand }).then((r) => { out(r.text); return r.code; });
+  if (a.verb === 'export') return exportPortable({ source: a.source, machine: a.machine, sys: a.sys, port: a.port, ...stand }).then((r) => { out(r.text); return r.code; });
+  if (a.verb === 'forget-keys') { const r = forgetKeys({ source: a.source, machine: a.machine, sys: a.sys, id: a.id, ...stand }); out(r.text); return r.code; }
   if (REQUESTS.includes(a.verb)) {
     const act = { start: startAgm, stop: stopAgm, rights: rightsAgm }[a.verb];
     return act({ machine: a.machine, sys: a.sys, out, ...stand }).then((r) => { out(r.text); return r.code; });
@@ -632,8 +1018,9 @@ if (require.main === module) {
   } else {
     const hold = (code) => {
       process.exitCode = code;
-      // The console the Start menu opened stays until the person has read it; a browser opened needs no reading.
-      if (process.stdin.isTTY && !(argv[0] === 'open' && code === DONE)) {
+      // The console the Start menu opened stays until the person has read it; a browser opened needs no reading, and the
+      // import's steps are the installer's hidden runs, which nobody reads there.
+      if (process.stdin.isTTY && !(argv[0] === 'open' && code === DONE) && !IMPORT_STEPS.includes(argv[0])) {
         process.stdout.write('\nPress Enter to close this window.\n');
         // A request's own question (readline) may have paused the console's input: it is taken up again for the Enter.
         process.stdin.once('data', () => process.stdin.pause());
@@ -648,4 +1035,6 @@ if (require.main === module) {
 module.exports = {
   main, parse, serve, taskEnv, TASK_PASSED, statusOf, showToken, adminName, csvRows, openPlan, healthAt, openAgm, DEFAULT_PORT, DONE, NOT_DONE, USAGE,
   accountOf, elevatedOf, controlTask, rightsLineOf, sendRequest, startAgm, stopAgm, rightsAgm, whoMayRun, whoMayRunWords, windowsHands, PS_NAMES, RIGHT_WORDS, REQUESTS, ANSWER_WAIT_MS,
+  exportPortable, forgetKeys, exportRefusal, factsAt, filesOf, carried, relOk, linkedSource, sameFile, portableOf, profileKeys, within, movedBat, copyBytes, importDirOf, verdictOf, partOf,
+  MANIFEST, EXPORT_SAID, FORGET_SAID, KEYS_CARRIED, DATA_LEFT, BUNDLE_FILES_MAX, REL_MAX, IMPORT_STEPS,
 };

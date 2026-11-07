@@ -79,8 +79,9 @@ test('the register: R1-R13 as the plan\'s U7 table names them (R3 retired, R3′
     assert.equal(x.pass, PASSES[l.id] || 'recorded', l.id + '\'s pass is the plan\'s, or "recorded"');
     assert.ok(x.pass === 'recorded' || l.text.includes(x.pass), l.id + '\'s pass is in the plan\'s line');
   }
-  // What this build cannot take names the unit whose code it measures; what it stands in for, the unit that ends it.
-  assert.match(R.READINGS.find((x) => x.id === 'R6').needs.join(' '), /U\d+ \(#\d+\)/, 'R6');
+  // What this build cannot take would name the unit whose code it measures; what it stands in for, the unit that ends it.
+  // None needs a unit now: U14 (#75) built the export, which R6 takes.
+  assert.deepEqual(R.READINGS.filter((x) => x.needs).map((x) => x.id), [], 'no reading waits for a unit\'s code before it can be taken');
   // R1 waits for no unit (U8, the stop at loopback with the proof, is built); R3′ and R9 waited for U12 (#72), which is
   // built: the lane takes them now (the upgrade backup's time, and the server task's stop-saves).
   for (const id of ['R1', 'R3′', 'R9']) assert.equal(R.READINGS.find((x) => x.id === id).needs, undefined, id + ' waits for no unit');
@@ -89,9 +90,9 @@ test('the register: R1-R13 as the plan\'s U7 table names them (R3 retired, R3′
   // waits for U18's words alone.
   for (const id of ['R8', 'R11']) assert.deepEqual([R.READINGS.find((x) => x.id === id).needs, R.READINGS.find((x) => x.id === id).later], [undefined, undefined], id + ' no longer waits for U17');
   assert.deepEqual(R.READINGS.find((x) => x.id === 'R13').later, ['U18 (#77): the words with no network']);
-  // U13 (#73) built the installer: R5 reads its signature beside the two programs', and R6 waits for U14's export alone.
+  // U13 (#73) built the installer: R5 reads its signature beside the two programs'; U14 (#75) the export, which R6 takes.
   assert.equal(R.READINGS.find((x) => x.id === 'R5').later, undefined, 'R5 no longer waits for U13');
-  assert.deepEqual(R.READINGS.find((x) => x.id === 'R6').needs, ['U14 (#75): the export']);
+  assert.deepEqual([R.READINGS.find((x) => x.id === 'R6').needs, R.READINGS.find((x) => x.id === 'R6').later], [undefined, undefined], 'R6 no longer waits for U14');
   for (const id of ['R4', 'R7', 'R12']) assert.equal(R.READINGS.find((x) => x.id === id).later, undefined, id + ' no longer waits for U12');
 });
 
@@ -126,9 +127,10 @@ test('a reading that waits for a later unit is held to it: once that unit\'s cod
       }
     }
   }
-  // U12 (#72) landed, so R3′, R4, R7, R9 and R12 no longer wait; U13 (#73), so R5 reads the installer and R6 waits for
-  // U14 alone; and U17 (#74), so R8, R11 and R13 take its control tasks: the readings still waiting name U14 and U18.
-  assert.ok(named >= 2, 'every unit a reading waits for is asked');
+  // U12 (#72) landed, so R3′, R4, R7, R9 and R12 no longer wait; U13 (#73), so R5 reads the installer; U17 (#74), so R8,
+  // R11 and R13 take its control tasks; and U14 (#75), so R6 takes the export: the one reading still waiting names U18.
+  assert.ok(named >= 1, 'every unit a reading waits for is asked');
+  assert.equal(LANDED.U14(), true, 'U14\'s code is in the tree (forget-keys)');
   // The fence knows U18 has not landed while the server reads the rows its events become.
   assert.ok(/'machine\.upgrade'/.test(code) && !LANDED.U18(), 'machine.upgrade, a row the server reads, is not U18\'s verb');
 });
@@ -144,8 +146,8 @@ test('nothing measured is nothing met: every reading not run with why (or retire
   const j = R.judge({ v: 1, readings: { R5: { error: 'Get-AuthenticodeSignature: no such file' }, R13: { skipped: 'no published release was named to read (none)' } } });
   assert.match(byId(j, 'R5').words, /failed on the runner: Get-AuthenticodeSignature: no such file/);
   assert.equal(byId(j, 'R13').words, 'no published release was named to read (none)');
-  assert.match(byId(j, 'R6').words, /^needs U14 \(#75\)/, 'a reading of a later unit names it');
-  // Even with a record, a reading whose unit has not landed is not judged.
+  assert.equal(byId(j, 'R6').words, 'not taken by this lane', 'a reading the lane did not take says so');
+  // A record that is not R6's shape is no export taken.
   assert.equal(byId(R.judge(raw({ R6: { runs: 10 } })), 'R6').state, 'not run');
   assert.match(byId(R.judge(raw({ R11: { runs: 10 } })), 'R11').words, /^the lane took no round for the account the control task is for/);
   // R3′ and R9 are the lane's now (U12 built): a record that is not their shape reads not run with why, never a unit.
@@ -299,6 +301,25 @@ test('R7 and R8: an access list read from its SDDL by SID: who may read and writ
   assert.equal(R.holds(acl('(A;;QQ;;;WD)'), R.STANDARD_ACCOUNT, 0x4).answer, 'yes', 'a right this does not know');
   assert.ok(Number.isNaN(R.rightsMask('FAX')));
   assert.equal(byId(R.judge(raw({ R8: { places: { 'C:\\': { error: 'icacls ended with 5' } } } })), 'R8').state, 'not run');
+});
+
+test('R6: open when a standard account\'s export wrote its bundle and the elevated import verified it (the two readings under over-the-shoulder elevation are the show laptop\'s); missed when either did not; not run with no export taken', () => {
+  const good = { sid: 'S-1-5-21-1-2-3-1001', stage: { code: 0, words: 'The import is ready' }, export: { code: 0, words: 'The portable folder is exported for the import: 1 file (1 KB)' }, take: { code: 0, verified: true, words: 'Imported and verified' }, profileRead: { ok: true } };
+  let x = byId(R.judge(raw({ R6: good })), 'R6');
+  assert.equal(x.state, 'open');
+  assert.equal(x.words, 'the export, run as a standard account, wrote its bundle into its own import folder; the elevated import read and verified it; an elevated read of that account\'s %LOCALAPPDATA%\\AGMessage read the file it made. The two readings of the account that started Setup need an administrator approving another account\'s elevation at a desktop, which no runner has: the show laptop\'s');
+  x = byId(R.judge(raw({ R6: { ...good, profileRead: { ok: false, code: 'EACCES' } } })), 'R6');
+  assert.deepEqual([x.state, x.words.includes('was refused (EACCES)')], ['open', true], 'an elevated read refused is a fact recorded, not the mark');
+  x = byId(R.judge(raw({ R6: { ...good, export: { code: 2, words: 'The import was not made ready for LAPTOP\\agmr6export on this PC (EPERM)' }, take: { code: 3, verified: false, words: 'no answer' } } })), 'R6');
+  assert.equal(x.state, 'missed');
+  assert.match(x.words, /^the export, run as a standard account, did not: The import was not made ready .*; the elevated import did not take it: no answer;/);
+  x = byId(R.judge(raw({ R6: { ...good, take: { code: 2, verified: false, words: 'The import did not pass its verify' } } })), 'R6');
+  assert.equal(x.state, 'missed');
+  x = byId(R.judge(raw({ R6: { sid: good.sid, stage: { code: 2, words: 'icacls.exe ended with 5' } } })), 'R6');
+  assert.deepEqual([x.state, x.words], ['missed', 'the import was not made ready for a standard account (machine.js import --step stage ended with 2: icacls.exe ended with 5)']);
+  x = byId(R.judge(raw({ R6: { sid: good.sid, stage: good.stage, export: { code: null, err: 'its task did not run: access denied' } } })), 'R6');
+  assert.deepEqual([x.state, x.words], ['not run', 'the export as a standard account was not taken (its task did not run: access denied)']);
+  assert.equal(byId(R.judge(raw({ R6: { skipped: 'the standard account was not made' } })), 'R6').words, 'the standard account was not made');
 });
 
 test('R11: met at 10 of 10, the account the control task is for running it (answered as SYSTEM for its SID) and a second account refused; anything less is missed with the first round that did not', () => {

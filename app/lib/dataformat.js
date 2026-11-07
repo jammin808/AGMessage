@@ -18,6 +18,9 @@
  *             another build wrote it. Whatever cannot be done throws with its words and the marker as it was: a folder
  *             whose marker cannot be written would not say which build and format last wrote it, so no copy serves it
  *   rowWords  the audit row (`server.upgraded`) for a marker whose build changed, or '' (pure)
+ *   movedOf   the mark an import leaves in a portable folder it took (`moved.json`), read before anything is written; and
+ *   movedRefusal  why such a folder may not start (pure): the server and its watchdog each refuse it before either
+ *             writes anything in it, so its halls never run on two nodes with one Show Bus id and one certificate
  *
  * "Newer" is MAJOR.MINOR.BUILD (lib/version.js `compareBuilds`). A build that opens a folder of a higher format refuses it;
  * one that opens a folder a newer build of the same format wrote serves it, says so (health's `format`, "This laptop"),
@@ -101,6 +104,37 @@ function refusal(found, { dataDir, build }) {
     : found.backup ? ' The copy that build kept of the folder before it changed it, ' + path.join(dataDir, ...found.backup.split('/')) + ', is no longer there.'
       : ' That build names no copy of the folder from before it changed it.';
   return 'this data folder (' + dataDir + ') was last written by ' + by + ' in format ' + found.format + ', and this build (' + build + ') reads format ' + FORMAT + ' and older. Nothing was changed. Start ' + (found.build ? found.build + ' or a newer build' : 'the build that wrote it') + ' on this folder.' + back;
+}
+
+/** The mark an import leaves in the portable folder it took (launch.js forget-keys, the 0.6.0 plan's U14), in its data folder. */
+const MOVED = 'moved.json';
+/**
+ * The import's mark off disk, read before anything is written: {state: 'none'} when there is none (ENOENT, and only that),
+ * {state: 'moved', at, build} when the folder was imported into the AGMessage installed on its PC, {state: 'unread', code}
+ * when it could not be read (a mark that cannot be read could be one: never taken for none). Never throws.
+ */
+function movedOf(dataDir) {
+  const file = path.join(dataDir, MOVED);
+  const { text, code } = readText(file);
+  if (code) return code === 'ENOENT' ? { state: 'none', file } : { state: 'unread', file, code };
+  let j = null;
+  try { j = JSON.parse(text); } catch { /* torn or not JSON: still the import's mark, its time unread */ }
+  return {
+    state: 'moved', file,
+    at: j && Number.isFinite(j.at) ? j.at : null,
+    build: j && typeof j.build === 'string' && BUILD_NAME.test(j.build) ? j.build : '',
+  };
+}
+/**
+ * Why a folder an import took may not start, in words, or '' (pure): its halls, accounts and keys are the installed
+ * AGMessage's now, and a second node with its Show Bus id and its certificate would run beside it. A mark that cannot be
+ * read is refused too, fail closed.
+ */
+function movedRefusal(found, { dataDir }) {
+  if (found.state === 'unread') return 'this folder\'s import mark ' + found.file + ' could not be read (' + found.code + '), so whether its AGMessage was moved into the one installed on this PC cannot be told. Nothing was changed. Start it again once the mark can be read.';
+  if (found.state !== 'moved') return '';
+  const when = found.at ? ' on ' + new Date(found.at).toISOString().slice(0, 10) : '';
+  return 'this folder\'s AGMessage (' + dataDir + ') was moved into the AGMessage installed on this PC' + when + (found.build ? ' (build ' + found.build + ')' : '') + ': its halls, accounts and keys are there now, and its keys were removed from this Windows account, so this copy does not start. Open the installed AGMessage from Start > AGMessage > Open AGMessage.';
 }
 
 /** Whether the folder holds anything a server wrote: a file anywhere in it but the watchdog's own. */
@@ -257,4 +291,4 @@ function rowWords(now, build) {
   return 'from ' + (now.before || 'a build its marker did not name') + ' to ' + build + ' (format ' + now.format + order + ')';
 }
 
-module.exports = { FORMAT, FILE, BACKUPS, STEPS, BEAT_MS, read, refusal, settle, rowWords, holdsData };
+module.exports = { FORMAT, FILE, BACKUPS, STEPS, BEAT_MS, MOVED, read, refusal, movedOf, movedRefusal, settle, rowWords, holdsData };

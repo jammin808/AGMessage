@@ -16,6 +16,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
 /** Exit codes with intent: what the server asks of its supervisor. */
 const EXIT = Object.freeze({
@@ -418,4 +419,16 @@ function placeId(dir, name, { absentOk = false } = {}) {
   return crypto.createHash('sha256').update(process.platform === 'win32' ? p.toLowerCase() : p).digest('hex').slice(0, 16);
 }
 
-module.exports = { EXIT, SupervisorPolicy, BeatClock, asleepWords, spanWords, writeFileAtomic, publishOnce, readText, readJsonWhole, readJsonWithBak, isJson, WriteLane, Ring, ClockSampler, placeId };
+/**
+ * Where a copy holds a data folder (server.js holdDataFolder) and where a reader asks whether one does (an import's check
+ * that its source is not running): a pipe of Windows (\\.\pipe\agmessage-<id>) or a socket file elsewhere, one per id
+ * the folder is known by: its path as given (0.5's, lower-cased on Windows) and its real path (placeId). A copy holds every
+ * one, so any that answers is held.
+ */
+function folderPipes(dataDir, { platform = process.platform, tmp = os.tmpdir() } = {}) {
+  const legacy = crypto.createHash('sha256').update(platform === 'win32' ? path.resolve(dataDir).toLowerCase() : path.resolve(dataDir)).digest('hex').slice(0, 16);
+  const own = placeId(dataDir, undefined, { absentOk: true });
+  return [...new Set([legacy, own])].map((id) => (platform === 'win32' ? '\\\\.\\pipe\\agmessage-' + id : path.join(tmp, 'agmessage-' + id + '.sock')));
+}
+
+module.exports = { EXIT, SupervisorPolicy, BeatClock, asleepWords, spanWords, writeFileAtomic, publishOnce, readText, readJsonWhole, readJsonWithBak, isJson, WriteLane, Ring, ClockSampler, placeId, folderPipes };

@@ -6548,6 +6548,78 @@ the next push; nothing of it has run on Windows yet)
   admin and its rights; the machine's events), `docs/ACCOUNTS.md`, `docs/DESIGN.md`, `docs/ANALYSIS.md`, `SECURITY.md` and
   `CLAUDE.md`. `docs/NODES.md` is unchanged: the context, the hello and the AI's brief carry none of it.
 
+**A portable folder is imported, once, before the installed node's first start** (the plan's Part 6, unit U14, with the
+owner's answer 42; the code, its tests and a Linux stand-in for Windows, with the Windows readings lane taking R6 on the
+next push; nothing of it has run on Windows yet)
+- **The installer's import page.** On a first install shown to a person, when the account that started Setup is this
+  PC's AGMessage admin, a page after the install asks for the portable folder (the one holding `start-agmessage.bat`),
+  or Start with no halls. It says first that the folder no longer starts once imported and that its keys leave the
+  account's profile, which every portable folder of that account uses. The first start waits until the page is passed.
+  A quiet install, an upgrade and a repair offer none.
+- **It refuses**, with nothing exported or laid: a copy running on the folder (its folder pipe answers, and the words
+  say what its busy line says; the pipes now come from one place, `lib/resilience.js` `folderPipes`, which the server's
+  hold reads too) or an AGMessage on the installed node's port; a folder last run by another build, or by this one in a
+  format it does not write; one an import took already; keys not in the starting account's profile ("This folder's keys
+  are another Windows account's: install from that account."); a machine key, certificate or server secret the installed
+  node's own start would refuse (a key that is not one, a certificate whose private key is not its own, a secret that is
+  no secret), each with what to do; an audit log that does not check; the folder chosen or its `app\` a link or junction,
+  or one anywhere in what it carries; more files than a bundle carries (the walk stops there, and never enters what the
+  import leaves, such as the backups); too little disk; and a target that has served (any hall, account or audit row, or
+  a machine key, certificate or `secret.key` of its own: never merge).
+- **Two steps, each side of the elevation.** `launch.js export` (new), run by `ExecAsOriginalUser` as that account,
+  writes contents only into its `machine\inbox\<SID>\import\` (made by `machine.js import --step stage`, new): each
+  file a numbered part, then a manifest of each part's place, size and SHA-256 with the folder's facts. The data folder
+  (but its backups, its console, the watchdog's files and temporary files), the uploads, and the profile's
+  `machine.key`, `tls.json` and `audit\` travel; `secret.key` is in the data folder; nothing is rotated. Each file is
+  opened without following a link and refused when it is not the file the walk saw. `machine.js import --step take`,
+  elevated, copies each part by its bytes into a new file (never over one there, never with an access list of its own),
+  a part read only when it is a file of its own of its manifest's size, its SHA-256 checked. Each look and its read are
+  compared by the whole file id (`{bigint: true}`: an NTFS or ReFS id past 2^53 read as a Number loses its low bits; the
+  control task's request read the same way now too).
+- **The verify** says each check that did not pass, by name: the halls, side rooms, messages, accounts and screens
+  counted alike; the same machine key; every sealed value opening, as many as before; the certificate's fingerprint
+  unchanged; the audit chain checking to its end with its archives. Each side is read by `lib/importfacts.js` (new), as a
+  process of its own with the server's readers and writing nothing (`AuditLog.checkAsItLies`, new: the chain walked
+  under a key read, never made; `secretbox.openWith`, new: a sealed value opened with a key given). Then what the
+  installed node's own start refuses, read from the copy itself and never from what the export said of its source: a
+  copy not last run by this build in the format it writes (`format`), a key, certificate or secret it would not start on
+  (`usable`), a copy running on its data folder (`held`), an import's mark there (`moved`). A verify that does not pass
+  takes out everything the copy laid, so the import can be run again. The facts reader, run elevated, loads only
+  `app\lib`, `app\verify` and Node's built-ins (`test/loads.test.js`).
+- **Then the old copies go.** `launch.js forget-keys` (new), as the same account, removes nothing without the import's
+  verdict for this folder (`import.json` in the account's outbox, which only SYSTEM and Administrators write). It marks
+  the source first (`app\data\moved.json`, which this build's server and watchdog now read before anything is written,
+  refusing to start with code 3 and words that name the installed AGMessage; `start-agmessage.bat` replaced by one that
+  says so, the original kept as `start-agmessage.bat.moved`), then removes `%LOCALAPPDATA%\AGMessage` and the folder's
+  `secret.key`, each checked; one that fails names its path, on the page's last words, and a mark that was not made is
+  said apart (the folder could still start: never start it again), never as a file to remove. It reaches nothing through
+  a link. `machine.js import --step finish` appends `machine.import` (who, named by the machine: the install record's
+  admin, else Windows' own name for the SID, never a name the bundle carries; the build, the counts, verified, whether
+  the old copies went and the folder is marked; no path in a profile), which the first start writes as its audit row; a
+  copy not removed or a folder not marked is not done.
+- **No copy of the keys stays in the inbox.** The bundle holds the profile's keys and the folder's secret, so a take that
+  does not pass clears it (the parts not laid, the manifest and the answers), finish clears it, and `machine.js import
+  --step clear` (new) clears an import left before its end: after an export that refused or did not run, at Start with
+  no halls, and at Setup's end. An import folder that is a link is removed itself, never what it names.
+- **The readings lane** takes R6 (no longer waiting for U14): a standard account made for it exports a stand-in portable
+  folder into its own inbox by a task with its logon, and the elevated import reads it back whole. Its mark is met only
+  over an administrator's shoulder, so the lane judges it at best open.
+- Held on Linux (`test/import.test.js`, new; `test/installer.test.js`, `test/machine.test.js`, `test/admintoken.test.js`,
+  `test/readings.test.js`, `test/modules.test.js`): a real portable copy seeded (a hall, messages, a file, a screen, a
+  sealed key, an account, HTTPS), stopped, exported, taken, verified and forgotten, the installed node started on it under
+  the task's environment with every count, the fingerprint and the chain as they were, and the portable copy refused at
+  its next start through the watchdog and without; every refusal above; each check of the verify failing with its words
+  and the copy taken out, a laid marker of another build and a laid key that is no key among them; nothing of the bundle
+  left after a take that did not pass, and clear; `forget-keys` refused without a verdict, for another import or folder,
+  or through a link, a removal that fails named and a mark not made said apart; the event's name the machine's, whatever
+  the manifest says; the page's steps, their order and its clears read from the installer's script. What only a Windows run proves: the
+  export under `ExecAsOriginalUser` writing into its inbox by its grants and the import reading it (R6 by a task; the
+  over-the-shoulder reading is the show laptop's), `%LOCALAPPDATA%` as Windows gives it, the import page itself, and
+  the installer's life cycle around it (U16). K's `stores\` is #80's.
+- The papers: `README.md`, `README.txt` (the import), `docs/INSTALL.md` (The import of a portable folder),
+  `docs/ACCOUNTS.md`, `docs/DESIGN.md`, `docs/ANALYSIS.md`, `SECURITY.md` and `CLAUDE.md`. `docs/NODES.md` is unchanged:
+  the context, the hello and the AI's brief carry none of it.
+
 **Fixed**
 - The installed node's account lookup says when it cannot read Windows' local accounts, and looks for a module's
   manifest in a folder of its version too. CI's Windows run, its first of these scripts, read `BUILTIN\Users` as no

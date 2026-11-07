@@ -1,9 +1,10 @@
 # AGMessage installed on a Windows PC
 
 *Begun with 0.6.0's start window; the installer's units (`docs/plan/0.6.0/PLAN.md` Part 6, U.9) write the rest of this
-paper. The installer (`installer/AGMessage.iss`, The installer below) is built by CI from the portable zip; the import of
-a portable folder and an upgrade with no administrator are later units', and its life cycle in CI (install, upgrade, the
-way back, uninstall, run for real) is the installer job's still to come. Venue laptops run the portable folder
+paper. The installer (`installer/AGMessage.iss`, The installer below) is built by CI from the portable zip, and imports a
+portable folder before the installed node's first start (The import of a portable folder, below); an upgrade with no
+administrator is a later unit's, and its life cycle in CI (install, upgrade, the way back, uninstall, run for real) is the
+installer job's still to come. Venue laptops run the portable folder
 ([README.txt](../README.txt)).*
 
 ## It opens no browser and has no window
@@ -370,8 +371,8 @@ is read from the environment; Inno passes `{sys}`, `{app}` and `{commonappdata}`
 Exit codes: 0 done, 2 not done (with why), 3 refused (a precondition a person must clear, fail closed), 64 a word it does
 not know, or an argument missing or malformed (a path that is not full from a drive or a share, `\ProgramData\…` among
 them). This build has `prepare`, `install`, `uninstall`, `preinstall-check`, `upgrade-stop`, `status`, `restore`, `whose`,
-`start`, `first-account` and `control`; `import` and `upgrade` are later units (U14, U18) and are refused as unknown until
-they land. The audit log is the server's alone: the machine appends to `machine\events.jsonl`, and the server turns each
+`start`, `first-account`, `control` and `import` (The import of a portable folder, below); `upgrade` is a later unit's
+(U18) and is refused as unknown until it lands. The audit log is the server's alone: the machine appends to `machine\events.jsonl`, and the server turns each
 event into its audit row (The machine's events, below).
 
 - **The machine folder, race-free** (`machine.js prepare`, at the installer's start). A non-recursive
@@ -552,7 +553,7 @@ the pages "the laptop's admin" is that Windows account; "admin account" stays an
   The server (`lib/machineevents.js`), the audit log's one writer, reads the file after the hold and at each nudge
   (`POST /api/machine/events`, which each act sends), and writes one row per event in seq order: `machine.admin`,
   `machine.grant`, `machine.revoke`, `machine.handover`, `machine.start`, `machine.stop`, `machine.refused` (and
-  `machine.upgrade`, `machine.upgrade.refused` and `machine.import`, which U18 and U14 append). A row names both
+  `machine.upgrade` and `machine.upgrade.refused`, which U18 appends, and `machine.import`, the import's). A row names both
   accounts by SID, whole, since names are localised and can be renamed: its actor the Windows account that asked
   (`{t: 'windows', id: <SID>, name}`), its target the SID of the account acted for; its words the event's (naming both by
   name), then the rights it names, when it was done ("· done 20:31 UTC on 7 Nov 2026", the event's own time: a stop's row
@@ -678,7 +679,8 @@ each run, against its release's digest and its publisher's signature; it is buil
   node runs on `node.exe`, which R5 reads as Valid; whether Smart App Control keeps it starting is lab 4's, not run.
 - **What only a Windows run proves**, and is not yet run: that ISCC compiles the script (the installer job, on the next
   push); the install, the upgrade, the way back and the uninstall themselves, the readings of whose it is under
-  over-the-shoulder elevation (R6, which waits for U14 too), the Start menu's consoles and the browser opening, and the
+  over-the-shoulder elevation (R6: the lane takes the import's export as a standard account, and the two readings stay the
+  show laptop's), the import page itself, the Start menu's consoles and the browser opening, and the
   first admin account made from the page (the installer's life cycle, U16). The pure parts are held on Linux
   (`test/installer.test.js`): the script by its text (its `[Setup]`, files, Start menu items parsed by `launch.js`'s own
   reader, every `machine.js` command and option it names, the password's path, the switches and refusals), the defines
@@ -687,6 +689,82 @@ each run, against its release's digest and its publisher's signature; it is buil
   of the token or the password reaching one that proves nothing, `preinstall-check`'s busy line, console check, the
   installer's own chain and `--rollback`, `upgrade-stop`'s, `uninstall` keeping the data and a later install taking it)
   and `launch.js open`; on Windows the same file runs `whose`'s and the programs' scripts for real.
+
+## The import of a portable folder, before the first start
+
+A portable folder's halls, messages, files, accounts, screens and keys come into the installed node once, on the
+installer's import page, before that node first starts (the 0.6.0 plan's Part 6, unit U14, with the owner's answer 42).
+An installed node that has served has its own machine key, `secret.key`, certificate and audit chain, and two of each
+cannot be merged, so a later import is refused; the portable folder's events stay in that folder, or come over to a
+fresh install whose data was removed at the uninstall. The page is offered on a first install shown to a person (never a
+quiet one), and only to the account that started the installer when it is AGMessage's admin here: the export runs as
+that account, since its profile holds the folder's keys. The first start waits until the page is passed; "Start with no
+halls" starts at once. The page says before Import is pressed that the folder no longer starts once imported, and that
+its keys leave the account's profile, which every portable folder of that account uses.
+
+- **It refuses**, with nothing exported or laid: a copy running on the folder (its folder pipe answers, and the words say
+  what its busy line says there, counts only) or an AGMessage answering on the installed node's port; a folder last run by
+  another build, or by this one in a format it does not write (its `app\data\format.json`; "upgrade the portable folder
+  to this build, start it once and stop it, then import again"); a folder an import took already (its `moved.json`); keys
+  that are not in the profile of the account that started Setup ("This folder's keys are another Windows account's:
+  install from that account.", when a sealed value does not open with that profile's machine key, the audit log is keyed
+  under another, or the profile has none while the folder holds what one sealed); a machine key, certificate or server
+  secret the installed node's own start would refuse (a `machine.key` that is not a key, a `tls.json` it cannot use, a
+  `secret.key` that holds no secret), each with what to do (put back the copy it had, or move it aside where nothing was
+  sealed with it); an audit log that does not check; the folder chosen or its `app\` a link or junction, or one anywhere
+  in what it carries (the backups, the console and the watchdog's files, which an import leaves, are never walked); more
+  files than a bundle carries (500,000; the walk stops there); a disk short of the room; and a target that has served (any
+  hall, account or audit row, or a machine key, certificate or `secret.key` of its own: never merge).
+- **Two steps.** `launch.js export`, run through Inno's `ExecAsOriginalUser` as the account that started Setup, writes a
+  bundle of contents only into that account's `machine\inbox\<SID>\import\` (made by `machine.js import --step stage`,
+  where the account may add files and write them, never a folder or a junction): each file's bytes as a part named by its
+  place, then a manifest naming each part's place, size and SHA-256 with the folder's facts. It carries the data folder
+  (but its backups, its console, the watchdog's own files and temporary files), the uploads, and from the profile's
+  `%LOCALAPPDATA%\AGMessage` the machine key, `tls.json` and the audit records, so every sealed value, the certificate's
+  fingerprint and the chain carry over; `secret.key` travels in the data folder. Nothing is rotated (answer 42). Then
+  `machine.js import --step take`, elevated, copies each part by its bytes into a new file of the data, uploads or keys
+  folder, never over a file there and never with an access list of its own (each takes its folder's), each part read only
+  when it is a file of its own (no link, no hard link, the file `lstat` saw, by its whole file id) of the size its
+  manifest names, and its SHA-256 checked.
+- **It then verifies, and says which check did not pass**: the halls, side rooms, messages, accounts and screens counted
+  alike; the same machine key; every sealed value opening, as many as the portable folder had; the certificate's
+  fingerprint unchanged; the audit chain checking to its end as it did there, the archives in `data\audit-archive\` it
+  names included. Then what the installed node's own start refuses, read from the copy itself and never from what the
+  export said of its source: the copy last run by this build in the format it writes (`format`), a machine key,
+  certificate and secret it starts on (`usable`), no copy running on its data folder (`held`) and no import's mark there
+  (`moved`). Each side is read by `lib/importfacts.js` with the server's own readers, writing nothing: the portable
+  folder's by the export, as the account; the copy's by the import, elevated, in an environment of Windows' own folders
+  (it loads only `app\lib`, `app\verify` and Node's built-ins, which `test/loads.test.js` holds). A check that does not
+  pass is said by its name, and everything the copy laid is taken out again, so the import can be run again.
+- **Then the old copies go** (answer 42). Once verified, the import's verdict is in the account's `machine\outbox\<SID>\`
+  (`import.json`, which only SYSTEM and Administrators write), and `launch.js forget-keys`, run as the same account,
+  removes nothing without a verdict that names this import and this folder. It marks the source first: `app\data\moved.json`,
+  which this build's server and watchdog read before they write anything and refuse to start on ("this folder's
+  AGMessage … was moved into the AGMessage installed on this PC on … : its halls, accounts and keys are there now"), and
+  its `start-agmessage.bat` replaced by one that names the installed AGMessage, the original kept as
+  `start-agmessage.bat.moved`; then it removes that account's `%LOCALAPPDATA%\AGMessage` and the folder's
+  `app\data\secret.key`, each checked and said. One that fails names its path, which stays on the import page's last words;
+  a mark that was not made is said apart ("the folder is not marked as moved …, so it could still start: never start it
+  again"). It reaches nothing through a link: the folder or its `app\` a link by then, nothing is removed.
+- **The import's end** (`machine.js import --step finish`) appends `machine.import` to the machine's events, which the
+  installed node's first start writes as its audit row: who imported, named by the machine (the install record's name for
+  the laptop's admin, else Windows' own name for the SID; never a name the bundle carries), the build, the counts,
+  verified, and whether the old copies went and the folder is marked (never a path in a profile); a copy not removed or a
+  folder not marked is not done, its words the page's last. The audit log carries on at its new path, saying where it was
+  written last (`audit.moved`).
+- **No copy of the keys stays in the inbox.** The bundle holds the profile's machine key, certificate and audit records and
+  the folder's secret, and the account may not remove what it wrote there. So a take that does not pass clears it (the
+  parts not laid, the manifest and the answers), finish clears it, and `machine.js import --step clear` clears an import
+  left before its end: the installer runs it after an export that refused or did not run, after a take or a finish that
+  did not end it, at Start with no halls, and at Setup's end. An import folder that is a link is removed itself, never what
+  it names.
+- **What only a Windows run proves**: that the export, run by `ExecAsOriginalUser` over an administrator's approval,
+  writes into its inbox under those grants and the import reads it (R6 takes the export as a standard account by a task
+  with its logon; the over-the-shoulder readings are the show laptop's), the import page itself, and the installer's life
+  cycle around it (U16). The rest is held on Linux (`test/import.test.js`): a real portable copy seeded, stopped, exported,
+  taken, verified and forgotten, the installed node started on it under the task, and the portable copy refused at its
+  next start; each refusal, each check that does not pass, the copy taken out again and the bundle cleared, and
+  `forget-keys` removing nothing without the verdict and naming a removal that failed with its path.
 
 ## The version number, the release order and the data folder's format
 
@@ -828,7 +906,7 @@ that definition element for element, with no token. R4's `whoami /priv` and `/gr
 | R3′ | the task: a stop at loopback with the proof saves and `last-stop.json` says so; the watchdog's give-up and a configuration refusal end the task with 0, and it stays stopped | 10 of 10 | the release notes name the failing case; a stop that does not save is said on "This laptop" | taken (U12, #72): U12's own server task definition (`app/machine.js`), under the lane's name and with the lane's folders, run on demand (its boot trigger never fires), its action `launch.js serve` (`AGM_RUNS=task`); 10 rounds of a stop at loopback with the proof of a token its own server made, each saving and ending the task with 0, staying stopped; the give-up and configuration refusal ending it with 0 are `launch.js serve`'s exit mapping, held on Linux (`test/machine.test.js`) | not measured |
 | R4 | under the task: `LOCALAPPDATA`, `os.homedir()`, UDP 9928 broadcast heard, a quick tunnel's URL returned with nothing written in the account's profile, a rule by program, protocol and port matching `node.exe` under the task, `whoami /priv` from the server's process, `schtasks /showsid` | `SeImpersonatePrivilege` absent, and the server serves with `SeChangeNotifyPrivilege` alone | the privilege list U12 sets is widened by the one privilege the reading names, with its reason | taken under the stand-in server task, whose principal and settings are U12's own (`app/machine.js`, held element for element by `test/readings.test.js`), its action the lane's probe: the token's privileges and groups (read by the task's action, which the server inherits), the task's SID, `LOCALAPPDATA` and the home folder, health answering with this bundle's build, UDP 9928 heard from this machine, a quick tunnel and the profile before and after, a rule by program, protocol and port made and read back; a client on another machine is the show laptop's | 2026-11-03, build 0.6.0-dev.78+442583d: ✓ met: the token holds SeChangeNotifyPrivilege alone, and the server served under it in 786 ms (0.6.0-dev.78+442583d). Beside it: the task's SID in the token; UDP 9928 heard yes (from this machine); a quick tunnel's address returned; files written or changed in the account's profile 0; a rule by program, protocol and port made and read back (TCP, 3124, LocalSubnet; no client on another machine to show it matching) |
 | R5 | `Get-AuthenticodeSignature` on `node.exe`, `cloudflared.exe` and the installer | the first two Valid; the installer recorded | `README.txt` names the file Windows does not trust | taken for `node.exe` and `cloudflared.exe`, and for the installer the installer job built for the run (recorded: it is unsigned; a job that built none is said) | 2026-11-03, build 0.6.0-dev.78+442583d: ✓ met: node.exe Valid (CN=OpenJS Foundation, O=OpenJS Foundation, L=San Francisco, S=California, C=US), cloudflared.exe Valid (CN="Cloudflare, Inc.", O="Cloudflare, Inc.", L=San Francisco, S=California, C=US, SERIALNUMBER=4710875, OID.2.5.4.15=Private Organization, OID.1.3.6.1.4.1.311.60.2.1.2=Delaware, OID.1.3.6.1.4.1.311.60.2.1.3=US); the installer not built yet (U13, #73) |
-| R6 | over-the-shoulder elevation: U.5.1's two readings of the account that started Setup; the user's own export (U14) run through `ExecAsOriginalUser` into the laptop's admin's inbox; an elevated read of another account's `%LOCALAPPDATA%\AGMessage` | both readings name the standard account | the admin page asks the person to choose, as U.5.1 says | not run: needs U14 (#75); the readings of who started Setup need a standard account and an administrator's typed approval, the show laptop's (lab 7's first account) | not measured |
+| R6 | over-the-shoulder elevation: U.5.1's two readings of the account that started Setup; the user's own export (U14) run through `ExecAsOriginalUser` into the laptop's admin's inbox; an elevated read of another account's `%LOCALAPPDATA%\AGMessage` | both readings name the standard account | the admin page asks the person to choose, as U.5.1 says | taken in part (U14 built): a standard account made for the reading runs the bundle's `launch.js export` (a task with its logon, as `ExecAsOriginalUser` runs it) of a stand-in portable folder into its own import folder, which `machine.js import --step stage` made with its grants; `machine.js import --step take` reads and verifies that bundle elevated; and the lane, elevated, reads a file that account made in its `%LOCALAPPDATA%\AGMessage`. The two readings of who started Setup need a standard account and an administrator's typed approval at a desktop, the show laptop's (lab 7's first account): open at best on a runner | not measured |
 | R7 | the folder pipe's access list as libuv makes it (`CreateNamedPipeW(…, NULL)`, `crit-dl/pipe.c:596-599`) under the task's token, and whether a remote client reaches it | recorded | nothing machine-level writes the pipe any more (U8); the busy line's readers are named | taken: the stand-in server's folder pipe, who may read and write it, and whether a client reaches it through SMB at the runner's own names (a network logon on one machine; a second machine is the show laptop's) | 2026-11-03, build 0.6.0-dev.78+442583d: ✓ recorded: read: Everyone, Anonymous, SYSTEM, LOCAL SERVICE, Administrators; write: SYSTEM, LOCAL SERVICE, Administrators (1 pipe); through SMB at this machine's own names (a network logon; no second machine): \\localhost connected, \\runnervmhao91 connected |
 | R8 | `icacls C:\` and `icacls %ProgramData%` (may a standard account create `C:\node_modules` or `%ProgramData%\AGMessage`?); `schtasks /query /xml` of each task as a standard account: readable or not, and no secret in it | recorded | U11 and U12's order already assume the worst | taken: both access lists, read by SID (`icacls /save`); U12's server task definition (`app/machine.js`), registered under the lane's folder and never run, its descriptor read back (may a standard account read it?) and its XML searched for a secret; U17's control task definition the same way, for the lane's own account (may that account read and run it, and another standard account not?) | 2026-11-03, build 0.6.0-dev.78+442583d: ✓ recorded: C:\: a standard account may create a folder (Authenticated Users); C:\ProgramData: a standard account may create a folder (Users); the tasks' definitions as a standard account wait for U12 (#72) and U17 (#74) |
 | R9 | the upgrade backup's time at an empty hall and at 20 × 10,000 | recorded, beside R2 | as R2 | taken (U12, #72): the bundle's own watchdog serves a seeded folder (empty, and 20 × 10,000), the stop at loopback with the proof carries reason `upgrade` (the seeded messages are from before the busy window, so no reason is typed), the server backs the folder up for the way back (`app/lib/upgradebackup.js`), and `last-stop.json` names its time | not measured |

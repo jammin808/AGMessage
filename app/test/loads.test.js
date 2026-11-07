@@ -16,7 +16,9 @@
 //    whom, and child_process named where none of these takes it fails. Each place a path is made is then held to give a
 //    full path or run nothing.
 //  - The machine's own commands (launch.js, and machine.js once it is made) require Node's built-ins only, by `node:`,
-//    and reach require no other way.
+//    and reach require no other way. What of app they run as a process of their own, elevated (the import's facts
+//    reader, lib/importfacts.js), loads under the resolve hook only app\lib, app\verify and Node's built-ins, asks for
+//    nothing app cannot answer, and runs no planted module.
 // Each rule is a function of what it is given, so the tree is held to it and a planted breach of each kind fails it.
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -728,6 +730,47 @@ test('runs only what it names by absolute path: each place a program\'s path is 
     launch.adminName({ sys, platform: 'win32', run: (file) => { ran.push(file); return ''; } });
     assert.deepEqual(ran, sys.startsWith('C:') ? ['C:\\Windows\\System32\\reg.exe'] : [], sys);
   }
+});
+
+/** What app runs as a process of its own from the machine's commands, as an administrator or SYSTEM: its script and why. */
+const ELEVATED_CHILDREN = Object.freeze([
+  { script: 'lib/importfacts.js', why: 'machine.js import --step take reads the installed node\'s facts with it, elevated (launch.js export runs it as the person)' },
+]);
+
+test('what the machine\'s commands run of app as a process of its own, elevated, loads only app\\lib, app\\verify and Node\'s built-ins, and asks for nothing app cannot answer', { timeout: 60_000 }, async (t) => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-loads-'));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const planted = plant(base);
+  const resolves = path.join(base, 'resolves.jsonl');
+  // A data folder and a key folder with a machine key in it, so the reader walks its keyed paths too.
+  const data = path.join(base, 'data');
+  const keys = path.join(base, 'keys');
+  fs.mkdirSync(data, { recursive: true });
+  fs.mkdirSync(keys, { recursive: true });
+  fs.writeFileSync(path.join(keys, 'machine.key'), require('crypto').randomBytes(32).toString('base64'));
+  const env = { ...process.env, NODE_OPTIONS: hooked(), NODE_PATH: planted.dir, AGM_TEST_RESOLVES: resolves };
+  const app = fs.realpathSync(ROOT);
+  // Each one a machine command runs is named here, by the file the command names it by.
+  for (const f of ['machine.js', 'launch.js']) assert.ok(read(f).includes("'lib', 'importfacts.js'"), f + ' runs lib/importfacts.js');
+  for (const { script } of ELEVATED_CHILDREN) {
+    const child = spawn(process.execPath, [path.join(ROOT, ...script.split('/')), '--data', data, '--keys', keys], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '';
+    child.stdout.on('data', (d) => { out += d; }); child.stderr.on('data', (d) => { out += d; });
+    const code = await new Promise((resolve) => { child.once('exit', resolve); });
+    assert.equal(code, 0, script + ': ' + out);
+    assert.ok(JSON.parse(out.trim().split(/\r?\n/).pop()).facts, script + ' answered its facts');
+    const rows = rowsOf(resolves).filter((r) => r.pid === child.pid);
+    assert.deepEqual(loadProblems(rows), [], script);
+    const beyond = rows.filter((r) => !('start' in r)).filter((r) => {
+      if (r.nowhere) return true;
+      if (r.url.startsWith('node:')) return false;
+      const rel = path.relative(app, fileURLToPath(r.url)).split(path.sep).join('/');
+      return !(rel.startsWith('lib/') || rel.startsWith('verify/'));
+    }).map((r) => r.asked + ' from ' + r.from);
+    assert.deepEqual(beyond, [], script + ' loads nothing but app\\lib, app\\verify and Node\'s built-ins, so nothing in app\\node_modules or above app runs elevated');
+    assert.ok(rows.filter((r) => r.url && !r.url.startsWith('node:')).length >= 10, script + '\'s graph went through the hook');
+  }
+  assert.deepEqual(planted.loaded(), [], 'no planted module ran');
 });
 
 test('the machine\'s own commands require Node\'s built-ins only, by node:, and load no code around require', () => {

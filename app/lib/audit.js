@@ -908,6 +908,30 @@ class AuditLog {
     return this._verify({ source, expect: { seq: stop.seq, h: stop.h }, publish: false, walk });
   }
 
+  /**
+   * The chain checked as it lies on disk, by a reader that never writes it (an import's verify of a folder no server holds:
+   * lib/importfacts.js): the machine key taken as `open()` takes it (none, and every keyed entry reads as another key's),
+   * the log named by its newest keyed entry, and every file walked as a routine check walks it, rotated files and archives
+   * included, to the newest entry on disk. Nothing is written, kept or published, and no record outside the data folder is
+   * read or compared: those are the writer's, at its open. A log a writer has opened is refused. The check's answer, with
+   * `done` (the walk reached the end), `kid` (this key's id, '' with none) and `newestKid` (the newest keyed entry's).
+   */
+  async checkAsItLies() {
+    if (this.opened) throw new Error('the chain as it lies is read only of a log no writer has opened');
+    try {
+      const k = this.keysOf();
+      this.Ke = k.entry; this.Kh = k.head;
+    } catch (err) {
+      this.keyless = { code: err.code || 'EIO', words: err.message };
+      this.Ke = crypto.randomBytes(32); this.Kh = null;
+    }
+    this.kid = kidOf(this.Ke);
+    const newest = this._newestKeyed();
+    this.l = newest ? newest.l : '0'.repeat(32);
+    const r = await this._verify({ publish: false });
+    return { ...r, done: r.brokenAt === undefined, kid: this.keyless ? '' : this.kid, newestKid: newest ? newest.k : '' };
+  }
+
   /** The chain's files, read off the event loop one at a time: {name, buf}, or {name, code} for one that cannot be read. */
   async * _read(files) {
     for (const f of files) {

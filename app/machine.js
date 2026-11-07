@@ -87,7 +87,27 @@
  *                     The same acts from an administrator's elevated console (a laptop whose admin account is gone): an
  *                     administrator may do every one, each event naming that administrator; the answer goes to --out.
  *
- *   import and upgrade are later units' (U14, U18): until each lands its verb is refused as unknown.
+ *   import            --step stage --for <SID> --machine … --sys …
+ *                     --step take --for <SID> --machine … --app <{app}> --source <portable folder> [--sys …]
+ *                     --step finish --for <SID> --machine … --sys … --id <the import's id>
+ *                     --step clear --for <SID> --machine …
+ *                     The portable import, before the installed node's first start (U14), its elevated half; the account
+ *                     that started the installer runs the other (launch.js export and forget-keys) as itself. stage: a node
+ *                     that has served refused (any hall, account or audit row, or keys of its own: never merge), and a
+ *                     fresh import\ folder made in that account's inbox, which it may add files to and never a folder.
+ *                     take: the bundle its export left read part by part (no link, no hard link, each the file lstat saw),
+ *                     each copied by its bytes into a new file of the data, uploads or keys folder (never over one, never
+ *                     an access list), its SHA-256 checked; then the verify, which says each check that did not pass (the
+ *                     counts, the machine key, every sealed value opening, the certificate's fingerprint, the audit
+ *                     chain, and what the installed node's own start refuses: the build and format, keys it would not
+ *                     start on, a copy running, an import's mark), and takes out what it copied when one did not; passed,
+ *                     its verdict in the account's outbox (import.json), which forget-keys reads before it removes
+ *                     anything. A take that does not pass clears the bundle (it holds the portable folder's keys).
+ *                     finish: `machine.import` appended to the machine's events, the account named by the machine, the
+ *                     import folder cleared; not done (2) when an old copy was not removed or the folder not marked, its
+ *                     path in the words. clear: an import left before its end, its folder and verdict removed.
+ *
+ *   upgrade is a later unit's (U18): until it lands its verb is refused as unknown.
  *
  * Every verb takes `--out <file>`: its result as JSON ({v, verb, code, words, …}), refusals too, never a token or a
  * password, written whole. Exit codes: 0 done; 2 not done, with the words of why; 3 refused, fail closed (a precondition
@@ -761,9 +781,9 @@ function programWords(list) {
 
 // ---------------------------------------------------------------- argument parsing
 
-/** The verbs built so far; import (U14) and upgrade (U18) are refused as unknown until they land. */
-const VERBS = Object.freeze(['prepare', 'install', 'uninstall', 'preinstall-check', 'upgrade-stop', 'status', 'restore', 'whose', 'start', 'first-account', 'control']);
-const LATER = Object.freeze({ import: 'U14', upgrade: 'U18' });
+/** The verbs built so far; upgrade (U18) is refused as unknown until it lands. */
+const VERBS = Object.freeze(['prepare', 'install', 'uninstall', 'preinstall-check', 'upgrade-stop', 'status', 'restore', 'whose', 'start', 'first-account', 'control', 'import']);
+const LATER = Object.freeze({ upgrade: 'U18' });
 /** The flags (no value). */
 const FLAGS = new Set(['--public', '--signed', '--remove-data', '--rollback', '--elevated']);
 /** Each verb's options, each at most once: any other is refused, never ignored. */
@@ -779,6 +799,7 @@ const VERB_OPTS = Object.freeze({
   start: ['--machine', '--sys', '--port', '--build', '--out'],
   'first-account': ['--machine', '--port', '--account', '--build', '--out'],
   control: ['--for', '--elevated', '--request', '--machine', '--sys', '--out'],
+  import: ['--step', '--for', '--machine', '--sys', '--app', '--source', '--id', '--out'],
 });
 
 /** The command line, read: {verb, opts} or {problem}. No value is a path read from the environment: each is an argument. */
@@ -1797,6 +1818,11 @@ function requestOf(bytes) {
 }
 
 /**
+ * Whether two stats name one file: its device and its file id, each read whole (`{bigint: true}`), since an NTFS or ReFS
+ * file id past 2^53 read as a Number loses its low bits and two files could read as one.
+ */
+const sameFile = (a, b) => BigInt(a.ino) === BigInt(b.ino) && BigInt(a.dev) === BigInt(b.dev);
+/**
  * A request taken from where it was left (an inbox's request.json, or an elevated console's file in machine\work\):
  * lstat refuses a link, a hard link, a reparse point Windows reads as one, anything but a file and anything over
  * REQUEST_MAX; the file opened is the one lstat saw (fstat's device and index alike); its bytes are copied into
@@ -1808,18 +1834,18 @@ function takeRequest(fsImpl, file, workDir) {
   let bytes;
   try {
     let st;
-    try { st = fsImpl.lstatSync(file); } catch (e) {
+    try { st = fsImpl.lstatSync(file, { bigint: true }); } catch (e) {
       if (e.code === 'ENOENT') throw refusal('No request was waiting: run it from the Start menu again.', { none: true });
       throw refusal('Your request could not be read (' + (e.code || e.message) + ').');
     }
     if (st.isSymbolicLink()) throw refusal('Your request is a link, which the control task never follows: it was not read.');
     if (!st.isFile()) throw refusal('Your request is not a file: it was not read.');
-    if (st.nlink > 1) throw refusal('Your request is a link to another file (a hard link), which the control task never reads: it was not read.');
-    if (st.size > REQUEST_MAX) throw refusal('Your request is over ' + REQUEST_MAX / 1024 + ' KB, so it was not read.');
+    if (st.nlink > 1n) throw refusal('Your request is a link to another file (a hard link), which the control task never reads: it was not read.');
+    if (st.size > BigInt(REQUEST_MAX)) throw refusal('Your request is over ' + REQUEST_MAX / 1024 + ' KB, so it was not read.');
     const fd = fsImpl.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
     try {
-      const ft = fsImpl.fstatSync(fd);
-      if (!ft.isFile() || ft.ino !== st.ino || ft.dev !== st.dev) throw refusal('Your request changed between its look and its read: it was not read.');
+      const ft = fsImpl.fstatSync(fd, { bigint: true });
+      if (!ft.isFile() || !sameFile(ft, st)) throw refusal('Your request changed between its look and its read: it was not read.');
       const buf = Buffer.alloc(REQUEST_MAX + 1);
       let n = 0;
       for (;;) { const got = fsImpl.readSync(fd, buf, n, buf.length - n, n); if (!got || n + got >= buf.length) { n += got; break; } n += got; }
@@ -1837,10 +1863,10 @@ function takeRequest(fsImpl, file, workDir) {
   try { return { bytes: fsImpl.readFileSync(copy) }; } finally { try { fsImpl.unlinkSync(copy); } catch { /* machine\work\'s, which no one else reads */ } }
 }
 
-/** The answer written for an account into its outbox\<sid>\answer.json, whole (a file beside it renamed over it). */
-function writeAnswer(fsImpl, outbox, answer) {
+/** The answer written for an account into its outbox\<sid>\ (answer.json, or the import's import.json), whole (a file beside it renamed over it). */
+function writeAnswer(fsImpl, outbox, answer, name = 'answer.json') {
   const P = pathOf(outbox);
-  const file = P.join(outbox, 'answer.json');
+  const file = P.join(outbox, name);
   const tmp = P.join(outbox, 'answer-' + crypto.randomBytes(6).toString('hex') + '.tmp');
   fsImpl.writeFileSync(tmp, JSON.stringify(answer), { flag: 'wx' });
   try { fsImpl.renameSync(tmp, file); } catch (e) { try { fsImpl.unlinkSync(tmp); } catch { /* left beside it: no secret */ } throw e; }
@@ -2263,6 +2289,463 @@ async function control(opts, { run = childProcess.execFileSync, fsImpl = fs, net
   return out;
 }
 
+// ---------------------------------------------------------------- import: a portable folder, before the first start
+
+/**
+ * The import's three steps, in their order (the folder made ready, the bundle taken and verified, the end said), and the
+ * clear that ends an import left before its end.
+ */
+const IMPORT_STEPS = Object.freeze(['stage', 'take', 'finish', 'clear']);
+/** The bounds on what an account's export leaves: its manifest, its answers, the files a bundle carries. */
+const IMPORT_MANIFEST_MAX = 128 * 1024 * 1024;
+const IMPORT_ANSWER_MAX = 64 * 1024;
+const IMPORT_FILES_MAX = 500000;
+/** The room the copy leaves beside it on the machine folder's disk (the server's own floor, AGM_UPLOAD_MIN_FREE). */
+const IMPORT_RESERVE = 1024 ** 3;
+const IMPORT_CHUNK = 1024 * 1024;
+/** How long the facts of the installed node's folders may take to read (its rooms loaded, its audit chain walked). */
+const IMPORT_FACTS_MS = 600_000;
+/** The import's folder in an account's inbox, where its export leaves the bundle (launch.js importDirOf). */
+const importDir = (root, sid) => pathOf(root).join(root, 'machine', 'inbox', sid, 'import');
+/** The import's verdict in an account's outbox, which it reads (launch.js verdictOf): only this command writes it. */
+const importVerdict = (root, sid) => pathOf(root).join(root, 'machine', 'outbox', sid, 'import.json');
+/** A part of the bundle by its place in the manifest (launch.js partOf). */
+const importPart = (i) => String(i).padStart(7, '0') + '.part';
+/** A path inside a carried folder (launch.js relOk, held to it by test/import.test.js; pure). */
+const IMPORT_REL_MAX = 240;
+const IMPORT_REL_NAME = /^[^\\/:*?"<>|\p{Cc}]{1,200}$/u;
+function importRelOk(rel) {
+  if (typeof rel !== 'string' || !rel || rel.length > IMPORT_REL_MAX) return false;
+  return rel.split('/').every((n) => IMPORT_REL_NAME.test(n) && n !== '.' && n !== '..');
+}
+/** What an export carries, by its place and path (launch.js carried, held to it by test/import.test.js; pure). */
+const IMPORT_DATA_LEFT = new Set(['backups', 'logs', 'watchdog.json', 'watchdog.seen.json', 'watchdog.log', 'moved.json']);
+function importCarries(area, rel) {
+  const parts = String(rel).split('/');
+  if (/\.tmp$/i.test(parts[parts.length - 1]) || parts.some((p) => p.startsWith('.partial-'))) return false;
+  if (area === 'data') return !IMPORT_DATA_LEFT.has(parts[0]);
+  if (area === 'keys') return parts.length === 1 ? parts[0] === 'machine.key' || parts[0] === 'tls.json' : parts[0] === 'audit';
+  return area === 'uploads';
+}
+const HEX64 = /^[0-9a-f]{64}$/;
+const IMPORT_ID = /^[0-9a-f]{24}$/;
+/** A folder's halls, messages, accounts and screens in words (pure): "1 hall, 2 messages, 1 account and 1 screen". */
+const countsWords = (f) => [plural(f.halls, 'hall'), plural(f.messages, 'message'), plural(f.accounts, 'account')].join(', ') + ' and ' + plural(f.screens, 'screen');
+
+/**
+ * A manifest an account's export wrote, read by type (pure): {manifest} or {problem}. Whole JSON; v 1; its id; the SID
+ * it names; the folder it is of; the build; the source's facts (an object, compared field by field); and its files, each
+ * {area, rel, size, sha256}, in the three places, of a path an export carries, at most IMPORT_FILES_MAX, none twice. What
+ * it names is never trusted past that: each part is read by its place, never by a name it gives, and no account is named
+ * by it (the machine names the account: its SID's).
+ */
+function manifestOf(bytes) {
+  let j;
+  try { j = JSON.parse(Buffer.isBuffer(bytes) ? bytes.toString('utf8') : String(bytes)); } catch { return { problem: 'the bundle\'s manifest is not whole JSON' }; }
+  if (!j || typeof j !== 'object' || Array.isArray(j) || j.v !== 1) return { problem: 'the bundle\'s manifest is not one an export of this build writes' };
+  if (typeof j.id !== 'string' || !IMPORT_ID.test(j.id) || !isSid(j.sid) || typeof j.source !== 'string' || !fullPath(j.source) || typeof j.build !== 'string') return { problem: 'the bundle\'s manifest does not name its import, its account, its folder and its build' };
+  if (!j.facts || typeof j.facts !== 'object' || Array.isArray(j.facts)) return { problem: 'the bundle\'s manifest holds no facts of its folder' };
+  if (!Array.isArray(j.files) || j.files.length > IMPORT_FILES_MAX) return { problem: 'the bundle\'s manifest holds no list of files of an import\'s size' };
+  const seen = new Set();
+  for (const f of j.files) {
+    const ok = f && typeof f === 'object' && ['data', 'uploads', 'keys'].includes(f.area) && importRelOk(f.rel) && importCarries(f.area, f.rel)
+      && Number.isSafeInteger(f.size) && f.size >= 0 && typeof f.sha256 === 'string' && HEX64.test(f.sha256);
+    if (!ok) return { problem: 'the bundle\'s manifest names a file an import does not carry' };
+    const key = f.area + '/' + f.rel.toLowerCase();
+    if (seen.has(key)) return { problem: 'the bundle\'s manifest names one file twice (' + said(f.area + '/' + f.rel, 120) + ')' };
+    seen.add(key);
+  }
+  return { manifest: { id: j.id, sid: j.sid, source: j.source, build: said(j.build, 80), facts: j.facts, files: j.files.map((f) => ({ area: f.area, rel: f.rel, size: f.size, sha256: f.sha256 })) } };
+}
+
+/**
+ * A file the account left in its import folder, read only when lstat shows a file of its own (no link, no hard link, at
+ * most `max`) and the handle opened is that file: its bytes, or null when there is none to read; a refusal otherwise.
+ */
+function readLeft(fsImpl, file, max) {
+  let st;
+  try { st = fsImpl.lstatSync(file, { bigint: true }); } catch (e) { if (e.code === 'ENOENT') return null; throw refusal(file + ' could not be read (' + (e.code || e.message) + ').'); }
+  if (st.isSymbolicLink() || !st.isFile() || st.nlink > 1n) throw refusal(file + ' is not a file the export wrote (a link, or not a file): the import never reads through one.');
+  if (st.size > BigInt(max)) throw refusal(file + ' is over ' + MB(max) + ', more than an export writes.');
+  const fd = fsImpl.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+  try {
+    const ft = fsImpl.fstatSync(fd, { bigint: true });
+    if (!ft.isFile() || !sameFile(ft, st)) throw refusal(file + ' changed between its look and its read: it was not read.');
+    const buf = Buffer.alloc(Number(st.size));
+    let n = 0;
+    while (n < buf.length) { const got = fsImpl.readSync(fd, buf, n, buf.length - n, n); if (!got) break; n += got; }
+    return buf.subarray(0, n);
+  } finally { fsImpl.closeSync(fd); }
+}
+/** An answer the account's step left ({v: 1, id, code, words, …}), read by type: the object, or null for none or one that is not. */
+function answerLeft(fsImpl, file) {
+  const buf = readLeft(fsImpl, file, IMPORT_ANSWER_MAX);
+  if (!buf) return null;
+  let j;
+  try { j = JSON.parse(buf.toString('utf8')); } catch { return null; }
+  return j && typeof j === 'object' && !Array.isArray(j) && j.v === 1 && typeof j.words === 'string' && Number.isSafeInteger(j.code) ? j : null;
+}
+
+/**
+ * What the installed node's folders hold of a node that has served (U.6.1): its halls (a room's files), its accounts, its
+ * audit rows, and the keys an import would lay over its own (the machine key, the certificate, the server secret): each
+ * named, none when it never started. A file that could not be read is named too, fail closed.
+ */
+function servedOf(root, fsImpl = fs) {
+  const P = pathOf(root);
+  const out = [];
+  const names = (d) => { try { return fsImpl.readdirSync(d); } catch (e) { if (e.code === 'ENOENT') return []; out.push(d + ' (' + (e.code || e.message) + ')'); return []; } };
+  const halls = names(P.join(root, 'data', 'rooms')).filter((n) => /\.json(?:\.bak)?$/.test(n));
+  if (halls.length) out.push(plural(halls.length, 'hall or room file'));
+  for (const name of ['accounts.json', 'accounts.json.bak']) {
+    let users = 0;
+    try { const j = JSON.parse(fsImpl.readFileSync(P.join(root, 'data', name), 'utf8')); users = j && Array.isArray(j.users) ? j.users.length : 0; } catch (e) {
+      if (e.code && e.code !== 'ENOENT') out.push(P.join(root, 'data', name) + ' (' + e.code + ')');
+    }
+    if (users) { out.push(plural(users, 'account')); break; }
+  }
+  const audit = names(P.join(root, 'data')).filter((n) => (n === 'audit.jsonl' || (n.startsWith('audit-') && n.endsWith('.jsonl'))) || n === 'audit-archive');
+  const rows = audit.some((n) => { try { return n === 'audit-archive' || fsImpl.statSync(P.join(root, 'data', n)).size > 0; } catch { return true; /* there, unread: it may hold rows */ } });
+  if (rows) out.push('an audit log');
+  for (const [area, name] of [['keys', 'machine.key'], ['keys', 'tls.json'], ['data', 'secret.key']]) {
+    try { fsImpl.lstatSync(P.join(root, area, name)); out.push('its own ' + name); } catch (e) { if (e.code !== 'ENOENT') out.push(P.join(root, area, name) + ' (' + (e.code || e.message) + ')'); }
+  }
+  return out;
+}
+const servedWords = (served) => 'This PC\'s AGMessage has served already: it holds ' + served.join(', ') + '. An import goes only into an AGMessage that has never started, since two machine keys, server secrets, certificates and audit chains cannot be merged: nothing is ever merged. The portable folder\'s events stay in that folder; or uninstall AGMessage with its data removed, install it again, and import before its first start.';
+
+/**
+ * The checks the verify makes, the portable folder's facts (`s`, read by its export) against the installed node's (`t`,
+ * read after the copy), each by lib/importfacts.js (pure): the halls, side rooms, messages, accounts and screens counted
+ * alike; the machine key the same; every sealed value opening here, as many as there; the certificate's fingerprint
+ * unchanged; the audit chain checking to its end, as it read there, archives included. Then what the installed node's own
+ * start refuses, read from the copy itself and never from what the export said of its source: a folder not last run by
+ * this build in the format it writes (`format`), a machine key, certificate or server secret it would not start on
+ * (`usable`), a copy running on its data folder (`held`), and an import's mark there (`moved`). [{check, words}] for each
+ * that did not pass; none when every one did.
+ */
+function verifyChecks(s, t) {
+  const out = [];
+  const num = (o, k) => (o && Number.isSafeInteger(o[k]) ? o[k] : -1);
+  const counts = ['halls', 'rooms', 'messages', 'accounts', 'screens'].filter((k) => num(s, k) < 0 || num(s, k) !== num(t, k));
+  if (counts.length) out.push({ check: 'counts', words: 'the counts differ: ' + counts.map((k) => num(t, k) + ' ' + k + ' here, ' + num(s, k) + ' in the portable folder').join('; ') });
+  const key = (o) => (o && o.key && typeof o.key === 'object' ? o.key : {});
+  if (key(s).state !== key(t).state || key(s).kid !== key(t).kid) out.push({ check: 'key', words: 'the machine key here is not the one the portable folder\'s values were sealed with' });
+  const sealed = (o) => (o && o.sealed && typeof o.sealed === 'object' ? o.sealed : { total: -1, open: -1, shut: [] });
+  const st = sealed(t);
+  if (st.total !== sealed(s).total || st.open !== st.total) {
+    const shut = Array.isArray(st.shut) ? st.shut.map((x) => said(x, 60)).join(', ') : '';
+    out.push({ check: 'sealed', words: st.total === sealed(s).total ? (st.total - st.open) + ' of ' + st.total + ' sealed values do not open here' + (shut ? ' (' + shut + ')' : '') : st.total + ' sealed values here, ' + sealed(s).total + ' in the portable folder' });
+  }
+  const fp = (o) => (o && o.cert && typeof o.cert.fp === 'string' ? o.cert.fp : null);
+  if (fp(s) === null || fp(s) !== fp(t)) out.push({ check: 'fingerprint', words: 'the certificate\'s fingerprint is not the portable folder\'s (' + (fp(t) || 'none here') + ', not ' + (fp(s) || 'none') + ')' });
+  const chain = (o) => (o && o.chain && typeof o.chain === 'object' ? o.chain : {});
+  const cs = chain(s);
+  const ct = chain(t);
+  if (ct.done !== true || ct.mark === 'broken' || ct.mark !== cs.mark || ct.entries !== cs.entries || ct.archives !== cs.archives) {
+    out.push({ check: 'chain', words: 'the audit chain does not check here as it did in the portable folder (' + said(ct.words || 'not read', 200) + ')' });
+  }
+  const fm = (o) => (o && o.format && typeof o.format === 'object' ? o.format : {});
+  const ft = fm(t);
+  const build = t && typeof t.build === 'string' && t.build ? t.build : '';
+  if (!build || ft.state !== 'read' || ft.build !== build || !Number.isSafeInteger(ft.current) || ft.format !== ft.current || !s || s.build !== build || fm(s).build !== build) {
+    const sb = s && typeof s.build === 'string' && s.build ? 'AGMessage ' + said(s.build, 80) : 'a build its facts do not name';
+    const why = ft.state === 'none' ? 'it holds no format marker' : ft.state !== 'read' ? 'its format marker could not be read'
+      : ft.build !== build ? 'its format marker names ' + (ft.build ? 'AGMessage ' + said(ft.build, 80) : 'no build')
+        : ft.format !== ft.current ? 'its format marker names this build in format ' + said(String(ft.format), 20) + ', which it does not write'
+          : s && s.build === build ? 'the export read a format marker naming ' + (fm(s).build ? 'AGMessage ' + said(fm(s).build, 80) : 'no build') : 'the export was made by ' + sb;
+    out.push({ check: 'format', words: 'the copy was not last run by this build (' + why + '; this is ' + (build || 'a build its facts do not name') + ')' });
+  }
+  const unusable = [];
+  const kt = key(t);
+  if (kt.state !== 'key' && kt.state !== 'absent') unusable.push('the machine key (' + said(kt.code || kt.state || 'not read', 40) + ')');
+  const cst = t && t.cert && typeof t.cert === 'object' ? t.cert : {};
+  if (!['ok', 'renew', 'absent'].includes(cst.state)) unusable.push('the certificate (' + said(cst.code || cst.state || 'not read', 40) + ')');
+  if (!t || (t.secret !== 'read' && t.secret !== 'absent')) unusable.push('the server secret');
+  if (unusable.length) out.push({ check: 'usable', words: 'the installed AGMessage would not start on ' + unusable.join(', ') + ' laid here' });
+  if (!t || t.held !== false) out.push({ check: 'held', words: 'a copy of AGMessage runs on this PC\'s AGMessage data folder' + (t && typeof t.busy === 'string' && t.busy ? ' (it says it is ' + said(t.busy, 200) + ')' : '') + ': stop it, then import again' });
+  if (!t || t.moved !== 'none') out.push({ check: 'moved', words: 'this PC\'s AGMessage data folder holds an import\'s mark (data\\moved.json), on which it does not start' });
+  return out;
+}
+
+/**
+ * The installed node's facts, read after the copy by lib/importfacts.js of the install (`--app`), run by this node.exe as a
+ * process of its own, in an environment made from the System32 folder alone (`runFile`, childProcess.execFileSync unless
+ * a test stands in for it): {facts} or {error}.
+ */
+function targetFacts({ root, app, sys, runFile = childProcess.execFileSync }) {
+  const P = pathOf(root);
+  const A = pathOf(app);
+  const winRoot = DRIVE_PATH.test(String(sys || '')) ? path.win32.dirname(sys) : '';
+  const env = winRoot ? { SystemRoot: winRoot, windir: winRoot, SystemDrive: winRoot.slice(0, 2), TEMP: path.win32.join(winRoot, 'Temp'), TMP: path.win32.join(winRoot, 'Temp') } : {};
+  let out;
+  try {
+    out = String(runFile(process.execPath, [A.join(app, 'app', 'lib', 'importfacts.js'), '--data', P.join(root, 'data'), '--keys', P.join(root, 'keys')],
+      { cwd: A.join(app, 'app'), env, encoding: 'utf8', windowsHide: true, timeout: IMPORT_FACTS_MS, maxBuffer: 16 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] }) || '');
+  } catch (e) { out = String((e && e.stdout) || ''); if (!out.trim()) return { error: said((e && (e.code || e.message)) || 'no answer', 160) }; }
+  let j;
+  try { j = JSON.parse(out.split(/\r?\n/).filter((l) => l.startsWith('{')).pop() || ''); } catch { return { error: 'its answer is not whole' }; }
+  return j && j.facts && typeof j.facts === 'object' ? { facts: j.facts } : { error: said((j && j.error) || 'no facts in its answer', 200) };
+}
+
+/** The folders `parts` below `base` made where they are not there, each a real directory, those made kept in `made`. */
+function importFolders(fsImpl, P, base, parts, made) {
+  let at = base;
+  for (const part of parts) {
+    at = P.join(at, part);
+    try { fsImpl.mkdirSync(at); made.push(at); } catch (e) { if (e.code !== 'EEXIST') throw e; }
+    const real = realDir(fsImpl, at);
+    if (!real.ok) throw Object.assign(new Error(at + ' ' + real.why), { code: 'ENOTDIR' });
+  }
+}
+/**
+ * One part of the bundle copied into its place: read only when lstat shows a file of its own (no link, no hard link) of
+ * the size the manifest names, through the handle of that file; written into a new file, never over one, so it takes the
+ * access list of the folder it lands in and never its own. Its bytes' SHA-256.
+ */
+function copyPart(fsImpl, part, to, size) {
+  const st = fsImpl.lstatSync(part, { bigint: true });
+  if (st.isSymbolicLink() || !st.isFile() || st.nlink > 1n) throw Object.assign(new Error(part + ' is not a part the export wrote (a link, or not a file)'), { code: 'ELINK' });
+  if (st.size !== BigInt(size)) throw Object.assign(new Error(part + ' is ' + st.size + ' bytes, not the ' + size + ' its manifest names'), { code: 'ESIZE' });
+  const hash = crypto.createHash('sha256');
+  const src = fsImpl.openSync(part, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+  let dst = null;
+  try {
+    const ft = fsImpl.fstatSync(src, { bigint: true });
+    if (!ft.isFile() || !sameFile(ft, st)) throw Object.assign(new Error(part + ' changed between its look and its read'), { code: 'ECHANGED' });
+    dst = fsImpl.openSync(to, 'wx');
+    const buf = Buffer.alloc(IMPORT_CHUNK);
+    for (;;) {
+      const n = fsImpl.readSync(src, buf, 0, buf.length, null);
+      if (!n) break;
+      hash.update(buf.subarray(0, n));
+      for (let off = 0; off < n;) off += fsImpl.writeSync(dst, buf, off, n - off);
+    }
+    fsImpl.fsyncSync(dst);
+  } finally {
+    fsImpl.closeSync(src);
+    if (dst !== null) fsImpl.closeSync(dst);
+  }
+  return hash.digest('hex');
+}
+/** What the copy made taken out again, newest first: the files, then the folders. What was left, as words. */
+function importUndo(fsImpl, made) {
+  const left = [];
+  for (const f of [...made.files].reverse()) { try { fsImpl.unlinkSync(f); } catch (e) { if (e.code !== 'ENOENT') left.push(f); } }
+  for (const d of [...made.dirs].reverse()) { try { fsImpl.rmdirSync(d); } catch (e) { if (e.code !== 'ENOENT') left.push(d); } }
+  return left;
+}
+
+/** Whether two full paths name one place, as their platform compares them (pure): a Windows path without its case. */
+function samePlace(a, b) {
+  if (!fullPath(a) || !fullPath(b) || pathOf(a) !== pathOf(b)) return false;
+  const P = pathOf(a);
+  const norm = (p) => { const r = P.resolve(p).replace(/[\\/]+$/, ''); return P === path.win32 ? r.toLowerCase() : r; };
+  return norm(a) === norm(b);
+}
+
+/**
+ * What an import left for an account removed (the bundle holds that account's machine key, certificate, audit records and
+ * server secret, so none of it stays once an import ends, passed or not): its import\ folder, never recursively and never
+ * through a link (one that lstat shows a link or junction is removed itself, never what it names: clearBox), and with
+ * `verdict` its verdict in the outbox. What was left, in words; '' when nothing is.
+ */
+function clearImport(fsImpl, root, sid, { verdict = false } = {}) {
+  const dir = importDir(root, sid);
+  const left = [];
+  let st = null;
+  try { st = fsImpl.lstatSync(dir); } catch (e) { if (e.code !== 'ENOENT') left.push(dir + ' (' + (e.code || e.message) + ')'); }
+  if (st && st.isDirectory()) {
+    const l = clearBox(fsImpl, dir);
+    if (l) left.push(l);
+  } else if (st) {
+    try { fsImpl.unlinkSync(dir); } catch (e) {
+      if (!st.isSymbolicLink()) left.push(dir + ' (' + (e.code || e.message) + ')');
+      else { try { fsImpl.rmdirSync(dir); } catch (e2) { left.push(dir + ' (' + (e2.code || e2.message) + ')'); } }
+    }
+  }
+  if (verdict) { try { fsImpl.unlinkSync(importVerdict(root, sid)); } catch (e) { if (e.code !== 'ENOENT') left.push(importVerdict(root, sid) + ' (' + (e.code || e.message) + ')'); } }
+  return left.join('; ');
+}
+
+/** The SID an import is for (--for): one person's, as the installer's whose reading found the laptop's admin. */
+function importFor(opts) {
+  const sid = String(opts['--for'] || '');
+  if (!personSid(sid)) throw usage('import needs --for <SID>, one person\'s account: the one that started the installer and runs its export.');
+  return sid;
+}
+
+/**
+ * import --step stage: the import made ready for the account that started the installer, before the installed node's first
+ * start. Refused for a node that has served (U.6.1: never merge). The account's inbox\ and outbox\ (made again with their
+ * grants), and in its inbox a fresh import\ folder (anything an earlier try left cleared, never recursively), where it may
+ * add and write files and never make a folder or a junction; an earlier verdict removed, so none stands for this import.
+ */
+function importStage(opts, { run = childProcess.execFileSync, fsImpl = fs } = {}) {
+  const root = needPath(opts, '--machine');
+  const sid = importFor(opts);
+  const H = hands(opts['--sys'], run);
+  const served = servedOf(root, fsImpl);
+  if (served.length) throw refusal(servedWords(served), { served });
+  accountFolder(H, fsImpl, root, 'inbox', sid, inboxGrants(sid));
+  accountFolder(H, fsImpl, root, 'outbox', sid, outboxGrants(sid));
+  const dir = importDir(root, sid);
+  const label = 'machine\\inbox\\' + sid + '\\import';
+  const left = clearImport(fsImpl, root, sid);
+  if (left) throw notDone('What an earlier import left could not be cleared (' + left + '): nothing was imported.');
+  makeFolder(fsImpl, dir, label, { fresh: false });
+  const [first, ...more] = inboxGrants(sid);
+  mustGrant(H, [dir, '/inheritance:r', '/grant:r', ...BASE_GRANTS, first], label);
+  for (const g of more) mustGrant(H, [dir, '/grant', g], label);
+  try { fsImpl.unlinkSync(importVerdict(root, sid)); } catch (e) { if (e.code !== 'ENOENT') throw notDone('An earlier import\'s verdict could not be removed (' + (e.code || e.message) + '): nothing was imported.'); }
+  return { words: 'The import is ready: the portable folder\'s bundle goes into ' + dir + '.' };
+}
+
+/**
+ * import --step take: the bundle the account's export left (launch.js export) copied into the installed node's data,
+ * uploads and key folders, then verified. Refused, with nothing copied: a node that has served; an export that left no
+ * answer or refused; a manifest that is not one, is of another account or import, or of another folder than --source; a
+ * disk short of the room. Each part is copied by its bytes into a new file, never over one, never with an access list of
+ * its own, never through a link, and its SHA-256 checked against the manifest; then the installed node's facts are read
+ * (lib/importfacts.js of the install) and checked against the portable folder's (verifyChecks). Anything that does not pass
+ * is said by its check, and everything the copy made is taken out again. Passed, the verdict goes into the account's
+ * outbox (import.json), which its forget-keys reads before it removes anything. {verified, id, checks}.
+ */
+function importTake(opts, stand = {}) {
+  const root = needPath(opts, '--machine');
+  const sid = importFor(opts);
+  try { return takeBundle(opts, root, sid, stand); } catch (e) {
+    // A take that did not pass leaves nothing of the bundle where the account's export put it: the parts not laid (the
+    // keys among them), its manifest and its answer. The verdict of an earlier take that passed is finish's or clear's.
+    const left = clearImport(stand.fsImpl || fs, root, sid);
+    if (left && e && typeof e.words === 'string') e.words += ' What the export left could not all be removed (' + left + '): remove it yourself, since it holds the portable folder\'s keys.';
+    throw e;
+  }
+}
+/** The take itself (importTake's): refusals and failures thrown, the bundle cleared by importTake. */
+function takeBundle(opts, root, sid, { fsImpl = fs, runFile } = {}) {
+  const app = needPath(opts, '--app');
+  const source = needPath(opts, '--source');
+  const P = pathOf(root);
+  if (!fsImpl.existsSync(pathOf(app).join(app, 'app', 'lib', 'importfacts.js'))) throw usage('--app is ' + app + ', which holds no app\\lib\\importfacts.js: it is the install\'s folder ({app}).');
+  const served = servedOf(root, fsImpl);
+  if (served.length) throw refusal(servedWords(served), { served });
+  const dir = importDir(root, sid);
+  const real = realDir(fsImpl, dir);
+  if (!real.ok) throw refusal('The import\'s folder ' + dir + ' ' + real.why + ': the import was not made ready (import --step stage). Nothing was imported.');
+  const said0 = answerLeft(fsImpl, P.join(dir, 'export.json'));
+  if (!said0) throw refusal('The portable folder\'s export left no answer, so there is no bundle to take. Nothing was imported.');
+  if (said0.code !== DONE) throw refusal(said(said0.words, 1200), { exported: false });
+  const bundle = readLeft(fsImpl, P.join(dir, 'manifest.json'), IMPORT_MANIFEST_MAX);
+  if (!bundle) throw refusal('The export left no bundle\'s manifest in ' + dir + ': nothing was imported.');
+  const got = manifestOf(bundle);
+  if (got.problem) throw refusal(got.problem + ': nothing was imported.');
+  const m = got.manifest;
+  if (m.sid !== sid || m.id !== said0.id) throw refusal('The bundle is not this import\'s (another account\'s, or another export\'s): nothing was imported.');
+  if (!samePlace(m.source, source)) throw refusal('The bundle is of ' + said(m.source, 200) + ', not of ' + source + ': nothing was imported.');
+  const bytes = m.files.reduce((n, f) => n + f.size, 0);
+  let free;
+  try { const s = fsImpl.statfsSync(P.join(root, 'data')); free = s.bavail * s.bsize; } catch { free = null; /* not read: a full disk is said by the copy */ }
+  if (free !== null && free < bytes + IMPORT_RESERVE) throw refusal('The disk has ' + MB(free) + ' free; the import lays ' + MB(bytes) + ' and AGMessage keeps ' + MB(IMPORT_RESERVE) + ' beside it: free some space, then import again. Nothing was imported.');
+  const made = { files: [], dirs: [] };
+  const undone = (words, extra = {}) => {
+    const left = importUndo(fsImpl, made);
+    return notDone(words + (left.length ? ' What it copied could not all be taken out again: ' + left.slice(0, 3).join(', ') + (left.length > 3 ? ' and ' + (left.length - 3) + ' more' : '') + '.' : ' What it copied was taken out again.') + ' Nothing was removed from the portable folder or your profile.', extra);
+  };
+  for (const [i, f] of m.files.entries()) {
+    const parts = f.rel.split('/');
+    const to = P.join(root, f.area, ...parts);
+    let sha;
+    try {
+      importFolders(fsImpl, P, P.join(root, f.area), parts.slice(0, -1), made.dirs);
+      sha = copyPart(fsImpl, P.join(dir, importPart(i)), to, f.size);
+      made.files.push(to);
+    } catch (e) {
+      if (e && e.code === 'EEXIST') throw undone('The import did not lay ' + f.area + '\\' + f.rel.split('/').join('\\') + ': there is a file of that name here already, and an import never lays a file over one.');
+      throw undone('The import did not lay ' + f.area + '\\' + f.rel.split('/').join('\\') + ' (' + said((e && e.message) || (e && e.code) || 'EIO', 200) + ').');
+    }
+    if (sha !== f.sha256) throw undone('The import did not pass its verify: ' + f.area + '\\' + f.rel.split('/').join('\\') + ' did not arrive whole (its bytes are not the ones the export read).', { checks: [{ check: 'file', words: f.area + '/' + f.rel }] });
+    try { fsImpl.unlinkSync(P.join(dir, importPart(i))); } catch { /* the bundle's own part, removed with the import folder at the end */ }
+  }
+  const t = targetFacts({ root, app, sys: opts['--sys'], runFile });
+  const checks = t.error ? [{ check: 'facts', words: 'the copy\'s facts could not be read (' + t.error + ')' }] : verifyChecks(m.facts, t.facts);
+  if (checks.length) throw undone('The import did not pass its verify: ' + checks.map((c) => c.words).join('; ') + '.', { checks });
+  const f = t.facts;
+  const verdict = { v: 1, id: m.id, verified: true, at: Date.now(), source, build: m.build, files: m.files.length, bytes, halls: f.halls, rooms: f.rooms, messages: f.messages, accounts: f.accounts, screens: f.screens, sealed: f.sealed.total, entries: f.chain.entries, fp: f.cert.fp };
+  writeAnswer(fsImpl, P.join(root, 'machine', 'outbox', sid), verdict, 'import.json');
+  return {
+    verified: true, id: m.id, checks: [],
+    words: 'Imported and verified: ' + countsWords(f) + ', counted alike; every sealed value opens (' + f.sealed.total + '); the certificate\'s fingerprint is unchanged; the audit chain checks (' + (f.chain.entries === 1 ? '1 entry' : f.chain.entries + ' entries') + (f.chain.archives ? ', ' + plural(f.chain.archives, 'archive') : '') + ').',
+  };
+}
+
+/**
+ * import --step finish: the import's end, once the account's forget-keys has run. Its verdict read (this command's, in the
+ * account's outbox), and what forget-keys answered (its words the person's, its flags read by type; none is said too);
+ * `machine.import` appended to the machine's events, naming the account by its SID and the name the machine gives it (the
+ * install record's for the laptop's admin, else Windows' own: never a name the account's bundle or answers carry), what
+ * was imported and verified, and whether the old copies went and the folder is marked (never a path in a profile), which
+ * the server writes as its audit row; the import folder cleared and the verdict removed. Its words are the import page's
+ * last: a copy that was not removed, or a mark that was not made, is not done (2), named there with its path.
+ */
+function importFinish(opts, { fsImpl = fs, run = childProcess.execFileSync } = {}) {
+  const root = needPath(opts, '--machine');
+  const sid = importFor(opts);
+  const id = String(opts['--id'] || '');
+  if (!IMPORT_ID.test(id)) throw usage('import --step finish needs --id <the import\'s id>, as its take answered it.');
+  const H = hands(opts['--sys'], run);
+  const P = pathOf(root);
+  let verdict;
+  try { verdict = JSON.parse(fsImpl.readFileSync(importVerdict(root, sid), 'utf8')); } catch { verdict = null; /* none: refused below */ }
+  if (!verdict || verdict.verified !== true || verdict.id !== id) throw refusal('No verified import of this id is here to finish: nothing was recorded.');
+  const dir = importDir(root, sid);
+  let gone;
+  try { gone = answerLeft(fsImpl, P.join(dir, 'forget.json')); } catch { gone = null; /* not one forget-keys wrote: said as no answer */ }
+  if (gone && (gone.id !== id || gone.verified !== true)) gone = null;
+  const flag = (x) => !!(x && typeof x === 'object' && x.ok === true);
+  const removed = gone ? { keys: flag(gone.keys), secret: flag(gone.secret), moved: gone.moved === true } : null;
+  const record = readRecord(H);
+  const name = record.values.Admin === sid && record.values.AdminName ? said(record.values.AdminName, 120) : (namesFor({ H }, [sid])[sid] || '');
+  const who = { sid, name };
+  const what = (who.name || sid) + ' imported a portable AGMessage folder (build ' + said(verdict.build, 80) + '): ' + countsWords(verdict) + ', verified';
+  const after = !removed ? '; its old copies of the keys were not confirmed removed, nor the folder marked as moved'
+    : (removed.keys && removed.secret ? '; its old copies of the keys were removed' : '; not every old copy of its keys was removed') + (removed.moved ? ' and the folder is marked as moved' : ', and the folder is not marked as moved');
+  let ev;
+  try { ev = { seq: appendEvent(P.join(root, 'machine'), { kind: 'machine.import', by: who, forAccount: who, words: what + after + '.' }, fsImpl), why: '' }; } catch (e) {
+    ev = { seq: 0, why: ' No machine event says so, so the audit log will not show the import: ' + ((e && e.words) || said(e && e.message, 200)) + '.' };
+  }
+  const left = clearImport(fsImpl, root, sid, { verdict: true });
+  const said1 = gone ? said(gone.words, 1200) : 'Its old copies of the keys were not confirmed removed, nor the folder marked as moved (forget-keys gave no answer): remove %LOCALAPPDATA%\\AGMessage and the folder\'s app\\data\\secret.key yourself, and never start that folder again, since it would serve these halls beside this PC\'s AGMessage.';
+  const words = 'Imported: ' + countsWords(verdict) + ', verified. ' + said1 + (left ? ' What the import left could not all be cleared (' + left + '): remove it yourself, since it may hold the portable folder\'s keys.' : '') + ev.why;
+  // Imported either way; a copy of the keys not removed, or a folder not marked, is not done, so its path stays on the
+  // import page's last words.
+  if (!(removed && removed.keys && removed.secret && removed.moved)) throw notDone(words, { imported: true, event: ev.seq });
+  return { imported: true, event: ev.seq, words };
+}
+
+/**
+ * import --step clear: an import left before its end (Start with no halls after one did not pass, or Setup closed)
+ * cleared: the import folder and the verdict, so no copy of the portable folder's keys stays in the account's inbox. Any
+ * node, served or not: it removes what only an import put there.
+ */
+function importClear(opts, { fsImpl = fs } = {}) {
+  const root = needPath(opts, '--machine');
+  const sid = importFor(opts);
+  const left = clearImport(fsImpl, root, sid, { verdict: true });
+  if (left) throw notDone('What the import left could not all be removed (' + left + '): remove it yourself, since it may hold the portable folder\'s keys.');
+  return { words: 'Nothing of an import is left in ' + importDir(root, sid) + '.' };
+}
+
+/** import: one of its steps (--step), each the plan's (U14) and each its own refusals. */
+function importStep(opts, stand) {
+  const step = String(opts['--step'] || '');
+  if (step === 'stage') return importStage(opts, stand);
+  if (step === 'take') return importTake(opts, stand);
+  if (step === 'finish') return importFinish(opts, stand);
+  if (step === 'clear') return importClear(opts, stand);
+  throw usage('import needs --step stage, take or finish (its three steps, in that order), or clear (an import left before its end).');
+}
+
 // ---------------------------------------------------------------- restore (the way back)
 
 /**
@@ -2348,6 +2831,7 @@ const OUT_FIELDS = Object.freeze([
   'programs', 'agree', 'adminName', 'approverName', 'startedSid', 'screenSid', 'choiceCount', 'choice1Sid', 'choice1Name', 'choice2Sid', 'choice2Name',
   'answered', 'build', 'needsAccount', 'tail', 'made', 'username', 'forceable',
   'id', 'ranAs', 'for', 'started', 'already', 'audited', 'rights', 'event', 'ran', 'task',
+  'served', 'exported', 'verified', 'checks', 'imported',
 ]);
 
 /** Run one verb: {code, text, out}. */
@@ -2369,6 +2853,7 @@ async function run(argv, stand = {}) {
     else if (a.verb === 'start') r = await start(a.opts, stand);
     else if (a.verb === 'first-account') r = await firstAccount(a.opts, stand);
     else if (a.verb === 'control') r = await control(a.opts, stand);
+    else if (a.verb === 'import') r = importStep(a.opts, stand);
     else r = await restore(a.opts, stand);
     text = r.words || 'Done.';
   } catch (e) {
@@ -2410,4 +2895,6 @@ module.exports = {
   PS_OWNER, PS_FIREWALL_ADD, PS_FIREWALL_REMOVE, PS_STATUS,
   SID, HKLM, TASK_FOLDER, SERVER_TASK, SERVER_TASK_SDDL, RULE_TCP, RULE_UDP, DISCOVERY_PORT, BACKUP_RESERVE, STOP_WAIT_MS,
   VERBS, LATER, VERB_OPTS, DONE, NOT_DONE, REFUSED, USAGE,
+  importStep, importStage, importTake, importFinish, importClear, clearImport, sameFile, manifestOf, verifyChecks, servedOf, servedWords, importRelOk, importCarries, readLeft, answerLeft, targetFacts, samePlace,
+  importDir, importVerdict, importPart, IMPORT_STEPS, IMPORT_FILES_MAX, IMPORT_REL_MAX,
 };

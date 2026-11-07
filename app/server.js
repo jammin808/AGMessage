@@ -125,6 +125,10 @@ const SETTINGS_PATH = path.join(DATA_DIR, 'settings.json');
 // `format` and "This laptop"'s.
 const formatRefused = dataformat.refusal(dataformat.read(DATA_DIR), { dataDir: DATA_DIR, build: BUILD.full });
 if (formatRefused) cannotStartYet(formatRefused);
+// A portable folder an import took into the AGMessage installed on this PC (its `moved.json`) never starts again: its halls,
+// accounts and keys are the installed node's now. Read beside the format, before anything is written.
+const movedRefused = dataformat.movedRefusal(dataformat.movedOf(DATA_DIR), { dataDir: DATA_DIR });
+if (movedRefused) cannotStartYet(movedRefused);
 let formatNow = null;
 // Nothing is written until this copy holds its data folder and its port (`holdDataFolder`, at the end of this file): every
 // store is read now, and the folders, the keys, the certificate, the server secret and the saves asked meanwhile are made
@@ -6240,9 +6244,9 @@ front.on('error', (e) => {
 // nothing else.
 const folderHolds = [];
 function holdDataFolder(then) {
-  const legacy = crypto.createHash('sha256').update(process.platform === 'win32' ? path.resolve(DATA_DIR).toLowerCase() : path.resolve(DATA_DIR)).digest('hex').slice(0, 16);
-  const own = resilience.placeId(DATA_DIR, undefined, { absentOk: true });
-  const ids = own === legacy ? [legacy] : [legacy, own];
+  // Each place the folder is known by (its path as given, as 0.5 named it, and its real path), held: an import's check
+  // that its source runs asks the same places (lib/resilience.js folderPipes).
+  const places = resilience.folderPipes(DATA_DIR);
   // The copy that holds the folder, as its busy line says (`text`, read from its pipe), in words: busy with what, idle
   // with what is open, or nothing when it said no line (0.5.1, which answers none, or a copy still starting).
   const refuse = (text) => {
@@ -6252,8 +6256,8 @@ function holdDataFolder(then) {
     process.exit(RUNS === 'task' ? resilience.EXIT.HELD : resilience.EXIT.CONFIG);
   };
   const holdOne = (i) => {
-    if (i >= ids.length) { then(); return; }
-    const where = process.platform === 'win32' ? '\\\\.\\pipe\\agmessage-' + ids[i] : path.join(os.tmpdir(), 'agmessage-' + ids[i] + '.sock');
+    if (i >= places.length) { then(); return; }
+    const where = places[i];
     let done = false;
     const next = () => { if (!done) { done = true; holdOne(i + 1); } };
     const unchecked = (e) => { console.warn('  [folder] could not hold the data folder (' + (e.code || e.message) + '): a second copy on it is not refused'); next(); };

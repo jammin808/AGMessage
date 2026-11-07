@@ -372,16 +372,20 @@ test('launch.js reads this PC\'s AGMessage admin from the install record by reg.
     }
   } finally { if (before === undefined) delete process.env.SystemRoot; else process.env.SystemRoot = before; }
   assert.equal(launch.adminName({ sys, platform: 'linux', run: () => { throw new Error('never run'); } }), '');
-  // launch.js reads no machine path from its environment: the installer passes each folder as an argument. Its one read
-  // of its environment is taskEnv's, which hands the watchdog Windows' own names (TASK_PASSED) and nothing else of it, so
-  // no NODE_OPTIONS, no AGM_… and no secret reaches the installed node from whatever started the task.
+  // launch.js reads no machine path from its environment: the installer passes each folder as an argument. Its reads of
+  // its environment are two: taskEnv's, which hands the watchdog Windows' own names (TASK_PASSED) and nothing else of it,
+  // so no NODE_OPTIONS, no AGM_… and no secret reaches the installed node from whatever started the task; and the import's
+  // (profileKeys), which reads the account's own LOCALAPPDATA alone, where its portable copy keeps its keys
+  // (lib/secretbox.js keyDir), a folder of that account's profile and never one of the machine.
   const src = h.readSource(path.join(ROOT, 'launch.js'));
-  assert.deepEqual(src.match(/process\.env\b.{0,1}/g), ['process.env)'], 'one read of its environment');
+  assert.deepEqual(src.match(/process\.env\b.{0,1}/g), ['process.env,', 'process.env)'], 'two reads of its environment');
+  assert.match(src, /function profileKeys\(\{ platform = process\.platform, env = process\.env, home = os\.homedir\(\) \} = \{\}\) \{\n {2}if \(platform === 'win32' && typeof env\.LOCALAPPDATA === 'string' && DRIVE_PATH\.test\(env\.LOCALAPPDATA\)\) return path\.win32\.join\(env\.LOCALAPPDATA, 'AGMessage'\);\n {2}return path\.join\(home, '\.agmessage'\);\n\}/, 'the import\'s reads LOCALAPPDATA alone');
+  assert.equal((src.match(/\benv\.[A-Z_]+/g) || []).filter((n) => n !== 'env.LOCALAPPDATA').length, 0, 'and no other name of it');
   assert.match(src, /function taskEnv\(a, inherited = process\.env\) \{\n {2}const env = \{\};\n {2}for \(const name of TASK_PASSED\) if \(typeof inherited\[name\] === 'string' && inherited\[name\]\) env\[name\] = inherited\[name\];\n/, 'and it copies the named names only');
   assert.ok(!launch.TASK_PASSED.some((n) => /^(AGM_|NODE_|ADMIN|ANTHROPIC|PATH$)/i.test(n)), 'none of them AGMessage\'s, Node\'s, a secret or the search path');
 });
 
-test('launch.js knows serve, token, status, open, start, stop and rights, and refuses any other word; token takes --machine <full path> [--sys <System32 folder>]', () => {
+test('launch.js knows serve, token, status, open, start, stop, rights, export and forget-keys, and refuses any other word; token takes --machine <full path> [--sys <System32 folder>]', () => {
   const said = [];
   const out = (t) => said.push(t);
   const machine = tmp('agm-machine-');
@@ -397,8 +401,8 @@ test('launch.js knows serve, token, status, open, start, stop and rights, and re
   const fits = 'launch.js token takes --machine <folder> and --sys <folder>, each once and each with its folder; ';
   const needs = 'launch.js token needs --machine <folder>, the installed node\'s folder as a full path (%ProgramData%\\AGMessage).';
   assert.deepEqual(said, [
-    'launch.js knows serve, token, status, open, start, stop or rights.',
-    'launch.js knows serve, token, status, open, start, stop or rights. "boot" is not one of them.',
+    'launch.js knows serve, token, status, open, start, stop, rights, export or forget-keys.',
+    'launch.js knows serve, token, status, open, start, stop, rights, export or forget-keys. "boot" is not one of them.',
     needs,
     needs,
     fits + '"--print" does not fit.',

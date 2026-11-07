@@ -420,6 +420,31 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   done with words saying the log will not show it. A bug in `machine.js` runs as SYSTEM: it requires
   Node's built-ins only, and its refusals are tests (`test/control.test.js`). Which descriptor rights let a standard
   account run its task on demand, and that another is refused, is the Windows readings lane's R11, not yet run.
+- **The portable import** (`docs/INSTALL.md`, The import of a portable folder), once, before the installed node's first
+  start, into a node that has served nothing (any hall, account or audit row, or a machine key, certificate or server
+  secret of its own, refuses it: two of each are never merged). The elevated half never reads the account's profile or
+  the portable folder: the account's own export (`launch.js export`, run as the account that started Setup by
+  `ExecAsOriginalUser`, never elevated) writes a bundle of contents only into that account's `machine\inbox\<SID>\import\`,
+  where it may add and write files and never make a folder or a junction, refusing any link or junction in what it
+  carries. `machine.js import` reads each part only when `lstat` shows a file of its own (no link, no hard link, the file
+  opened the one `lstat` saw, of the size the manifest names), lays it by its place in the manifest under one of three
+  folders, by a path of an export's names only (no `..`, no drive, no separator of Windows', nothing of the copy's
+  backups or the watchdog's), into a new file that is never laid over one and takes its folder's access list, never one
+  of its own, and checks its SHA-256, each look and its read compared by the whole file id. The verify reads the copy
+  with the server's own readers and writes nothing, in a process of its own that loads only `app\lib`, `app\verify` and
+  Node's built-ins (`test/loads.test.js`), and takes what the installed node's own start refuses (the build and format, a
+  key, certificate or secret it would not start on, a copy running, an import's mark) from the copy itself, never from
+  what the account's export said; what does not pass is said and the copy taken out again. The bundle holds the
+  profile's keys, so nothing of it stays in the inbox once an import ends, passed or not (a take that does not pass, the
+  finish and the installer's clear remove it, never through a link). Only then does a verdict reach the account's outbox (which only
+  SYSTEM and Administrators write), and the account's `forget-keys` removes nothing without it: it marks the folder as
+  moved (its `moved.json` refuses the folder's next start, server and watchdog alike, before either writes a byte) and
+  removes the old copies of the keys, the profile's `%LOCALAPPDATA%\AGMessage` and the folder's `secret.key`, each
+  checked, so two nodes never run with one Show Bus id and one certificate. Nothing is rotated (answer 42): what the
+  account that ran the portable copy held before the import, it knew; once its copies are gone it holds none of what
+  the installed node makes after. The import's machine event names who imported and what, never a path in a profile,
+  and the account by its SID and the name the machine gives it (the install record's, or Windows' own), never a name its
+  bundle carries.
 - A seat On stage holds messages and nothing else, on the server, for the admin seated there too: it is given no upload
   token, and an upload token is checked again when it is used, against the seat its page holds then; the admin's move of
   a page to a seat that shares no file ends its token in the same tick, so that page uploads nothing more with the one it

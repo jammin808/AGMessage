@@ -2,9 +2,10 @@
 ; files (installer/build-installer.ps1). It installs per machine into Program Files\AGMessage, and every machine-level act is
 ; one of app\machine.js's commands, run elevated with the node.exe this build lays down: the machine folder made race-free
 ; (prepare), whose AGMessage it is (whose), the checks (preinstall-check, upgrade-stop), the server task, the rules and the
-; record (install), the start and its verify (start), the first admin account (first-account), the way back (restore, then
-; the kept installer of the earlier build with /ROLLBACK) and the uninstall (uninstall). Nothing is written to the
-; registry or the machine folder here: the record is machine.js's alone, and so are the folders.
+; record (install), the portable import before the first start (import, with launch.js export and forget-keys run as the
+; account that started Setup), the start and its verify (start), the first admin account (first-account), the way back
+; (restore, then the kept installer of the earlier build with /ROLLBACK) and the uninstall (uninstall). Nothing is written
+; to the registry or the machine folder here: the record is machine.js's alone, and so are the folders.
 ;
 ; The build passes, from a numbered build only:
 ;   SemVer          the product's version, MAJOR.MINOR.PATCH                                0.6.0
@@ -99,6 +100,8 @@ const
   AdminRole = 'AGMessage''s admin on this PC is one Windows account, standard or administrator: it reads AGMessage''s admin token (Start > AGMessage > Show the admin token), with which it signs in at the laptop and makes the first admin account; it starts and stops AGMessage (Start AGMessage, Stop AGMessage...), and gives these rights to other accounts, takes them back or hands its admin over (Who may run AGMessage...). Windows asks an administrator''s approval again only to upgrade or uninstall AGMessage.';
   PublicWords = 'AGMessage answers phones, tablets and screens on this PC''s local subnet only, on Private and Domain networks. Windows makes every new network Public, so on fresh venue Wi-Fi nobody reaches AGMessage unless this is ticked, or that network is made Private in Windows'' settings.';
   AccountWords = 'AGMessage has no accounts yet. Make its first admin account now, to sign in with on AGMessage''s page; or leave these empty and make it later at Admin login on this PC, with the token (Start > AGMessage > Show the admin token).';
+  ImportWords = 'Before AGMessage first starts, it can take in a portable AGMessage folder''s halls, messages, accounts, screens and keys, so its guests, invites, pins and trusted devices hold. It takes only a folder last run by this same build: upgrade the portable folder first, start it once and stop it. It copies and never moves, then checks what it copied. Once that check passes, the old copies of its keys are removed from your Windows account (%LOCALAPPDATA%\AGMessage, which every portable AGMessage folder of this account uses) and from the folder (app\data\secret.key), and the folder is marked as moved: it no longer starts. Once AGMessage has started, no portable folder can be brought here.';
+  ImportHow = 'Stop the portable copy first (Ctrl+C in its window). The folder is read as your Windows account, whose profile holds its keys, and nothing in it changes until what was copied has been checked.';
 
 var
   MachineDir, NodeExe, MachineJs, OneTimeDir: String;
@@ -114,6 +117,10 @@ var
   AdminChoicePage, PublicPage: TInputOptionWizardPage;
   BusyPage, AccountPage: TInputQueryWizardPage;
   EarlierStopped, ReachedPostInstall, SetupFailed, NeedsAccount: Boolean;
+  StartedSid: String;
+  ImportChoicePage: TInputOptionWizardPage;
+  ImportDirPage: TInputDirWizardPage;
+  StartDeferred, ImportFinished, ImportOpen: Boolean;
 
 function MultiByteToWideChar(CodePage, Flags: Cardinal; Source: AnsiString; SourceLength: Integer; Target: String; TargetLength: Integer): Integer;
   external 'MultiByteToWideChar@kernel32.dll stdcall';
@@ -379,6 +386,7 @@ begin
     Exit;
   end;
   WhoseWords := Words;
+  StartedSid := JsonText(Json, 'startedSid');
   AdminAgreed := JsonTrue(Json, 'agree');
   AdminSid := JsonText(Json, 'admin');
   AdminName := JsonText(Json, 'adminName');
@@ -513,7 +521,19 @@ begin
   BusyPage := CreateInputQueryPage(PublicPage.ID, 'AGMessage is busy', 'It is in use now.', '');
   BusyPage.Add('Why stop it now (kept in AGMessage''s audit log):', False);
   BusyPage.Values[0] := Force;
-  AccountPage := CreateInputQueryPage(wpInfoAfter, 'The first admin account', 'Make AGMessage''s first admin account', AccountWords);
+  // The portable import, on a first install alone and before the first start: a choice, then the folder.
+  AfterID := wpInfoAfter;
+  if not Installed then
+  begin
+    ImportChoicePage := CreateInputOptionPage(wpInfoAfter, 'A portable AGMessage', 'Bring a portable AGMessage''s events here, before AGMessage first starts', ImportWords, True, False);
+    ImportChoicePage.Add('Start with no halls');
+    ImportChoicePage.Add('Import a portable AGMessage folder');
+    ImportChoicePage.SelectedValueIndex := 0;
+    ImportDirPage := CreateInputDirPage(ImportChoicePage.ID, 'Import a portable AGMessage', 'Choose its folder, then Next imports it', ImportHow, False, '');
+    ImportDirPage.Add('The portable AGMessage folder (it holds start-agmessage.bat):');
+    AfterID := ImportDirPage.ID;
+  end;
+  AccountPage := CreateInputQueryPage(AfterID, 'The first admin account', 'Make AGMessage''s first admin account', AccountWords);
   AccountPage.Add('User name:', False);
   AccountPage.Add('Your name:', False);
   AccountPage.Add('Password:', True);
@@ -540,8 +560,124 @@ begin
     Result := True
   else if (BusyPage <> nil) and (PageID = BusyPage.ID) then
     Result := not BusyNow()
+  else if (ImportChoicePage <> nil) and (PageID = ImportChoicePage.ID) then
+    Result := not StartDeferred and not ImportFinished
+  else if (ImportDirPage <> nil) and (PageID = ImportDirPage.ID) then
+    Result := not (StartDeferred or ImportFinished) or (ImportChoicePage.SelectedValueIndex <> 1)
   else if (AccountPage <> nil) and (PageID = AccountPage.ID) then
     Result := not NeedsAccount;
+end;
+
+// Whether the portable import is offered: a first install shown to a person, set up, before its first start, for the
+// account that started Setup, since its export runs as that account (whose profile holds the folder's keys) into that
+// account's own inbox, which AGMessage's admin alone has on a first install.
+function ImportOffered(): Boolean;
+begin
+  Result := not Installed and not Rollback and not WizardSilent and (StartedSid <> '') and (CompareText(StartedSid, AdminSid) = 0);
+  if not Installed and not Rollback and not WizardSilent and not Result then
+    Log('the portable import is not offered: AGMessage''s admin here is not the account that started Setup, as whom it runs');
+end;
+
+// The start and its verify, put off on a first install until the import page has been passed: the first admin account's
+// page follows when the proven server says it has none.
+function StartNow(): Boolean;
+var
+  Json, Words: String;
+  Code: Integer;
+begin
+  Result := True;
+  if not StartDeferred then Exit;
+  StartDeferred := False;
+  Code := Machine('start', MachineArgs() + ' --build ' + Arg('{#Full}'), Json, Words);
+  if Code = 0 then
+    NeedsAccount := JsonTrue(Json, 'needsAccount')
+  else
+  begin
+    SetupFailed := True;
+    SuppressibleMsgBox('AGMessage is installed and its server task registered, but it did not answer: ' + Words + #13#10#13#10 + 'Its server task starts it again with Windows: once the cause is cleared, restart this PC. Or uninstall AGMessage (its data is kept unless you choose otherwise) and install it again.', mbError, MB_OK, IDOK);
+  end;
+end;
+
+// The import's words on its page, its last words there, and said in a box as well.
+procedure ImportSays(const Words: String; Bad: Boolean);
+begin
+  ImportDirPage.SubCaptionLabel.Caption := Words;
+  if Bad then SuppressibleMsgBox(Words, mbError, MB_OK, IDOK) else SuppressibleMsgBox(Words, mbInformation, MB_OK, IDOK);
+end;
+
+// What an import left before its end cleared (machine.js import --step clear): its bundle holds the portable folder's keys,
+// so none of it stays in the account's inbox once the import has not gone on. What could not be removed is said.
+procedure ImportClear();
+var
+  Json, Words: String;
+begin
+  if not ImportOpen then Exit;
+  ImportOpen := False;
+  if Machine('import', '--step clear --for ' + Arg(AdminSid) + ' --machine ' + Arg(MachineDir), Json, Words) <> 0 then
+  begin
+    Log('the import''s folder was not cleared: ' + Words);
+    SuppressibleMsgBox(Words, mbError, MB_OK, IDOK);
+  end;
+end;
+
+// The portable import, before the first start (U14): the import folder made ready for the account that started Setup
+// (machine.js import --step stage), its export of the folder run as that account (launch.js export, by ExecAsOriginalUser:
+// its keys are in its profile), the bundle taken and verified elevated (--step take), the old copies of the keys removed
+// as that account once verified (launch.js forget-keys), and the end recorded (--step finish), whose words stay on the
+// page. An import that does not go on is cleared (--step clear), as is one Setup leaves before its end. True when it is
+// imported, every old copy went and the folder is marked; ImportFinished once it is imported at all.
+function RunImport(const Folder: String): Boolean;
+var
+  Json, Words, Said, Id, Launch: String;
+  Code: Integer;
+begin
+  Result := False;
+  ImportDirPage.SubCaptionLabel.Caption := 'Importing: a large folder takes a moment...';
+  Launch := Arg(ExpandConstant('{app}\app\launch.js'));
+  Code := Machine('import', '--step stage --for ' + Arg(AdminSid) + ' --machine ' + Arg(MachineDir) + ' --sys ' + Arg(ExpandConstant('{sys}')), Json, Words);
+  if Code <> 0 then
+  begin
+    ImportSays(Words, True);
+    Exit;
+  end;
+  ImportOpen := True;
+  if not ExecAsOriginalUser(ExpandConstant('{app}\node\node.exe'), Launch + ' export --source ' + Arg(Folder) + ' --machine ' + Arg(MachineDir) + ' --sys ' + Arg(ExpandConstant('{sys}')) + ' --port ' + IntToStr(Port), ExpandConstant('{app}\app'), SW_HIDE, ewWaitUntilTerminated, Code) then
+  begin
+    ImportClear();
+    ImportSays('The portable folder could not be read as the account that started this installer (' + SysErrorMessage(Code) + '): nothing was imported.', True);
+    Exit;
+  end;
+  Said := Utf8File(MachineDir + '\machine\inbox\' + AdminSid + '\import\export.json');
+  Id := JsonText(Said, 'id');
+  Words := JsonText(Said, 'words');
+  Log('launch.js export answered ' + IntToStr(Code) + ': ' + Words);
+  if (Code <> 0) or (Id = '') then
+  begin
+    ImportClear();
+    if Words = '' then Words := 'The export gave no answer (it ended with ' + IntToStr(Code) + '): nothing was imported.';
+    ImportSays(Words, True);
+    Exit;
+  end;
+  Code := Machine('import', '--step take --for ' + Arg(AdminSid) + ' --machine ' + Arg(MachineDir) + ' --app ' + Arg(ExpandConstant('{app}')) + ' --source ' + Arg(Folder) + ' --sys ' + Arg(ExpandConstant('{sys}')), Json, Words);
+  if Code <> 0 then
+  begin
+    ImportClear();
+    ImportSays(Words, True);
+    Exit;
+  end;
+  if not ExecAsOriginalUser(ExpandConstant('{app}\node\node.exe'), Launch + ' forget-keys --source ' + Arg(Folder) + ' --machine ' + Arg(MachineDir) + ' --sys ' + Arg(ExpandConstant('{sys}')) + ' --id ' + Arg(Id), ExpandConstant('{app}\app'), SW_HIDE, ewWaitUntilTerminated, Code) then
+    Log('launch.js forget-keys could not be run as the account that started Setup (' + SysErrorMessage(Code) + ')');
+  Code := Machine('import', '--step finish --for ' + Arg(AdminSid) + ' --machine ' + Arg(MachineDir) + ' --sys ' + Arg(ExpandConstant('{sys}')) + ' --id ' + Arg(Id), Json, Words);
+  ImportFinished := JsonTrue(Json, 'imported');
+  // finish clears the import's folder itself; one it could not finish is cleared here.
+  if ImportFinished then ImportOpen := False else ImportClear();
+  if ImportFinished then
+  begin
+    ImportDirPage.Edits[0].Enabled := False;
+    ImportDirPage.Buttons[0].Enabled := False;
+  end;
+  Result := Code = 0;
+  ImportSays(Words, not Result);
 end;
 
 // The first admin account, through machine.js first-account and the server's /api/setup: the user name, the name and the
@@ -618,6 +754,25 @@ begin
     end
     else
       Force := Trim(BusyPage.Values[0]);
+  end
+  else if (ImportChoicePage <> nil) and (CurPageID = ImportChoicePage.ID) then
+  begin
+    if ImportChoicePage.SelectedValueIndex = 0 then
+    begin
+      ImportClear();
+      Result := StartNow();
+    end;
+  end
+  else if (ImportDirPage <> nil) and (CurPageID = ImportDirPage.ID) then
+  begin
+    // Imported, its last words read: Next starts AGMessage. A refusal, or a verify that did not pass, keeps the page, the
+    // folder there to change or Back to start with no halls; an import whose old copies did not all go keeps it once.
+    if ImportFinished then
+      Result := StartNow()
+    else if RunImport(Trim(ImportDirPage.Values[0])) then
+      Result := StartNow()
+    else
+      Result := False;
   end
   else if (AccountPage <> nil) and (CurPageID = AccountPage.ID) then
     Result := MakeAccount();
@@ -757,6 +912,12 @@ begin
   if Rollback then Params := Params + ' --rollback';
   Code := Machine('install', Params, Json, Words);
   PartsSet := Code = 0;
+  // A first install shown to a person starts once its import page is passed: the import comes before the first start.
+  if PartsSet and ImportOffered() then
+  begin
+    StartDeferred := True;
+    Exit;
+  end;
   if PartsSet then
   begin
     WizardForm.StatusLabel.Caption := 'Starting AGMessage and waiting for it to answer...';
@@ -794,6 +955,15 @@ begin
   begin
     Machine('start', MachineArgs(), Json, Words);
     Log('the install did not finish: the earlier build was started again');
+  end;
+  // An import Setup left before its end leaves no bundle (it holds the portable folder's keys) in the account's inbox.
+  ImportClear();
+  // A first install whose import page was never passed starts AGMessage now, as its server task would at the next boot.
+  if StartDeferred then
+  begin
+    StartDeferred := False;
+    Machine('start', MachineArgs() + ' --build ' + Arg('{#Full}'), Json, Words);
+    Log('the import page was not passed: AGMessage was started with what its folders hold');
   end;
   if (not ReachedPostInstall) and (OneTimeDir <> '') and DirExists(OneTimeDir) then
     DelTree(OneTimeDir, True, True, True);

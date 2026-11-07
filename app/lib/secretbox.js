@@ -110,15 +110,26 @@ function seal(plain) {
   return PREFIX + Buffer.concat([iv, c.getAuthTag(), body]).toString('base64');
 }
 
-/** The plain key, or '' when it isn't sealed, was sealed on another machine, or this run has no machine key. */
-function open(stored) {
-  if (typeof stored !== 'string' || !stored.startsWith(PREFIX)) return '';
+/**
+ * A sealed value opened with a machine key given (32 bytes): the plain value, or '' when it isn't sealed or that key did
+ * not seal it. A reader that is not this run's (an import's verify of another folder's keys) opens with the key it read.
+ */
+function openWith(key, stored) {
+  if (typeof stored !== 'string' || !stored.startsWith(PREFIX) || !Buffer.isBuffer(key) || key.length !== 32) return '';
   try {
     const raw = Buffer.from(stored.slice(PREFIX.length), 'base64');
-    const d = crypto.createDecipheriv('aes-256-gcm', machineKey(), raw.subarray(0, 12));
+    const d = crypto.createDecipheriv('aes-256-gcm', key, raw.subarray(0, 12));
     d.setAuthTag(raw.subarray(12, 28));
     return Buffer.concat([d.update(raw.subarray(28)), d.final()]).toString('utf8');
   } catch { return ''; }
+}
+
+/** The plain key, or '' when it isn't sealed, was sealed on another machine, or this run has no machine key. */
+function open(stored) {
+  if (typeof stored !== 'string' || !stored.startsWith(PREFIX)) return '';
+  let key;
+  try { key = machineKey(); } catch { return ''; }   // this run has no machine key: nothing opens
+  return openWith(key, stored);
 }
 
 const isSealed = (s) => typeof s === 'string' && s.startsWith(PREFIX);
@@ -154,4 +165,4 @@ function signingKey() { return signingKeyFrom(deriveFrom(machineKey(), SIGN)); }
 /** For tests: forget the machine key, why there was none and every key derived from it (after pointing AGM_KEY_DIR elsewhere). */
 function _reset() { cached = null; problem = null; making = true; derived.clear(); }
 
-module.exports = { seal, open, isSealed, keyDir, hasKey, keyProblem, keyState, deferMaking, allowMaking, derive, deriveFrom, signingKey, signingKeyFrom, _reset };
+module.exports = { seal, open, openWith, keyFrom: keyOf, isSealed, keyDir, hasKey, keyProblem, keyState, deferMaking, allowMaking, derive, deriveFrom, signingKey, signingKeyFrom, _reset };

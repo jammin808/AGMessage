@@ -84,7 +84,6 @@ const READINGS = [
     what: 'over-the-shoulder elevation: U.5.1\'s two readings of the account that started Setup; the user\'s own export (U14) run through `ExecAsOriginalUser` into the laptop\'s admin\'s inbox; an elevated read of another account\'s `%LOCALAPPDATA%\\AGMessage`',
     mark: 'both readings name the standard account',
     miss: 'the admin page asks the person to choose, as U.5.1 says',
-    needs: ['U14 (#75): the export'],
   },
   {
     id: 'R7',
@@ -581,6 +580,28 @@ function judgeR12(r) {
   return verdict(n >= 2 && z === 1 ? 'recorded' : 'missed', parts.join('; '), facts);
 }
 
+/**
+ * R6 (U14 landed): what a runner takes of it. The export as a standard account into its own import folder (its exit code
+ * and the words it left there), and the elevated import's take of that bundle (verified or not); an elevated read of that
+ * account's %LOCALAPPDATA%\AGMessage. The two readings of the account that started Setup need a desktop where an
+ * administrator approves another account's elevation, which no runner has, so the mark is never judged here: open when the
+ * export and the take both did their part, missed when either did not.
+ */
+function judgeR6(r) {
+  const ex = r.export && typeof r.export === 'object' ? r.export : null;
+  const facts = { sid: String(r.sid || ''), stage: r.stage || null, export: ex, take: r.take || null, profileRead: r.profileRead || null };
+  if (r.stage && r.stage.code !== 0) return verdict('missed', 'the import was not made ready for a standard account (machine.js import --step stage ended with ' + r.stage.code + ': ' + String(r.stage.words || '').slice(0, 200) + ')', facts);
+  if (!ex || !Number.isInteger(ex.code)) return verdict('not run', 'the export as a standard account was not taken' + (ex && ex.err ? ' (' + String(ex.err).slice(0, 200) + ')' : r.why ? ' (' + String(r.why).slice(0, 200) + ')' : ''), facts);
+  const exported = ex.code === 0;
+  const taken = !!(r.take && r.take.verified === true);
+  const read = r.profileRead && r.profileRead.ok === true ? 'read the file it made' : 'was refused (' + String((r.profileRead && r.profileRead.code) || 'not asked') + ')';
+  const words = 'the export, run as a standard account, ' + (exported ? 'wrote its bundle into its own import folder' : 'did not: ' + String(ex.words || 'no words').slice(0, 200))
+    + '; the elevated import ' + (taken ? 'read and verified it' : 'did not take it' + (r.take ? ': ' + String(r.take.words || '').slice(0, 200) : ''))
+    + '; an elevated read of that account\'s %LOCALAPPDATA%\\AGMessage ' + read
+    + '. The two readings of the account that started Setup need an administrator approving another account\'s elevation at a desktop, which no runner has: the show laptop\'s';
+  return verdict(exported && taken ? 'open' : 'missed', words, facts);
+}
+
 /** R13: GitHub's release answer read from a SYSTEM task; the offline half is U18's words. */
 function judgeR13(r) {
   const assets = Array.isArray(r.assets) ? r.assets : [];
@@ -625,7 +646,7 @@ function judgeR3prime(r) {
   return verdict('missed', saved + ' of ' + list.length + ' saved: the release notes name the failing case (' + why + ')', facts);
 }
 
-const JUDGES = { R1: judgeR1, R2: judgeR2, 'R3′': judgeR3prime, R4: judgeR4, R5: judgeR5, R7: judgeR7, R8: judgeR8, R9: judgeR9, R10: judgeR10, R11: judgeR11, R12: judgeR12, R13: judgeR13 };
+const JUDGES = { R1: judgeR1, R2: judgeR2, 'R3′': judgeR3prime, R4: judgeR4, R5: judgeR5, R6: judgeR6, R7: judgeR7, R8: judgeR8, R9: judgeR9, R10: judgeR10, R11: judgeR11, R12: judgeR12, R13: judgeR13 };
 
 /**
  * Every reading's verdict on what the lane measured (`raw`, tools/readings-take.js's record; anything else reads as
