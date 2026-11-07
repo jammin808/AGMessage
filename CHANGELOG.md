@@ -6621,6 +6621,10 @@ next push; nothing of it has run on Windows yet)
   the context, the hello and the AI's brief carry none of it.
 
 **Fixed**
+- The installer's build accepts the installer it built. `installer/build-installer.ps1` reads the version back from the
+  file it compiled and compares it with the build's, and read its strings with the padding Windows' version resource
+  keeps after them, so CI's first build of it (run 96) refused "0.6.0.96" padded with blanks as not "0.6.0.96". The
+  padding (blanks or NULs) is cut before the two are compared; a version that differs is still refused.
 - The browser smoke's ＋ steps on the ❝ Quote tab say what the tab stood on when its Show was not ready in time, and set
   ＋ on or off rather than toggling it. One local run found Show not ready 8 s after a reload (the next two runs did
   not), and a step after it was then handed ＋ the wrong way round; the next time, the report names the box, its pane,

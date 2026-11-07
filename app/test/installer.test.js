@@ -785,7 +785,11 @@ test('the installer\'s defines: read from a stage\'s build.json by lib/version.j
   const usedInIss = [...new Set([...ISS.matchAll(/\{#(\w+)\}/g)].map((m) => m[1]))].sort();
   assert.deepEqual(passed, usedInIss, 'every {#…} the script uses is a define the build passes');
   assert.match(build, /foreach \(\$f in \$d\.LeftOut\) \{/, 'the .bat files taken out of the payload');
-  assert.match(build, /if \(\$info\.FileVersion -ne \$d\.FileVersion -or \$info\.ProductVersion -ne \$d\.Full\) \{/, 'the file read back says the build');
+  assert.match(build, /if \(\$fileVersion -ne \$d\.FileVersion -or \$productVersion -ne \$d\.Full\) \{/, 'the file read back says the build');
+  // Read back as the resource holds them, padded with spaces or NULs: the padding is cut before they are compared.
+  for (const [name, field] of [['fileVersion', 'FileVersion'], ['productVersion', 'ProductVersion']]) {
+    assert.ok(build.includes('$' + name + ' = ([string]$info.' + field + ") -replace '[\\x00\\s]+$', ''"), name + ' cut of its padding');
+  }
   // The portable build lays every file the installer needs into the stage: each one of app\ by name, the rest by the
   // folder copied whole or the file copied to the stage's top. machine.js among them, which the installer and its
   // uninstaller run.

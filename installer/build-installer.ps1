@@ -40,10 +40,13 @@ $Out = (Resolve-Path $Out).Path
 if ($LASTEXITCODE -ne 0) { throw "ISCC failed ($LASTEXITCODE)" }
 $exe = Join-Path $Out ('AGMessage-Setup-' + $d.Label + '-unsigned.exe')
 if (-not (Test-Path -LiteralPath $exe)) { throw "ISCC wrote no $exe" }
-# The file says the build it was compiled for: its version, read back from the file itself.
+# The file says the build it was compiled for: its version, read back from the file itself. A version resource's strings
+# are read with the padding the resource holds after them (spaces, or NULs), which says nothing of the version: it is cut.
 $info = (Get-Item -LiteralPath $exe).VersionInfo
-if ($info.FileVersion -ne $d.FileVersion -or $info.ProductVersion -ne $d.Full) {
-    throw "the installer's version is $($info.FileVersion) ($($info.ProductVersion)); this build is $($d.FileVersion) ($($d.Full))"
+$fileVersion = ([string]$info.FileVersion) -replace '[\x00\s]+$', ''
+$productVersion = ([string]$info.ProductVersion) -replace '[\x00\s]+$', ''
+if ($fileVersion -ne $d.FileVersion -or $productVersion -ne $d.Full) {
+    throw "the installer's version is $fileVersion ($productVersion); this build is $($d.FileVersion) ($($d.Full))"
 }
 
 # The payload's sums: every file the installer lays down, by its path under the install folder ('/' between folders).
