@@ -6704,6 +6704,119 @@ nothing of it run on Windows yet)
 - The papers: `README.md`, `README.txt` (after the event), `docs/INSTALL.md` (Events and their archives),
   `docs/ACCOUNTS.md`, `docs/DESIGN.md` and `CLAUDE.md`.
 
+**An upgrade the laptop's admin or a granted account starts needs no administrator, checked against its release** (the
+plan's Part 6, unit U18, with the owner's answers 36 and 38; the code and its tests on Linux, GitHub's answers stood in
+for; nothing of it has run on Windows yet, and until immutable releases are turned on (unit U16, #78) every check is
+refused, fail closed)
+- **Upgrade AGMessage…** (Start → AGMessage; `launch.js upgrade`, new), for the laptop's admin and an account given
+  `upgrade`: the person's own control task looks up AGMessage's newest release on GitHub and says whether it is newer
+  ("The newest release is AGMessage 0.6.1 (AGMessage-Setup-0.6.1-unsigned.exe, 38 MB); this PC has AGMessage 0.6.0 (build
+  41)."), a look that changes nothing and writes no event; Enter installs it, or the person types the full path of an
+  installer they downloaded (`AGMessage-Setup-<version>-unsigned.exe`, quoted as a file dropped into the window is),
+  which their console copies into their inbox under that name, saying its SHA-256. A look refused for the newest release
+  alone (not immutable, no installer in it, GitHub's own refusal) says why and still takes a named installer; one
+  refused for no internet, no repository named or an install record that names too little ends there. A busy AGMessage
+  is upgraded only with a reason the person types, asked for and sent again with it. The console says the last upgrade's
+  or go back's outcome first, with the last lines of its installer's log when it was not done.
+- **The control task's checks, as SYSTEM, in the plan's order** (`machine.js control`'s `upgrade`), under
+  `machine\work\upgrade.lock` from the read of what is under way to the hand-off (made only where none is; one older than
+  15 minutes, past the control task's 10, taken over), so two control tasks never both start a runner: 1. the file staged in
+  a new folder of `machine\staged\` (SYSTEM and Administrators only): a named one copied by its bytes from the inbox once
+  `lstat` shows a file of its own (a link, a hard link, anything else, an empty one or one over 512 MB refused, one whose
+  open is not the file `lstat` saw or whose size changes refused, and the inbox's file removed whatever happens), the
+  newest release's asset downloaded straight there (through GitHub's API address and its redirect to GitHub's storage,
+  https only, never past the size the release gives, and within 7 minutes in all, so the check ends within its control
+  task's 10 and says why); only the staged copy is hashed or run. 2. The release, asked of
+  `api.github.com` for the repository this build was made in (`build.json` gains `repo` at stamp time, from
+  `GITHUB_REPOSITORY`; a build that names none checks nothing) by the version the file's name or the newest release's tag
+  carries: it must be that tag of that repository (its API address, its page and the asset's download address all under
+  it), published, `immutable: true`, with one asset of the file's exact name, uploaded whole, whose `digest` is
+  `sha256:` and the staged copy's SHA-256. 3. Newer than the record's `SemVer`, by SemVer (the installer's own version
+  check refuses an older or equal build a second time). 4. Not busy, or a reason typed. Refused with words: "AGMessage
+  could not check this installer against its release (no internet). Run it yourself: Windows will ask for an
+  administrator's approval."; a release of another repository, a draft, not immutable, no asset of that name or no
+  digest; "This file is not the release's. Do not run it."; not newer; busy without a reason; an upgrade or a go back
+  being checked or under way; an install record that names no port or no install folder. Each refusal is one
+  `machine.upgrade.refused` event (who, and why), the staged copy removed. An administrator's elevated console may
+  upgrade to the newest release; an installer it names is its own to run.
+- **The run, handed to a runner** (`machine.js upgrade --step run`, new): nothing may run from Program Files\AGMessage
+  while an installer replaces it, and the control task and the person's console both run its `node.exe`. So once the
+  checks pass, the control task writes the plan in a new folder of `machine\work\` first (from then on the folder reads
+  as a runner's), copies `node.exe` and `machine.js` beside it, and runs it there as a task of its own,
+  `\AGMessage\Upgrade-<id>` (SYSTEM, once, its descriptor SYSTEM's and Administrators' alone, no time limit), then ends:
+  a task of its own is a job of its own, since Task Scheduler ends a task's job at its time limit (the control task's
+  10 minutes) and a child started detached would stay in it. An elevated console's runner is started detached, as that
+  administrator. Its answer says what was checked and that the upgrade begins once the window has closed (press Enter).
+  The runner refuses a plan naming an installer anywhere but the release's name in one folder of its own
+  `machine\staged\` or the kept installer of its build; waits up to 10 minutes for every program of {app} but the
+  server's own to end (a console still open past that is refused, nothing changed); reads the staged copy's SHA-256
+  again; and runs the staged installer `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /UPGRADEBY=<SID>`, with
+  `/FORCE="<reason>"` when one was typed, its log in the runner's own folder (SYSTEM and Administrators only, never a
+  file another account could place), on its own and never killed (Inno's rollback does not run on a kill); the
+  installer follows its own order (the version check, `preinstall-check`, `upgrade-stop`, the files, `install`, the
+  verify, and the way back by itself).
+- **Each outcome one event, once it is seen**: the runner reads the installer's exit code, what the install record names
+  after it and, when it did not reach its build, what answers on the port, and only then appends `machine.upgrade` (an
+  exit of 0 with the record naming the build asked for: who, the builds from and to as the records name them, the
+  installer's SHA-256) or `machine.upgrade.refused` (anything else, said from what was seen, never from the exit code
+  alone). Its outcome goes into the person's outbox ("Upgraded: AGMessage 0.6.1 (build 52) is installed on this PC, and
+  it answers.", or "The installer of 0.6.1 ended with 3: the build it laid down did not start. The install record names
+  AGMessage 0.6.0 (build 41), the build before; AGMessage … answers on port 3023."), written after the control task's
+  own answer so that one never lands over it, with the log's last lines; `ended.json` beside the plan.
+- **One at a time**: a runner is under way while its own copy of `node.exe` runs from its folder (or for its first 2
+  minutes), however long it runs; one whose end is written is swept with its task and its staged copy; one whose program
+  is gone with no end written died, and the next ask says its outcome by its one event, from what the record names,
+  then sweeps it. The installer refuses while another AGMessage installer runs on the PC, in any session
+  (`Global\AGMessageSetup`, checked and made in `InitializeSetup`; its own way back's `/ROLLBACK` run excepted).
+- **`/UPGRADEBY=<SID>`** (the installer, new): accepted only from SYSTEM, for an account the install record gives
+  `upgrade` (`machine.js preinstall-check --upgrade-by`, which every check of the installer then carries, refused
+  otherwise with words); the stop it asks for names that account ("LAPTOP\ben, by a checked upgrade").
+- **Go back to build N** (Start → AGMessage, on an upgraded PC: the item names the build the upgrade replaced, an older
+  build's item removed at each install; `launch.js back`, new): the record's `Previous`, gone back to once its build
+  number is typed, and what it costs said first (the data laid back as it was when the newer build was installed; what
+  was written since is not kept, though the audit log is). The control task checks that `Previous` is the build asked
+  for, that its installer is kept in `{app}\installers\` (laid there by an elevated or a checked install, under Program
+  Files, so no network and no check), that the backup the upgrade from it made is kept, and how busy AGMessage is; the
+  runner reads the kept installer's SHA-256, stops AGMessage at loopback (reason `back`; it saves), lays that backup back
+  (`machine.js restore`) and runs the kept installer `/ROLLBACK /UPGRADEBY=<SID>`, its outcome said from what was seen,
+  its own steps first (a kept installer refusing once the data is laid back says AGMessage is stopped with its data laid
+  back, and what starts it). An administrator may go back too.
+- **`machine.js restore` keeps the machine events' place** (`settings.json`'s `machineSeq`) when the settings it lays
+  back are behind it, written beside them and renamed over them, so the backup's own file is never changed: the audit
+  log is never rolled back, and the server looks past its place only in the log's newest 500 rows, so the earlier
+  build's first start would otherwise write every machine event since the backup a second time. Both the installer's own
+  way back and Go back to build N lay their backup back through it.
+- **The installer's words for the laptop's admin** now say that Windows asks an administrator's approval again only to
+  uninstall AGMessage, or to upgrade it with an installer it cannot check (Upgrade AGMessage… needs none).
+- **The readings lane**: R13 takes its offline half: the bundle's own `machine.js` asking for the release as a checked
+  upgrade asks, from a copy of the bundle's `node.exe` that an outbound rule of the firewall blocks, run by a task with a
+  control task's principal, and the words it gives; the rule and the task removed at the end. No reading waits for a
+  unit now.
+- Held on Linux (`test/upgrade.test.js`, new, with `test/fixtures/github-release.json`, GitHub's answer for one release
+  in its REST API's shape; `test/control.test.js`, `test/machine.test.js`, `test/installer.test.js`,
+  `test/readings.test.js`, `test/version.test.js`, `test/loads.test.js`): the request's shapes; the release judged; a
+  named installer staged, checked and handed to a runner's task from its definition, which waits for the console, runs
+  it from `machine\staged\` with `/UPGRADEBY`, its log in its own folder, and appends one `machine.upgrade` once the
+  record names the build; a file changed in the inbox after it was staged changing nothing that runs; no network,
+  another repository, a moved one, not immutable, no asset of that name, a digest that differs, not newer, busy without a
+  reason, a link, no repository named and a record naming no port or folder, each refused with one
+  `machine.upgrade.refused` event and nothing left staged; the newest release looked up (no event), downloaded (a slow
+  one bounded) and checked, and refused before any download when not newer; who may, and an elevated console's runner
+  started on its own; a plan naming an installer anywhere else refused; Go back's checks, its runner's order and each of
+  its ends said from what was seen (a kept installer refusing after the lay back, its log's last lines); a restore
+  keeping the machine events' place, with no event written twice past 500 other rows; the runner's own refusals; one at
+  a time (the lock, a runner's program, one that died said by its event, the sweeps); an installer that ends without its
+  build; the last answer written after the control task's; the installer's one-at-a-time mutex; `/UPGRADEBY` from SYSTEM
+  alone; an https GET against a local server (a redirect to http refused, the bounds, a silent server and a slow one);
+  and `launch.js upgrade` (a refused look still taking a named file) and `back` as the person. What only a Windows run
+  proves: SYSTEM running the control task and the runner's own task, its job outliving the control task's and the
+  installer outliving the runner, Inno taking `/UPGRADEBY` and its mutex across sessions and laying the files down under
+  a runner, GitHub's answer and a download from the show laptop's network (R13, lab 7, and the installer's life cycle,
+  U16); no reading of the lane reads the runner's task yet.
+- The papers: `README.md`, `README.txt` (Upgrading an installed AGMessage), `docs/INSTALL.md` (The checked upgrade, and
+  Go back to build N), `docs/DESIGN.md`, `SECURITY.md` and `CLAUDE.md`. `docs/NODES.md` is unchanged: nothing of it
+  reaches the wire, the context or the AI's brief.
+
 **Fixed**
 - The portable import names a part of its bundle by the part's own name when it refuses one ("0000021.part is not a
   part the export wrote (a link, or not a file)"). It named the part by its whole path under the account's inbox, and the

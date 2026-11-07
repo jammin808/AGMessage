@@ -94,11 +94,12 @@ function prepared() {
 
 // ---------------------------------------------------------------- the command line and its exit codes
 
-test('machine.js knows its commands, each with its own options; a later unit\'s verb names it; an unknown word, an option of another verb and one given twice are refused', () => {
-  assert.deepEqual(machine.VERBS, ['prepare', 'install', 'uninstall', 'preinstall-check', 'upgrade-stop', 'status', 'restore', 'whose', 'start', 'first-account', 'control', 'import']);
-  assert.deepEqual(machine.LATER, { upgrade: 'U18' }, 'import is built (U14); upgrade is U18\'s');
+test('machine.js knows its commands, each with its own options; an unknown word, an option of another verb and one given twice are refused', () => {
+  assert.deepEqual(machine.VERBS, ['prepare', 'install', 'uninstall', 'preinstall-check', 'upgrade-stop', 'status', 'restore', 'whose', 'start', 'first-account', 'control', 'import', 'upgrade']);
+  assert.deepEqual(machine.LATER, {}, 'every unit\'s verb is built: upgrade is U18\'s, the last');
   assert.deepEqual(machine.parse(['prepare', '--machine', W, '--sys', SYS]), { verb: 'prepare', opts: { '--machine': W, '--sys': SYS } });
-  for (const [verb, unit] of Object.entries(machine.LATER)) assert.equal(machine.parse([verb]).problem, 'machine.js ' + verb + ' is built by ' + unit + '; it is not one of this build\'s commands (' + machine.VERBS.join(', ') + ').');
+  assert.deepEqual(machine.parse(['upgrade', '--step', 'run', '--plan', W, '--sys', SYS]).opts, { '--step': 'run', '--plan': W, '--sys': SYS });
+  assert.equal(machine.parse(['upgrade', '--for', 'x']).problem, '"--for" is not an argument machine.js upgrade knows.', 'the runner takes its plan, never an account');
   assert.match(machine.parse(['zzz']).problem, /is not one of machine\.js's commands/);
   assert.match(machine.parse(['toString']).problem, /is not one of machine\.js's commands/, 'an Object property is no verb');
   assert.match(machine.parse([]).problem, /machine\.js takes a command/);
@@ -964,7 +965,7 @@ test('launch.js status: the person\'s reader, each fact read, refused or absent 
   assert.equal(none.facts.lastStop.read, 'absent');
 });
 
-test('launch.js knows serve, token, status, open, start, stop, rights, export and forget-keys; a later unit\'s verb names its unit', () => {
+test('launch.js knows serve, token, status, open, start, stop, upgrade, back, rights, export and forget-keys; each takes its folders', () => {
   const said = [];
   const out = (t) => said.push(t);
   assert.equal(launch.main([], { out }), 64);
@@ -972,8 +973,8 @@ test('launch.js knows serve, token, status, open, start, stop, rights, export an
   assert.equal(launch.main(['serve', '--data', '/tmp/x'], { out }), 64);
   assert.equal(launch.main(['start'], { out }), 64);
   assert.equal(launch.main(['stop', '--machine', '/m', '--sys', 'System32'], { out }), 64);
-  assert.match(said[0], /launch\.js knows serve, token, status, open, start, stop, rights, export or forget-keys\./);
-  assert.match(said[1], /launch\.js upgrade is built by U18/);
+  assert.match(said[0], /launch\.js knows serve, token, status, open, start, stop, upgrade, back, rights, export or forget-keys\./);
+  assert.match(said[1], /launch\.js upgrade needs --machine <folder>/);
   assert.match(said[2], /launch\.js serve needs --uploads/);
   assert.match(said[3], /launch\.js start needs --machine <folder>/);
   assert.match(said[4], /launch\.js stop needs --sys <folder>, the System32 folder named from its drive \(C:\\Windows\\System32\): whoami\.exe and schtasks\.exe are run from it\./);

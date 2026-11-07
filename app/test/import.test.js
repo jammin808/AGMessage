@@ -759,7 +759,7 @@ test('the profile\'s key folder is where a portable copy keeps it; the import\'s
   assert.match(launch.parse(['forget-keys', '--source', src, '--machine', m, '--sys', SYS, '--id', 'nothex']).problem, /needs --id <the import's id>/);
   assert.match(launch.parse(['forget-keys', '--source', src, '--machine', m, '--sys', SYS, '--port', '1']).problem, /"--port" is not an argument launch\.js forget-keys knows/);
   assert.match(launch.parse(['export', '--source', src, '--machine', m, '--sys', SYS, '--port', '70000']).problem, /a port from 1 to 65535/);
-  assert.equal(launch.parse(['upgrade']).problem.includes('export or forget-keys'), true, 'an unknown verb\'s words name the import\'s two');
+  assert.equal(launch.parse(['reboot']).problem.includes('export or forget-keys'), true, 'an unknown verb\'s words name the import\'s two');
   // machine.js import: its options, and a step it does not know refused (64).
   assert.deepEqual(machine.parse(['import', '--step', 'take', '--for', ANA, '--machine', m, '--app', src, '--source', src]).opts['--step'], 'take');
   assert.equal(machine.parse(['import', '--port', '1']).problem, '"--port" is not an argument machine.js import knows.');

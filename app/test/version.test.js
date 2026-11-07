@@ -114,13 +114,25 @@ test('stamp-build: numbers a CI build, names a release only for its own tag, ref
   fs.copyFileSync(path.join(ROOT, 'tools', 'stamp-build.js'), path.join(tree, 'tools', 'stamp-build.js'));
   fs.copyFileSync(path.join(ROOT, 'app', 'lib', 'version.js'), path.join(tree, 'app', 'lib', 'version.js'));
   fs.writeFileSync(path.join(tree, 'app', 'package.json'), JSON.stringify({ version: '1.2.3', agmessage: { runBase: 100 } }));
-  const env = { ...process.env, GITHUB_STEP_SUMMARY: '', GITHUB_OUTPUT: '' };
+  // The repository the build was made in, as GitHub names it to the job (GITHUB_REPOSITORY): the stamp carries it.
+  const env = { ...process.env, GITHUB_STEP_SUMMARY: '', GITHUB_OUTPUT: '', GITHUB_REPOSITORY: 'jammin808/AGMessage' };
   const run = (...args) => spawnSync(process.execPath, [path.join(tree, 'tools', 'stamp-build.js'), ...args], { encoding: 'utf8', env });
   const stamp = () => JSON.parse(fs.readFileSync(path.join(tree, 'app', 'build.json'), 'utf8'));
 
   let r = run('--run', '117', '--commit', 'ABCDEF1234567', '--ref', 'refs/heads/main');
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual({ ...stamp(), builtAt: '' }, { version: '1.2.3', build: 17, installVersion: '1.2.17', commit: 'abcdef1234567', channel: 'dev', builtAt: '' });
+  assert.deepEqual({ ...stamp(), builtAt: '' }, { version: '1.2.3', build: 17, installVersion: '1.2.17', commit: 'abcdef1234567', channel: 'dev', builtAt: '', repo: 'jammin808/AGMessage' });
+  // With none named (a stamp made by hand), none is written; one that is not owner/name is refused, nothing stamped.
+  r = spawnSync(process.execPath, [path.join(tree, 'tools', 'stamp-build.js'), '--run', '117', '--commit', 'abcdef1'], { encoding: 'utf8', env: { ...env, GITHUB_REPOSITORY: '' } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(stamp().repo, undefined, 'no repository named, none stamped');
+  fs.rmSync(path.join(tree, 'app', 'build.json'));
+  r = spawnSync(process.execPath, [path.join(tree, 'tools', 'stamp-build.js'), '--run', '117', '--commit', 'abcdef1'], { encoding: 'utf8', env: { ...env, GITHUB_REPOSITORY: 'https://github.com/x/y' } });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /GITHUB_REPOSITORY "https:\/\/github\.com\/x\/y" is not a repository \(owner\/name\); nothing was stamped/);
+  assert.ok(!fs.existsSync(path.join(tree, 'app', 'build.json')));
+  r = run('--run', '117', '--commit', 'ABCDEF1234567', '--ref', 'refs/heads/main');
+  assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /1\.2\.3-dev\.17\+abcdef1/);
   assert.match(run('--print').stdout, /^1\.2\.3-dev\.17\+abcdef1/, 'the stamped tree reads as that build');
 

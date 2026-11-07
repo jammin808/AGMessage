@@ -128,7 +128,6 @@ const READINGS = [
     what: 'from a control task as SYSTEM, `api.github.com`\'s release answer for a published tag: `immutable` and each asset\'s `digest` read; with no network, the words',
     mark: 'recorded',
     miss: 'U18\'s offline words are the ones shown',
-    later: ['U18 (#77): the words with no network'],
   },
 ];
 
@@ -602,15 +601,26 @@ function judgeR6(r) {
   return verdict(exported && taken ? 'open' : 'missed', words, facts);
 }
 
-/** R13: GitHub's release answer read from a SYSTEM task; the offline half is U18's words. */
+/**
+ * R13's offline half (pure): the words the bundle's own check showed with its node.exe kept off the network, or why
+ * they were not taken; the outbound rule not holding (GitHub answered) is said, never taken for the words.
+ */
+function offlineWords(off) {
+  if (!off || typeof off !== 'object') return 'with no network, not taken';
+  if (off.why === 'offline') return 'with no network, the words: "' + String(off.words || '').slice(0, 300) + '" (' + String(off.error || 'no answer').slice(0, 60) + ')';
+  if (off.why) return 'with no network, not taken: the outbound rule did not keep GitHub away (' + (off.status ? 'HTTP ' + off.status : String(off.error || 'no answer').slice(0, 60)) + ')';
+  return 'with no network, not taken (' + String(off.error || 'no record').slice(0, 200) + ')';
+}
+/** R13: GitHub's release answer read from a SYSTEM task, and with no network the words a checked upgrade shows (U18). */
 function judgeR13(r) {
   const assets = Array.isArray(r.assets) ? r.assets : [];
-  const facts = { tag: r.tag || '', status: r.status, immutable: r.immutable, assets, ms: r.ms, failure: r.failure || '' };
+  const off = r.offline && typeof r.offline === 'object' ? { why: String(r.offline.why || ''), words: String(r.offline.words || '').slice(0, 400), error: String(r.offline.error || '').slice(0, 200), status: Number(r.offline.status) || 0 } : null;
+  const facts = { tag: r.tag || '', status: r.status, immutable: r.immutable, assets, ms: r.ms, failure: r.failure || '', offline: off };
   if ((r.status === 403 || r.status === 429) && r.rateRemaining === 0) return verdict('not run', 'GitHub refused this runner\'s address for its rate limit (HTTP ' + r.status + '), which says nothing of the show laptop\'s', facts);
   if (r.status !== 200) return verdict('missed', 'GitHub\'s answer was not read from the SYSTEM task (' + (r.status ? 'HTTP ' + r.status : String(r.failure || 'no answer')) + ')', facts);
   const digests = assets.filter((a) => a && /^sha256:[0-9a-f]{64}$/.test(String(a.digest || ''))).length;
   const imm = r.immutable === true ? 'immutable' : r.immutable === false ? 'not immutable (U16, #78, turns immutable releases on)' : 'no `immutable` in the answer';
-  return verdict('recorded', 'read in ' + ms(r.ms) + ': ' + (r.tag || 'the release') + ' ' + imm + ', ' + digests + ' of ' + assets.length + ' assets with a SHA-256 digest; with no network, the words wait for U18 (#77)', facts);
+  return verdict('recorded', 'read in ' + ms(r.ms) + ': ' + (r.tag || 'the release') + ' ' + imm + ', ' + digests + ' of ' + assets.length + ' assets with a SHA-256 digest; ' + offlineWords(off), facts);
 }
 
 /**

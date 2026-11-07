@@ -420,6 +420,35 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   done with words saying the log will not show it. A bug in `machine.js` runs as SYSTEM: it requires
   Node's built-ins only, and its refusals are tests (`test/control.test.js`). Which descriptor rights let a standard
   account run its task on demand, and that another is refused, is the Windows readings lane's R11, not yet run.
+- **The checked upgrade** (`docs/INSTALL.md`, The checked upgrade, and Go back to build N). SYSTEM runs an installer at a
+  person's request only after its control task has checked it against its release on GitHub, and only one newer than
+  the installed build: whoever controls an account given `upgrade` can install any newer genuine release, and nothing
+  else. AGMessage is unsigned (answer 36), so the release's published digest takes a signature's place: the release must
+  be the tag the file's name (or the newest release's tag) names, of the repository the build was stamped from
+  (`build.json` `repo`), its addresses all under that repository, published, `immutable: true` (its assets can no longer be
+  modified or deleted, nor its tag moved), with one asset of the file's exact name whose `digest` is `sha256:` and the
+  staged copy's SHA-256; until immutable releases are turned on (unit U16), every check is refused, fail closed. GitHub is
+  asked over https with Node's own certificate authorities and no token, and a download follows redirects to https only,
+  never past the size the release gives. A named installer is taken from the account's inbox only when `lstat` shows a
+  file of its own (no link, no hard link, the file opened the one `lstat` saw, of its size), copied by its bytes into
+  `machine\staged\` (SYSTEM and Administrators only) and the inbox's file removed; only that copy is hashed, and its
+  SHA-256 read again before it runs, so a file changed in the inbox changes nothing that runs. Newer only, checked twice
+  (by the control task against the record's version, and by the installer's own version check), since an older signed or
+  checked installer run as SYSTEM is a known way back to a fixed hole. The run is a runner's, a copy of `node.exe` and
+  `machine.js` in `machine\work\` (SYSTEM and Administrators only), so nothing runs from Program Files while it is
+  replaced, run as a task of its own (`\AGMessage\Upgrade-<id>`, its descriptor SYSTEM's and Administrators' alone); it
+  runs only a plan its control task wrote there, naming only the release's installer in its own folder of
+  `machine\staged\` or the kept installer of its build, as SYSTEM, never from Program Files; the installer's log is
+  written in the runner's own folder, never in a folder another account may write, so SYSTEM never writes a file that
+  account could have placed; the installer takes `/UPGRADEBY` (which names the account in the stop's audit row) only from
+  SYSTEM for an account the record gives `upgrade`, and refuses while another AGMessage installer runs on the PC
+  (`Global\AGMessageSetup`). Go back runs only the kept installer of the record's `Previous` from `{app}\installers\`,
+  which only an administrator's or a checked install writes. One check and one run at a time (`machine\work\upgrade.lock`,
+  then the runner's own program). Each outcome, once it is seen (the exit code, the record, what answers), is one
+  machine event (`machine.upgrade`, with the builds and the digest, or `machine.upgrade.refused`, with why), never an
+  attempt written as done; a restore keeps the machine events' place, so none is written to the audit log twice. The trust is GitHub's (the owner's account and the release job), as for a person
+  who downloads the installer; offline, an administrator runs the installer, as at the install. Held by
+  `test/upgrade.test.js`; SYSTEM running it, and Inno taking `/UPGRADEBY`, are a Windows run's.
 - **The portable import** (`docs/INSTALL.md`, The import of a portable folder), once, before the installed node's first
   start, into a node that has served nothing (any hall, account or audit row, or a machine key, certificate or server
   secret of its own, refuses it: two of each are never merged). The elevated half never reads the account's profile or

@@ -1,0 +1,139 @@
+{
+  "url": "https://api.github.com/repos/jammin808/AGMessage/releases/261004117",
+  "assets_url": "https://api.github.com/repos/jammin808/AGMessage/releases/261004117/assets",
+  "upload_url": "https://uploads.github.com/repos/jammin808/AGMessage/releases/261004117/assets{?name,label}",
+  "html_url": "https://github.com/jammin808/AGMessage/releases/tag/v0.6.1",
+  "id": 261004117,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "node_id": "MDM6Qm90NDE4OTgyODI=",
+    "type": "Bot",
+    "site_admin": false
+  },
+  "node_id": "RE_kwDOAGMsg84PjqZV",
+  "tag_name": "v0.6.1",
+  "target_commitish": "main",
+  "name": "AGMessage 0.6.1",
+  "draft": false,
+  "immutable": true,
+  "prerelease": false,
+  "created_at": "2026-11-20T18:01:37Z",
+  "updated_at": "2026-11-20T18:09:12Z",
+  "published_at": "2026-11-20T18:09:12Z",
+  "assets": [
+    {
+      "url": "https://api.github.com/repos/jammin808/AGMessage/releases/assets/310007701",
+      "id": 310007701,
+      "node_id": "RA_kwDOAGMsg84310007701",
+      "name": "AGMessage-Portable-0.6.1.zip",
+      "label": "",
+      "uploader": {
+        "login": "github-actions[bot]",
+        "id": 41898282,
+        "node_id": "MDM6Qm90NDE4OTgyODI=",
+        "type": "Bot",
+        "site_admin": false
+      },
+      "content_type": "application/zip",
+      "state": "uploaded",
+      "size": 48213790,
+      "digest": "sha256:a05a9c3c496611a0ad915129cee0c667292cc6edebcda78ca1e5eb50f6e18d6e",
+      "download_count": 0,
+      "created_at": "2026-11-20T18:08:52Z",
+      "updated_at": "2026-11-20T18:08:55Z",
+      "browser_download_url": "https://github.com/jammin808/AGMessage/releases/download/v0.6.1/AGMessage-Portable-0.6.1.zip"
+    },
+    {
+      "url": "https://api.github.com/repos/jammin808/AGMessage/releases/assets/310007702",
+      "id": 310007702,
+      "node_id": "RA_kwDOAGMsg84310007702",
+      "name": "AGMessage-Setup-0.6.1-unsigned.exe",
+      "label": "",
+      "uploader": {
+        "login": "github-actions[bot]",
+        "id": 41898282,
+        "node_id": "MDM6Qm90NDE4OTgyODI=",
+        "type": "Bot",
+        "site_admin": false
+      },
+      "content_type": "application/x-msdownload",
+      "state": "uploaded",
+      "size": 143360,
+      "digest": "sha256:385f926bfa0dab1710b4c5a10e008a9286283e7f8d97b4c60b0525321316481b",
+      "download_count": 0,
+      "created_at": "2026-11-20T18:08:52Z",
+      "updated_at": "2026-11-20T18:08:55Z",
+      "browser_download_url": "https://github.com/jammin808/AGMessage/releases/download/v0.6.1/AGMessage-Setup-0.6.1-unsigned.exe"
+    },
+    {
+      "url": "https://api.github.com/repos/jammin808/AGMessage/releases/assets/310007703",
+      "id": 310007703,
+      "node_id": "RA_kwDOAGMsg84310007703",
+      "name": "SHA256SUMS.payload",
+      "label": "",
+      "uploader": {
+        "login": "github-actions[bot]",
+        "id": 41898282,
+        "node_id": "MDM6Qm90NDE4OTgyODI=",
+        "type": "Bot",
+        "site_admin": false
+      },
+      "content_type": "application/octet-stream",
+      "state": "uploaded",
+      "size": 512114,
+      "digest": "sha256:e276698722ed2146c61ad475f80fac4a76a8dac9b7826045a4e65dd55f990f98",
+      "download_count": 0,
+      "created_at": "2026-11-20T18:08:52Z",
+      "updated_at": "2026-11-20T18:08:55Z",
+      "browser_download_url": "https://github.com/jammin808/AGMessage/releases/download/v0.6.1/SHA256SUMS.payload"
+    },
+    {
+      "url": "https://api.github.com/repos/jammin808/AGMessage/releases/assets/310007704",
+      "id": 310007704,
+      "node_id": "RA_kwDOAGMsg84310007704",
+      "name": "agmessage-sbom.cdx.json",
+      "label": "",
+      "uploader": {
+        "login": "github-actions[bot]",
+        "id": 41898282,
+        "node_id": "MDM6Qm90NDE4OTgyODI=",
+        "type": "Bot",
+        "site_admin": false
+      },
+      "content_type": "application/json",
+      "state": "uploaded",
+      "size": 88412,
+      "digest": "sha256:98f3ae1ef67113d8140d4f6cb8d2830070e21ea48f091be519659846c771a374",
+      "download_count": 0,
+      "created_at": "2026-11-20T18:08:52Z",
+      "updated_at": "2026-11-20T18:08:55Z",
+      "browser_download_url": "https://github.com/jammin808/AGMessage/releases/download/v0.6.1/agmessage-sbom.cdx.json"
+    },
+    {
+      "url": "https://api.github.com/repos/jammin808/AGMessage/releases/assets/310007705",
+      "id": 310007705,
+      "node_id": "RA_kwDOAGMsg84310007705",
+      "name": "SHA256SUMS",
+      "label": "",
+      "uploader": {
+        "login": "github-actions[bot]",
+        "id": 41898282,
+        "node_id": "MDM6Qm90NDE4OTgyODI=",
+        "type": "Bot",
+        "site_admin": false
+      },
+      "content_type": "application/octet-stream",
+      "state": "uploaded",
+      "size": 412,
+      "digest": "sha256:2220e3c51f099b5308c70ed91977af4887c71fe1f8f6c3fedafe7c9f623f301f",
+      "download_count": 0,
+      "created_at": "2026-11-20T18:08:52Z",
+      "updated_at": "2026-11-20T18:08:55Z",
+      "browser_download_url": "https://github.com/jammin808/AGMessage/releases/download/v0.6.1/SHA256SUMS"
+    }
+  ],
+  "tarball_url": "https://api.github.com/repos/jammin808/AGMessage/tarball/v0.6.1",
+  "zipball_url": "https://api.github.com/repos/jammin808/AGMessage/zipball/v0.6.1",
+  "body": "Build 0.6.1+112.abc1234. Extract All first (right-click the zip), then run start-agmessage.bat from the AGMessage folder it extracts."
+}

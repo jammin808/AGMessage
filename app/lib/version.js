@@ -4,8 +4,8 @@
  *
  *   package.json "version"   the product version, SemVer MAJOR.MINOR.PATCH, written there and nowhere else
  *   build.json               the stamp CI writes beside it (tools/stamp-build.js): the build number (the CI run number less
- *                            package.json's agmessage.runBase), the install version (MAJOR.MINOR.BUILD), the commit, and
- *                            the channel
+ *                            package.json's agmessage.runBase), the install version (MAJOR.MINOR.BUILD), the commit, the
+ *                            channel, and the repository it was made in
  *
  * The three channels and how each reads (SemVer 2.0, so any reader orders them right):
  *   release   a build of the tag v<version>               0.5.0+17.abc1234
@@ -31,6 +31,8 @@ const path = require('path');
 const APP_DIR = path.join(__dirname, '..');
 const SEMVER = /^(0|[1-9]\d{0,4})\.(0|[1-9]\d{0,4})\.(0|[1-9]\d{0,4})$/;
 const COMMIT = /^[0-9a-f]{7,64}$/;
+/** The repository a stamp names (GITHUB_REPOSITORY): owner/name, as GitHub allows them (app/machine.js REPO, held equal). */
+const REPO = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/;
 const CHANNELS = ['release', 'dev'];
 
 /** The informational version for a stamp (pure). */
@@ -181,4 +183,4 @@ function load() {
 
 const BUILD = load();
 
-module.exports = { BUILD, compose, readStamp, checkoutCommit, installVersionOf, parseBuild, compareBuilds, compareVersions, releaseRefusal, INSTALL_MAX, SEMVER, COMMIT };
+module.exports = { BUILD, compose, readStamp, checkoutCommit, installVersionOf, parseBuild, compareBuilds, compareVersions, releaseRefusal, INSTALL_MAX, SEMVER, COMMIT, REPO };

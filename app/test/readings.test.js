@@ -86,10 +86,9 @@ test('the register: R1-R13 as the plan\'s U7 table names them (R3 retired, R3′
   // built: the lane takes them now (the upgrade backup's time, and the server task's stop-saves).
   for (const id of ['R1', 'R3′', 'R9']) assert.equal(R.READINGS.find((x) => x.id === id).needs, undefined, id + ' waits for no unit');
   // R4, R7 and R12 took under a stand-in while U12 was not built; it is now, and their stand-in's settings are U12's.
-  // U17 (#74) built the control tasks: R11 takes a real one, R8 reads its definition back and R13 runs as one does; R13
-  // waits for U18's words alone.
-  for (const id of ['R8', 'R11']) assert.deepEqual([R.READINGS.find((x) => x.id === id).needs, R.READINGS.find((x) => x.id === id).later], [undefined, undefined], id + ' no longer waits for U17');
-  assert.deepEqual(R.READINGS.find((x) => x.id === 'R13').later, ['U18 (#77): the words with no network']);
+  // U17 (#74) built the control tasks: R11 takes a real one, R8 reads its definition back and R13 runs as one does; U18
+  // (#77) built the checked upgrade, whose words with no network R13 takes too.
+  for (const id of ['R8', 'R11', 'R13']) assert.deepEqual([R.READINGS.find((x) => x.id === id).needs, R.READINGS.find((x) => x.id === id).later], [undefined, undefined], id + ' waits for no unit');
   // U13 (#73) built the installer: R5 reads its signature beside the two programs'; U14 (#75) the export, which R6 takes.
   assert.equal(R.READINGS.find((x) => x.id === 'R5').later, undefined, 'R5 no longer waits for U13');
   assert.deepEqual([R.READINGS.find((x) => x.id === 'R6').needs, R.READINGS.find((x) => x.id === 'R6').later], [undefined, undefined], 'R6 no longer waits for U14');
@@ -128,11 +127,13 @@ test('a reading that waits for a later unit is held to it: once that unit\'s cod
     }
   }
   // U12 (#72) landed, so R3′, R4, R7, R9 and R12 no longer wait; U13 (#73), so R5 reads the installer; U17 (#74), so R8,
-  // R11 and R13 take its control tasks; and U14 (#75), so R6 takes the export: the one reading still waiting names U18.
-  assert.ok(named >= 1, 'every unit a reading waits for is asked');
-  assert.equal(LANDED.U14(), true, 'U14\'s code is in the tree (forget-keys)');
-  // The fence knows U18 has not landed while the server reads the rows its events become.
-  assert.ok(/'machine\.upgrade'/.test(code) && !LANDED.U18(), 'machine.upgrade, a row the server reads, is not U18\'s verb');
+  // R11 and R13 take its control tasks; U14 (#75), so R6 takes the export; and U18 (#77), so R13 takes its words with no
+  // network: no reading waits for a unit now.
+  assert.equal(named, 0, 'no reading waits for a unit\'s code');
+  for (const u of Object.keys(LANDED)) assert.equal(LANDED[u](), true, u + '\'s code is in the tree');
+  // The fence tells U18's own verb from the rows its events become, which the server read before it landed.
+  assert.ok(/'machine\.upgrade'/.test(code) && LANDED.U18(), 'machine.js upgrade, U18\'s verb, is in the tree');
+  assert.equal(/VERBS = Object\.freeze\(\[[^\]]*'upgrade'/.test("const VERBS = Object.freeze(['upgrade-stop', 'status']);"), false, 'upgrade-stop is not upgrade');
 });
 
 test('nothing measured is nothing met: every reading not run with why (or retired), every lab line not run, Defender not asked', () => {
@@ -385,6 +386,17 @@ test('R12 and R13: Task Scheduler\'s restarts and GitHub\'s answer recorded; the
   assert.equal(byId(R.judge(raw({ R13: { status: 403, rateRemaining: 0, assets: [] } })), 'R13').state, 'not run', 'the runner\'s rate limit says nothing of the laptop');
   x = byId(R.judge(raw({ R13: { status: 0, failure: 'ENOTFOUND', assets: [] } })), 'R13');
   assert.deepEqual([x.state, x.words], ['missed', 'GitHub\'s answer was not read from the SYSTEM task (ENOTFOUND)']);
+  // With no network: the words a checked upgrade shows, as the bundle's machine.js gave them behind the outbound rule.
+  const OFFLINE = require('../machine').OFFLINE_WORDS;
+  const online = { tag: 'v0.6.1', status: 200, ms: 300, immutable: true, assets: [{ name: 'a.exe', digest }] };
+  x = byId(R.judge(raw({ R13: { ...online, offline: { ms: 40, error: 'ENOTFOUND', status: 0, why: 'offline', words: OFFLINE } } })), 'R13');
+  assert.equal(x.state, 'recorded');
+  assert.ok(x.words.endsWith('; with no network, the words: "' + OFFLINE + '" (ENOTFOUND)'), x.words);
+  assert.deepEqual(x.facts.offline, { why: 'offline', words: OFFLINE, error: 'ENOTFOUND', status: 0 });
+  x = byId(R.judge(raw({ R13: { ...online, offline: { error: '', status: 200, why: 'repository', words: '' } } })), 'R13');
+  assert.ok(x.words.endsWith('with no network, not taken: the outbound rule did not keep GitHub away (HTTP 200)'), 'a rule that did not hold is said, never taken for the words');
+  assert.ok(byId(R.judge(raw({ R13: { ...online, offline: { error: 'schtasks could not run the offline stand-in' } } })), 'R13').words.endsWith('with no network, not taken (schtasks could not run the offline stand-in)'));
+  assert.ok(byId(R.judge(raw({ R13: online })), 'R13').words.endsWith('with no network, not taken'));
 });
 
 test('R1 judged: the largest hall\'s slowest page back against 1.5 s, as R2 and R10 judge theirs, each size\'s median and slowest said, a stop that did not save or a round that did not finish said', () => {
@@ -855,6 +867,18 @@ test('the probes: a start recorded and its exit code; a profile\'s change listed
     assert.equal(p, 0);
     const answer = JSON.parse(fs.readFileSync(path.join(r13, 'answer.json'), 'utf8'));
     assert.deepEqual([answer.status, answer.immutable, answer.assets.length, typeof answer.user], [200, true, 2, 'string']);
+    // probe-offline asks as the bundle's machine.js asks (here its githubGet stood in for by a network that is not there,
+    // its words machine.js's own) and writes what it met where the lane reads it.
+    // The lane's own copy of this file, with the bundle's machine.js beside it (stood in for here).
+    const lane = path.join(dir, 'lane');
+    fs.mkdirSync(lane);
+    fs.copyFileSync(TAKE_JS, path.join(lane, 'readings-take.js'));
+    fs.writeFileSync(path.join(lane, 'machine.js'), 'const m = require(' + JSON.stringify(path.join(ROOT, 'app', 'machine.js')) + ');\nmodule.exports = { githubWords: m.githubWords, githubGet: async (p) => (p === \'/repos/o/r/releases/tags/v1.0.0\' ? { error: \'ENOTFOUND\' } : { status: 404, json: null, headers: {} }) };\n');
+    fs.writeFileSync(path.join(r13, 'plan.json'), JSON.stringify({ repo: 'o/r', tag: 'v1.0.0' }));
+    const offRan = await new Promise((resolve) => { const c = require('child_process').spawn(process.execPath, [path.join(lane, 'readings-take.js'), 'probe-offline', r13]); c.on('exit', resolve); });
+    assert.equal(offRan, 0);
+    const off = JSON.parse(fs.readFileSync(path.join(r13, 'offline.json'), 'utf8'));
+    assert.deepEqual([off.error, off.why, off.words, typeof off.user], ['ENOTFOUND', 'offline', require('../machine').OFFLINE_WORDS, 'string']);
   } finally {
     for (const s of servers) s.close();
     fs.rmSync(dir, { recursive: true, force: true });

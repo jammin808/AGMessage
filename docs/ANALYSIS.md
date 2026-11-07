@@ -913,7 +913,12 @@ beside it, and an elevated console's `machine.js control --elevated` beside it) 
 `explorer.exe` in the Windows folder `--sys` sits in, named from its drive, or nothing is opened), with the runner `run`
 that `open` hands to `status` and each request to `windowsHands` and `adminName`; `machine.js`'s `exe(name)` (its `schtasks.exe`, `icacls.exe`, `reg.exe`,
 `whoami.exe` and `WindowsPowerShell\v1.0\powershell.exe` in that System32 folder, each by its absolute path, the runner
-`run` handed to `hands` whose calls the fence reads there); `lib/laptop.js` and `lib/power.js`'s
+`run` handed to `hands` whose calls the fence reads there), `runnerNode` (the checked upgrade's runner for an elevated
+console: a copy of this `node.exe` made in a new folder `machine\work\upgrade-<id>\` of the machine folder, a full path,
+run there on its own copy of `machine.js`; a control task's runner is the same copy as a task's action, which
+`schtasks.exe` registers and runs) and `installer` (the runner's plan's installer, which `planOf` takes only where its
+control task put it: the release's name in one folder of the plan's own `machine\staged\`, or the kept installer
+`{app}\installers\AGMessage-Setup-<to>-unsigned.exe`); `lib/laptop.js` and `lib/power.js`'s
 `powershellPlan` file; `lib/startup.js`'s `openerPlan` file; and the tests' own (the smoke's browser, the two preloads
 handing on the server's calls and the tunnel's stand-in for a cloudflared that is not there, the readings' `icacls.exe`
 and `cmd.exe` for the .bat files). A

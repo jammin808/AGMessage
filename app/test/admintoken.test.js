@@ -401,8 +401,8 @@ test('launch.js knows serve, token, status, open, start, stop, rights, export an
   const fits = 'launch.js token takes --machine <folder> and --sys <folder>, each once and each with its folder; ';
   const needs = 'launch.js token needs --machine <folder>, the installed node\'s folder as a full path (%ProgramData%\\AGMessage).';
   assert.deepEqual(said, [
-    'launch.js knows serve, token, status, open, start, stop, rights, export or forget-keys.',
-    'launch.js knows serve, token, status, open, start, stop, rights, export or forget-keys. "boot" is not one of them.',
+    'launch.js knows serve, token, status, open, start, stop, upgrade, back, rights, export or forget-keys.',
+    'launch.js knows serve, token, status, open, start, stop, upgrade, back, rights, export or forget-keys. "boot" is not one of them.',
     needs,
     needs,
     fits + '"--print" does not fit.',
@@ -440,4 +440,5 @@ test('launch.js token, run as the person runs it: the token printed with code 0;
   assert.ok(!r.out.includes('00112233aabbccdd'), 'never the file\'s bytes');
   r = await run(['upgrade']);
   assert.equal(r.code, 64, r.out);
+  assert.match(r.out, /launch\.js upgrade needs --machine <folder>/, 'upgrade is a verb it knows, which takes its folders');
 });

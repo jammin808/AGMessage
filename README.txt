@@ -424,8 +424,9 @@ installs AGMessage in C:\Program Files\AGMessage, keeps its data in
 C:\ProgramData\AGMessage, and starts it with Windows, with nobody
 signed in. It has no window: Start -> AGMessage has Open AGMessage
 (opens it in your browser, or says what it found), Show the admin token,
-Start AGMessage, Stop AGMessage..., Who may run AGMessage... and
-AGMessage status.
+Start AGMessage, Stop AGMessage..., Upgrade AGMessage..., Go back to
+build N (after an upgrade), Who may run AGMessage... and AGMessage
+status.
 - Run it from the Windows account you run shows from, standard or
   administrator: Windows asks an administrator's approval once. That
   account is AGMessage's admin on this PC, and reads its admin token
@@ -481,6 +482,33 @@ AGMessage status.
   itself. Only a newer build installs: "AGMessage 0.6.0 (build 41) is
   newer than this installer's 0.6.0 (build 37): uninstall it first to
   go back."
+- Upgrading with no administrator: AGMessage's admin, and an account
+  given upgrade, use Start -> AGMessage -> Upgrade AGMessage... It
+  looks up the newest release on GitHub and says whether it is newer:
+  press Enter to install it, or type the full path of an installer you
+  downloaded (AGMessage-Setup-<version>-unsigned.exe; you can drop the
+  file into the window). The PC checks the installer against its
+  release first: it must be a newer release of AGMessage, the release
+  must be immutable (its files can no longer be changed), and the
+  installer's SHA-256 must be the one GitHub gives for it. Then press
+  Enter: the window closes and the upgrade runs by itself, as above.
+  Upgrade AGMessage... says how the last one went, with the last lines
+  of the installer's log when it did not finish. If the newest release
+  cannot be used (not yet immutable, say), it says why and you can
+  still type the path of an installer you downloaded. It needs the
+  internet: without it, "AGMessage could not check this installer
+  against its release (no internet). Run it yourself: Windows will ask
+  for an administrator's approval." A file that is not the release's
+  is refused: "This file is not the release's. Do not run it." One
+  upgrade or go back at a time: a second one asked meanwhile is
+  refused until the first has ended.
+- Going back: after an upgrade, Start -> AGMessage -> Go back to build
+  N (the build you had before) lays that build down again from the
+  installer kept on this PC, with its data as it was when the newer
+  build was installed: what was written since is not kept, though the
+  audit log is. Type the build's number to go back. It needs the
+  upgrade right too, and asks for a reason when people are using
+  AGMessage.
 - Uninstall (Settings -> Apps) asks "Remove all AGMessage data from this
   PC?": No, the default, keeps every hall, account, file and key, so
   AGMessage installed again finds them (and asks again whose AGMessage
@@ -489,7 +517,8 @@ AGMessage status.
   prompt: "C:\Program Files\AGMessage\unins000.exe" /FORCE="why".
 - Close AGMessage's own consoles (Show the admin token, AGMessage
   status, Who may run AGMessage...) before an upgrade or an uninstall:
-  either says so if one is open.
+  either says so if one is open. Upgrade AGMessage... and Go back wait
+  up to 10 minutes for them to close, then give up and change nothing.
 - If AGMessage does not answer after a first install, the installer
   says why. Its server task starts it with Windows, so restart the PC
   once the cause is cleared, or uninstall it and install it again.

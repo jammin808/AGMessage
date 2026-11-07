@@ -22,7 +22,9 @@
 ; stopped anyway, the reason kept in its audit log; a stop with no save record or no backup gone on with), /ROLLBACK (the
 ; way back: accepted only for the build the install record names as Previous, or for the build it still names when the
 ; files in Program Files\AGMessage are another build's that never recorded itself, and only while nothing answers on the
-; port), and /REMOVEDATA for the uninstaller (every AGMessage data folder removed, the keys last).
+; port), /UPGRADEBY=<SID> (the checked upgrade's: AGMessage's control task, as SYSTEM, runs a release's installer it checked
+; for the account that asked, which must hold the upgrade right; refused from anyone but SYSTEM), and /REMOVEDATA for the
+; uninstaller (every AGMessage data folder removed, the keys last).
 
 #ifndef InstallVersion
   #error An installer is made from a numbered build only (tools/stamp-build.js in CI): a local build has no install version, so it could not be upgraded in order.
@@ -75,6 +77,10 @@ Source: "{#Payload}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs
 ; installer of the earlier build, run with /ROLLBACK, never copies itself over itself.
 Source: "{srcexe}"; DestDir: "{app}\installers"; DestName: "AGMessage-Setup-{#InstallVersion}-unsigned.exe"; Flags: external ignoreversion; Check: KeepThisInstaller
 
+[InstallDelete]
+; Go back to build N names the build this install replaces: an earlier install's item, naming an older build, goes first.
+Type: files; Name: "{group}\Go back to build *.lnk"
+
 ; No [Dirs] and no [Registry]: the machine folder under %ProgramData%\AGMessage is machine.js prepare's to make, in its order
 ; (a folder made here, elevated and before that order, would be made through a junction a standard account put there first),
 ; and HKLM\SOFTWARE\AGMessage is machine.js install's one record.
@@ -86,6 +92,8 @@ Name: "{group}\Open AGMessage"; Filename: "{app}\node\node.exe"; Parameters: """
 Name: "{group}\Show the admin token"; Filename: "{app}\node\node.exe"; Parameters: """{app}\app\launch.js"" token --machine ""{commonappdata}\AGMessage"" --sys ""{sys}"""; WorkingDir: "{app}\app"; Comment: "Shows AGMessage's admin token to its admin on this PC"
 Name: "{group}\Start AGMessage"; Filename: "{app}\node\node.exe"; Parameters: """{app}\app\launch.js"" start --machine ""{commonappdata}\AGMessage"" --sys ""{sys}"""; WorkingDir: "{app}\app"; Comment: "Starts AGMessage, for its admin on this PC and the accounts it gives start"
 Name: "{group}\Stop AGMessage..."; Filename: "{app}\node\node.exe"; Parameters: """{app}\app\launch.js"" stop --machine ""{commonappdata}\AGMessage"" --sys ""{sys}"""; WorkingDir: "{app}\app"; Comment: "Stops AGMessage, saved, for its admin on this PC and the accounts it gives stop"
+Name: "{group}\Upgrade AGMessage..."; Filename: "{app}\node\node.exe"; Parameters: """{app}\app\launch.js"" upgrade --machine ""{commonappdata}\AGMessage"" --sys ""{sys}"""; WorkingDir: "{app}\app"; Comment: "Upgrades AGMessage to a newer release checked against GitHub, for its admin on this PC and the accounts it gives upgrade"
+Name: "{group}\Go back to build {code:PreviousBuild}"; Filename: "{app}\node\node.exe"; Parameters: """{app}\app\launch.js"" back --machine ""{commonappdata}\AGMessage"" --sys ""{sys}"""; WorkingDir: "{app}\app"; Comment: "Takes AGMessage back to the build this PC had before, from its kept installer"; Check: GoBackOffered
 Name: "{group}\Who may run AGMessage..."; Filename: "{app}\node\node.exe"; Parameters: """{app}\app\launch.js"" rights --machine ""{commonappdata}\AGMessage"" --sys ""{sys}"""; WorkingDir: "{app}\app"; Comment: "Lists who may run AGMessage on this PC; its admin gives, takes back or hands over the rights"
 Name: "{group}\AGMessage status"; Filename: "{app}\node\node.exe"; Parameters: """{app}\app\launch.js"" status --machine ""{commonappdata}\AGMessage"" --sys ""{sys}"""; WorkingDir: "{app}\app"; Comment: "Says how AGMessage runs on this PC"
 
@@ -97,7 +105,8 @@ const
   SacEvaluating = 2;
   SacWords = 'Smart App Control is evaluating this PC. Once it turns itself on, Windows blocks unsigned programs: this installer, its uninstaller and the next AGMessage installer would no longer run. To keep installing and upgrading AGMessage here, turn Smart App Control off in Windows Security > App & browser control > Smart App Control.';
   QuietAdminWords = 'AGMessage needs to know whose it is: add /ADMIN=<account>.';
-  AdminRole = 'AGMessage''s admin on this PC is one Windows account, standard or administrator: it reads AGMessage''s admin token (Start > AGMessage > Show the admin token), with which it signs in at the laptop and makes the first admin account; it starts and stops AGMessage (Start AGMessage, Stop AGMessage...), and gives these rights to other accounts, takes them back or hands its admin over (Who may run AGMessage...). Windows asks an administrator''s approval again only to upgrade or uninstall AGMessage.';
+  AdminRole = 'AGMessage''s admin on this PC is one Windows account, standard or administrator: it reads AGMessage''s admin token (Start > AGMessage > Show the admin token), with which it signs in at the laptop and makes the first admin account; it starts and stops AGMessage (Start AGMessage, Stop AGMessage...), and gives these rights to other accounts, takes them back or hands its admin over (Who may run AGMessage...). Windows asks an administrator''s approval again only to uninstall AGMessage, or to upgrade it with an installer it cannot check against its release on GitHub (Upgrade AGMessage... checks one, and needs no administrator).';
+  SetupMutexName = 'Global\AGMessageSetup';
   PublicWords = 'AGMessage answers phones, tablets and screens on this PC''s local subnet only, on Private and Domain networks. Windows makes every new network Public, so on fresh venue Wi-Fi nobody reaches AGMessage unless this is ticked, or that network is made Private in Windows'' settings.';
   AccountWords = 'AGMessage has no accounts yet. Make its first admin account now, to sign in with on AGMessage''s page; or leave these empty and make it later at Admin login on this PC, with the token (Start > AGMessage > Show the admin token).';
   ImportWords = 'Before AGMessage first starts, it can take in a portable AGMessage folder''s halls, messages, accounts, screens and keys, so its guests, invites, pins and trusted devices hold. It takes only a folder last run by this same build: upgrade the portable folder first, start it once and stop it. It copies and never moves, then checks what it copied. Once that check passes, the old copies of its keys are removed from your Windows account (%LOCALAPPDATA%\AGMessage, which every portable AGMessage folder of this account uses) and from the folder (app\data\secret.key), and the folder is marked as moved: it no longer starts. Once AGMessage has started, no portable folder can be brought here.';
@@ -121,6 +130,7 @@ var
   ImportChoicePage: TInputOptionWizardPage;
   ImportDirPage: TInputDirWizardPage;
   StartDeferred, ImportFinished, ImportOpen: Boolean;
+  UpgradeBy, UpgradeByName: String;
 
 function MultiByteToWideChar(CodePage, Flags: Cardinal; Source: AnsiString; SourceLength: Integer; Target: String; TargetLength: Integer): Integer;
   external 'MultiByteToWideChar@kernel32.dll stdcall';
@@ -341,12 +351,26 @@ begin
 end;
 
 // preinstall-check's arguments: the port, and {app}, where no console may stay open; the reason typed, when there is one;
-// and, for the way back (which stops nothing), that nothing may answer on the port.
+// for the way back (which stops nothing), that nothing may answer on the port; and /UPGRADEBY's account, which machine.js
+// takes only from SYSTEM for an account the record gives the upgrade right.
 function CheckArgs(const Reason: String): String;
 begin
   Result := MachineArgs() + ' --app ' + Arg(InstallFolder());
   if Reason <> '' then Result := Result + ' --force ' + Arg(Reason);
   if Rollback then Result := Result + ' --rollback';
+  if UpgradeBy <> '' then Result := Result + ' --upgrade-by ' + Arg(UpgradeBy);
+end;
+
+// Go back to build N, on the Start menu after an upgrade: the build this install replaces, the one the record keeps as
+// Previous and whose installer is kept beside this one. A first install and the way back (which records none) have none.
+function GoBackOffered(): Boolean;
+begin
+  Result := Installed and not Rollback and (InstalledVersion <> '') and (CompareVersions(InstalledVersion, '{#InstallVersion}') < 0);
+end;
+
+function PreviousBuild(Param: String): String;
+begin
+  Result := BuildOf(InstalledVersion);
 end;
 
 // Words, then a further sentence, and how to go on anyway where a typed reason lifts the refusal (machine.js says so by
@@ -407,6 +431,7 @@ begin
   Result := False;
   Rollback := CmdLineHas('/ROLLBACK');
   Force := Trim(ExpandConstant('{param:FORCE|}'));
+  UpgradeBy := Trim(ExpandConstant('{param:UPGRADEBY|}'));
   MachineDir := ExpandConstant('{commonappdata}\AGMessage');
   // The one install record, machine.js install's: the version an upgrade compares, the one it replaced, the port and the
   // Public tick it keeps.
@@ -415,6 +440,16 @@ begin
   if not RegQueryStringValue(HKLM64, RecordKey, 'Previous', PreviousVersion) then PreviousVersion := '';
   if RegQueryDWordValue(HKLM64, RecordKey, 'Port', Value) and (Value > 0) and (Value < 65536) then Port := Value else Port := DefaultPort;
   PublicRecorded := RegQueryDWordValue(HKLM64, RecordKey, 'PublicFirewall', Value) and (Value = 1);
+
+  // One AGMessage installer at a time on this PC, in every session (the checked upgrade's runs as SYSTEM, in session 0),
+  // held until this one ends. A /ROLLBACK run is the way back of the installer that holds it, which waits for it, so it
+  // opens the same one without asking.
+  if (not Rollback) and CheckForMutexes(SetupMutexName) then
+  begin
+    Refuse('Another AGMessage installer is running on this PC (an upgrade or a go back): wait for it to end, then run this one again. Nothing was changed.');
+    Exit;
+  end;
+  CreateMutex(SetupMutexName);
 
   // Program Files\AGMessage only, refused before anything is made (PrepareToInstall holds it again for {app}).
   if Trim(ExpandConstant('{param:DIR|}')) <> '' then
@@ -472,6 +507,8 @@ begin
     Refuse(ThenSay(Words, 'Nothing was changed.'));
     Exit;
   end;
+  // The checked upgrade's account, by the name Windows gives it, for who asked the stop.
+  if UpgradeBy <> '' then UpgradeByName := JsonText(Json, 'byName');
   // The machine folder, race-free, before anything else of the install.
   Code := Machine('prepare', '--machine ' + Arg(MachineDir) + ' --sys ' + Arg(ExpandConstant('{sys}')), Json, Words);
   if Code <> 0 then
@@ -809,7 +846,10 @@ begin
   end;
   if Installed and not Rollback then
   begin
-    Params := MachineArgs() + ' --by ' + Arg('the installer, run by ' + ExpandConstant('{username}')) + ' --app ' + Arg(InstallFolder());
+    if UpgradeBy <> '' then
+      Params := MachineArgs() + ' --by ' + Arg(UpgradeByName + ', by a checked upgrade') + ' --app ' + Arg(InstallFolder())
+    else
+      Params := MachineArgs() + ' --by ' + Arg('the installer, run by ' + ExpandConstant('{username}')) + ' --app ' + Arg(InstallFolder());
     if Force <> '' then Params := Params + ' --force ' + Arg(Force);
     // A refusal may come after the stop (a program still running from the folder): the earlier server is started again.
     EarlierStopped := True;

@@ -72,8 +72,20 @@
  *                              %LOCALAPPDATA%\AGMessage and the folder's app\data\secret.key, each checked and said. Each
  *                              leaves its answer in the import folder (export.json, forget.json) for the installer.
  *
- * upgrade and back (U18) are a later unit's: until it lands their verbs are refused as unknown. A verb it does not know is
- * refused, never defaulted. Exit codes: 0 done; 2 not done, with the words of why; 64 a verb or an argument it does not
+ *   upgrade --machine <folder> --sys <folder>
+ *   back --machine <folder> --sys <folder>
+ *                              Upgrade AGMessage… and Go back to build N, requests to the person's own control task as
+ *                              Start and Stop are, for the laptop's admin and an account given `upgrade`, with no
+ *                              administrator. Upgrade asks the control task for AGMessage's newest release (it looks it
+ *                              up on GitHub) and offers it, or takes the full path of an installer the person downloaded
+ *                              (AGMessage-Setup-<version>-unsigned.exe), which it copies into their inbox under that name;
+ *                              the control task checks the installer against its release and, when it is newer, hands
+ *                              the run to a runner that waits for this console to close. Back names the build the
+ *                              install record keeps as Previous and goes back to it once that build's number is typed.
+ *                              Each asks for a reason when AGMessage is busy and asks again with it, and says the last
+ *                              upgrade's or go back's outcome first, which its runner leaves in the person's outbox.
+ *
+ * A verb it does not know is refused, never defaulted. Exit codes: 0 done; 2 not done, with the words of why; 64 a verb or an argument it does not
  * know, or one missing. In a console window it waits for Enter before it ends, so the window that the Start menu opened
  * stays until the person has read it; open waits only when it did not open the browser, and the import's steps never.
  */
@@ -138,14 +150,12 @@ function showToken({ machine, sys = '', read = fs.readFileSync, admin = adminNam
   return { code: DONE, text: 'AGMessage\'s admin token on this PC:\n\n    ' + text + '\n\nType it at Admin login on this PC. It holds while AGMessage serves; each start makes a new one. If it is not taken, AGMessage has started again or is not serving: show the token again once it serves.' };
 }
 
-// The verbs a later unit adds are refused as unknown until it lands (U18's upgrade and back).
-const LATER = Object.freeze({ upgrade: 'U18', back: 'U18' });
 /** The person's requests, each answered by their own control task. */
-const REQUESTS = Object.freeze(['start', 'stop', 'rights']);
+const REQUESTS = Object.freeze(['start', 'stop', 'upgrade', 'back', 'rights']);
 /** The portable import's two steps run as the account that started the installer, hidden: neither waits for Enter. */
 const IMPORT_STEPS = Object.freeze(['export', 'forget-keys']);
 /** The commands this build knows, for the words of an unknown one. */
-const KNOWN = 'serve, token, status, open, start, stop, rights, export or forget-keys';
+const KNOWN = 'serve, token, status, open, start, stop, upgrade, back, rights, export or forget-keys';
 
 /** Options read by `--name value`, each once; a value missing or a name twice is a problem. */
 function options(rest, allowed, verb) {
@@ -168,7 +178,6 @@ function parse(argv) {
   if (verb === 'open') return parseOpen(rest);
   if (REQUESTS.includes(verb)) return parseOpen(rest, verb);
   if (IMPORT_STEPS.includes(verb)) return parseImport(rest, verb);
-  if (LATER[verb]) return { problem: 'launch.js ' + verb + ' is built by ' + LATER[verb] + '; this build knows ' + KNOWN + '.' };
   if (verb !== 'token') return { problem: 'launch.js knows ' + KNOWN + '.' + (verb ? ' "' + said(verb, 40) + '" is not one of them.' : '') };
   const got = { '--machine': null, '--sys': null };
   for (let i = 0; i < rest.length; i++) {
@@ -209,8 +218,8 @@ function parseStatus(rest) {
 }
 
 /**
- * open's command line, and start's, stop's and rights': the machine folder and the System32 folder, each required, each a
- * full path (--sys from its drive).
+ * open's command line, and start's, stop's, upgrade's, back's and rights': the machine folder and the System32 folder,
+ * each required, each a full path (--sys from its drive).
  */
 function parseOpen(rest, verb = 'open') {
   const o = options(rest, ['--machine', '--sys'], verb);
@@ -462,8 +471,11 @@ function rightsLineOf(line) {
   return { problem: '"' + t.slice(0, 80) + '" is not one of the three: Give LAPTOP\\ben: start, stop · Take back from LAPTOP\\ben: stop (or all) · Hand over to LAPTOP\\ben.' };
 }
 
-/** How long each request waits for its answer: a stop may take two minutes to save, a start 35 s to answer. */
-const ANSWER_WAIT_MS = Object.freeze({ start: 90_000, stop: 180_000, grant: 90_000, revoke: 90_000, handover: 90_000 });
+/**
+ * How long each request waits for its answer: a stop may take two minutes to save, a start 35 s to answer, an upgrade's
+ * check a download of its installer.
+ */
+const ANSWER_WAIT_MS = Object.freeze({ start: 90_000, stop: 180_000, upgrade: 600_000, back: 120_000, grant: 90_000, revoke: 90_000, handover: 90_000 });
 const ANSWER_POLL_MS = 250;
 const wait = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 
@@ -472,21 +484,30 @@ const wait = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
  * the request is written into their inbox\ and their own control task run (schtasks.exe /Run), and its answer waited for
  * in their outbox\ by the request's id; a request that cannot be left there, or a control task this account cannot run,
  * is told whom to ask. Elevated (an administrator's console), machine.js control --elevated is run by its absolute path
- * beside this file, with the request a file of machine\work\. `run`, `read`, `write` and `remove` stand in for Node's own
- * unless a test gives its own; `script` is machine.js.
+ * beside this file, with the request a file of machine\work\. `before(me, elevated)`, when given, runs once who asks is
+ * known and before the request is left, and a result it returns is the answer instead (an upgrade's installer copied into
+ * the inbox first). `run`, `read`, `write` and `remove` stand in for Node's own unless a test gives its own; `script` is
+ * machine.js.
  */
-async function sendRequest({ machine, sys, request, run = childProcess.execFileSync, read = fs.readFileSync, write = fs.writeFileSync, remove = fs.rmSync, script = path.join(__dirname, 'machine.js'), execPath = process.execPath, waitMs = 0, pollMs = ANSWER_POLL_MS }) {
+async function sendRequest({ machine, sys, request, before = null, run = childProcess.execFileSync, read = fs.readFileSync, write = fs.writeFileSync, remove = fs.rmSync, script = path.join(__dirname, 'machine.js'), execPath = process.execPath, waitMs = 0, pollMs = ANSWER_POLL_MS }) {
   const call = windowsHands(sys, run);
   const me = accountOf(call('whoami.exe', ['/user', '/fo', 'csv', '/nh']).out);
   if (!me) return { code: NOT_DONE, text: 'Your Windows account could not be read (whoami.exe), so nothing was asked.' };
   const id = crypto.randomBytes(12).toString('hex');
   const body = JSON.stringify({ id, ...request });
   const work = path.join(machine, 'machine', 'work');
-  if (elevatedOf(call('whoami.exe', ['/groups', '/fo', 'csv', '/nh']).out)) {
+  const elevated = elevatedOf(call('whoami.exe', ['/groups', '/fo', 'csv', '/nh']).out);
+  if (before) {
+    const instead = before(me, elevated);
+    if (instead) return instead;
+  }
+  if (elevated) {
     const file = path.join(work, 'request-' + id + '.json');
     const out = path.join(work, 'answer-' + id + '.json');
     try { write(file, body, { flag: 'wx' }); } catch (e) { return { code: NOT_DONE, text: 'The request could not be written into ' + work + ' (' + ((e && e.code) || 'EIO') + '), so nothing was asked.' }; }
-    try { run(execPath, [script, 'control', '--elevated', '--request', file, '--machine', machine, '--sys', sys, '--out', out], { cwd: path.dirname(script), encoding: 'utf8', windowsHide: true, timeout: 300_000, stdio: ['ignore', 'pipe', 'pipe'] }); } catch { /* its exit code is in its answer, read below */ }
+    // Bounded as the person's own request is (an upgrade's check takes in a download), and never below five minutes.
+    const bound = Math.max(300_000, ANSWER_WAIT_MS[request.verb] || 0);
+    try { run(execPath, [script, 'control', '--elevated', '--request', file, '--machine', machine, '--sys', sys, '--out', out], { cwd: path.dirname(script), encoding: 'utf8', windowsHide: true, timeout: bound, stdio: ['ignore', 'pipe', 'pipe'] }); } catch { /* its exit code is in its answer, read below */ }
     let answer;
     try { answer = JSON.parse(String(read(out, 'utf8'))); } catch { answer = null; /* no answer: said below */ }
     try { remove(out, { force: true }); } catch { /* machine\work\'s, which only administrators read */ }
@@ -594,6 +615,150 @@ async function rightsAgm({ out = () => {}, prompt = promptLine, who = whoMayRun,
   }
   out('Asking AGMessage\'s control task…');
   return sendRequest({ ...stand, request });
+}
+
+// ---------------------------------------------------------------- the person's upgrade: Upgrade AGMessage…, Go back to build N
+
+/** A release's installer, by the name the release job gives it (machine.js INSTALLER_NAME, held to it by test/upgrade.test.js). */
+const INSTALLER_NAME = /^AGMessage-Setup-((?:0|[1-9]\d{0,4})\.(?:0|[1-9]\d{0,4})\.(?:0|[1-9]\d{0,4}))-unsigned\.exe$/;
+/** The most an installer may be (machine.js INSTALLER_MAX). */
+const INSTALLER_MAX = 512 * 1024 * 1024;
+/** An install version as the record keeps one: MAJOR.MINOR.BUILD (machine.js INSTALL_VERSION). */
+const INSTALL_VERSION = /^(?:0|[1-9]\d{0,2})\.(?:0|[1-9]\d{0,2})\.[1-9]\d{0,4}$/;
+const buildOf = (v) => String(v || '').split('.').pop();
+/** The install record's values, as reg.exe answers for its key in the 64-bit view (pure but for the read): {} unread. */
+function recordOf(call) {
+  const o = {};
+  for (const line of String(call('reg.exe', ['query', HKLM, '/reg:64']).out).split(/\r?\n/)) {
+    const m = /^ {4}([A-Za-z]{1,40}) {4}REG_[A-Z_]{2,20} {4}(.*)$/.exec(line);
+    if (m) o[m[1]] = said(m[2], 120);
+  }
+  return o;
+}
+/** Why a look was refused when a file the person names would be refused for it too (machine.js's own `why`). */
+const FILE_REFUSED_TOO = Object.freeze(['offline', 'norepo', 'record']);
+/** A path the person typed or dropped into the console, its quotes taken off (pure). */
+const typedPath = (t) => said(t, 400).replace(/^"(.*)"$/, '$1').trim();
+/**
+ * An installer the person named, copied by its bytes, as they read it, into their own inbox under its own name (`to`):
+ * {size, sha256}; or {problem} in their words, {denied} when the inbox would not take it (no rights here). A file of theirs,
+ * a link included, is theirs to read: the control task refuses a link or a hard link in the inbox itself.
+ */
+function intoInbox(fsImpl, from, to) {
+  let src;
+  try { src = fsImpl.openSync(from, 'r'); } catch (e) { return { problem: from + ' could not be read (' + ((e && e.code) || 'EIO') + '). Nothing was installed.' }; }
+  let dst = null;
+  try {
+    const st = fsImpl.fstatSync(src);
+    if (!st.isFile()) return { problem: from + ' is not a file. Nothing was installed.' };
+    if (st.size < 1 || st.size > INSTALLER_MAX) return { problem: from + ' is ' + (st.size < 1 ? 'empty' : 'larger than any AGMessage installer') + '. Nothing was installed.' };
+    try { dst = fsImpl.openSync(to, 'w'); } catch (e) { return { denied: (e && e.code) || 'EIO' }; }
+    const hash = crypto.createHash('sha256');
+    const buf = Buffer.alloc(COPY_CHUNK);
+    let size = 0;
+    for (;;) {
+      const n = fsImpl.readSync(src, buf, 0, buf.length, null);
+      if (!n) break;
+      hash.update(buf.subarray(0, n));
+      for (let off = 0; off < n;) off += fsImpl.writeSync(dst, buf, off, n - off);
+      size += n;
+    }
+    return { size, sha256: hash.digest('hex') };
+  } finally {
+    fsImpl.closeSync(src);
+    if (dst !== null) fsImpl.closeSync(dst);
+  }
+}
+/**
+ * The last upgrade's or go back's outcome this account asked for, as its runner left it in the account's outbox: its words
+ * and when, and, for one not done, the last lines of its installer's log (which this account cannot read where it is
+ * kept); or '' (none, or another answer there since).
+ */
+function lastOutcome({ machine, sys, run = childProcess.execFileSync, read = fs.readFileSync }) {
+  const me = accountOf(windowsHands(sys, run)('whoami.exe', ['/user', '/fo', 'csv', '/nh']).out);
+  if (!me) return '';
+  let a;
+  try { a = JSON.parse(String(read(path.join(machine, 'machine', 'outbox', me.sid, 'answer.json'), 'utf8'))); } catch { return ''; /* no answer there */ }
+  if (!a || a.final !== true || (a.verb !== 'upgrade' && a.verb !== 'back') || typeof a.words !== 'string' || !Number.isFinite(a.at)) return '';
+  const at = new Date(a.at);
+  const two = (n) => String(n).padStart(2, '0');
+  const tail = a.code !== 0 && Array.isArray(a.logTail) ? a.logTail.filter((l) => typeof l === 'string').slice(-8).map((l) => '    ' + said(l, 200)) : [];
+  return ['Your last ' + (a.verb === 'back' ? 'go back' : 'upgrade') + ', on ' + at.getFullYear() + '-' + two(at.getMonth() + 1) + '-' + two(at.getDate()) + ' at ' + two(at.getHours()) + ':' + two(at.getMinutes()) + ': ' + said(a.words, 800), ...(tail.length ? ['  The last lines of its installer\'s log:', ...tail] : [])].join('\n');
+}
+/**
+ * A request asked again with the reason the person types when AGMessage is busy ("Not upgraded: AGMessage is busy (…).
+ * Type a reason to upgrade it anyway."); Enter alone leaves it as it is.
+ */
+async function withReason(r, { out, prompt, again }) {
+  if (!(r.answer && r.answer.busy === true && r.answer.forceable === true)) return r;
+  out(r.text);
+  const force = said(await prompt('Reason (Enter leaves AGMessage as it is): '), 200);
+  if (!force) return { code: NOT_DONE, text: 'Left as it is: no reason was typed.' };
+  return again(force);
+}
+/**
+ * Upgrade AGMessage…: {code, text}. The control task looks up the newest release and says whether it is newer; Enter
+ * installs it (the control task downloads it straight into machine\staged\), or the person types the full path of an
+ * installer they downloaded, which is copied into their inbox under its own name for the control task to stage and check.
+ * Its answer says what was checked; the run begins once this console has closed.
+ */
+async function upgradeAgm({ out = () => {}, prompt = promptLine, fsImpl = fs, ...stand }) {
+  const last = lastOutcome(stand);
+  if (last) out(last);
+  out('Looking up AGMessage\'s newest release on GitHub…');
+  const look = await sendRequest({ ...stand, request: { verb: 'upgrade', look: true } });
+  const found = look.code === DONE && !!look.answer && look.answer.look === true;
+  // A look refused for the newest release alone (not immutable, no installer in it, GitHub's own refusal) still takes an
+  // installer the person names: only no internet, no repository named and an install record that names too little refuse
+  // a named file as well, as does a request beyond the person's rights (no `why`).
+  const fileStill = !found && !!look.answer && typeof look.answer.why === 'string' && !FILE_REFUSED_TOO.includes(look.answer.why);
+  if (!found && !fileStill) return look;
+  out(look.text);
+  const newer = found && look.answer.newer === true && look.answer.release && typeof look.answer.release.semver === 'string';
+  const line = typedPath(await prompt(newer
+    ? 'Press Enter to install it, or type the full path of an installer you downloaded (AGMessage-Setup-<version>-unsigned.exe): '
+    : 'Type the full path of an installer you downloaded (AGMessage-Setup-<version>-unsigned.exe), or press Enter to leave AGMessage as it is: '));
+  if (!line) {
+    if (!newer) return { code: DONE, text: 'Left as it is: nothing was installed.' };
+    const request = { verb: 'upgrade', release: look.answer.release.semver };
+    out('Asking AGMessage\'s control task to download it and check it against its release…');
+    return withReason(await sendRequest({ ...stand, request }), { out, prompt, again: (force) => sendRequest({ ...stand, request: { ...request, force } }) });
+  }
+  if (!path.isAbsolute(line)) return { code: NOT_DONE, text: '"' + line + '" is not a full path: type the installer\'s whole path, or drop the file into this window. Nothing was installed.' };
+  const name = path.basename(line);
+  if (!INSTALLER_NAME.test(name)) return { code: NOT_DONE, text: name + ' is not an AGMessage installer\'s name (AGMessage-Setup-<version>-unsigned.exe): an installer is checked against its release by the name its release gives it. Nothing was installed.' };
+  const request = { verb: 'upgrade', file: name };
+  // Copied into the inbox before each ask: the control task stages it from there, and removes what it found.
+  const put = (me, elevated) => {
+    if (elevated) return null;
+    const r = intoInbox(fsImpl, line, path.join(stand.machine, 'machine', 'inbox', me.sid, name));
+    if (r.denied) return { code: NOT_DONE, text: 'You have no AGMessage rights on this PC. Ask ' + (adminName({ sys: stand.sys, run: stand.run, platform: 'win32' }) || 'this PC\'s AGMessage admin') + ', or an administrator.' };
+    if (r.problem) return { code: NOT_DONE, text: r.problem };
+    out('Your installer is in your AGMessage inbox (SHA-256 ' + r.sha256 + '): AGMessage\'s control task checks it against its release…');
+    return null;
+  };
+  return withReason(await sendRequest({ ...stand, request, before: put }), { out, prompt, again: (force) => sendRequest({ ...stand, request: { ...request, force }, before: put }) });
+}
+/**
+ * Go back to build N: {code, text}. The install record names the build before (Previous); the person types its number to
+ * go back, Enter leaves it. The control task checks that build's installer is kept and the upgrade from it left its
+ * backup; the run, once this console has closed, stops AGMessage (it saves), lays that backup back and lays the build down.
+ */
+async function backAgm({ out = () => {}, prompt = promptLine, ...stand }) {
+  const last = lastOutcome(stand);
+  if (last) out(last);
+  const rec = recordOf(windowsHands(stand.sys, stand.run));
+  const now = (rec.SemVer ? 'AGMessage ' + rec.SemVer : 'the AGMessage installed') + (INSTALL_VERSION.test(rec.Version || '') ? ' (build ' + buildOf(rec.Version) + ')' : '');
+  const previous = INSTALL_VERSION.test(rec.Previous || '') ? rec.Previous : '';
+  if (!previous) return { code: NOT_DONE, text: 'This PC has no build of AGMessage before ' + now + ' to go back to: its install record names none (a first install, or a go back made already).' };
+  const n = buildOf(previous);
+  out('Go back from ' + now + ' to build ' + n + '? AGMessage stops (it saves), its data is laid back as it was when the newer build was installed (what was written since is not kept, though its audit log is), and build ' + n + ' is laid down again from the installer kept on this PC.');
+  const typed = said(await prompt('Type ' + n + ' to go back, or press Enter to leave AGMessage as it is: '), 20);
+  if (!typed) return { code: DONE, text: 'Left as it is.' };
+  if (typed !== n) return { code: NOT_DONE, text: '"' + typed + '" is not ' + n + ': left as it is.' };
+  out('Asking AGMessage\'s control task…');
+  const request = { verb: 'back', to: previous };
+  return withReason(await sendRequest({ ...stand, request }), { out, prompt, again: (force) => sendRequest({ ...stand, request: { ...request, force } }) });
 }
 
 // ---------------------------------------------------------------- the portable import: the export, and the keys' removal
@@ -984,7 +1149,7 @@ function serve(a, { spawn = childProcess.spawn, supervise = path.join(__dirname,
 }
 
 /**
- * Runs one of the person's commands (token, status, open, start, stop, rights) or one of the import's steps (export,
+ * Runs one of the person's commands (token, status, open, start, stop, upgrade, back, rights) or one of the import's steps (export,
  * forget-keys) and says its words: the exit code, or for open, export and the requests a promise of it (they ask the port,
  * or the control task). serve runs through `serve`.
  */
@@ -996,7 +1161,7 @@ function main(argv, { out = (t) => process.stdout.write(t + '\n'), ...stand } = 
   if (a.verb === 'export') return exportPortable({ source: a.source, machine: a.machine, sys: a.sys, port: a.port, ...stand }).then((r) => { out(r.text); return r.code; });
   if (a.verb === 'forget-keys') { const r = forgetKeys({ source: a.source, machine: a.machine, sys: a.sys, id: a.id, ...stand }); out(r.text); return r.code; }
   if (REQUESTS.includes(a.verb)) {
-    const act = { start: startAgm, stop: stopAgm, rights: rightsAgm }[a.verb];
+    const act = { start: startAgm, stop: stopAgm, upgrade: upgradeAgm, back: backAgm, rights: rightsAgm }[a.verb];
     return act({ machine: a.machine, sys: a.sys, out, ...stand }).then((r) => { out(r.text); return r.code; });
   }
   if (a.verb === 'status') {
@@ -1035,6 +1200,7 @@ if (require.main === module) {
 module.exports = {
   main, parse, serve, taskEnv, TASK_PASSED, statusOf, showToken, adminName, csvRows, openPlan, healthAt, openAgm, DEFAULT_PORT, DONE, NOT_DONE, USAGE,
   accountOf, elevatedOf, controlTask, rightsLineOf, sendRequest, startAgm, stopAgm, rightsAgm, whoMayRun, whoMayRunWords, windowsHands, PS_NAMES, RIGHT_WORDS, REQUESTS, ANSWER_WAIT_MS,
+  upgradeAgm, backAgm, intoInbox, lastOutcome, recordOf, typedPath, INSTALLER_NAME, INSTALL_VERSION, FILE_REFUSED_TOO,
   exportPortable, forgetKeys, exportRefusal, factsAt, filesOf, carried, relOk, linkedSource, sameFile, portableOf, profileKeys, within, movedBat, copyBytes, importDirOf, verdictOf, partOf,
   MANIFEST, EXPORT_SAID, FORGET_SAID, KEYS_CARRIED, DATA_LEFT, BUNDLE_FILES_MAX, REL_MAX, IMPORT_STEPS,
 };

@@ -635,7 +635,14 @@ test('the Start menu: each item is node.exe on launch.js, a verb launch.js knows
     const fields = new Map([...l.matchAll(/(\w+): "((?:[^"]|"")*)"/g)].map((m) => [m[1], m[2].replace(/""/g, '"')]));
     return { name: fields.get('Name'), file: fields.get('Filename'), params: fields.get('Parameters'), dir: fields.get('WorkingDir'), flags: /Flags:/.test(l) };
   });
-  assert.deepEqual(items.map((i) => i.name), ['{group}\\Open AGMessage', '{group}\\Show the admin token', '{group}\\Start AGMessage', '{group}\\Stop AGMessage...', '{group}\\Who may run AGMessage...', '{group}\\AGMessage status'], 'the items this build has, in the plan\'s order: Upgrade and Go back are a later unit\'s');
+  assert.deepEqual(items.map((i) => i.name), ['{group}\\Open AGMessage', '{group}\\Show the admin token', '{group}\\Start AGMessage', '{group}\\Stop AGMessage...', '{group}\\Upgrade AGMessage...', '{group}\\Go back to build {code:PreviousBuild}', '{group}\\Who may run AGMessage...', '{group}\\AGMessage status'], 'the items, in the plan\'s order');
+  // Go back to build N names the build an upgrade replaced, and is there only after one: an earlier one's item goes first.
+  assert.match(icons.find((l) => l.includes('Go back to build')), /; Check: GoBackOffered$/);
+  assert.match(CODE, /function GoBackOffered\(\): Boolean;\nbegin\n {2}Result := Installed and not Rollback and \(InstalledVersion <> ''\) and \(CompareVersions\(InstalledVersion, '\{#InstallVersion\}'\) < 0\);\nend;/);
+  assert.match(CODE, /function PreviousBuild\(Param: String\): String;\nbegin\n {2}Result := BuildOf\(InstalledVersion\);\nend;/, 'the build Previous names after this install');
+  const lines = ISS.split('\n');
+  const del = lines.indexOf('[InstallDelete]');
+  assert.ok(del > 0 && lines.slice(del + 1).find((l) => !l.startsWith(';')) === 'Type: files; Name: "{group}\\Go back to build *.lnk"', 'an older build\'s Go back item removed at each install');
   const verbs = [];
   for (const i of items) {
     assert.equal(i.file, '{app}\\node\\node.exe', i.name + ': the signed node.exe, never a .bat or a program of its own');
@@ -650,7 +657,7 @@ test('the Start menu: each item is node.exe on launch.js, a verb launch.js knows
     assert.deepEqual([a.machine, a.sys], [MACHINE, SYS], i.name + ': its folders, as launch.js reads none from its environment');
     verbs.push(a.verb);
   }
-  assert.deepEqual(verbs, ['open', 'token', 'start', 'stop', 'rights', 'status']);
+  assert.deepEqual(verbs, ['open', 'token', 'start', 'stop', 'upgrade', 'back', 'rights', 'status']);
 });
 
 test('the installer\'s code: every machine-level act is a machine.js command it knows, with options it takes; the password goes in a file of machine\\work\\, never a command line or the log', () => {
@@ -740,8 +747,15 @@ test('the installer\'s import, before the first start: a first install shown to 
   assert.match(CODE, /ImportWords = '.*It copies and never moves, then checks what it copied\. Once that check passes, the old copies of its keys are removed from your Windows account \(%LOCALAPPDATA%\\AGMessage, which every portable AGMessage folder of this account uses\) and from the folder \(app\\data\\secret\.key\), and the folder is marked as moved: it no longer starts\./, 'the page says so before Import is pressed');
 });
 
-test('the installer\'s switches and refusals: /ADMIN, /PUBLICFIREWALL, /FORCE, /ROLLBACK and /REMOVEDATA; an older or the same build refused with words; /ROLLBACK only to the recorded Previous', () => {
-  for (const s of ["{param:ADMIN|}", "{param:PUBLICFIREWALL|}", "{param:FORCE|}", "CmdLineHas('/ROLLBACK')", "CmdLineHas('/REMOVEDATA')"]) assert.ok(CODE.includes(s), s);
+test('the installer\'s switches and refusals: /ADMIN, /PUBLICFIREWALL, /FORCE, /ROLLBACK, /UPGRADEBY and /REMOVEDATA; an older or the same build refused with words; /ROLLBACK only to the recorded Previous', () => {
+  for (const s of ["{param:ADMIN|}", "{param:PUBLICFIREWALL|}", "{param:FORCE|}", "{param:UPGRADEBY|}", "CmdLineHas('/ROLLBACK')", "CmdLineHas('/REMOVEDATA')"]) assert.ok(CODE.includes(s), s);
+  // /UPGRADEBY: machine.js preinstall-check takes it from SYSTEM alone, for an account the record gives upgrade, in every
+  // check the installer runs; the stop it asks for names that account.
+  assert.match(CODE, /\n {2}if UpgradeBy <> '' then Result := Result \+ ' --upgrade-by ' \+ Arg\(UpgradeBy\);\n/);
+  assert.match(CODE, /if UpgradeBy <> '' then UpgradeByName := JsonText\(Json, 'byName'\);/);
+  assert.match(CODE, /if UpgradeBy <> '' then\n {6}Params := MachineArgs\(\) \+ ' --by ' \+ Arg\(UpgradeByName \+ ', by a checked upgrade'\)/);
+  const initSetup = CODE.slice(CODE.indexOf('\nfunction InitializeSetup()'), CODE.indexOf('\nprocedure InitializeWizard()'));
+  assert.ok(initSetup.indexOf("{param:UPGRADEBY|}") > 0 && initSetup.indexOf("{param:UPGRADEBY|}") < initSetup.indexOf("Machine('preinstall-check'"), '/UPGRADEBY read before the first check');
   assert.ok(CODE.includes("Refuse(InstalledWords() + ' is newer than this installer''s {#SemVer} (build {#Build}): uninstall it first to go back. Nothing was changed.');"));
   assert.ok(CODE.includes("Refuse(InstalledWords() + ' is installed already: an installer upgrades only an older build. Nothing was changed.');"));
   assert.ok(CODE.includes("if not ((CompareVersions(PreviousVersion, '{#InstallVersion}') = 0) or ((CompareVersions(InstalledVersion, '{#InstallVersion}') = 0) and (LaidVersion() <> '') and (CompareVersions(LaidVersion(), '{#InstallVersion}') <> 0))) then"), '/ROLLBACK lays back the recorded Previous, or the build the record still names only where the laid files are another build\'s');
@@ -751,6 +765,12 @@ test('the installer\'s switches and refusals: /ADMIN, /PUBLICFIREWALL, /FORCE, /
   // /DIR= refused before prepare makes anything; a refusal after it says nothing was installed, never that nothing changed.
   const init = CODE.slice(CODE.indexOf('\nfunction InitializeSetup()'), CODE.indexOf('\nprocedure InitializeWizard()'));
   assert.ok(init.indexOf("{param:DIR|}") > 0 && init.indexOf("{param:DIR|}") < init.indexOf("Machine('prepare'"), '/DIR= before prepare');
+  // One installer at a time on the PC, in every session (a checked upgrade's runs as SYSTEM): refused before anything,
+  // the way back of the installer that holds it excepted.
+  assert.match(CODE, /\n {2}SetupMutexName = 'Global\\AGMessageSetup';\n/);
+  assert.match(init, /\n {2}if \(not Rollback\) and CheckForMutexes\(SetupMutexName\) then\n {2}begin\n {4}Refuse\('Another AGMessage installer is running on this PC \(an upgrade or a go back\): wait for it to end, then run this one again\. Nothing was changed\.'\);\n {4}Exit;\n {2}end;\n {2}CreateMutex\(SetupMutexName\);\n/);
+  assert.ok(init.indexOf('CheckForMutexes(') < init.indexOf("{param:DIR|}") && init.indexOf('CheckForMutexes(') < init.indexOf("Machine('"), 'before every other check and every machine.js command');
+  assert.ok(!/^SetupMutex=/m.test(ISS), 'not [Setup]\'s SetupMutex, which would refuse the kept installer the way back runs while this one holds it');
   const prepare = CODE.slice(CODE.indexOf('\nfunction PrepareToInstall('), CODE.indexOf('\nprocedure KeepTwoInstallers()'));
   assert.ok(!prepare.includes('Nothing was changed.'), 'PrepareToInstall runs after prepare made the machine folder');
   assert.match(prepare, /Result := RefusalWords\(Json, Words, 'Nothing was installed\.'\);/);

@@ -1,7 +1,7 @@
 'use strict';
 /**
- * The installed node's machine-level commands. Run elevated or as SYSTEM only, by the installer (`AGMessage.iss`) and the
- * control tasks and the checked upgrade once they are built. It requires Node's own modules only, runs nothing but by its
+ * The installed node's machine-level commands. Run elevated or as SYSTEM only, by the installer (`AGMessage.iss`), the
+ * control tasks and the checked upgrade's runner. It requires Node's own modules only, runs nothing but by its
  * absolute path in the System32 folder it is given, with that folder as its working folder, and reads no machine path from
  * its environment: Inno passes `{sys}`, `{app}` and `{commonappdata}` as arguments.
  *
@@ -28,14 +28,15 @@
  *                     keys last; else it is kept, every Windows account's right on it taken back, and the record left as
  *                     `Kept` (the root) and `Port`, which a later install takes. Each step checked: what was left is
  *                     named, and the exit is 2.
- *   preinstall-check  --machine … --port <n> [--sys …] [--force <reason>] [--app <{app}>] [--rollback]
+ *   preinstall-check  --machine … --port <n> [--sys …] [--force <reason>] [--app <{app}>] [--rollback] [--upgrade-by <SID>]
  *                     Fails closed: with --app, a program from {app} that is not the server's own (a person's console of
  *                     the Start menu) is refused first, the installer's own chain left out (the kept installer that ran
  *                     this check); then, with --rollback (the way back, which stops nothing), anything that answers on
  *                     the port is refused; a port that answers and is not this PC's AGMessage proving its token is
  *                     refused with who holds it (a portable copy's words, or another program's pid); a busy server with
  *                     no typed reason (`busy` and its line of counts in --out), or one that does not answer within 5 s,
- *                     is refused (exit 3).
+ *                     is refused (exit 3). With --upgrade-by (the installer's /UPGRADEBY), refused first unless this
+ *                     runs as SYSTEM and the record gives that account `upgrade`; its name is `byName` in --out.
  *   upgrade-stop      --machine … --port <n> [--by <who>] [--force <reason>] [--sys … --app <{app}>]
  *                     Refused before it asks anything when the disk is short of the room the way back's backup takes. Then
  *                     the stop at loopback with the proof of the token, reason "upgrade": the server, the one writer,
@@ -70,7 +71,8 @@
  *   restore           --machine … --backup <backups\upgrade-…> --port <n>
  *                     The way back's restore of one backup over the data and uploads folders, file by file, while nothing
  *                     answers on the port: what the backup holds laid back, what it does not hold removed; the audit log and
- *                     watchdog.log, append-only evidence, are never rolled back.
+ *                     watchdog.log, append-only evidence, are never rolled back, nor is the place in the machine's events
+ *                     the server's settings had reached (settings.json's machineSeq), so none is written to the log twice.
  *
  *   control           --for <SID> --machine … --sys …
  *                     An account's request, run as SYSTEM by its own control task (`\AGMessage\Control-<SID>`, whose
@@ -78,7 +80,7 @@
  *                     ran says whose request it is and nothing the request says can change that. The request is
  *                     machine\inbox\<SID>\request.json, refused when lstat shows a link, a hard link or a reparse point,
  *                     copied by its bytes into machine\work\ and read there: whole JSON of at most 4 KB, a known verb
- *                     (start, stop, grant, revoke, handover; upgrade and back are U18's) and fields of their types. The
+ *                     (start, stop, upgrade, back, grant, revoke, handover) and fields of their types. The
  *                     right is read from the install record at that moment (the laptop's admin holds all four; Grants
  *                     names the rest), the act done, its answer written into machine\outbox\<SID>\answer.json (that
  *                     account reads it), and one machine event appended for an act done. grant, revoke and handover only
@@ -107,7 +109,19 @@
  *                     import folder cleared; not done (2) when an old copy was not removed or the folder not marked, its
  *                     path in the words. clear: an import left before its end, its folder and verdict removed.
  *
- *   upgrade is a later unit's (U18): until it lands its verb is refused as unknown.
+ *   upgrade           --step run --plan <machine\work\upgrade-<id>\plan.json> --sys …
+ *                     The checked upgrade's runner (Upgrade AGMessage…, Go back to build N): the control task checks an
+ *                     installer against its release on GitHub (immutable, the asset's digest equal to the staged copy's
+ *                     SHA-256, newer than the record's version, AGMessage not busy without a typed reason), then leaves
+ *                     a copy of node.exe and this file beside a plan in machine\work\ and runs it there as a task of its
+ *                     own (\AGMessage\Upgrade-<id>, SYSTEM, once), since nothing may run from {app} while an installer
+ *                     replaces it and the control task's job ends at its time limit. The runner waits for the console
+ *                     that asked to close, then runs the staged installer with /UPGRADEBY (or, to go back, stops
+ *                     AGMessage, lays the upgrade's backup back and runs the kept installer with /ROLLBACK), its log in
+ *                     its own folder, and answers into the account's outbox. Each outcome, once it is seen (the exit
+ *                     code, the record, what answers on the port), is one machine event: machine.upgrade or
+ *                     machine.upgrade.refused. One at a time: machine\work\upgrade.lock from the check to the hand-off,
+ *                     then the runner's own program.
  *
  * Every verb takes `--out <file>`: its result as JSON ({v, verb, code, words, …}), refusals too, never a token or a
  * password, written whole. Exit codes: 0 done; 2 not done, with the words of why; 3 refused, fail closed (a precondition
@@ -119,6 +133,7 @@ const childProcess = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const http = require('node:http');
+const https = require('node:https');
 const net = require('node:net');
 const path = require('node:path');
 
@@ -148,9 +163,8 @@ const controlTask = (sid) => TASK_FOLDER + 'Control-' + sid;
 const controlSddl = (sid) => 'D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;' + sid + ')';
 /** The rights the laptop's admin holds and gives (U.5.1): each to one person's account at a time. */
 const RIGHTS = Object.freeze(['token', 'start', 'stop', 'upgrade']);
-/** The verbs a request may name; upgrade and back are U18's, refused as unknown until it lands. */
-const CONTROL_VERBS = Object.freeze(['start', 'stop', 'grant', 'revoke', 'handover']);
-const CONTROL_LATER = Object.freeze({ upgrade: 'U18', back: 'U18' });
+/** The verbs a request may name. */
+const CONTROL_VERBS = Object.freeze(['start', 'stop', 'upgrade', 'back', 'grant', 'revoke', 'handover']);
 /** The most of a request the control task reads: a request over this is refused whole. */
 const REQUEST_MAX = 4096;
 /** The integrity labels of an elevated token (High) and of SYSTEM's (System), by SID: never Windows' localised words. */
@@ -384,6 +398,8 @@ async function healthOf(port) {
 // ---------------------------------------------------------------- the build an install records
 
 const SEMVER = /^(0|[1-9]\d{0,4})\.(0|[1-9]\d{0,4})\.(0|[1-9]\d{0,4})$/;
+/** An install version as the record writes one (installOf's `version`): MAJOR.MINOR.BUILD, BUILD from 1. */
+const INSTALL_VERSION = /^(?:0|[1-9]\d{0,2})\.(?:0|[1-9]\d{0,2})\.[1-9]\d{0,4}$/;
 const BUILD_NUMBER = /^[1-9]\d{0,4}$/;
 const SHORT_COMMIT = /^[0-9a-f]{7}$/;
 /**
@@ -781,9 +797,10 @@ function programWords(list) {
 
 // ---------------------------------------------------------------- argument parsing
 
-/** The verbs built so far; upgrade (U18) is refused as unknown until it lands. */
-const VERBS = Object.freeze(['prepare', 'install', 'uninstall', 'preinstall-check', 'upgrade-stop', 'status', 'restore', 'whose', 'start', 'first-account', 'control', 'import']);
-const LATER = Object.freeze({ upgrade: 'U18' });
+/** The verbs. */
+const VERBS = Object.freeze(['prepare', 'install', 'uninstall', 'preinstall-check', 'upgrade-stop', 'status', 'restore', 'whose', 'start', 'first-account', 'control', 'import', 'upgrade']);
+/** A later unit's verb, refused by its unit's name until it lands: none now. */
+const LATER = Object.freeze({});
 /** The flags (no value). */
 const FLAGS = new Set(['--public', '--signed', '--remove-data', '--rollback', '--elevated']);
 /** Each verb's options, each at most once: any other is refused, never ignored. */
@@ -791,7 +808,7 @@ const VERB_OPTS = Object.freeze({
   prepare: ['--machine', '--sys', '--out'],
   install: ['--machine', '--app', '--sys', '--build', '--port', '--admin', '--admin-name', '--public', '--signed', '--rollback', '--out'],
   uninstall: ['--machine', '--sys', '--port', '--force', '--remove-data', '--app', '--out'],
-  'preinstall-check': ['--machine', '--sys', '--port', '--force', '--app', '--rollback', '--out'],
+  'preinstall-check': ['--machine', '--sys', '--port', '--force', '--app', '--rollback', '--upgrade-by', '--out'],
   'upgrade-stop': ['--machine', '--sys', '--port', '--by', '--force', '--app', '--out'],
   status: ['--machine', '--sys', '--port', '--out'],
   restore: ['--machine', '--backup', '--port', '--out'],
@@ -800,6 +817,7 @@ const VERB_OPTS = Object.freeze({
   'first-account': ['--machine', '--port', '--account', '--build', '--out'],
   control: ['--for', '--elevated', '--request', '--machine', '--sys', '--out'],
   import: ['--step', '--for', '--machine', '--sys', '--app', '--source', '--id', '--out'],
+  upgrade: ['--step', '--plan', '--sys', '--out'],
 });
 
 /** The command line, read: {verb, opts} or {problem}. No value is a path read from the environment: each is an argument. */
@@ -1447,7 +1465,37 @@ function holderPid(opts, run, port) {
  * reason; silent within 5 s refused, naming its pid); anything else refused with who holds the port, read from its health
  * (a portable copy's words) or by its pid.
  */
-async function preinstallCheck(opts, { run = childProcess.execFileSync, fsImpl = fs, net: n = {} } = {}) {
+async function preinstallCheck(opts, stand = {}) {
+  const { run = childProcess.execFileSync } = stand;
+  const by = opts['--upgrade-by'] === undefined ? null : checkedUpgrader(opts, run);
+  try {
+    const r = await preinstallChecked(opts, stand);
+    return by ? { ...r, byName: by.name } : r;
+  } catch (e) {
+    if (by && e && typeof e === 'object') e.byName = by.name;
+    throw e;
+  }
+}
+/**
+ * /UPGRADEBY=<sid>, checked (preinstall-check --upgrade-by): the switch AGMessage's checked upgrade runs the installer with,
+ * accepted only when this runs as SYSTEM (whoami's SID) and the install record gives that one person's account `upgrade`
+ * (the laptop's admin, or a Grants value naming it): {sid, name}, the name Windows gives it now, for who asked the stop.
+ */
+function checkedUpgrader(opts, run) {
+  const sid = String(opts['--upgrade-by']);
+  if (!personSid(sid)) throw usage('--upgrade-by is "' + said(sid, 80) + '", which is not one person\'s SID.');
+  const H = hands(opts['--sys'], run);
+  const me = accountOf(H.whoami(['/user', '/fo', 'csv', '/nh']).out);
+  if (!me || me.sid !== SID.system) throw refusal('/UPGRADEBY is the switch of AGMessage\'s own checked upgrade, which runs this installer as SYSTEM: run it without /UPGRADEBY, and Windows asks for an administrator\'s approval. Nothing was changed.');
+  const record = readRecord(H);
+  const rights = record.values.Admin === sid ? RIGHTS : grantRightsOf(readGrants(H)[sid]);
+  if (!record.installed || !rights.includes('upgrade')) throw refusal('/UPGRADEBY names ' + sid + ', which AGMessage on this PC gives no right to upgrade it: nothing was changed.');
+  const ps = H.powershell(PS_WHOSE, { AGM_SIDS: sid });
+  const name = ps.names && typeof ps.names[sid] === 'string' && ps.names[sid] ? said(ps.names[sid], 80) : sid === record.values.Admin && record.values.AdminName ? said(record.values.AdminName, 80) : sid;
+  return { sid, name };
+}
+/** preinstall-check's checks themselves, once /UPGRADEBY (when given) is taken. */
+async function preinstallChecked(opts, { run = childProcess.execFileSync, fsImpl = fs, net: n = {} } = {}) {
   const root = needPath(opts, '--machine');
   const port = needPort(opts);
   // A person's console from {app} (Show the admin token, AGMessage status, Open AGMessage) holds node.exe open: the files
@@ -1768,13 +1816,16 @@ function elevatedOf(text) {
   return ELEVATED_LABELS.some((l) => sids.has(l)) && sids.has(SID.admins);
 }
 /** The keys each verb's request may hold, beside id and verb. */
-const REQUEST_KEYS = Object.freeze({ start: [], stop: ['force'], grant: ['account', 'rights'], revoke: ['account', 'rights'], handover: ['account', 'confirm'] });
+const REQUEST_KEYS = Object.freeze({ start: [], stop: ['force'], upgrade: ['look', 'release', 'file', 'force'], back: ['to', 'force'], grant: ['account', 'rights'], revoke: ['account', 'rights'], handover: ['account', 'confirm'] });
 const REQUEST_ID = /^[0-9a-f]{16,64}$/;
 /**
  * A request read from its bytes (pure): {request} or {problem, id}. Whole JSON of at most REQUEST_MAX bytes, an object,
  * `id` 16-64 hex characters and `verb` one of CONTROL_VERBS, with the keys of that verb alone, each of its type: `force`
- * words (a stop's typed reason); `account` an account's name or SID; `rights` a list of RIGHTS, each once (a revoke's may
- * be "all"); `confirm` the new admin's name typed again. Anything else is refused, never defaulted.
+ * words (the reason typed for a busy stop, upgrade or go back); an upgrade's one way, `look` (true: its newest release
+ * looked up, nothing installed), `release` (a version, MAJOR.MINOR.PATCH, downloaded from its release) or `file` (an
+ * installer's name, AGMessage-Setup-<version>-unsigned.exe, in the account's inbox); a back's `to` (the install version it
+ * goes back to); `account` an account's name or SID; `rights` a list of RIGHTS, each once (a revoke's may be "all");
+ * `confirm` the new admin's name typed again. Anything else is refused, never defaulted.
  */
 function requestOf(bytes) {
   const buf = Buffer.isBuffer(bytes) ? bytes : Buffer.from(String(bytes || ''), 'utf8');
@@ -1785,14 +1836,33 @@ function requestOf(bytes) {
   const id = typeof j.id === 'string' && REQUEST_ID.test(j.id) ? j.id : '';
   if (!id) return { problem: 'Your request carries no id of its shape (16 to 64 hex characters).' };
   if (typeof j.verb !== 'string') return { problem: 'Your request names no verb.', id };
-  if (Object.hasOwn(CONTROL_LATER, j.verb)) return { problem: '"' + j.verb + '" is built by ' + CONTROL_LATER[j.verb] + '; this build\'s control task knows ' + CONTROL_VERBS.join(', ') + '.', id };
   if (!CONTROL_VERBS.includes(j.verb)) return { problem: '"' + said(j.verb, 40) + '" is not a request AGMessage\'s control task knows (' + CONTROL_VERBS.join(', ') + ').', id };
   const allowed = ['id', 'verb', ...REQUEST_KEYS[j.verb]];
   const extra = Object.keys(j).find((k) => !allowed.includes(k));
   if (extra !== undefined) return { problem: 'A ' + j.verb + ' request takes ' + (REQUEST_KEYS[j.verb].join(', ') || 'nothing more') + '; "' + said(extra, 40) + '" is not one of them.', id };
   const request = { id, verb: j.verb };
-  if (j.verb === 'stop') {
-    if (j.force !== undefined && typeof j.force !== 'string') return { problem: 'A stop\'s force is the reason you typed, in words.', id };
+  if (j.verb === 'upgrade') {
+    const ways = ['look', 'release', 'file'].filter((k) => j[k] !== undefined);
+    if (ways.length !== 1) return { problem: 'An upgrade request names one of look, release and file.', id };
+    if (ways[0] === 'look') {
+      if (j.look !== true || j.force !== undefined) return { problem: 'An upgrade\'s look is true, and asks nothing more.', id };
+      request.look = true;
+      return { request };
+    }
+    if (ways[0] === 'release') {
+      if (typeof j.release !== 'string' || !SEMVER.test(j.release)) return { problem: 'An upgrade\'s release is its version, MAJOR.MINOR.PATCH (0.6.1).', id };
+      request.release = j.release;
+    } else {
+      if (typeof j.file !== 'string' || !INSTALLER_NAME.test(j.file)) return { problem: 'An upgrade\'s file is an installer\'s name in your inbox, AGMessage-Setup-<version>-unsigned.exe.', id };
+      request.file = j.file;
+    }
+  }
+  if (j.verb === 'back') {
+    if (typeof j.to !== 'string' || !INSTALL_VERSION.test(j.to)) return { problem: 'A back request names the build it goes back to, by its install version (0.6.41).', id };
+    request.to = j.to;
+  }
+  if (j.verb === 'stop' || j.verb === 'upgrade' || j.verb === 'back') {
+    if (j.force !== undefined && typeof j.force !== 'string') return { problem: 'A ' + j.verb + '\'s force is the reason you typed, in words.', id };
     request.force = said(j.force || '', 200);
   }
   if (REQUEST_KEYS[j.verb].includes('account')) {
@@ -2002,24 +2072,27 @@ function eventFor(c, ev) {
 
 /** Why an account may not do `verb`, in its words: '' when it may. The rights are the install record's, read now. */
 function mayNot(c, verb) {
-  const asks = { start: 'start', stop: 'stop' }[verb];
+  const asks = { start: 'start', stop: 'stop', upgrade: 'upgrade', back: 'upgrade' }[verb];
   const ask = c.adminName ? 'Ask ' + c.adminName + ', or an administrator.' : 'Ask this PC\'s AGMessage admin, or an administrator.';
   if (c.elevated) return c.installed ? '' : 'AGMessage is not installed on this PC (no install record).';
   if (!c.installed) return 'You have no AGMessage rights on this PC. Ask an administrator.';
   if (!asks) return c.isAdmin ? '' : 'Only ' + (c.adminName || 'this PC\'s AGMessage admin') + ', this PC\'s AGMessage admin, can ' + ({ grant: 'give rights', revoke: 'take rights back', handover: 'hand AGMessage\'s admin over' })[verb] + '.';
   if (c.rights.includes(asks)) return '';
   if (!c.rights.length) return 'You have no AGMessage rights on this PC. ' + ask;
-  return 'You may not ' + asks + ' AGMessage on this PC (your rights here: ' + rightsWords(c.rights) + '). ' + ask;
+  const act = verb === 'back' ? 'take AGMessage back to its build before' : asks + ' AGMessage';
+  return 'You may not ' + act + ' on this PC (your rights here: ' + rightsWords(c.rights) + '). ' + ask;
 }
 /**
  * A request read whole and refused for want of the right, as its machine event (`machine.refused`): who asked, what, and
  * the rights it named. What the request names is never looked up: the account named is said as it was typed.
  */
 function refusedEvent(c, req, why) {
-  const rights = req.verb === 'start' || req.verb === 'stop' ? [req.verb] : Array.isArray(req.rights) ? req.rights : [];
+  const rights = req.verb === 'start' || req.verb === 'stop' ? [req.verb] : req.verb === 'upgrade' || req.verb === 'back' ? ['upgrade'] : Array.isArray(req.rights) ? req.rights : [];
   const asked = {
     start: 'start AGMessage',
     stop: 'stop AGMessage',
+    upgrade: req.look ? 'look up AGMessage\'s newest release' : 'upgrade AGMessage' + (req.release ? ' to ' + req.release : req.file ? ' with ' + req.file : ''),
+    back: 'take AGMessage back to its build before (' + req.to + ')',
     grant: 'give ' + req.account + ' ' + rightsWords(rights),
     revoke: 'take back ' + (req.rights === 'all' ? 'every right' : rightsWords(rights)) + ' from ' + req.account,
     handover: 'hand AGMessage\'s admin over to ' + req.account,
@@ -2197,8 +2270,11 @@ async function controlHandover(c, req) {
   };
 }
 
-const CONTROL_ACTS = Object.freeze({ start: controlStart, stop: controlStop, grant: controlGrant, revoke: controlRevoke, handover: controlHandover });
+const CONTROL_ACTS = Object.freeze({ start: controlStart, stop: controlStop, upgrade: controlUpgrade, back: controlBack, grant: controlGrant, revoke: controlRevoke, handover: controlHandover });
 
+/** The words when the install record names no port, or no install folder, for an act that needs it. */
+const NO_PORT = 'The install record names no port, so AGMessage cannot be asked: reinstall it.';
+const NO_APP = 'The install record names no install folder, so AGMessage\'s build and its kept installers cannot be read: reinstall AGMessage.';
 /**
  * control: one account's request, as SYSTEM from its control task (--for), or from an administrator's elevated console
  * (--elevated, the request a file of machine\work\). Who asks is the task that ran (or the elevated account), never what
@@ -2246,7 +2322,7 @@ async function control(opts, { run = childProcess.execFileSync, fsImpl = fs, net
   const admin = isSid(record.values.Admin) ? record.values.Admin : '';
   const app = record.values.InstallDir || '';
   const c = {
-    root, sys: opts['--sys'], H, fsImpl, n, elevated, machineDir: P.join(root, 'machine'),
+    root, sys: opts['--sys'], H, run, fsImpl, n, elevated, machineDir: P.join(root, 'machine'), record: record.values, app, sid,
     installed: record.installed, admin, adminName: said(record.values.AdminName || '', 120), grants,
     isAdmin: !elevated && !!admin && sid === admin,
     rights: sid === admin ? [...RIGHTS] : grantRightsOf(grants[sid]),
@@ -2267,12 +2343,14 @@ async function control(opts, { run = childProcess.execFileSync, fsImpl = fs, net
       }
       throw refusal(no, { event: ev.seq || 0 });
     }
-    if ((req.verb === 'start' || req.verb === 'stop') && !c.port) throw notDone('The install record names no port, so AGMessage cannot be asked: reinstall it.');
+    // An upgrade's and a go back's own (recordNamesAll) are inside their acts, so each is their refusal's event.
+    if ((req.verb === 'start' || req.verb === 'stop') && !c.port) throw notDone(NO_PORT);
+    if (req.verb === 'upgrade' && req.look && !fullPath(app)) throw notDone(NO_APP);
     if (['grant', 'revoke', 'handover'].includes(req.verb) && !c.node) throw notDone('The install record names no install folder, so no control task can be made: reinstall AGMessage.');
     c.me = whoAsks();
     result = await CONTROL_ACTS[req.verb](c, req);
   } catch (e) {
-    answer({ id: req.id, verb: req.verb, code: e && e.usage ? USAGE : e && e.refused ? REFUSED : NOT_DONE, words: (e && e.words) || said(e && e.message, 200), ...(e && e.busy ? { busy: true, forceable: true } : {}) });
+    answer({ id: req.id, verb: req.verb, code: e && e.usage ? USAGE : e && e.refused ? REFUSED : NOT_DONE, words: (e && e.words) || said(e && e.message, 200), ...(e && e.busy ? { busy: true, forceable: true } : {}), ...(e && typeof e.why === 'string' && (req.verb === 'upgrade' || req.verb === 'back') ? { why: said(e.why, 20) } : {}) });
     throw Object.assign(e, { id: req.id });
   }
   const { after, code = DONE, ...told } = result;
@@ -2287,6 +2365,888 @@ async function control(opts, { run = childProcess.execFileSync, fsImpl = fs, net
   const out = { id: req.id, ...told, ranAs: me ? me.sid : '', for: sid };
   if (code !== DONE) throw notDone(told.words, out);
   return out;
+}
+
+// ---------------------------------------------------------------- the checked upgrade, and Go back to build N
+
+/** GitHub's REST API: the one place a checked upgrade asks, with no token (a repository's releases are public). */
+const GITHUB_API = 'https://api.github.com';
+const GITHUB_HEADERS = Object.freeze({ 'user-agent': 'AGMessage-machine', accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28' });
+/** A repository as build.json names it (tools/stamp-build.js, from GITHUB_REPOSITORY): owner/name, as GitHub allows them. */
+const REPO = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/;
+/** A release's installer, by the name the release job gives it: AGMessage-Setup-<MAJOR.MINOR.PATCH>-unsigned.exe. */
+const INSTALLER_NAME = /^AGMessage-Setup-((?:0|[1-9]\d{0,4})\.(?:0|[1-9]\d{0,4})\.(?:0|[1-9]\d{0,4}))-unsigned\.exe$/;
+/** The most an installer may be (one is tens of MB), and the most of GitHub's answer for one release a check reads. */
+const INSTALLER_MAX = 512 * 1024 * 1024;
+const RELEASE_MAX = 1024 * 1024;
+/**
+ * How long GitHub is given to answer, a download to send its next bytes, how many redirects a download follows, and how
+ * long a download may take in all, so a check ends within its control task's 10 minutes (past which Task Scheduler ends
+ * it) and says why.
+ */
+const GITHUB_MS = 20_000;
+const DOWNLOAD_IDLE_MS = 60_000;
+const REDIRECTS_MAX = 5;
+const DOWNLOAD_MAX_MS = 7 * 60_000;
+/**
+ * The runner's bounds: how long it waits for the console that asked (and any other of {app}'s) to close and how often it
+ * looks; how long a runner handed its plan may take to show as a program running from its folder, past which one that
+ * does not was never started or has died; and how long it waits for its control task's answer before it writes its own
+ * last one. An installer is never killed (Inno's rollback does not run on a kill, and the installer's own steps are
+ * bounded: the stop's two minutes, the verify's 35 s, the way back's), so the runner waits for it however long it runs.
+ */
+const RUNNER_WAIT_MS = 10 * 60_000;
+const RUNNER_POLL_MS = 2000;
+const RUNNER_START_MS = 2 * 60_000;
+const PENDING_WAIT_MS = 30_000;
+/**
+ * machine\work\upgrade.lock, held by one control task from its read of what is under way to its hand-off, so two control
+ * tasks never both start a runner; past this age it is one a control task that ended left (Task Scheduler ends a control
+ * task at its 10 minutes, and an elevated console's request is bounded the same).
+ */
+const UPGRADE_LOCK_STALE_MS = 15 * 60_000;
+/** A runner's folder in machine\work\, by its own random id; a staged folder in machine\staged\, by its own. */
+const RUNNER_DIR = /^upgrade-([0-9a-f]{16})$/;
+const STAGED_DIR = /^[0-9a-f]{16}$/;
+/** The task a control task's runner runs as, once, as SYSTEM: \AGMessage\Upgrade-<its folder's id>. */
+const runnerTask = (id) => TASK_FOLDER + 'Upgrade-' + id;
+/** The words when GitHub cannot be asked: with no signature (answer 36) nothing checks an installer offline. */
+const OFFLINE_WORDS = 'AGMessage could not check this installer against its release (no internet). Run it yourself: Windows will ask for an administrator\'s approval.';
+const NOT_THE_RELEASES = 'This file is not the release\'s. Do not run it.';
+
+/** The version an installer's name carries (INSTALLER_NAME), or '' (pure). */
+const installerSemver = (name) => { const m = INSTALLER_NAME.exec(String(name || '')); return m ? m[1] : ''; };
+/** A release's installer's name for its version (pure). */
+const installerName = (semver) => 'AGMessage-Setup-' + semver + '-unsigned.exe';
+/** An install version's build number: what follows its last dot (pure). */
+const buildOfVersion = (v) => String(v || '').split('.').pop();
+const capital = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+/** SemVer precedence of two MAJOR.MINOR.PATCH versions (lib/version.js compareVersions, held to it): 1, -1 or 0 (pure). */
+function compareSemver(a, b) {
+  const p = String(a).split('.').map(Number), q = String(b).split('.').map(Number);
+  for (let i = 0; i < 3; i++) if (p[i] !== q[i]) return p[i] > q[i] ? 1 : -1;
+  return 0;
+}
+/** The repository a build names: its build.json's `repo`, or '' when it names none of the shape (pure). */
+function repoOf(text) {
+  let j;
+  try { j = JSON.parse(String(text)); } catch { return ''; /* no stamp: a local build names no repository */ }
+  return j && typeof j.repo === 'string' && REPO.test(j.repo) ? j.repo : '';
+}
+/** What the install record says is installed (pure): {semver, version, build}, each '' when it names none of its shape. */
+function installedOf(values) {
+  const semver = SEMVER.test(String(values.SemVer || '')) ? values.SemVer : '';
+  const version = INSTALL_VERSION.test(String(values.Version || '')) ? values.Version : '';
+  return { semver, version, build: version ? buildOfVersion(version) : '' };
+}
+const installedWords = (i) => (i.semver ? 'AGMessage ' + i.semver + (i.build ? ' (build ' + i.build + ')' : '') : 'the AGMessage installed');
+/** Whether `url` begins with `prefix`, letter case aside: GitHub's owners and names are not case-sensitive (pure). */
+const under = (url, prefix) => typeof url === 'string' && url.toLowerCase().startsWith(prefix.toLowerCase());
+
+/**
+ * GitHub's release answer judged for an installer (pure): {asset: {name, size, digest, id, url}}, `digest` the SHA-256
+ * GitHub gives (hex), or {why, words}. The release must be `v<semver>` of `repo` (its API address and its page both under
+ * that repository), published (no draft) and immutable (U16 turns immutable releases on, so until then every check is
+ * refused here, fail closed); one asset must have the exact name `name`, be uploaded whole, of a size an installer has,
+ * under that repository's assets, and give a digest of the form `sha256:<64 hex>`.
+ */
+function releaseJudged(rel, { repo, semver, name }) {
+  const tag = 'v' + semver;
+  const of = 'the release ' + tag + ' of ' + repo;
+  const no = (why, words) => ({ why, words });
+  if (!rel || typeof rel !== 'object' || Array.isArray(rel)) return no('repository', 'GitHub\'s answer for ' + tag + ' of ' + repo + ' is not a release, so this installer was not run.');
+  if (rel.tag_name !== tag || !under(rel.url, GITHUB_API + '/repos/' + repo + '/releases/') || !under(rel.html_url, 'https://github.com/' + repo + '/releases/')) {
+    return no('repository', 'GitHub\'s answer for ' + tag + ' is not a release of ' + repo + ', the repository this AGMessage was built from, so this installer was not run.');
+  }
+  if (rel.draft === true) return no('repository', capital(of) + ' is a draft, not a published release, so this installer was not run.');
+  if (rel.immutable !== true) return no('immutable', capital(of) + ' is not immutable, so its files could still be replaced: AGMessage runs an installer with no administrator only from an immutable release. Run it yourself: Windows will ask for an administrator\'s approval.');
+  const same = Array.isArray(rel.assets) ? rel.assets.filter((a) => a && typeof a === 'object' && a.name === name) : [];
+  if (same.length !== 1) return no('asset', capital(of) + ' holds ' + (same.length ? 'more than one file' : 'no file') + ' named ' + name + ', so this installer is not its: it was not run.');
+  const a = same[0];
+  const digest = typeof a.digest === 'string' ? (/^sha256:([0-9a-f]{64})$/.exec(a.digest) || [])[1] : undefined;
+  if (!digest) return no('digest', capital(of) + ' gives no SHA-256 digest for ' + name + ', so this installer could not be checked: it was not run.');
+  if (!under(a.url, GITHUB_API + '/repos/' + repo + '/releases/assets/') || String(a.browser_download_url || '').toLowerCase() !== ('https://github.com/' + repo + '/releases/download/' + tag + '/' + name).toLowerCase()) {
+    return no('repository', 'The file ' + name + ' that GitHub names for ' + tag + ' is not one of ' + repo + '\'s release files, so this installer was not run.');
+  }
+  if (a.state !== 'uploaded' || !Number.isSafeInteger(a.size) || a.size < 1 || a.size > INSTALLER_MAX) return no('asset', capital(of) + '\'s ' + name + ' is not a whole file of an installer\'s size (' + said(a.state || 'no state', 20) + ', ' + (Number.isSafeInteger(a.size) ? a.size : 'no') + ' bytes), so it was not run.');
+  return { asset: { name, size: a.size, digest, id: Number.isSafeInteger(a.id) ? a.id : 0, url: a.url } };
+}
+/** The words for GitHub's answer when it is no release to judge (pure): {why, words}; `asked` names what was asked. */
+function githubWords(r, { repo, asked }) {
+  if (!r || r.error) return { why: 'offline', words: OFFLINE_WORDS };
+  if (r.status === 200) return { why: 'repository', words: 'GitHub\'s answer for the ' + asked + ' of ' + repo + ' is not a release AGMessage reads, so this installer was not run.' };
+  if (r.status === 404) return { why: 'repository', words: repo + ' has no ' + asked + ' on GitHub, so this installer is not one of its releases: it was not run.' };
+  if (r.status >= 300 && r.status < 400) return { why: 'repository', words: 'GitHub answered for the ' + asked + ' of ' + repo + ' from another place (HTTP ' + r.status + '), so this installer was not run.' };
+  const limit = (r.status === 403 || r.status === 429) && r.headers && String(r.headers['x-ratelimit-remaining']) === '0';
+  return { why: 'github', words: 'GitHub did not answer this check (HTTP ' + r.status + (limit ? ': its rate limit for this PC\'s address' : '') + '). Try again later, or run the installer yourself: Windows will ask for an administrator\'s approval.' };
+}
+/** Why `semver` is no upgrade of what is installed (pure): '' when it is newer, by SemVer, than the record's. */
+function newerRefusal(semver, installed) {
+  if (!installed.semver) return 'The install record names no version, so AGMessage cannot tell whether ' + semver + ' is newer: run the installer yourself (Windows will ask for an administrator\'s approval).';
+  const d = compareSemver(semver, installed.semver);
+  if (d === 0) return 'AGMessage ' + semver + ' is the version this PC has already (' + installedWords(installed) + '): an upgrade installs only a newer release.';
+  if (d < 0) return 'AGMessage ' + semver + ' is older than this PC\'s ' + installedWords(installed) + ': an upgrade installs only a newer release (Go back to build N takes it back to the build before).';
+  return '';
+}
+/**
+ * The installer's switches for a run with no one at it (pure): Inno's /VERYSILENT, /SUPPRESSMSGBOXES and /NORESTART;
+ * /ROLLBACK for the way back; /UPGRADEBY=<sid> when SYSTEM runs it for an account (the installer takes it from SYSTEM
+ * alone); /FORCE=<reason> when a reason was typed (a double quote, which Inno's command line cannot carry, made a single
+ * one); /LOG=<file>.
+ */
+function installerArgs({ sid = '', force = '', log = '', rollback = false } = {}) {
+  const args = ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'];
+  if (rollback) args.push('/ROLLBACK');
+  if (sid) args.push('/UPGRADEBY=' + sid);
+  if (force) args.push('/FORCE=' + String(force).replace(/"/g, '\''));
+  if (log) args.push('/LOG=' + log);
+  return args;
+}
+/**
+ * An installer's exit code in words, of what the installer itself did (pure): Inno Setup's codes, and the installer's own
+ * 3 for a build it laid down and set up that did not answer (its way back, which may or may not have laid the build before
+ * down: the record and the port say which). What the runner did before it ran is the runner's words, not these.
+ */
+function exitWords(code) {
+  return {
+    0: 'it installed and its build answers',
+    1: 'it refused before it replaced a file',
+    2: 'it was cancelled before it replaced a file',
+    3: 'the build it laid down did not start',
+    5: 'it was cancelled',
+    7: 'it refused before it replaced a file',
+  }[code] || (code < 0 ? 'it could not be run' : 'it did not finish');
+}
+/** The newest backup an upgrade from `previous` made, from the backups' records (pure): its {name, build, stopAt, saved}, or null. */
+function backupFor(list, previous) {
+  const of = list.filter((b) => b && typeof b.build === 'string' && installOf(b.build) && installOf(b.build).version === previous && Number.isFinite(b.stopAt));
+  of.sort((a, b) => b.stopAt - a.stopAt);
+  return of[0] || null;
+}
+
+/**
+ * One GET of an https address: {status, headers, body} (`body` the bytes, at most `max`), or {status, headers, bytes}
+ * when the bytes went to `toFd`; {status, location} for a redirect not followed; {error} when nothing whole came ('silent'
+ * when nothing came for `timeoutMs`, 'too large' past `max`, 'not https' for any other address). Up to `follow` redirects
+ * are followed, each to an https address. `tls` adds to the connection's options (a test's own certificate authority).
+ */
+function fetchHttps(url, { headers = {}, timeoutMs = GITHUB_MS, max = RELEASE_MAX, toFd = null, fsImpl = fs, follow = 0, tls = {}, until = 0 } = {}) {
+  return new Promise((resolve) => {
+    let u;
+    try { u = new URL(url); } catch { resolve({ error: 'not an address' }); return; }
+    if (u.protocol !== 'https:') { resolve({ error: 'not https' }); return; }
+    if (until && Date.now() >= until) { resolve({ error: 'too slow' }); return; }
+    let done = false;
+    let late = null;
+    const finish = (v) => { if (!done) { done = true; if (late) clearTimeout(late); resolve(v); } };
+    const req = https.get(u, { headers, agent: false, ...tls }, (res) => {
+      const status = res.statusCode;
+      if (status >= 300 && status < 400) {
+        res.resume();
+        const location = typeof res.headers.location === 'string' ? res.headers.location : '';
+        if (!location || follow <= 0) { finish({ status, headers: res.headers, location }); return; }
+        let next;
+        try { next = new URL(location, u).href; } catch { finish({ error: 'a redirect to no address' }); return; }
+        fetchHttps(next, { headers, timeoutMs, max, toFd, fsImpl, follow: follow - 1, tls, until }).then(finish);
+        return;
+      }
+      const chunks = [];
+      let n = 0;
+      res.on('data', (c) => {
+        n += c.length;
+        if (n > max) { req.destroy(Object.assign(new Error('too large'), { code: 'too large' })); return; }
+        if (toFd === null || status !== 200) { if (toFd === null) chunks.push(c); return; }
+        try { for (let off = 0; off < c.length;) off += fsImpl.writeSync(toFd, c, off, c.length - off); } catch (e) { req.destroy(e); }
+      });
+      res.on('end', () => finish(toFd === null ? { status, headers: res.headers, body: Buffer.concat(chunks) } : { status, headers: res.headers, bytes: status === 200 ? n : 0 }));
+      res.on('error', (e) => finish({ error: e.code || e.message }));
+    });
+    req.setTimeout(timeoutMs, () => req.destroy(Object.assign(new Error('silent'), { code: 'silent' })));
+    // `until` bounds the whole answer, a slow one that never goes silent included.
+    if (until) late = setTimeout(() => req.destroy(Object.assign(new Error('too slow'), { code: 'too slow' })), Math.max(0, until - Date.now()));
+    req.on('error', (e) => finish({ error: e.code || e.message }));
+  });
+}
+/** GitHub's REST answer for `p` (a path under the API): {status, json, headers}, `json` null unless a 200 read whole; or {error}. */
+async function githubGet(p, { tls } = {}) {
+  const r = await fetchHttps(GITHUB_API + p, { headers: GITHUB_HEADERS, max: RELEASE_MAX, tls });
+  if (r.error) return { error: r.error };
+  let json = null;
+  if (r.status === 200) { try { json = JSON.parse(r.body.toString('utf8')); } catch { json = null; /* not JSON: no release to judge */ } }
+  return { status: r.status, json, headers: r.headers || {} };
+}
+/**
+ * A release's installer downloaded straight into `file`, a new file (its API address, which redirects to GitHub's
+ * storage), within `maxMs` in all.
+ */
+async function downloadAsset(asset, file, { fsImpl = fs, tls, maxMs = DOWNLOAD_MAX_MS } = {}) {
+  const fd = fsImpl.openSync(file, 'wx');
+  try {
+    return await fetchHttps(asset.url, { headers: { ...GITHUB_HEADERS, accept: 'application/octet-stream' }, max: asset.size, toFd: fd, fsImpl, follow: REDIRECTS_MAX, timeoutMs: DOWNLOAD_IDLE_MS, tls, until: Date.now() + maxMs });
+  } finally { fsImpl.closeSync(fd); }
+}
+/** A file's SHA-256 (hex), read through its own handle. */
+function sha256File(fsImpl, file) {
+  const fd = fsImpl.openSync(file, 'r');
+  try {
+    const h = crypto.createHash('sha256');
+    const buf = Buffer.alloc(1024 * 1024);
+    for (;;) { const n = fsImpl.readSync(fd, buf, 0, buf.length, null); if (!n) break; h.update(buf.subarray(0, n)); }
+    return h.digest('hex');
+  } finally { fsImpl.closeSync(fd); }
+}
+
+/** A new folder of machine\staged\ (SYSTEM and Administrators only) for one staged installer: {dir, file}. */
+function stagedPlace(fsImpl, root, name) {
+  const P = pathOf(root);
+  const staged = P.join(root, 'machine', 'staged');
+  const real = realDir(fsImpl, staged);
+  if (!real.ok) throw notDone('machine\\staged ' + real.why + ': nothing was staged.');
+  const dir = P.join(staged, crypto.randomBytes(8).toString('hex'));
+  fsImpl.mkdirSync(dir);
+  return { dir, file: P.join(dir, name) };
+}
+/** A staged folder removed (machine\staged\'s, which only SYSTEM and Administrators write). */
+function removeStaged(fsImpl, dir) {
+  try { fsImpl.rmSync(dir, { recursive: true, force: true }); } catch { /* in use: the next upgrade's sweep takes it */ }
+}
+/**
+ * A named installer staged (step 1): `from`, a file of the account's inbox, refused when lstat shows a link, a hard link,
+ * anything but a file, an empty one or one over INSTALLER_MAX; opened without following a link, the file read the one
+ * lstat saw (fstat's device and index alike, and its size); its bytes copied into a new file of a new folder of
+ * machine\staged\, refused when they were not that size. The inbox's file is removed whatever it held, so nothing there
+ * is read twice. {dir, file, size}. Only that copy is ever hashed or run.
+ */
+function stageInstaller(fsImpl, from, root, name) {
+  const changed = () => refusal('The installer you named changed while it was read: it was not run.', { why: 'link' });
+  let place = null;
+  try {
+    let st;
+    try { st = fsImpl.lstatSync(from, { bigint: true }); } catch (e) {
+      throw refusal(e.code === 'ENOENT' ? 'No installer was waiting in your inbox: name it again in Upgrade AGMessage….' : 'The installer you named could not be read (' + (e.code || e.message) + ').', { why: 'file' });
+    }
+    if (st.isSymbolicLink()) throw refusal('The installer you named reached AGMessage\'s control task as a link, which it never follows: it was not run.', { why: 'link' });
+    if (!st.isFile()) throw refusal('What you named is not a file: it was not run.', { why: 'link' });
+    if (st.nlink > 1n) throw refusal('The installer you named is a link to another file (a hard link), which the control task never reads: it was not run.', { why: 'link' });
+    if (st.size < 1n || st.size > BigInt(INSTALLER_MAX)) throw refusal('The file you named is ' + (st.size < 1n ? 'empty' : 'over ' + MB(INSTALLER_MAX)) + ', which no AGMessage installer is: it was not run.', { why: 'file' });
+    place = stagedPlace(fsImpl, root, name);
+    const src = fsImpl.openSync(from, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+    let dst = null;
+    try {
+      const ft = fsImpl.fstatSync(src, { bigint: true });
+      if (!ft.isFile() || !sameFile(ft, st) || ft.size !== st.size) throw changed();
+      dst = fsImpl.openSync(place.file, 'wx');
+      const buf = Buffer.alloc(1024 * 1024);
+      let n = 0;
+      for (;;) {
+        const got = fsImpl.readSync(src, buf, 0, buf.length, null);
+        if (!got) break;
+        n += got;
+        if (BigInt(n) > ft.size) throw changed();
+        for (let off = 0; off < got;) off += fsImpl.writeSync(dst, buf, off, got - off);
+      }
+      if (BigInt(n) !== ft.size) throw changed();
+    } finally {
+      fsImpl.closeSync(src);
+      if (dst !== null) fsImpl.closeSync(dst);
+    }
+    return { ...place, size: Number(st.size) };
+  } catch (e) {
+    if (place) removeStaged(fsImpl, place.dir);
+    throw e;
+  } finally {
+    try { fsImpl.unlinkSync(from); } catch { try { fsImpl.rmdirSync(from); } catch { /* gone already, or a folder holding files: never read */ } }
+  }
+}
+
+/** The repository and what is installed, as the control task reads them: build.json's `repo` beside the installed app. */
+function upgradeFacts(c) {
+  let text = '';
+  try { text = c.fsImpl.readFileSync(pathOf(c.app).join(c.app, 'app', 'build.json'), 'utf8'); } catch { /* no stamp: it names no repository, refused below */ }
+  return { repo: repoOf(text), installed: installedOf(c.record) };
+}
+const NO_REPO = 'This build of AGMessage names no repository it was released from (its app\\build.json), so no installer can be checked against a release: run the installer yourself (Windows will ask for an administrator\'s approval).';
+/**
+ * The release asked of GitHub for `repo`: the one tagged v<semver>, or the newest published one when `semver` is ''; then
+ * judged (releaseJudged). {semver, asset}, or a refusal in the words a person reads ({why}: 'offline', 'repository',
+ * 'github', 'immutable', 'asset', 'digest').
+ */
+async function releaseFor(c, repo, semver) {
+  const p = '/repos/' + repo + '/releases/' + (semver ? 'tags/v' + semver : 'latest');
+  let r;
+  try { r = await (c.n.github || githubGet)(p); } catch (e) { r = { error: (e && (e.code || e.message)) || 'no answer' }; }
+  if (!r || r.error || r.status !== 200 || !r.json) {
+    const g = githubWords(r, { repo, asked: semver ? 'release v' + semver : 'release published' });
+    throw refusal(g.words, { why: g.why, detail: r && r.error ? said(r.error, 60) : '' });
+  }
+  const sv = semver || ((/^v(\d{1,5}\.\d{1,5}\.\d{1,5})$/.exec(String(r.json.tag_name || '')) || [])[1] || '');
+  if (!SEMVER.test(sv)) throw refusal('The newest release of ' + repo + ' names no version AGMessage reads (' + said(r.json.tag_name || 'no tag', 40) + '), so nothing was looked up.', { why: 'repository' });
+  const j = releaseJudged(r.json, { repo, semver: sv, name: installerName(sv) });
+  if (j.why) throw refusal(j.words, { why: j.why });
+  return { semver: sv, asset: j.asset };
+}
+/** How busy AGMessage is, asked at loopback with the proof (step 4): a busy one refused until the person types a reason. */
+async function busyCheck(c, force, act) {
+  const token = tokenFrom(c.root, c.fsImpl);
+  if (!token) throw refusal('AGMessage\'s token (token\\admin-token) could not be read, so it cannot be asked how busy it is: nothing was ' + act.done + '. Ask an administrator.', { why: 'token' });
+  const b = await (c.n.busy || busyAsk)({ port: c.port, token });
+  if (b.busy && !force) throw refusal('Not ' + act.done + ': AGMessage is busy (' + (b.words || 'activity in the last 10 minutes') + '). Type a reason to ' + act.verb + ' anyway.', { why: 'busy', busy: true, forceable: true, line: b.line || null });
+  return b;
+}
+/**
+ * machine\work\upgrade.lock taken (made only where none is), from the read of what is under way to the hand-off, so two
+ * control tasks (two accounts' own, or a console's elevated request beside one) never both start a runner: a function
+ * that gives it back, or a refusal while another holds it. One older than UPGRADE_LOCK_STALE_MS was left by a control task
+ * that ended, and is taken over.
+ */
+function upgradeLock(c) {
+  const lock = pathOf(c.root).join(c.root, 'machine', 'work', 'upgrade.lock');
+  const held = (at) => refusal('Another upgrade or go back is being checked now' + (at ? ' (asked at ' + clock(at) + ')' : '') + ': wait for it to end, then ask again.', { why: 'running' });
+  for (let tries = 0; tries < 3; tries++) {
+    let fd;
+    try { fd = c.fsImpl.openSync(lock, 'wx'); } catch (e) {
+      if (e.code !== 'EEXIST') throw notDone('machine\\work\\upgrade.lock could not be made (' + (e.code || e.message) + '): nothing was changed.', { why: 'lock' });
+      let st;
+      try { st = c.fsImpl.statSync(lock); } catch { continue; /* given back since: tried again */ }
+      if (Date.now() - st.mtimeMs <= UPGRADE_LOCK_STALE_MS) throw held(st.mtimeMs);
+      try { c.fsImpl.unlinkSync(lock); } catch { /* another took it over first */ }
+      continue;
+    }
+    try { c.fsImpl.writeSync(fd, JSON.stringify({ at: Date.now(), for: c.sid })); } finally { c.fsImpl.closeSync(fd); }
+    return () => { try { c.fsImpl.unlinkSync(lock); } catch { /* given back already */ } };
+  }
+  throw held(0);
+}
+/** A folder's age, by its last change: Infinity when it cannot be read (pure but for the read). */
+function ageOf(fsImpl, dir) {
+  try { return Date.now() - fsImpl.statSync(dir).mtimeMs; } catch { return Infinity; }
+}
+/** A runner's folder swept, with the task it ran as: what it held is the runner's own copy, its plan and its log. */
+function sweepRunner(c, dir, id) {
+  try { c.fsImpl.rmSync(dir, { recursive: true, force: true }); } catch { /* its node.exe still held: the next sweep takes it */ }
+  removeTask(c.H, runnerTask(id));
+}
+/**
+ * The runners' folders in machine\work\, read under the upgrade's lock. A runner is under way while a program runs from
+ * its folder (its own copy of node.exe: programsIn, fail closed), or while it has had less than RUNNER_START_MS to show
+ * as one; said, since an upgrade asked now would race it. One whose end is written is swept, with its task. One with no
+ * end and no program running from it died (a kill, a power cut) before it said its outcome: its outcome is its event now,
+ * from what the install record names (`machine.upgrade` when the record names its target, `machine.upgrade.refused`
+ * otherwise), then it is swept. A folder with no plan its control task wrote is swept once older than RUNNER_START_MS.
+ * With none under way, each staged folder older than the lock's stale age (none a check may still hold) is removed. ''
+ * when none is under way.
+ */
+function runnerUnderWay(c) {
+  const P = pathOf(c.root);
+  const work = P.join(c.root, 'machine', 'work');
+  let names = [];
+  try { names = c.fsImpl.readdirSync(work); } catch { /* no work folder: no runner */ }
+  for (const name of names.filter((x) => RUNNER_DIR.test(x))) {
+    const dir = P.join(work, name);
+    const id = RUNNER_DIR.exec(name)[1];
+    let plan = null;
+    try { plan = planOf(c.fsImpl.readFileSync(P.join(dir, 'plan.json'), 'utf8')); } catch { plan = null; /* none written */ }
+    if (plan && (plan.id !== id || plan.root !== c.root)) plan = null;
+    if (c.fsImpl.existsSync(P.join(dir, 'ended.json'))) {
+      if (plan && plan.staged) removeStaged(c.fsImpl, plan.staged);   // its end removes it; one still in use then goes now
+      sweepRunner(c, dir, id);
+      continue;
+    }
+    if (!plan) { if (ageOf(c.fsImpl, dir) > RUNNER_START_MS) sweepRunner(c, dir, id); continue; }
+    const what = plan.kind === 'back' ? 'A go back' : 'An upgrade';
+    const under = () => what + ' asked at ' + clock(plan.at) + ' is still under way: wait for it to end (AGMessage status says how AGMessage runs), then ask again.';
+    if (Date.now() - plan.at < RUNNER_START_MS) return under();
+    if (programsIn({ '--app': dir, '--sys': c.sys }, c.run).length) return under();
+    // Died with no end written: its end, then its one event, then the sweep, so a sweep that fails says it only once.
+    try { c.fsImpl.writeFileSync(P.join(dir, 'ended.json'), JSON.stringify({ at: Date.now(), code: NOT_DONE, died: true })); } catch { /* the event below still says it */ }
+    const now = installedOf(readRecord(c.H).values);
+    const reached = plan.kind === 'back' ? now.version === plan.to : now.semver === plan.to;
+    const who = plan.by.name || plan.by.sid;
+    const asked = plan.kind === 'back' ? 'take AGMessage back to build ' + buildOfVersion(plan.to) : 'upgrade AGMessage to ' + plan.to;
+    const tail = 'its runner ended at no step it said (its program is gone), and the install record names ' + installedWords(now).replace(/^AGMessage /, '') + ' now.';
+    eventFor(c, reached
+      ? { kind: 'machine.upgrade', by: plan.by, forAccount: plan.by, rights: ['upgrade'], words: who + (plan.kind === 'back' ? ' took AGMessage back from ' : ' upgraded AGMessage from ') + installedWords(plan.from).replace(/^AGMessage /, '') + ' to ' + installedWords(now).replace(/^AGMessage /, '') + ', asked at ' + clock(plan.at) + ': ' + tail }
+      : { kind: 'machine.upgrade.refused', by: plan.by, forAccount: plan.by, rights: ['upgrade'], words: who + ' asked to ' + asked + ' at ' + clock(plan.at) + '; it did not happen: ' + tail });
+    if (plan.staged) removeStaged(c.fsImpl, plan.staged);
+    sweepRunner(c, dir, id);
+  }
+  const staged = P.join(c.root, 'machine', 'staged');
+  let left = [];
+  try { left = c.fsImpl.readdirSync(staged); } catch { /* no staged folder: nothing to sweep */ }
+  for (const name of left) if (STAGED_DIR.test(name) && ageOf(c.fsImpl, P.join(staged, name)) > UPGRADE_LOCK_STALE_MS) removeStaged(c.fsImpl, P.join(staged, name));
+  return '';
+}
+/**
+ * A runner's task (Task Scheduler's schema 1.3; pure): SYSTEM, run on demand only (no trigger) and once, its action the
+ * runner's own copy of node.exe on its copy of machine.js, both in its folder of machine\work\, its descriptor SYSTEM's and
+ * Administrators' alone. A task of its own puts the runner in a job of its own: the control task that made it ends while
+ * it runs (Task Scheduler ends a task's job at its time limit, and a detached child does not break away from it). No time
+ * limit: the runner never kills an installer, and waits for it however long it runs. No token or password is in it.
+ */
+function runnerTaskXml({ node, args, cwd, uri }) {
+  return [
+    '<?xml version="1.0" encoding="UTF-16"?>',
+    '<Task version="1.3" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">',
+    '  <RegistrationInfo>',
+    '    <Description>AGMessage: one checked upgrade or go back, run once as SYSTEM from its own copy in machine\\work\\.</Description>',
+    '    <URI>' + xmlText(uri) + '</URI>',
+    '    <SecurityDescriptor>' + SERVER_TASK_SDDL + '</SecurityDescriptor>',
+    '  </RegistrationInfo>',
+    '  <Triggers />',
+    '  <Principals>',
+    '    <Principal id="Author">',
+    '      <UserId>' + SID.system + '</UserId>',
+    '      <RunLevel>HighestAvailable</RunLevel>',
+    '    </Principal>',
+    '  </Principals>',
+    '  <Settings>',
+    '    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>',
+    '    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>',
+    '    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>',
+    '    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>',
+    '    <AllowStartOnDemand>true</AllowStartOnDemand>',
+    '    <Enabled>true</Enabled>',
+    '  </Settings>',
+    '  <Actions Context="Author">',
+    '    <Exec>',
+    '      <Command>' + xmlText(node) + '</Command>',
+    '      <Arguments>' + xmlText(args.map(winArg).join(' ')) + '</Arguments>',
+    '      <WorkingDirectory>' + xmlText(cwd) + '</WorkingDirectory>',
+    '    </Exec>',
+    '  </Actions>',
+    '</Task>',
+    '',
+  ].join('\r\n');
+}
+/**
+ * The run handed to a runner (step 5): a new folder of machine\work\ (SYSTEM and Administrators only), the plan written
+ * first (from then on the folder reads as a runner's, under way until its end is written), then a copy of this node.exe
+ * and machine.js beside it, so nothing runs from {app} while the installer replaces it. A control task's runner is a task
+ * of its own, run once as SYSTEM (runnerTaskXml), registered and run with schtasks.exe; an elevated console's is started
+ * there on its own (detached), as that administrator, outside any task's job. The control task then ends. `c.n.runner`
+ * stands in for the programs and the spawn in a test.
+ */
+function startRunner(c, plan) {
+  const { execPath = process.execPath, script = __filename, spawn = childProcess.spawn } = c.n.runner || {};
+  const P = pathOf(c.root);
+  const dir = P.join(c.root, 'machine', 'work', 'upgrade-' + plan.id);
+  const runnerNode = P.join(dir, 'node.exe');
+  const copy = P.join(dir, 'machine.js');
+  const planFile = P.join(dir, 'plan.json');
+  const args = [copy, 'upgrade', '--step', 'run', '--plan', planFile, '--sys', c.sys];
+  const tn = runnerTask(plan.id);
+  c.fsImpl.mkdirSync(dir);
+  let started = null;
+  let why = '';
+  try {
+    c.fsImpl.writeFileSync(planFile, JSON.stringify(plan), { flag: 'wx' });
+    c.fsImpl.copyFileSync(execPath, runnerNode);
+    c.fsImpl.copyFileSync(script, copy);
+    if (c.elevated) {
+      const child = spawn(runnerNode, args, { cwd: dir, detached: true, stdio: 'ignore', windowsHide: true });
+      if (child && Number.isSafeInteger(child.pid)) {
+        if (typeof child.on === 'function') child.on('error', () => {});   // a start that fails late leaves no program: its folder is swept as a runner that died
+        if (typeof child.unref === 'function') child.unref();
+        started = { pid: child.pid };
+      } else why = 'its runner did not start';
+    } else {
+      const xml = P.join(dir, 'task.xml');
+      c.fsImpl.writeFileSync(xml, Buffer.concat([Buffer.from([0xFF, 0xFE]), Buffer.from(runnerTaskXml({ node: runnerNode, args, cwd: dir, uri: tn }), 'utf16le')]), { flag: 'wx' });
+      const made = c.H.schtasks(['/Create', '/TN', tn, '/XML', xml, '/F']);
+      try { c.fsImpl.unlinkSync(xml); } catch { /* left in the runner's folder, swept with it; it holds no secret */ }
+      if (made.code !== 0) why = 'its task ' + tn + ' could not be registered: ' + (made.err || 'schtasks.exe ended with ' + made.code);
+      else {
+        const ran = c.H.schtasks(['/Run', '/TN', tn]);
+        if (ran.code === 0) started = { task: tn };
+        else why = 'its task ' + tn + ' could not be run: ' + (ran.err || 'schtasks.exe ended with ' + ran.code);
+      }
+    }
+  } catch (e) { why = (e && (e.code || e.message)) || 'no answer'; }
+  if (!started) {
+    try { c.fsImpl.writeFileSync(P.join(dir, 'ended.json'), JSON.stringify({ at: Date.now(), code: NOT_DONE })); } catch { /* swept by the next upgrade, as a folder with no program */ }
+    if (!c.elevated) removeTask(c.H, tn);
+    throw notDone('The ' + (plan.kind === 'back' ? 'go back' : 'upgrade') + ' could not be started (' + said(why, 200) + '): nothing was run.', { why: 'runner' });
+  }
+  return { dir, planFile, ...started };
+}
+/** A checked upgrade's or a go back's refusal, as its machine event (`machine.upgrade.refused`: who, and why). */
+async function upgradeRefusedEvent(c, asked, why) {
+  const ev = eventFor(c, { kind: 'machine.upgrade.refused', by: c.me, forAccount: c.me, rights: ['upgrade'], words: (c.me.name || c.me.sid) + ' asked to ' + asked + ', and was refused: ' + why });
+  await nudgeServer(c);
+  return ev;
+}
+/** The newest release, looked up and judged, and whether it is newer than what is installed: no event, nothing staged. */
+async function lookUpgrade(c, facts) {
+  if (!facts.repo) throw refusal(NO_REPO, { why: 'norepo' });
+  const rel = await releaseFor(c, facts.repo, '');
+  const older = newerRefusal(rel.semver, facts.installed);
+  const release = { semver: rel.semver, name: rel.asset.name, size: rel.asset.size, digest: 'sha256:' + rel.asset.digest };
+  return {
+    look: true, release, newer: !older, installed: facts.installed,
+    words: older ? 'The newest release, AGMessage ' + rel.semver + ', is not newer than this PC\'s ' + installedWords(facts.installed) + '.' : 'The newest release is AGMessage ' + rel.semver + ' (' + rel.asset.name + ', ' + MB(rel.asset.size) + '); this PC has ' + installedWords(facts.installed) + '.',
+  };
+}
+/** The answer the person reads while their console closes and the runner waits for it: what was checked, and what follows. */
+const handedWords = (what) => what + ' It begins once this window has closed (press Enter): nothing of AGMessage may still run from its folder while its files are replaced.';
+
+/**
+ * upgrade: Upgrade AGMessage…, for the laptop's admin and an account given `upgrade`, with no administrator. A look names
+ * the newest release and whether it is newer, and changes nothing (no event). Otherwise, as SYSTEM, in the plan's order:
+ * 1. the file staged in machine\staged\ (a named one copied by its bytes from the account's inbox, stageInstaller; the
+ *    newest release's asset downloaded straight there, once its release is judged and found newer);
+ * 2. its release asked of GitHub (releaseFor), for the repository this build names, by the version the file's name or the
+ *    release's tag carries: immutable, one asset of the file's exact name, and its digest equal to the staged copy's
+ *    SHA-256;
+ * 3. newer than the installed one, by SemVer (the record's), which the installer's own check refuses a second time;
+ * 4. how busy AGMessage is, a busy one refused until the person types a reason;
+ * 5. the run, handed to a runner (startRunner, upgradeRun) with the staged copy, whose SHA-256 it reads again before it
+ *    runs it.
+ * Each refusal is a `machine.upgrade.refused` event, the staged copy removed; the run's outcome is its runner's one event,
+ * once it is seen. The read of what is under way and the hand-off hold machine\work\upgrade.lock (upgradeLock). An
+ * administrator's elevated console has its own installer run as it, with no check: a file it names is refused here.
+ */
+async function controlUpgrade(c, req) {
+  const facts = upgradeFacts(c);
+  if (req.look) return lookUpgrade(c, facts);
+  const asked = 'upgrade AGMessage to ' + (req.file ? installerSemver(req.file) + ' (' + req.file + ')' : req.release + ' (its release)');
+  let staged = null;
+  let handed = false;
+  let unlock = null;
+  try {
+    recordNamesAll(c);
+    if (c.elevated && req.file) throw refusal('You are an administrator here: run ' + req.file + ' yourself, and Windows takes your approval as it runs. Upgrade AGMessage… checks an installer for the accounts that are not administrators.', { why: 'elevated' });
+    unlock = upgradeLock(c);
+    const busyRun = runnerUnderWay(c);
+    if (busyRun) throw refusal(busyRun, { why: 'running' });
+    if (!facts.repo) throw refusal(NO_REPO, { why: 'norepo' });
+    const P = pathOf(c.root);
+    let semver;
+    let asset;
+    let sum;
+    if (req.file) {
+      semver = installerSemver(req.file);
+      staged = stageInstaller(c.fsImpl, P.join(c.root, 'machine', 'inbox', c.sid, req.file), c.root, req.file);
+      sum = sha256File(c.fsImpl, staged.file);
+      ({ asset } = await releaseFor(c, facts.repo, semver));
+      if (sum !== asset.digest) throw refusal(NOT_THE_RELEASES, { why: 'digest' });
+      const older = newerRefusal(semver, facts.installed);
+      if (older) throw refusal(older, { why: 'newer' });
+    } else {
+      semver = req.release;
+      ({ asset } = await releaseFor(c, facts.repo, semver));
+      const older = newerRefusal(semver, facts.installed);
+      if (older) throw refusal(older, { why: 'newer' });
+      staged = stagedPlace(c.fsImpl, c.root, asset.name);
+      let got;
+      try { got = await (c.n.download || downloadAsset)(asset, staged.file, { fsImpl: c.fsImpl }); } catch (e) { got = { error: (e && (e.code || e.message)) || 'no answer' }; }
+      if (!got || got.error || got.status !== 200 || got.bytes !== asset.size) {
+        const how = got && got.error === 'too slow' ? 'not within ' + DOWNLOAD_MAX_MS / 60_000 + ' minutes' : got && got.error ? got.error : got ? (got.status === 200 ? got.bytes + ' of ' + asset.size + ' bytes' : 'HTTP ' + got.status) : 'no answer';
+        throw refusal('The release\'s installer could not be downloaded whole (' + said(how, 60) + '): nothing was run. Try again, or run it yourself: Windows will ask for an administrator\'s approval.', { why: 'download' });
+      }
+      sum = sha256File(c.fsImpl, staged.file);
+      if (sum !== asset.digest) throw refusal('The installer downloaded from ' + facts.repo + '\'s release v' + semver + ' is not the release\'s (its SHA-256 differs from the digest GitHub gives): nothing was run.', { why: 'digest' });
+    }
+    await busyCheck(c, req.force, { done: 'upgraded', verb: 'upgrade it' });
+    const plan = {
+      v: 1, id: crypto.randomBytes(8).toString('hex'), request: req.id, kind: 'upgrade', at: Date.now(), for: c.sid, by: c.me, elevated: c.elevated,
+      root: c.root, app: c.app, port: c.port, repo: facts.repo, from: facts.installed, to: semver,
+      installer: staged.file, staged: staged.dir, digest: sum, force: req.force || '',
+    };
+    const r = startRunner(c, plan);
+    handed = true;
+    return {
+      pending: true, release: { semver, name: asset.name, size: asset.size, digest: 'sha256:' + sum }, runner: r.task || r.pid,
+      words: handedWords('Checked: ' + asset.name + ' is ' + facts.repo + '\'s release v' + semver + ' (immutable; SHA-256 ' + sum + '), newer than this PC\'s ' + installedWords(facts.installed) + '. AGMessage then stops (it saves and backs its data up), is upgraded, and starts again; if the new build does not start, the build before is laid back by itself.'),
+    };
+  } catch (e) {
+    if (staged && !handed) removeStaged(c.fsImpl, staged.dir);
+    // A named installer refused before it was staged leaves nothing in the inbox either.
+    if (req.file) { try { c.fsImpl.unlinkSync(pathOf(c.root).join(c.root, 'machine', 'inbox', c.sid, req.file)); } catch { /* staged and removed already, or none there */ } }
+    const ev = await upgradeRefusedEvent(c, asked, (e && e.words) || said(e && e.message, 200));
+    throw Object.assign(e, { event: ev.seq });
+  } finally {
+    if (unlock) unlock();
+  }
+}
+/** What an upgrade and a go back need the install record to name: its port (the busy check, the stop) and its install folder. */
+function recordNamesAll(c) {
+  if (!c.port) throw notDone(NO_PORT, { why: 'record' });
+  if (!fullPath(c.app)) throw notDone(NO_APP, { why: 'record' });
+}
+/** The backups an upgrade made (data\backups\upgrade-…\backup.json), each {name, build, stopAt, saved}; a folder not whole is passed over. */
+function listBackups(c) {
+  const P = pathOf(c.root);
+  const dir = P.join(c.root, 'data', BACKUPS);
+  let names;
+  try { names = c.fsImpl.readdirSync(dir); } catch { return []; /* none made */ }
+  const out = [];
+  for (const name of names.filter((x) => BACKUP_NAME.test(x))) {
+    if (!realDir(c.fsImpl, P.join(dir, name)).ok) continue;
+    let meta;
+    try { meta = JSON.parse(c.fsImpl.readFileSync(P.join(dir, name, 'backup.json'), 'utf8')); } catch { continue; /* not whole */ }
+    if (meta && meta.v === 1 && typeof meta.build === 'string') out.push({ name, build: said(meta.build, 80), stopAt: Number(meta.stopAt), saved: meta.saved === true });
+  }
+  return out;
+}
+/**
+ * back: Go back to build N, for the laptop's admin and an account given `upgrade` (or an administrator): the build the
+ * record names as Previous, the one `to` names (so a request made before another upgrade or go back is refused), its
+ * installer kept in {app}\installers\ (laid there by an elevated or a checked install, under Program Files, so it needs no
+ * network and no check), and the backup the upgrade from it made; refused while AGMessage is busy until the person types
+ * a reason. The run is a runner's: AGMessage stopped at loopback (it saves), that backup laid back, the kept installer run
+ * with /ROLLBACK, which lays the earlier build down and verifies that it answers (U.6.1). Each refusal is a
+ * `machine.upgrade.refused` event; the run's outcome is its runner's one event, once it is seen.
+ */
+async function controlBack(c, req) {
+  const facts = upgradeFacts(c);
+  const asked = 'take AGMessage back to build ' + buildOfVersion(req.to);
+  let unlock = null;
+  try {
+    recordNamesAll(c);
+    unlock = upgradeLock(c);
+    const busyRun = runnerUnderWay(c);
+    if (busyRun) throw refusal(busyRun, { why: 'running' });
+    const previous = INSTALL_VERSION.test(String(c.record.Previous || '')) ? c.record.Previous : '';
+    if (!previous) throw refusal('This PC has no build before ' + installedWords(facts.installed) + ' to go back to: the install record names none (a first install, or a go back made already).', { why: 'previous' });
+    if (req.to !== previous) throw refusal('The build before this one is build ' + buildOfVersion(previous) + ' now, not build ' + buildOfVersion(req.to) + ': run Go back to build ' + buildOfVersion(previous) + ' from the Start menu.', { why: 'previous' });
+    const A = pathOf(c.app);
+    const kept = A.join(c.app, 'installers', 'AGMessage-Setup-' + previous + '-unsigned.exe');
+    let st = null;
+    try { st = c.fsImpl.lstatSync(kept); } catch { st = null; /* not kept: refused below */ }
+    if (!st || st.isSymbolicLink() || !st.isFile()) throw refusal('Build ' + buildOfVersion(previous) + '\'s installer is not kept in ' + A.join(c.app, 'installers') + ', so this PC cannot go back by itself: an administrator runs that build\'s installer with /ROLLBACK.', { why: 'kept' });
+    const backup = backupFor(listBackups(c), previous);
+    if (!backup) throw refusal('No backup of this PC\'s data from build ' + buildOfVersion(previous) + ' is kept (an upgrade keeps two, and one gone on without a backup made none): going back would leave build ' + buildOfVersion(previous) + ' the data a newer build wrote, so nothing was changed. An administrator can run its installer with /ROLLBACK.', { why: 'backup' });
+    await busyCheck(c, req.force, { done: 'taken back', verb: 'take it back' });
+    const plan = {
+      v: 1, id: crypto.randomBytes(8).toString('hex'), request: req.id, kind: 'back', at: Date.now(), for: c.sid, by: c.me, elevated: c.elevated,
+      root: c.root, app: c.app, port: c.port, from: facts.installed, to: previous,
+      installer: kept, staged: '', backup: backup.name, backupAt: backup.stopAt, force: req.force || '',
+    };
+    const r = startRunner(c, plan);
+    return {
+      pending: true, backup: backup.name, runner: r.task || r.pid,
+      words: handedWords('Going back from ' + installedWords(facts.installed) + ' to build ' + buildOfVersion(previous) + ': AGMessage stops (it saves), its data is laid back from the backup made when the newer build was installed (' + clock(backup.stopAt) + ' on ' + dayOf(backup.stopAt) + '; what was written since is not kept, though its audit log is), and build ' + buildOfVersion(previous) + '\'s kept installer lays it down and starts it.'),
+    };
+  } catch (e) {
+    const ev = await upgradeRefusedEvent(c, asked, (e && e.words) || said(e && e.message, 200));
+    throw Object.assign(e, { event: ev.seq });
+  } finally {
+    if (unlock) unlock();
+  }
+}
+
+/** Whether two paths name one place (pure): letter case aside on Windows paths. */
+const samePath = (a, b) => (pathOf(String(a)) === path.win32 ? String(a).toLowerCase() === String(b).toLowerCase() : a === b);
+/** A day by the machine's own clock, as clock() gives its time (pure but for the time zone): 2026-11-07. */
+const dayOf = (ms) => { const d = new Date(ms); return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); };
+/**
+ * A runner's plan read by type (pure): the fields the control task wrote, each of its shape, and what it runs where its
+ * control task put it, so a plan names no other program: an upgrade's installer the file of its release's name in one
+ * folder of the plan's own machine\staged\, which is all it removes; a go back's the kept installer of its build in
+ * {app}\installers\, with nothing staged. Else null.
+ */
+function planOf(text) {
+  let p;
+  try { p = JSON.parse(String(text)); } catch { return null; }
+  if (!p || typeof p !== 'object' || p.v !== 1 || !/^[0-9a-f]{16}$/.test(String(p.id)) || !['upgrade', 'back'].includes(p.kind)) return null;
+  if (!personSid(p.for) || !p.by || !isSid(p.by.sid) || typeof p.by.name !== 'string' || typeof p.elevated !== 'boolean') return null;
+  if (!fullPath(p.root) || !fullPath(p.app) || !fullPath(p.installer) || !Number.isInteger(p.port) || p.port < 1 || p.port > 65535) return null;
+  if (typeof p.force !== 'string' || !Number.isFinite(p.at) || typeof p.request !== 'string' || !p.from || typeof p.from !== 'object') return null;
+  const R = pathOf(p.root);
+  if (p.kind === 'upgrade') {
+    if (!(SEMVER.test(String(p.to)) && /^[0-9a-f]{64}$/.test(String(p.digest)) && fullPath(p.staged) && typeof p.repo === 'string')) return null;
+    if (!samePath(R.dirname(p.staged), R.join(p.root, 'machine', 'staged')) || !STAGED_DIR.test(R.basename(p.staged))) return null;
+    if (!samePath(R.dirname(p.installer), p.staged) || R.basename(p.installer) !== installerName(p.to)) return null;
+  } else {
+    if (!(INSTALL_VERSION.test(String(p.to)) && BACKUP_NAME.test(String(p.backup)) && p.staged === '' && Number.isFinite(p.backupAt))) return null;
+    if (!samePath(p.installer, pathOf(p.app).join(p.app, 'installers', 'AGMessage-Setup-' + p.to + '-unsigned.exe'))) return null;
+  }
+  return p;
+}
+/** Whether `file` lies inside `dir` (pure), letter case aside on Windows paths. */
+function inside(file, dir) {
+  const P = pathOf(dir);
+  const rel = P.relative(dir, file);
+  return !!rel && !rel.startsWith('..') && !P.isAbsolute(rel);
+}
+/** The programs of {app} but the server's own, waited for until there are none, at most `waitMs`: those still running. */
+async function consolesGone({ app, sys, run, waitMs, pollMs }) {
+  const until = Date.now() + waitMs;
+  for (;;) {
+    const others = programsIn({ '--app': app, '--sys': sys }, run).filter((p) => !serverProgram(p));
+    if (!others.length || Date.now() >= until) return others;
+    await sleep(pollMs);
+  }
+}
+/**
+ * An installer run and waited for however long it runs: its own process, hidden, from `cwd`, on its own (so a runner
+ * that ends does not end it with its job), and never killed, since Inno's rollback does not run on a kill. {code}, or -1
+ * with `error` when it could not run.
+ */
+function runInstaller(installer, args, { cwd } = {}) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (v) => { if (!done) { done = true; resolve(v); } };
+    let child;
+    try { child = childProcess.spawn(installer, args, { cwd, windowsHide: true, detached: true, stdio: 'ignore' }); } catch (e) { finish({ code: -1, error: said(e.code || e.message, 60) }); return; }
+    child.once('error', (e) => finish({ code: -1, error: said(e.code || e.message, 60) }));
+    child.once('exit', (code, signal) => finish(Number.isInteger(code) ? { code } : { code: -1, error: said(signal || 'no exit code', 60) }));
+  });
+}
+/**
+ * Until the control task's own answer to the plan's request is in the account's outbox (it writes it once its runner is
+ * handed the plan), at most `waitMs` from the plan's making, so the runner's last answer is never written under it.
+ */
+async function answeredFirst(fsImpl, outbox, plan, waitMs, pollMs = POLL_MS) {
+  const file = pathOf(outbox).join(outbox, 'answer.json');
+  const until = plan.at + waitMs;
+  for (;;) {
+    let a;
+    try { a = JSON.parse(fsImpl.readFileSync(file, 'utf8')); } catch { a = null; /* not there yet, or being replaced */ }
+    if (a && a.id === plan.request) return true;
+    if (Date.now() >= until) return false;
+    await sleep(pollMs);
+  }
+}
+/** What answers on `port` now, by the machine's hello (the proof of the token): in words, for a run's last answer. */
+async function answerWords(c, port) {
+  const token = tokenFrom(c.root, c.fsImpl);
+  if (!token) return { up: false, words: 'whether AGMessage answers is not known (its token could not be read)' };
+  const h = await (c.n.hello || hello)({ port, token });
+  if (h.ok) return { up: true, words: 'AGMessage ' + said(h.build, 80) + ' answers on port ' + port };
+  if (h.why === 'ECONNREFUSED') return { up: false, stopped: true, words: 'nothing answers on port ' + port + ', so AGMessage is stopped' };
+  return { up: false, words: 'AGMessage did not answer on port ' + port + ' as this PC\'s (' + said(h.words || h.why, 80) + ')' };
+}
+
+/**
+ * upgrade --step run --plan <machine\work\upgrade-<id>\plan.json> --sys <{sys}>: the checked upgrade's run, or Go back's,
+ * from the copy of node.exe and machine.js its control task left beside the plan, never from {app}, as SYSTEM (its own
+ * task) or the elevated administrator whose console asked. It waits until nothing but AGMessage's own server runs from
+ * {app} (the console that asked closes once its person has read the answer), at most RUNNER_WAIT_MS. Then, for an upgrade:
+ * the staged copy's SHA-256 read again and the staged installer run with /UPGRADEBY (and /FORCE with the reason typed),
+ * which follows U.6.1's order from its version check, the way back included. For Go back: the kept installer's SHA-256
+ * read, AGMessage stopped at loopback (reason back; it saves), the upgrade's backup laid back (restore), and the kept
+ * installer of the build before run with /ROLLBACK. The installer's log is written in the runner's own folder. Its end,
+ * once the outcome is seen (the exit code, what the install record names and what answers on the port): one event, the
+ * account's last answer (final), ended.json beside the plan, the staged copy removed.
+ */
+async function upgradeRun(opts, { run = childProcess.execFileSync, fsImpl = fs, net: n = {} } = {}) {
+  if (opts['--step'] !== 'run') throw usage('machine.js upgrade takes --step run --plan <file>: the runner that Upgrade AGMessage… and Go back to build N start through their control task.');
+  const planFile = String(opts['--plan'] || '');
+  if (!fullPath(planFile)) throw usage('upgrade needs --plan <file>, a runner\'s plan as a full path.');
+  const P = pathOf(planFile);
+  const dir = P.dirname(planFile);
+  const work = P.dirname(dir);
+  const root = P.dirname(P.dirname(work));
+  if (P.basename(planFile) !== 'plan.json' || !RUNNER_DIR.test(P.basename(dir)) || P.basename(work) !== 'work' || P.basename(P.dirname(work)) !== 'machine') throw usage('--plan is "' + said(planFile, 120) + '", which is not a runner\'s plan (machine\\work\\upgrade-<id>\\plan.json).');
+  const H = hands(opts['--sys'], run);
+  let plan = null;
+  try { plan = planOf(fsImpl.readFileSync(planFile, 'utf8')); } catch { plan = null; /* refused below */ }
+  if (!plan || plan.root !== root || P.basename(dir) !== 'upgrade-' + plan.id) throw refusal('The runner\'s plan (' + planFile + ') is not one its control task wrote: nothing was run.');
+  const me = accountOf(H.whoami(['/user', '/fo', 'csv', '/nh']).out);
+  const ranBy = me && (me.sid === SID.system || (plan.elevated && me.sid === plan.by.sid && elevatedOf(H.whoami(['/groups', '/fo', 'csv', '/nh']).out)));
+  if (!ranBy) throw refusal('machine.js upgrade runs as SYSTEM, from the copy its control task left beside its plan: nothing was run.');
+  const self = n.self || { node: process.execPath, script: __filename };
+  if (inside(self.node, plan.app) || inside(self.script, plan.app)) throw refusal('machine.js upgrade runs from the copy its control task left in machine\\work\\, never from ' + plan.app + ', whose files the installer replaces: nothing was run.');
+  const c = { root, sys: opts['--sys'], H, run, fsImpl, n, machineDir: P.join(root, 'machine'), me: plan.by, port: plan.port, sid: plan.for, elevated: plan.elevated };
+  const toBuild = plan.kind === 'back' ? 'build ' + buildOfVersion(plan.to) : plan.to;
+  const asked = plan.kind === 'back' ? 'take AGMessage back to ' + toBuild : 'upgrade AGMessage to ' + toBuild;
+  const who = plan.by.name || plan.by.sid;
+  const outbox = P.join(root, 'machine', 'outbox', plan.for);
+  // The run's end, once its outcome is seen: its one event (machine.upgrade for an outcome done, `done` its words;
+  // machine.upgrade.refused otherwise, with what stopped it), the account's last answer, written after its control task's
+  // own so that one never lands over it, ended.json beside the plan, and the staged copy removed.
+  const end = async (a, done = '') => {
+    const ok = a.code === DONE;
+    const ev = eventFor(c, ok
+      ? { kind: 'machine.upgrade', by: plan.by, forAccount: plan.by, rights: ['upgrade'], words: done }
+      : { kind: 'machine.upgrade.refused', by: plan.by, forAccount: plan.by, rights: ['upgrade'], words: who + ' asked to ' + asked + (a.code === REFUSED ? ', and was refused: ' : '; it did not happen: ') + a.words });
+    await nudgeServer(c);
+    const rec = { v: 1, id: plan.request, verb: plan.kind, final: true, at: Date.now(), ranAs: me.sid, for: plan.for, ...a, words: a.words + ev.why, event: ev.seq };
+    if (!plan.elevated) {
+      await answeredFirst(fsImpl, outbox, plan, n.pendingWaitMs === undefined ? PENDING_WAIT_MS : n.pendingWaitMs);
+      try { writeAnswer(fsImpl, outbox, rec); } catch { /* its outbox is gone: the account no longer holds a right */ }
+    }
+    try { fsImpl.writeFileSync(P.join(dir, 'ended.json'), JSON.stringify({ at: Date.now(), code: a.code })); } catch { /* the next upgrade reads it as a runner that died, and says so once */ }
+    if (plan.staged) removeStaged(fsImpl, plan.staged);
+    return rec;
+  };
+  const refused = async (words, extra = {}) => refusal(words, await end({ code: REFUSED, words, ...extra }));
+  try {
+    return await runPlan({ plan, c, run, opts, dir, end, refused });
+  } catch (e) {
+    // Whatever stopped it, the run's end is written: its event, its answer, ended.json, the staged copy removed.
+    if (e && e.final === true) throw e;
+    const words = (e && e.words) || said(e && e.message, 200);
+    throw (e && e.refused ? refusal : notDone)(words, await end({ code: e && e.refused ? REFUSED : NOT_DONE, words }));
+  }
+}
+/** The runner's steps, once its plan, its account and its own copy are taken (upgradeRun). */
+async function runPlan({ plan, c, run, opts, dir, end, refused }) {
+  const P = pathOf(dir);
+  const { fsImpl, n } = c;
+  // The console that asked, and any other of {app}'s, closed: their node.exe holds a file the installer replaces.
+  let left;
+  try { left = await consolesGone({ app: plan.app, sys: opts['--sys'], run, waitMs: n.consoleWaitMs || RUNNER_WAIT_MS, pollMs: n.pollMs || RUNNER_POLL_MS }); } catch (e) { throw await refused(e.words || said(e.message, 200)); }
+  if (left.length) throw await refused(programWords(left) + ' still runs from ' + plan.app + ' after ' + Math.round((n.consoleWaitMs || RUNNER_WAIT_MS) / 60_000) + ' minutes (a console of the Start menu left open), so AGMessage\'s files could not be replaced: nothing was changed. Close it, then ask again.');
+  // The installer's log in the runner's own folder (SYSTEM and Administrators only), never one another account can place.
+  const log = P.join(dir, plan.kind + '.log');
+  if (plan.kind === 'upgrade') {
+    if (sha256File(fsImpl, plan.installer) !== plan.digest) throw await refused(NOT_THE_RELEASES);
+    return finishRun({ plan, c, end, log, digest: plan.digest, args: installerArgs({ sid: plan.elevated ? '' : plan.for, force: plan.force, log }) });
+  }
+  // Go back: the kept installer read before anything changes, then the stop that saves, the backup laid back, the installer.
+  let digest;
+  try { digest = sha256File(fsImpl, plan.installer); } catch (e) { throw await refused('Build ' + buildOfVersion(plan.to) + '\'s kept installer could not be read (' + (e.code || e.message) + '): nothing was changed.'); }
+  const token = tokenFrom(plan.root, fsImpl);
+  if (!token) throw await refused('AGMessage\'s token (token\\admin-token) could not be read, so it cannot be stopped at loopback: nothing was changed.');
+  try { await stopAndWait({ port: plan.port, token, reason: 'back', by: said(plan.by.name || plan.by.sid, 80), force: plan.force, n }); } catch (e) { throw await refused(e.words || said(e.message, 200), e.busy ? { busy: true, forceable: true } : {}); }
+  const until = Date.now() + (n.programsWaitMs || PROGRAMS_WAIT_MS);
+  let still = programsIn({ '--app': plan.app, '--sys': opts['--sys'] }, run);
+  while (still.length && Date.now() < until) { await sleep(POLL_MS); still = programsIn({ '--app': plan.app, '--sys': opts['--sys'] }, run); }
+  const toNo = buildOfVersion(plan.to);
+  if (still.length) {
+    const words = 'AGMessage stopped for the go back, but ' + programWords(still) + ' still runs from ' + plan.app + ', so nothing was laid back: close it, then Go back to build ' + toNo + ' again (Start AGMessage starts it meanwhile).';
+    throw notDone(words, await end({ code: NOT_DONE, words }));
+  }
+  try { await restore({ '--machine': plan.root, '--backup': plan.backup, '--port': String(plan.port) }, { fsImpl, net: n }); } catch (e) {
+    const words = 'AGMessage stopped for the go back, but its data could not be laid back: ' + ((e && e.words) || said(e && e.message, 200)) + ' AGMessage stays stopped: an administrator lays the backup back (machine.js restore) before it starts again.';
+    throw notDone(words, await end({ code: NOT_DONE, words }));
+  }
+  const before = 'after AGMessage was stopped for the go back and its data laid back as build ' + toNo + ' left it on ' + dayOf(plan.backupAt) + ' at ' + clock(plan.backupAt) + ' (what was written since is not kept)';
+  return finishRun({ plan, c, end, log, digest, before, args: installerArgs({ sid: plan.elevated ? '' : plan.for, force: plan.force, log, rollback: true }) });
+}
+/**
+ * The installer run and waited for, and its outcome as it is seen: its exit code, what the install record names after it,
+ * and, when it did not reach its build, what answers on the port. Done is an exit of 0 with the record naming the build
+ * asked for: `machine.upgrade` then names who, the builds from and to as the records name them, and the installer's
+ * SHA-256. Anything else is said from what was seen (`before`, what the runner had done first), never from the exit code
+ * alone, with the log's last lines.
+ */
+async function finishRun({ plan, c, end, log, digest, args, before = '' }) {
+  const r = await (c.n.runInstaller || runInstaller)(plan.installer, args, { cwd: pathOf(plan.installer).dirname(plan.installer) });
+  const now = installedOf(readRecord(c.H).values);
+  const reached = plan.kind === 'back' ? now.version === plan.to : now.semver === plan.to;
+  const bare = (i) => installedWords(i).replace(/^AGMessage /, '');
+  const who = plan.by.name || plan.by.sid;
+  const as = plan.elevated ? 'as an administrator' : 'as SYSTEM';
+  const toNo = buildOfVersion(plan.to);
+  if (r.code === 0 && reached) {
+    const done = plan.kind === 'back'
+      ? who + ' took AGMessage back from ' + bare(plan.from) + ' to ' + bare(now) + ' ' + as + ', build ' + toNo + '\'s kept installer sha256:' + digest + ', its data laid back as of ' + dayOf(plan.backupAt) + ' ' + clock(plan.backupAt) + '.'
+      : who + ' upgraded AGMessage from ' + bare(plan.from) + ' to ' + bare(now) + ' ' + as + ', its installer sha256:' + digest + ' (' + plan.repo + '\'s release v' + plan.to + ').';
+    return end({ code: DONE, words: (plan.kind === 'back' ? 'Gone back: ' : 'Upgraded: ') + installedWords(now) + ' is installed on this PC, and it answers.', installerExit: 0, installed: now }, done);
+  }
+  const port = await answerWords(c, plan.port);
+  const what = plan.kind === 'back' ? 'Build ' + toNo + '\'s installer' : 'The installer of ' + plan.to;
+  const same = now.version && now.version === plan.from.version;
+  const record = 'The install record ' + (same && plan.kind === 'back' ? 'still names ' : 'names ') + installedWords(now) + (same && plan.kind === 'upgrade' ? ', the build before' : '');
+  const next = !port.stopped ? '' : plan.kind === 'back'
+    ? ' Start AGMessage starts ' + installedWords(now) + ' on the data laid back' + (now.version === plan.to ? '' : ', or Go back to build ' + toNo + ' again') + '.'
+    : ' Start AGMessage starts it again.';
+  const words = what + ' ended with ' + r.code + (r.error ? ' (' + r.error + ')' : '') + ': ' + exitWords(r.code) + (before ? ', ' + before : '') + '. ' + record + '; ' + port.words + '.' + next;
+  const rec = await end({ code: NOT_DONE, words, installerExit: r.code, installed: now, answers: port.up, log, logTail: tailOf(c.fsImpl, log, 8).lines.map((l) => said(l, 200)) });
+  throw notDone(words, rec);
 }
 
 // ---------------------------------------------------------------- import: a portable folder, before the first start
@@ -2780,6 +3740,8 @@ async function restore(opts, { fsImpl = fs, net: n = {} } = {}) {
   try { meta = JSON.parse(fsImpl.readFileSync(P.join(dir, 'backup.json'), 'utf8')); } catch { meta = null; /* not whole: refused below */ }
   if (!meta || meta.v !== 1) throw refusal('the backup ' + name + ' is not whole (no backup.json): nothing was laid back.');
   if (await (n.portAnswers || portAnswers)(port)) throw refusal('something answers on port ' + port + ': stop AGMessage before its backup is laid back. Nothing was laid back.');
+  // The machine events the server has written are in the audit log, which is never rolled back: their place is kept.
+  const liveSeq = machineSeqIn(fsImpl, P.join(dataDir, 'settings.json'));
   const areas = [['data', dataDir], ['uploads', uploadDir]];
   const held = new Set();
   let restored = 0, unchanged = 0, removed = 0;
@@ -2813,10 +3775,43 @@ async function restore(opts, { fsImpl = fs, net: n = {} } = {}) {
   } catch (e) {
     throw notDone('the backup ' + name + ' was laid back only in part (' + (e.code || e.message) + ' after ' + plural(restored, 'file') + ' laid back and ' + removed + ' removed): lay it back again before AGMessage starts.');
   }
+  let kept;
+  try { kept = keepMachineSeq(fsImpl, P.join(dataDir, 'settings.json'), liveSeq); } catch (e) {
+    throw notDone('the backup ' + name + ' is laid back, but its settings.json could not be given the machine events\' place the audit log has reached (' + (e.code || e.message) + '): lay it back again before AGMessage starts, or its first start writes those events to the audit log a second time.');
+  }
   return {
-    restored, unchanged, removed,
-    words: 'The backup ' + name + ' (build ' + said(meta.build || '?', 80) + ') is laid back: ' + plural(restored, 'file') + ' laid back, ' + unchanged + ' unchanged, ' + removed + ' the newer build made removed. The audit log and watchdog.log are kept as they are. The earlier build\'s first start says AGMessage restarted in each hall.',
+    restored, unchanged, removed, machineSeq: kept,
+    words: 'The backup ' + name + ' (build ' + said(meta.build || '?', 80) + ') is laid back: ' + plural(restored, 'file') + ' laid back, ' + unchanged + ' unchanged, ' + removed + ' the newer build made removed. The audit log and watchdog.log are kept as they are' + (kept ? ', and so is the place its machine events have reached (machine event ' + kept + ')' : '') + '. The earlier build\'s first start says AGMessage restarted in each hall.',
   };
+}
+/** The machine events' place the server keeps in settings.json (`machineSeq`, lib/machineevents.js), or 0 (pure but for the read). */
+function machineSeqIn(fsImpl, file) {
+  let j;
+  try { j = JSON.parse(fsImpl.readFileSync(file, 'utf8')); } catch { return 0; /* none, or none read */ }
+  return j && typeof j === 'object' && Number.isSafeInteger(j.machineSeq) && j.machineSeq > 0 ? j.machineSeq : 0;
+}
+/**
+ * The settings laid back given the machine events' place the live settings had reached (`seq`), when theirs is below it:
+ * the audit log is never rolled back, so a place laid back from before would write every machine event since to it a
+ * second time (the server reads past its place only the newest 500 rows of the log). Written beside it and renamed over
+ * it, so a settings.json the backup links is never changed in place; settings that are not there are made holding the
+ * place alone; settings that do not read as JSON are never written over (the server refuses them itself). The place kept,
+ * or 0 when nothing was written.
+ */
+function keepMachineSeq(fsImpl, file, seq) {
+  if (!seq) return 0;
+  let j;
+  try { j = JSON.parse(fsImpl.readFileSync(file, 'utf8')); } catch (e) {
+    if (e.code !== 'ENOENT') return 0;
+    j = {};
+  }
+  if (!j || typeof j !== 'object' || Array.isArray(j)) return 0;
+  if (Number.isSafeInteger(j.machineSeq) && j.machineSeq >= seq) return 0;
+  j.machineSeq = seq;
+  const tmp = file + '.' + crypto.randomBytes(4).toString('hex') + '.tmp';
+  fsImpl.writeFileSync(tmp, JSON.stringify(j, null, 2), { flag: 'wx', mode: 0o600 });
+  try { fsImpl.renameSync(tmp, file); } catch (e) { try { fsImpl.unlinkSync(tmp); } catch { /* left beside it: no secret but the sealed values it already held */ } throw e; }
+  return seq;
 }
 
 // ---------------------------------------------------------------- the runner
@@ -2835,6 +3830,7 @@ const OUT_FIELDS = Object.freeze([
   'answered', 'build', 'needsAccount', 'tail', 'made', 'username', 'forceable',
   'id', 'ranAs', 'for', 'started', 'already', 'audited', 'rights', 'event', 'ran', 'task',
   'served', 'exported', 'verified', 'checks', 'imported',
+  'byName', 'look', 'release', 'newer', 'installed', 'pending', 'final', 'installerExit', 'answers', 'log', 'logTail', 'runner', 'why', 'machineSeq',
 ]);
 
 /** Run one verb: {code, text, out}. */
@@ -2857,6 +3853,7 @@ async function run(argv, stand = {}) {
     else if (a.verb === 'first-account') r = await firstAccount(a.opts, stand);
     else if (a.verb === 'control') r = await control(a.opts, stand);
     else if (a.verb === 'import') r = importStep(a.opts, stand);
+    else if (a.verb === 'upgrade') r = await upgradeRun(a.opts, stand);
     else r = await restore(a.opts, stand);
     text = r.words || 'Done.';
   } catch (e) {
@@ -2890,7 +3887,7 @@ if (require.main === module) {
 
 module.exports = {
   main, run, parse, prepare, install, uninstall, preinstallCheck, upgradeStop, status, restore, whose, start, firstAccount, control,
-  controlTaskXml, controlTask, controlSddl, requestOf, takeRequest, clearBox, grantRightsOf, elevatedOf, appendEvent, lastSeqOf, RIGHTS, CONTROL_VERBS, CONTROL_LATER, REQUEST_MAX,
+  controlTaskXml, controlTask, controlSddl, requestOf, takeRequest, clearBox, grantRightsOf, elevatedOf, appendEvent, lastSeqOf, RIGHTS, CONTROL_VERBS, REQUEST_MAX,
   personSid, accountOf, whoseOf, adminOf, serverProgram, programWords, outsideOwnChain, accountFile, startedFrom, proven, PS_WHOSE, PS_PROGRAMS, START_WAIT_MS, PROGRAMS_WAIT_MS,
   CHILDREN, MACHINE_SUBS, BASE_GRANTS, SETUP_GRANT, inboxGrants, outboxGrants, serverTaskXml, winArg, firewallRules, recordValues, ownerSidOf, grant,
   csvRows, taskStateOf, installOf, kindOf, NEVER_ROLLED_BACK, backupEstimate, readLastStop, fullPath,
@@ -2900,4 +3897,8 @@ module.exports = {
   VERBS, LATER, VERB_OPTS, DONE, NOT_DONE, REFUSED, USAGE,
   importStep, importStage, importTake, importFinish, importClear, clearImport, sameFile, manifestOf, verifyChecks, servedOf, servedWords, importRelOk, importCarries, readLeft, answerLeft, targetFacts, samePlace,
   importDir, importVerdict, importPart, IMPORT_STEPS, IMPORT_FILES_MAX, IMPORT_REL_MAX,
+  upgradeRun, keepMachineSeq, machineSeqIn, releaseJudged, githubWords, newerRefusal, installerArgs, exitWords, backupFor, fetchHttps, githubGet, downloadAsset, sha256File, stageInstaller,
+  repoOf, installedOf, compareSemver, installerSemver, installerName, planOf, runInstaller, checkedUpgrader, inside,
+  OFFLINE_WORDS, NOT_THE_RELEASES, INSTALLER_NAME, INSTALL_VERSION, REPO, GITHUB_API, GITHUB_HEADERS, RUNNER_DIR, RUNNER_START_MS, INSTALLER_MAX,
+  runnerTaskXml, runnerTask, upgradeLock, answeredFirst, DOWNLOAD_MAX_MS, UPGRADE_LOCK_STALE_MS, PENDING_WAIT_MS,
 };

@@ -4,9 +4,11 @@
  * Stamps a CI build (app/build.json) and checks a release tag against the version. One scheme: app/lib/version.js.
  *
  *   node tools/stamp-build.js --run <github.run_number> --commit <github.sha> [--ref <github.ref>]
- *       writes app/build.json ({version, build, installVersion, commit, channel, builtAt}); the channel is "release" for
- *       the ref refs/tags/v<version>, "dev" for anything else; installVersion is MAJOR.MINOR.BUILD, the order "newer" is
- *       read by (app/lib/version.js)
+ *       writes app/build.json ({version, build, installVersion, commit, channel, builtAt, repo}); the channel is "release"
+ *       for the ref refs/tags/v<version>, "dev" for anything else; installVersion is MAJOR.MINOR.BUILD, the order "newer" is
+ *       read by (app/lib/version.js); repo is the repository the build was made in (GITHUB_REPOSITORY, owner/name), which
+ *       an installed node's checked upgrade asks GitHub for its releases (app/machine.js): a stamp made with none names
+ *       none, and an installed node of it checks no installer
  *   node tools/stamp-build.js --check-tag <tag> [--released <tags>] [--tags <tags>]
  *       fails unless the tag is v<package.json version>: a release is never built from a tag that names another version;
  *       with --released (the tags of the releases already published, one per line or space; none for a first release),
@@ -24,7 +26,7 @@ const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
 const APP = path.join(ROOT, 'app');
-const { compose, installVersionOf, releaseRefusal, INSTALL_MAX, SEMVER, COMMIT, BUILD } = require(path.join(APP, 'lib', 'version.js'));
+const { compose, installVersionOf, releaseRefusal, INSTALL_MAX, SEMVER, COMMIT, REPO, BUILD } = require(path.join(APP, 'lib', 'version.js'));
 
 function fail(words) { console.error('stamp-build: ' + words); process.exit(1); }
 function arg(name) { const i = process.argv.indexOf(name); return i > 0 ? String(process.argv[i + 1] || '') : null; }
@@ -63,7 +65,9 @@ if (!installVersionOf(version, build)) fail('the version ' + version + ' has a M
 const channel = ref === 'refs/tags/v' + version ? 'release' : 'dev';
 if (/^refs\/tags\//.test(ref) && channel !== 'release') fail('the tag ' + ref.slice(10) + ' does not name this version (v' + version + ')');
 
-const stamp = { version, build, installVersion: installVersionOf(version, build), commit, channel, builtAt: new Date().toISOString() };
+const repo = String(process.env.GITHUB_REPOSITORY || '');
+if (repo && !REPO.test(repo)) fail('GITHUB_REPOSITORY "' + repo.slice(0, 120) + '" is not a repository (owner/name); nothing was stamped');
+const stamp = { version, build, installVersion: installVersionOf(version, build), commit, channel, builtAt: new Date().toISOString(), ...(repo ? { repo } : {}) };
 fs.writeFileSync(path.join(APP, 'build.json'), JSON.stringify(stamp, null, 2) + '\n');
 const full = compose(version, stamp);
 console.log('stamp-build: ' + full + ' (' + channel + ')');

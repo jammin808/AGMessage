@@ -367,9 +367,13 @@ start that cannot run says why in its window: a file missing beside the .bat, or
 On your own show laptop, the installer (`AGMessage-Setup-<version>-unsigned.exe`, from a release) installs AGMessage in
 Program Files, its data in `C:\ProgramData\AGMessage`, and serves it from boot with nobody signed in; the Windows account
 that runs it is AGMessage's admin on that PC, and its Start menu has Open AGMessage, Show the admin token, Start
-AGMessage, Stop AGMessage…, Who may run AGMessage… and AGMessage status. That account starts and stops AGMessage with no
-administrator, and gives its rights (token, start, stop, upgrade) to other Windows accounts, takes them back or hands
-the admin over, each act a row of the audit log. A first install can bring a portable folder's halls, messages, files,
+AGMessage, Stop AGMessage…, Upgrade AGMessage…, Go back to build N (after an upgrade), Who may run AGMessage… and
+AGMessage status. That account starts and stops AGMessage with no administrator, and gives its rights (token, start,
+stop, upgrade) to other Windows accounts, takes them back or hands the admin over, each act a row of the audit log.
+Upgrade AGMessage… installs a newer release with no administrator either, once the PC has checked the installer against
+its release on GitHub (an immutable release, the installer's SHA-256 the digest GitHub gives); offline, or for a
+release that is not immutable, it refuses, and an administrator runs the installer. Go back to build N lays the build
+before back down, with its data as it was then. A first install can bring a portable folder's halls, messages, files,
 accounts, screens, keys and audit log in, once, before it first starts: the installer's import page copies them,
 checks every count, key, sealed value, the certificate's fingerprint and the audit chain, and only then removes that
 folder's keys from your profile and marks it so it no longer starts. It is unsigned: where Smart App Control is on, Windows blocks it. Venue laptops use the portable folder.

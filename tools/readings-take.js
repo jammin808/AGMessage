@@ -40,7 +40,9 @@
  *            elevated; and an elevated read of that account's %LOCALAPPDATA%\AGMessage. The plan's two readings under
  *            over-the-shoulder elevation need a desktop no runner has: they are the show laptop's, and the record says so
  *       R13  a task with a control task's principal and settings (SYSTEM) reading GitHub's release answer for the newest
- *            published tag
+ *            published tag; then, with no network, a copy of the bundle's node.exe that an outbound rule of the
+ *            firewall blocks, run by the same kind of task, asking the bundle's own machine.js for that release as a
+ *            checked upgrade asks, and the words it gives (U18's offline words); the rule and the task removed
  *     Each reading is taken on its own: one that fails is written with why, and the rest are taken. The record is
  *     written before the first reading and after each, and marked whole at the end, so a lane cut short still says what
  *     it took; a reading not begun within the lane's own bound (BUDGET_MS) is written as not run, so the job never
@@ -48,7 +50,7 @@
  *     It is CI's alone: it refuses a machine that is not a GitHub-hosted runner, a work folder it did not make, and a
  *     \AGMessage\Server task it did not make, before anything is made or removed. Exit 0 once the record is written, 2
  *     when it cannot be, 64 for a word it does not know, a run off Windows or a machine it refuses.
- *   node readings-take.js probe-server <dir> | probe-exit <dir> | probe-release <dir> | probe-run <dir> | probe-export <dir>
+ *   node readings-take.js probe-server <dir> | probe-exit <dir> | probe-release <dir> | probe-offline <dir> | probe-run <dir> | probe-export <dir>
  *       what a stand-in task runs, from the copy the lane makes of this file: what a probe runs requires Node's own
  *       modules only (R1's step alone, run from the checkout, asks its server through app/lib/machinewire.js)
  *
@@ -80,6 +82,9 @@ const DEFINITION_TASK = '\\AGMessage-Readings\\Definition';
 const CONTROL_DEFINITION_TASK = '\\AGMessage-Readings\\ControlDefinition';
 const RESTART_TASKS = { nonZero: '\\AGMessage-Readings\\RestartNonZero', zero: '\\AGMessage-Readings\\RestartZero' };
 const RELEASE_TASK = '\\AGMessage-Readings\\Release';
+/** R13's offline half: its task, and the outbound rule that takes the network from its own copy of node.exe. */
+const OFFLINE_TASK = '\\AGMessage-Readings\\Offline';
+const OFFLINE_RULE = 'AGMessage-readings-R13-offline';
 /** R11's tasks: the control task (machine.js's own definition, under the lane's folder) and one task as each account. */
 const R11_TASKS = { as: '\\AGMessage-Readings\\R11-As-' };
 /** R11's two standard accounts, made for the reading and removed after it: one the control task is for, one it is not. */
@@ -561,6 +566,21 @@ function probeExport(dir) {
 async function probeRelease(dir) {
   const plan = readJson(path.join(dir, 'plan.json'));
   writeJson(path.join(dir, 'answer.json'), { ...(await readRelease(plan.url)), user: os.userInfo().username });
+  return 0;
+}
+
+/**
+ * probe-offline: the release asked as the bundle's own machine.js asks it for a checked upgrade (githubGet, then the words
+ * githubWords gives a person), with this copy of node.exe kept off the network by the lane's outbound rule: what it met and
+ * the words it shows. The lane leaves the bundle's machine.js beside this file's copy.
+ */
+async function probeOffline(dir) {
+  const plan = readJson(path.join(dir, 'plan.json'));
+  const m = require(path.join(__dirname, 'machine.js'));
+  const t0 = now();
+  const r = await m.githubGet('/repos/' + plan.repo + '/releases/tags/' + plan.tag);
+  const said = m.githubWords(r.error ? r : { status: r.status, headers: r.headers }, { repo: plan.repo, asked: 'release ' + plan.tag });
+  writeJson(path.join(dir, 'offline.json'), { ms: Math.round(now() - t0), error: String(r.error || ''), status: r.status || 0, why: said.why, words: r.error ? said.words : '', user: os.userInfo().username });
   return 0;
 }
 
@@ -1356,9 +1376,29 @@ async function take(o) {
       if (ran.code !== 0) throw new Error('schtasks could not run the stand-in: ' + (ran.err || ran.out).trim().slice(0, 300));
       const answer = await until(() => { try { return readJson(path.join(dir, 'answer.json')); } catch { return null; /* not written yet */ } }, 60000);
       if (!answer) throw new Error('the SYSTEM task wrote no answer within 60 s (last result ' + L.lastResult(RELEASE_TASK) + ')');
-      return { tag: o.tag, ...answer };
+      // With no network: the bundle's machine.js asked by a copy of its node.exe that an outbound rule blocks.
+      const offline = await guarded(async () => {
+        const cut = path.join(dir, 'offline');
+        fs.mkdirSync(cut, { recursive: true });
+        const blocked = path.join(cut, 'node.exe');
+        fs.copyFileSync(node, blocked);
+        fs.copyFileSync(path.join(root, 'app', 'machine.js'), path.join(path.dirname(self), 'machine.js'));
+        writeJson(path.join(dir, 'plan.json'), { url: 'https://api.github.com/repos/' + o.repo + '/releases/tags/' + o.tag, repo: o.repo, tag: o.tag });
+        const rule = run(L.exe('netsh.exe'), ['advfirewall', 'firewall', 'add', 'rule', 'name=' + OFFLINE_RULE, 'dir=out', 'action=block', 'program=' + blocked, 'enable=yes']);
+        if (rule.code !== 0) return { error: 'the outbound rule could not be made: ' + (rule.err || rule.out).trim().slice(0, 200) };
+        L.register(OFFLINE_TASK, taskXml({ description: 'AGMessage readings: a checked upgrade\'s release check with no network, as SYSTEM', ...CONTROL_PRINCIPAL, command: blocked, args: [self, 'probe-offline', dir], cwd: path.dirname(self) }));
+        const go = L.schtasks(['/Run', '/TN', OFFLINE_TASK]);
+        if (go.code !== 0) return { error: 'schtasks could not run the offline stand-in: ' + (go.err || go.out).trim().slice(0, 200) };
+        const said = await until(() => { try { return readJson(path.join(dir, 'offline.json')); } catch { return null; /* not written yet */ } }, 90000);
+        return said || { error: 'the offline task wrote no answer within 90 s (last result ' + L.lastResult(OFFLINE_TASK) + ')' };
+      });
+      return { tag: o.tag, ...answer, offline };
     });
-  } finally { L.remove(RELEASE_TASK); }
+  } finally {
+    L.remove(RELEASE_TASK);
+    L.remove(OFFLINE_TASK);
+    run(L.exe('netsh.exe'), ['advfirewall', 'firewall', 'delete', 'rule', 'name=' + OFFLINE_RULE]);
+  }
 
   raw.defenderEnd = await guarded(() => L.ps(SCRIPTS.defender));
   raw.complete = true;
@@ -1398,6 +1438,7 @@ async function main(argv) {
   if (a.error) { console.error(a.error); return 64; }
   if (a.verb === 'probe-exit' && a.positional.length === 1) return probeExit(a.positional[0]);
   if (a.verb === 'probe-release' && a.positional.length === 1) return probeRelease(a.positional[0]);
+  if (a.verb === 'probe-offline' && a.positional.length === 1) return probeOffline(a.positional[0]);
   if (a.verb === 'probe-run' && a.positional.length === 1) return probeRun(a.positional[0]);
   if (a.verb === 'probe-export' && a.positional.length === 1) return probeExport(a.positional[0]);
   if (a.verb === 'probe-server' && a.positional.length === 1) return probeServer(a.positional[0]);
@@ -1406,7 +1447,7 @@ async function main(argv) {
     if (!Number.isInteger(port) || port < 1024 || port > 65535) { console.error('readings-take: --port is a port from 1024 to 65535'); return 64; }
     return take({ zip: a.flags.zip, previous: a.flags.previous || '', defender: a.flags.defender, out: a.flags.out, work: a.flags.work || 'C:\\agm-readings', port, repo: a.flags.repo || '', tag: a.flags.tag || '', installer: a.flags.installer || '' });
   }
-  console.error('readings-take: take --zip <bundle.zip> --defender <defender.json> --out <raw.json> [--previous <zip>] [--work <folder>] [--port <n>] [--repo <owner/name> --tag <vX.Y.Z>] [--installer <exe>] | probe-server <dir> | probe-exit <dir> | probe-release <dir> | probe-run <dir> | probe-export <dir>');
+  console.error('readings-take: take --zip <bundle.zip> --defender <defender.json> --out <raw.json> [--previous <zip>] [--work <folder>] [--port <n>] [--repo <owner/name> --tag <vX.Y.Z>] [--installer <exe>] | probe-server <dir> | probe-exit <dir> | probe-release <dir> | probe-offline <dir> | probe-run <dir> | probe-export <dir>');
   return 64;
 }
 
@@ -1416,7 +1457,7 @@ if (require.main === module) {
 
 module.exports = {
   zipEntries, memberParts, topFolder, releaseOf, layOut, extractOne, taskXml, winArg, utf16, SERVER_PRINCIPAL, CONTROL_PRINCIPAL, SCRIPTS, lane, system32, takeR11, probeRun, takeR6, probeExport, R6_USER, R6_TASK,
-  snapshot, snapshotDiff, udpHeard, waitHealth, quickTunnel, readRelease, probeExit, parseArgs, main, TRYCF, installerSignature,
+  snapshot, snapshotDiff, udpHeard, waitHealth, quickTunnel, readRelease, probeOffline, probeExit, parseArgs, main, TRYCF, installerSignature,
   sddlOfSave, pipeReach, keepTail, tokenIn, withoutSecrets, placeRefusal, takeR12, take,
   seedHalls, pageSocket, paceMs, takeR1, takeR9, takeR3prime, serveFolders, R1_SIZES, R1_QUIET_MS, PAGE_PACE,
   SERVER_TASK, STAND_IN, DEFINITION_TASK, CONTROL_DEFINITION_TASK, RESTART_TASKS, R11_TASKS, R11_USERS, R11_ROUNDS, WORK_MARK, BUDGET_MS,
