@@ -1,9 +1,10 @@
 # AGMessage installed on a Windows PC
 
 *Begun with 0.6.0's start window; the installer's units (`docs/plan/0.6.0/PLAN.md` Part 6, U.9) write the rest of this
-paper. No build installs AGMessage yet: until the installer ships, AGMessage runs as the portable folder only
-([README.txt](../README.txt)). What is here is what the server and the portable folder's .bat already do about an
-installed AGMessage.*
+paper. The installer (`installer/AGMessage.iss`, The installer below) is built by CI from the portable zip; giving rights
+to other accounts, the import of a portable folder and an upgrade with no administrator are later units', and its life
+cycle in CI (install, upgrade, the way back, uninstall, run for real) is the installer job's still to come. Venue laptops
+run the portable folder ([README.txt](../README.txt)).*
 
 ## It opens no browser and has no window
 
@@ -16,8 +17,7 @@ Windows Vista", https://learn.microsoft.com/en-us/windows/win32/services/interac
   holds.
 - **No window.** What a portable copy says in its window, the installed node says on its console, which its watchdog
   keeps in `logs\server.log`, its logs folder beside `data\` (What it says, kept, below). The admin page's "This laptop" says what it knows and
-  what Windows says; Open AGMessage and AGMessage status in the Start menu show the log's tail once the installer's
-  units bring them.
+  what Windows says; Open AGMessage and AGMessage status in the Start menu show the log's tail (The installer, below).
 
 ## What it says, kept, and "This laptop"
 
@@ -129,7 +129,7 @@ The copy then ends with code 75, and its watchdog tries again (below).
 
 ## How it starts, and when it does not
 
-The channel is `AGM_RUNS=task`, which the task's launcher sets (the installer's units; no build sets it yet). The
+The channel is `AGM_RUNS=task`, which the task's launcher sets (`launch.js serve`, the installer's server task). The
 watchdog and the server read it, and these rules, before either writes anything (`lib/startup.js` `channelOf`,
 `supervise.js`, `server.js`):
 
@@ -420,8 +420,11 @@ row (U17).
   `last-stop.json` and `watchdog.log` are SYSTEM's, Administrators' and the server's, so to anyone else they read
   refused, and are said so. **`machine.js status`** is the elevated reader: all of it, plus the port's holder pid and
   whether a code-integrity event (Smart App Control) stopped `node.exe`, from one `powershell.exe`. Neither shows a token.
-- **`machine.js preinstall-check`** fails closed before an install or an upgrade lays a file. Nothing on the port: ready,
-  with or without a token (a first install has none). The installed AGMessage proving its token is asked how busy it is:
+- **`machine.js preinstall-check`** fails closed before an install or an upgrade lays a file. With `--app`, a console of
+  the Start menu still open from {app} is refused first; the installer's own chain is not one (a kept installer of
+  `{app}\installers\` that is a parent of this check, and its other instance, the one that asked for the elevation, which
+  the parents' chain names by its file). With `--rollback` (the way back, which stops nothing) anything answering on the
+  port is refused. Nothing on the port: ready, with or without a token (a first install has none). The installed AGMessage proving its token is asked how busy it is:
   busy is refused without a typed reason (`/FORCE`), and one that does not answer within 5 s is refused, naming its pid.
   Anything else on the port is refused with who holds it: "AGMessage 0.5.1 is running on port 3023 from a folder: press
   Ctrl+C in its window, then continue" from its `/api/health`, or "Another program (pid 4120) holds port 3023: close it,
@@ -431,12 +434,17 @@ row (U17).
   (`--by`) and the reason typed: it waits for the server to end (its port closed, up to 2 minutes), reads
   `last-stop.json` written after it asked, and says "AGMessage stopped for the upgrade and saved at 20:31; backup …". No
   record, a stop that did not save, or no backup made (the record's `unbacked` says why) is refused (3) unless forced.
-- **`machine.js uninstall`** stops the server at loopback first (it saves; Task Scheduler's End, TerminateProcess, is
-  never the stop), waits for its port to close, then ends and removes every task in `\AGMessage\` (the server task, the
-  control task the record names for the laptop's admin and each account given a right, and any other the folder lists),
-  the firewall rules and the record, before any file goes; the data is kept unless the person ticks "Remove all AGMessage data from this PC"
-  (`/REMOVEDATA`), and then the keys are removed last (answer 43). Each removal is checked: what was left is named, and
-  the exit is 2.
+- **`machine.js uninstall`** refuses while a console of the Start menu is open from `--app` ({app}), then stops the
+  server at loopback (it saves; Task Scheduler's End, TerminateProcess, is never the stop), waits for its port to close,
+  ends and removes every task in `\AGMessage\` (the server task, the control task the record names for the laptop's admin
+  and each account given a right, and any other the folder lists), waits for every program of {app} to end (one still
+  running is named), then removes the firewall rules and the record, before any file goes. The data is removed only when
+  the person says Yes to "Remove all AGMessage data from this PC" (`/REMOVEDATA`), the keys last (answer 43). Kept, it
+  is left with SYSTEM and Administrators alone: the laptop's admin's and each grantee's grants on the machine folder's
+  children are taken back (`icacls /remove:g`, by SID, while the record still names them) and their `inbox\` and
+  `outbox\` folders removed; the record is replaced by `Kept` (the root) and `Port`, which `prepare` takes as it takes an
+  earlier install, so AGMessage installed again takes the folder, finds whose it is anew and serves on the same port.
+  Each step is checked: what was left is named, and the exit is 2.
 - **The way back's backup** (`app/lib/upgradebackup.js`). The server, the one writer, makes it at a stop this PC's machine
   asked for an upgrade, once the audit log, every store and each dirty hall are saved and before `last-stop.json`, which
   names it (`backup`, `backupMs`, or `unbacked`). It goes under `data\backups\upgrade-<build>-<time>-<suffix>\`: a hard
@@ -458,6 +466,116 @@ row (U17).
   held on Linux (`test/machine.test.js`); on Windows the same file runs the read-only scripts (a real folder's owner, the
   port's holder) through the machine's own hands. The Windows readings lane takes R3′ (U12's own task definition, its
   stop-saves) and R9 (the backup's time), and R8 reads that definition back as a standard account.
+
+## The installer
+
+`installer/AGMessage.iss`, an EXE built by Inno Setup 7.1 (PlayMap's tool and skeleton), `AGMessage-Setup-<version>-unsigned.exe`
+(a CI build's `AGMessage-Setup-0.6.0-dev.41_abc1234-unsigned.exe`). `installer/build-installer.ps1` builds it from the
+portable zip's stage without its two .bat files (the installed node has no window and no clean copy), with the defines
+`tools/installer-defines.js` reads from the stage's `app\package.json` and `app\build.json` by `lib/version.js`'s rules
+(a local build has no install version and makes no installer), checks the version the file carries, and writes
+`SHA256SUMS.payload` beside it: the SHA-256 of every file it lays down, by its path under the install folder. CI's
+`installer` job builds it on `windows-2025` from the zip the package job built, Inno Setup pinned by hash and checked, on
+each run, against its release's digest and its publisher's signature; it is built there and never run.
+
+- **Per machine, Program Files only.** One fixed `AppId`; `{autopf}\AGMessage` with no folder page, and any other folder
+  (`/DIR=` included, or an earlier install elsewhere) refused before anything changes; `PrivilegesRequired=admin` with no
+  per-user override, since it registers tasks and rules; `CloseApplications=no`, so Inno never closes a running AGMessage:
+  it is stopped only at loopback, where it saves. No `[Dirs]` and no `[Registry]`: the machine folder is
+  `machine.js prepare`'s, in its race-free order, and `HKLM\SOFTWARE\AGMessage` is `machine.js install`'s one record.
+- **Every machine-level act is `machine.js`'s**, run with this build's `node.exe` and `machine.js`, extracted to the
+  installer's temporary folder before anything is laid down (R10 read that extraction inside 5 s), hidden and waited for,
+  its record read from `--out`; a command run with `--out` never waits for Enter. In order:
+  1. **`InitializeSetup`, the refusals.** Only a newer build installs, by the install version: "AGMessage 0.6.0 (build
+     41) is newer than this installer's 0.6.0 (build 37): uninstall it first to go back."; the same build "is installed
+     already: an installer upgrades only an older build."; a quiet first install without `/ADMIN=` "AGMessage needs to
+     know whose it is: add /ADMIN=<account>." Then `preinstall-check` (a portable copy, another program or an open console
+     said before anything is made; a busy server is the busy page's), `prepare` (the machine folder) and, at a first
+     install, the plan's two readings of whose it is (below).
+  2. **The pages.** Smart App Control's, only while it evaluates this PC; the laptop's admin's (first install); "Also on
+     Public networks (hotels, airports, fresh venue Wi-Fi)", unticked, or as the record keeps it on an upgrade
+     (`/PUBLICFIREWALL=1` or `=0` quietly); the busy page, shown only when `preinstall-check` refuses a busy server: its
+     counts in the server's words ("AGMessage is busy (3 pages active, a countdown running)") and a reason that must be
+     typed (`/FORCE="<reason>"` quietly), kept in the audit log as the stop's `server.stop.forced`.
+  3. **`PrepareToInstall`.** `preinstall-check` again (the wizard may have waited on its pages), then on an upgrade
+     `upgrade-stop`: the stop at loopback with the proof of the token, saved and backed up for the way back, and nothing
+     left running from Program Files\AGMessage (a console of the Start menu is named: "AGMessage's own console is open
+     (node.exe (pid 5000) runs from …): close its window, then continue."). Any refusal there is the Preparing page's
+     words (with how to go on anyway, `/FORCE="<why>"` from a command prompt, where a reason lifts it: no save record, no
+     backup, the disk short), and an install that does not reach its end starts the earlier server again. A stop that
+     went on without its save or backup, by the reason given, is said to the person. A refusal there, once `prepare` has
+     made the machine folder, says nothing was installed.
+  4. **After the files: `install`, then `start`.** The server task, its grants, the rules and the record (the laptop's
+     admin given at a first install, kept at an upgrade), then the server task run and the server waited for until it
+     proves, by the machine's hello, that it holds the machine folder's token, as this build (35 s: the watchdog's 30 s
+     start window and the task's own start). `/api/health` is never the verify: its build words are public, and a program
+     that took the port during the upgrade could say them. Whether the node has an account yet is asked of the proven
+     server, on the connection it proved itself on. One that does not prove itself is ended, and its log's last lines are
+     the words. A first install whose server did not answer says what works: its task starts it again with Windows (a
+     restart, once the cause is cleared), or an uninstall and a new install; this installer would refuse to run again,
+     since the record names its build.
+  5. **The way back**, when the new build is not set up or does not answer: the backup its stop made laid back
+     (`machine.js restore`), then the kept installer of the earlier build run with `/ROLLBACK`, which lays the earlier
+     files down, starts that build and verifies that it answers. `/ROLLBACK` is accepted only for the build the record
+     names as `Previous`, or for the build it still names when the files in Program Files\AGMessage are another build's
+     (a newer one that never recorded itself, read from their `app\build.json`), and only while nothing answers on the
+     port (`preinstall-check --rollback`): the way back stops nothing, since the newer build had ended. Its record names
+     no `Previous` (`install --rollback`): the build it replaced did not start. Two installers are kept in
+     `{app}\installers\`, this one and the earlier build's, by their install versions (`AGMessage-Setup-0.6.41-unsigned.exe`),
+     so the way back needs no download.
+  6. **The first admin account**, on the page after the files, when the node has none: user name, name and password
+     (twice), made through `/api/setup` with the token the installer may read (`machine.js first-account`). The three go to
+     `machine.js` in a file of `machine\work\`, which only SYSTEM and Administrators may read and which it removes before
+     it asks; the password is never in a command line, a URL or the installer's log. They and the token are sent only to
+     this build's server once it has proved it holds the token, on the connection it proved itself on: a program that
+     took the port is asked the hello alone and sent neither. Empty fields leave it for Admin login with the token. A
+     quiet install makes none.
+- **Whose AGMessage it is** (the laptop's admin, the plan's U.5.1). Once the elevation is in, the account that started
+  Setup runs `{sys}\whoami.exe /user /fo csv /nh` through `{cmd}` (Inno's `ExecAsOriginalUser`, which returns only an
+  exit code) into the one-time folder `prepare` made in `setup\`, where any signed-in account may create a file and none
+  may list or read; then `machine.js whose` reads and removes that file, reads the owner of `explorer.exe` in the
+  installer's session (`Win32_Process`'s `GetOwnerSid`, one `powershell.exe` by its absolute path), the account the
+  elevation runs as (`whoami.exe`) and the names Windows gives each SID. Both readings naming one person's account
+  decide it: "AGMessage's admin on this PC will be LAPTOP\ana, the account that started this installer. LAPTOP\it-admin
+  approved it and gets no AGMessage rights." When they disagree, or one cannot be read, the page shows both and the
+  person chooses one of them, never a third; when neither names a person (SYSTEM, nobody at the screen), the install is
+  refused unless `/ADMIN=<account>` names it, which Windows resolves to its SID and which is taken only when Windows
+  confirms it is one person's account on this PC: it names the SID, it is no local group, and it is a local account
+  (`Get-LocalUser`) or has a profile here (`ProfileList`: it has signed in to this PC, which no group ever does). A group
+  or a service is refused ("Give it to one person's account"), and so are a group of a domain or of Entra ID, which share
+  a person's SID shape, an account Windows cannot confirm and a SID it names nothing for. The record keeps its SID
+  (`Admin`) and its name for the words (`AdminName`); an upgrade keeps them, whatever `/ADMIN` says.
+- **The Start menu** (`Start → AGMessage`): Open AGMessage, Show the admin token and AGMessage status, each
+  `node.exe app\launch.js <verb>` with the machine folder and `{sys}`, a console run as the person and never elevated by
+  itself. **Open AGMessage** (`launch.js open`) reads the port from the record (3023 when it names none) and asks
+  `/api/health` once: the installed node answering opens `http://localhost:<port>` in the person's browser by
+  `explorer.exe`, by its absolute path in the Windows folder `{sys}` sits in, and the console closes; a portable copy or
+  another program on the port, a port that does not answer within 3 s, or nothing serving is said, with the server task's
+  state, the log's last line and what to do, and the console stays until Enter. Start, Stop, Upgrade, Go back to build N
+  and Who may run AGMessage… are later units' (U17, U18).
+- **The uninstall** asks "Remove all AGMessage data from this PC?", No the default (the uninstaller has no pages, so the
+  box the plan names unticked is a question whose default is No; `/REMOVEDATA` quietly), then `machine.js uninstall
+  --app` refuses while a console of the Start menu is open, stops the server at loopback (it saves), removes every task
+  of `\AGMessage\`, waits for every program of the folder to end, removes the rules and the record, and the data when
+  asked, the keys last, before any file goes; data kept is left for AGMessage installed again, every account's right on
+  it taken back (`machine.js uninstall`, above). Anything it could not take back stops the uninstall with every file
+  still in place; a busy AGMessage is stopped only with `/FORCE="<reason>"`, and the uninstaller, which has no page to
+  type it on, says its own command whole (`"C:\Program Files\AGMessage\unins000.exe" /FORCE="<why>"`).
+- **Smart App Control.** The installer and its uninstaller are AGMessage's only unsigned executables. Under Smart App
+  Control's enforcement Windows blocks the installer and it never runs, so its words are in `README.txt` and the release
+  notes; while Smart App Control evaluates, the installer runs and its first page says so (PlayMap's page). The installed
+  node runs on `node.exe`, which R5 reads as Valid; whether Smart App Control keeps it starting is lab 4's, not run.
+- **What only a Windows run proves**, and is not yet run: that ISCC compiles the script (the installer job, on the next
+  push); the install, the upgrade, the way back and the uninstall themselves, the readings of whose it is under
+  over-the-shoulder elevation (R6, which waits for U14 too), the Start menu's consoles and the browser opening, and the
+  first admin account made from the page (the installer's life cycle, U16). The pure parts are held on Linux
+  (`test/installer.test.js`): the script by its text (its `[Setup]`, files, Start menu items parsed by `launch.js`'s own
+  reader, every `machine.js` command and option it names, the password's path, the switches and refusals), the defines
+  and the portable stage holding every file the installer needs, and every `machine.js` command it runs (`whose` with
+  `/ADMIN`'s confirmation, `start` and `first-account` against proving and impostor stand-ins and a real server, no byte
+  of the token or the password reaching one that proves nothing, `preinstall-check`'s busy line, console check, the
+  installer's own chain and `--rollback`, `upgrade-stop`'s, `uninstall` keeping the data and a later install taking it)
+  and `launch.js open`; on Windows the same file runs `whose`'s and the programs' scripts for real.
 
 ## The version number, the release order and the data folder's format
 
@@ -543,7 +661,8 @@ a reading: the installer's life cycle in CI, when it lands, is a gate, as every 
   work folder, so it refuses, before it makes or removes anything, a machine that is not a GitHub-hosted runner, a work
   folder it did not make, and a `\AGMessage\Server` task it did not make (the installed node's). It is never run on the
   show laptop: lab 3 is taken there by hand.
-- **What it stands in for.** The control tasks and the installer are later units'; the server task is U12's
+- **What it stands in for.** The control tasks are a later unit's, and the installer is the installer job's, whose file R5
+  reads (the lane waits for that job and is never held by it); the server task is U12's
   (`app/machine.js`). R3′ and R8 register U12's own definition under the lane's names (R3′ runs it on demand, its boot
   trigger never firing; R8 reads it back and never runs it). R4, R7 and R12 are taken under stand-in tasks whose
   principal and settings are that definition's (`\AGMessage\Server`: LocalService under its own SID,
@@ -590,8 +709,8 @@ a reading: the installer's life cycle in CI, when it lands, is a gate, as every 
 | R3 | retired: it was B-service's (shawl's stop under `NT SERVICE\AGMessage`), which is not the shape (U.5) | — | — | — | — |
 | R3′ | the task: a stop at loopback with the proof saves and `last-stop.json` says so; the watchdog's give-up and a configuration refusal end the task with 0, and it stays stopped | 10 of 10 | the release notes name the failing case; a stop that does not save is said on "This laptop" | taken (U12, #72): U12's own server task definition (`app/machine.js`), under the lane's name and with the lane's folders, run on demand (its boot trigger never fires), its action `launch.js serve` (`AGM_RUNS=task`); 10 rounds of a stop at loopback with the proof of a token its own server made, each saving and ending the task with 0, staying stopped; the give-up and configuration refusal ending it with 0 are `launch.js serve`'s exit mapping, held on Linux (`test/machine.test.js`) | not measured |
 | R4 | under the task: `LOCALAPPDATA`, `os.homedir()`, UDP 9928 broadcast heard, a quick tunnel's URL returned with nothing written in the account's profile, a rule by program, protocol and port matching `node.exe` under the task, `whoami /priv` from the server's process, `schtasks /showsid` | `SeImpersonatePrivilege` absent, and the server serves with `SeChangeNotifyPrivilege` alone | the privilege list U12 sets is widened by the one privilege the reading names, with its reason | taken under the stand-in server task, whose principal and settings are U12's own (`app/machine.js`, held element for element by `test/readings.test.js`), its action the lane's probe: the token's privileges and groups (read by the task's action, which the server inherits), the task's SID, `LOCALAPPDATA` and the home folder, health answering with this bundle's build, UDP 9928 heard from this machine, a quick tunnel and the profile before and after, a rule by program, protocol and port made and read back; a client on another machine is the show laptop's | 2026-11-03, build 0.6.0-dev.78+442583d: ✓ met: the token holds SeChangeNotifyPrivilege alone, and the server served under it in 786 ms (0.6.0-dev.78+442583d). Beside it: the task's SID in the token; UDP 9928 heard yes (from this machine); a quick tunnel's address returned; files written or changed in the account's profile 0; a rule by program, protocol and port made and read back (TCP, 3124, LocalSubnet; no client on another machine to show it matching) |
-| R5 | `Get-AuthenticodeSignature` on `node.exe`, `cloudflared.exe` and the installer | the first two Valid; the installer recorded | `README.txt` names the file Windows does not trust | taken for `node.exe` and `cloudflared.exe`; the installer once U13 (#73) builds it | 2026-11-03, build 0.6.0-dev.78+442583d: ✓ met: node.exe Valid (CN=OpenJS Foundation, O=OpenJS Foundation, L=San Francisco, S=California, C=US), cloudflared.exe Valid (CN="Cloudflare, Inc.", O="Cloudflare, Inc.", L=San Francisco, S=California, C=US, SERIALNUMBER=4710875, OID.2.5.4.15=Private Organization, OID.1.3.6.1.4.1.311.60.2.1.2=Delaware, OID.1.3.6.1.4.1.311.60.2.1.3=US); the installer not built yet (U13, #73) |
-| R6 | over-the-shoulder elevation: U.5.1's two readings of the account that started Setup; the user's own export (U14) run through `ExecAsOriginalUser` into the laptop's admin's inbox; an elevated read of another account's `%LOCALAPPDATA%\AGMessage` | both readings name the standard account | the admin page asks the person to choose, as U.5.1 says | not run: needs U13 (#73) and U14 (#75) | not measured |
+| R5 | `Get-AuthenticodeSignature` on `node.exe`, `cloudflared.exe` and the installer | the first two Valid; the installer recorded | `README.txt` names the file Windows does not trust | taken for `node.exe` and `cloudflared.exe`, and for the installer the installer job built for the run (recorded: it is unsigned; a job that built none is said) | 2026-11-03, build 0.6.0-dev.78+442583d: ✓ met: node.exe Valid (CN=OpenJS Foundation, O=OpenJS Foundation, L=San Francisco, S=California, C=US), cloudflared.exe Valid (CN="Cloudflare, Inc.", O="Cloudflare, Inc.", L=San Francisco, S=California, C=US, SERIALNUMBER=4710875, OID.2.5.4.15=Private Organization, OID.1.3.6.1.4.1.311.60.2.1.2=Delaware, OID.1.3.6.1.4.1.311.60.2.1.3=US); the installer not built yet (U13, #73) |
+| R6 | over-the-shoulder elevation: U.5.1's two readings of the account that started Setup; the user's own export (U14) run through `ExecAsOriginalUser` into the laptop's admin's inbox; an elevated read of another account's `%LOCALAPPDATA%\AGMessage` | both readings name the standard account | the admin page asks the person to choose, as U.5.1 says | not run: needs U14 (#75); the readings of who started Setup need a standard account and an administrator's typed approval, the show laptop's (lab 7's first account) | not measured |
 | R7 | the folder pipe's access list as libuv makes it (`CreateNamedPipeW(…, NULL)`, `crit-dl/pipe.c:596-599`) under the task's token, and whether a remote client reaches it | recorded | nothing machine-level writes the pipe any more (U8); the busy line's readers are named | taken: the stand-in server's folder pipe, who may read and write it, and whether a client reaches it through SMB at the runner's own names (a network logon on one machine; a second machine is the show laptop's) | 2026-11-03, build 0.6.0-dev.78+442583d: ✓ recorded: read: Everyone, Anonymous, SYSTEM, LOCAL SERVICE, Administrators; write: SYSTEM, LOCAL SERVICE, Administrators (1 pipe); through SMB at this machine's own names (a network logon; no second machine): \\localhost connected, \\runnervmhao91 connected |
 | R8 | `icacls C:\` and `icacls %ProgramData%` (may a standard account create `C:\node_modules` or `%ProgramData%\AGMessage`?); `schtasks /query /xml` of each task as a standard account: readable or not, and no secret in it | recorded | U11 and U12's order already assume the worst | taken: both access lists, read by SID (`icacls /save`); U12's server task definition (`app/machine.js`), registered under the lane's folder and never run, its descriptor read back (may a standard account read it?) and its XML searched for a secret; the control tasks' definitions once U17 (#74) makes them | 2026-11-03, build 0.6.0-dev.78+442583d: ✓ recorded: C:\: a standard account may create a folder (Authenticated Users); C:\ProgramData: a standard account may create a folder (Users); the tasks' definitions as a standard account wait for U12 (#72) and U17 (#74) |
 | R9 | the upgrade backup's time at an empty hall and at 20 × 10,000 | recorded, beside R2 | as R2 | taken (U12, #72): the bundle's own watchdog serves a seeded folder (empty, and 20 × 10,000), the stop at loopback with the proof carries reason `upgrade` (the seeded messages are from before the busy window, so no reason is typed), the server backs the folder up for the way back (`app/lib/upgradebackup.js`), and `last-stop.json` names its time | not measured |

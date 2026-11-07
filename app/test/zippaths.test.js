@@ -173,7 +173,9 @@ test('the bundle: AGMessage-Portable-<version>.zip holding one folder, AGMessage
   assert.match(ps, /\nCompress-Archive -Path \$stage -DestinationPath \$zip\n/, 'the staged folder itself zipped, so it is the zip\'s one folder');
   const ci = read('.github/workflows/ci.yml');
   assert.doesNotMatch(ci, /AGMessage-Portable-Windows/, 'one pattern, which 0.5\'s releases match too');
-  const job = ci.slice(ci.indexOf('\n  package:\n'), ci.indexOf('\n  readings:\n'));
+  // The package job, to the next job of the file (the installer's, built from this zip).
+  const fromPackage = ci.slice(ci.indexOf('\n  package:\n'));
+  const job = fromPackage.slice(0, fromPackage.slice(1).search(/\n {2}[a-z-]+:\n/) + 1);
   assert.ok(job.length > 100, 'the package job');
   const steps = job.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n').split('\n      - ').slice(1);   // each step without the comments above the next
   const at = (needle) => steps.findIndex((s) => s.includes(needle));

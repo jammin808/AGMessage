@@ -8,31 +8,61 @@
  *   prepare           --machine <%ProgramData%\AGMessage> --sys <{sys}>
  *                     The machine folder, made race-free before anything is installed: the root with SYSTEM and
  *                     Administrators in full control (by SID, inheritance cut, never /T), an existing one taken only when
- *                     the install record shows an earlier install (or a prepare of this root that no install finished),
- *                     lstat shows a real directory and its owner is SYSTEM or Administrators; the root listed; then its
+ *                     the install record shows an earlier install (or a prepare of this root that no install finished, or
+ *                     the data an uninstall kept), lstat shows a real directory and its owner is SYSTEM or Administrators;
+ *                     the root listed; then its
  *                     children (data, uploads, keys, logs, token, machine\ with inbox\, outbox\, work\ and staged\), each a
  *                     real directory made or found, with its own grants; and setup\<128 random bits>\, named in --out.
  *   install           --machine … --app <{app}> --sys … --build <full build> --port <n> [--admin <SID> --admin-name <name>]
- *                     [--public] [--signed]
+ *                     [--public] [--signed] [--rollback]
  *                     The server task `\AGMessage\Server`, its SID's grants on the folders it uses, the laptop's admin's
  *                     reads and its inbox\ and outbox\, the firewall rules, and the one install record
  *                     (`HKLM\SOFTWARE\AGMessage`); setup\ removed. The laptop's admin is recorded once, at the first install
  *                     (`--admin` then required); an upgrade keeps the record's, and only then is `machine.admin` appended to
- *                     the machine's events, which the server turns into its audit row.
- *   uninstall         --machine … --sys … [--port <n>] [--force <reason>] [--remove-data]
- *                     The server stopped at loopback (it saves), then every task in \AGMessage\, the firewall rules and the
- *                     record removed, before any file goes; the data kept unless --remove-data, then the keys last. Each
- *                     removal checked: what was left is named, and the exit is 2.
- *   preinstall-check  --machine … --port <n> [--sys …] [--force <reason>]
- *                     Fails closed: a port that answers and is not this PC's AGMessage proving its token is refused with
- *                     who holds it (a portable copy's words, or another program's pid); a busy server with no typed
- *                     reason, or one that does not answer within 5 s, is refused (exit 3).
- *   upgrade-stop      --machine … --port <n> [--by <who>] [--force <reason>]
+ *                     the machine's events, which the server turns into its audit row. Previous names the build an
+ *                     upgrade replaced; with --rollback (the way back) none.
+ *   uninstall         --machine … --sys … [--port <n>] [--force <reason>] [--remove-data] [--app <{app}>]
+ *                     With --app, a person's console open from {app} refused first. The server stopped at loopback (it
+ *                     saves), then every task in \AGMessage\ removed and (--app) every program of {app} waited for, the
+ *                     firewall rules and the record removed, before any file goes. The data goes with --remove-data, the
+ *                     keys last; else it is kept, every Windows account's right on it taken back, and the record left as
+ *                     `Kept` (the root) and `Port`, which a later install takes. Each step checked: what was left is
+ *                     named, and the exit is 2.
+ *   preinstall-check  --machine … --port <n> [--sys …] [--force <reason>] [--app <{app}>] [--rollback]
+ *                     Fails closed: with --app, a program from {app} that is not the server's own (a person's console of
+ *                     the Start menu) is refused first, the installer's own chain left out (the kept installer that ran
+ *                     this check); then, with --rollback (the way back, which stops nothing), anything that answers on
+ *                     the port is refused; a port that answers and is not this PC's AGMessage proving its token is
+ *                     refused with who holds it (a portable copy's words, or another program's pid); a busy server with
+ *                     no typed reason (`busy` and its line of counts in --out), or one that does not answer within 5 s,
+ *                     is refused (exit 3).
+ *   upgrade-stop      --machine … --port <n> [--by <who>] [--force <reason>] [--sys … --app <{app}>]
  *                     Refused before it asks anything when the disk is short of the room the way back's backup takes. Then
  *                     the stop at loopback with the proof of the token, reason "upgrade": the server, the one writer,
  *                     saves, backs its data up and writes its record. upgrade-stop waits for the server to end, reads
  *                     that record (made after it asked), and refuses (exit 3) a stop that did not save or made no backup,
- *                     unless forced.
+ *                     unless forced; with --app, a program still running from {app} once the server has ended is refused.
+ *   whose             --machine … --sys … [--started <setup\<random>\file>] [--admin <account>]
+ *                     Whose AGMessage it is (the laptop's admin), from the plan's two readings once the elevation is in:
+ *                     the account that started Setup (the whoami answer the installer had it write into the setup folder,
+ *                     read and removed), and the owner of explorer.exe in this session; beside them the account the
+ *                     elevation runs as (whoami.exe), and the account /ADMIN names, resolved to its SID and taken only
+ *                     when Windows confirms it is one person's account here (a local user, or one with a profile on this
+ *                     PC; a group, a service or an account it cannot confirm refused). Both readings naming one person
+ *                     decide it; else the person chooses between the readings that name one, never a third; none is a
+ *                     refusal (exit 3) that asks for /ADMIN.
+ *   start             --machine … --sys … --port <n> [--build <full build>]
+ *                     The server task run, and the server waited for (the watchdog's 30 s start window and the task's
+ *                     own start) until it proves it holds the machine folder's token, as --build when it is given: the
+ *                     verify. One that does not prove itself is ended and refused as not done (2), with its log's last
+ *                     lines; `needsAccount`, asked of the proven server, says the node has no account yet.
+ *   first-account     --machine … --port <n> --account <machine\work\file> [--build <full build>]
+ *                     The first admin account, made through /api/setup at loopback with the token the machine folder
+ *                     holds, sent only to the server that proved it holds that token (as --build when it is given), on
+ *                     the connection it proved itself on; its user name, name and password read from the file the
+ *                     installer wrote into machine\work\ (SYSTEM and Administrators only), which is removed before
+ *                     anything is asked. The password goes in no argument, URL, --out or log; the server's refusal (an
+ *                     account there already, a password it takes not) is said in its own words (exit 3).
  *   status            --machine … --sys … [--port <n>]
  *                     The server task's state and last result, the tails of watchdog.log and server.log, the last
  *                     last-stop.json, the port's holder pid, whether a code-integrity event stopped node.exe, the laptop's
@@ -44,10 +74,11 @@
  *
  *   import, control and upgrade are later units' (U14, U17, U18): until each lands its verb is refused as unknown.
  *
- * Every verb takes `--out <file>`: its result as JSON ({v, verb, code, words, …}), refusals too, never a token, written
- * whole. Exit codes: 0 done; 2 not done, with the words of why; 3 refused, fail closed (a precondition a person must
- * clear); 64 a verb or an argument it does not know, or one missing or malformed. In a console it waits for Enter before it
- * ends. Its one authority is the install record and the folder it holds; the audit log is the server's alone.
+ * Every verb takes `--out <file>`: its result as JSON ({v, verb, code, words, …}), refusals too, never a token or a
+ * password, written whole. Exit codes: 0 done; 2 not done, with the words of why; 3 refused, fail closed (a precondition
+ * a person must clear); 64 a verb or an argument it does not know, or one missing or malformed. Run in a console with no
+ * --out (a person reading it), it waits for Enter before it ends; with --out (the installer's hidden runs) it never waits.
+ * Its one authority is the install record and the folder it holds; the audit log is the server's alone.
  */
 const childProcess = require('node:child_process');
 const crypto = require('node:crypto');
@@ -85,7 +116,15 @@ const isSid = (v) => typeof v === 'string' && /^S-1-[0-9-]{1,140}$/.test(v) && !
 const BACKUP_RESERVE = 1024 ** 3;
 /** How long a stop for an upgrade or an uninstall may take, saving and backing up, before the machine stops waiting. */
 const STOP_WAIT_MS = 120_000;
+/**
+ * How long the verify waits for the server task's server to answer /api/health: the watchdog's 30 s start window
+ * (AGM_STARTUP_MS, which the task never sets) and 5 s for Task Scheduler to start the task's action.
+ */
+const START_WAIT_MS = 35_000;
+/** How long the programs of {app} are given to end once the server has (the watchdog and launch.js serve after it). */
+const PROGRAMS_WAIT_MS = 15_000;
 const POLL_MS = 250;
+const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 
 /** A name as words for the console: control characters and bidi marks taken out, cut short. */
 const said = (v, max = 200) => String(v).replace(/[\p{Cc}\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu, '').trim().slice(0, max);
@@ -136,40 +175,79 @@ function sameProof(a, b) {
   return crypto.timingSafeEqual(Buffer.from(a, 'hex'), Buffer.from(b, 'hex'));
 }
 
-/** One request to 127.0.0.1:`port`: {status, json} or {error} ('silent' when the whole answer had not come in time). */
-function request({ port, method = 'GET', path: p, headers = {}, body = Buffer.alloc(0), timeoutMs = ANSWER_MS }) {
+/**
+ * One request to 127.0.0.1:`port`: {status, json, socket} or {error} ('silent' when the whole answer had not come in
+ * time). Through `agent` when one is given (a connection kept for the next request), else a connection of its own. With
+ * `only`, the request is written only on that connection: given any other (the one that proved the server was closed), it
+ * is destroyed before a byte is written, {error: 'reconnected'}.
+ */
+function request({ port, method = 'GET', path: p, headers = {}, body = Buffer.alloc(0), timeoutMs = ANSWER_MS, agent = false, only = null }) {
   return new Promise((resolve) => {
     let done = false;
     let deadline = null;
+    let socket = null;
     const finish = (v) => { if (!done) { done = true; clearTimeout(deadline); resolve(v); } };
-    const req = http.request({ host: '127.0.0.1', port, method, path: p, agent: false, headers: { ...headers, 'content-length': body.length } }, (res) => {
+    const req = http.request({ host: '127.0.0.1', port, method, path: p, agent, headers: { ...headers, 'content-length': body.length } }, (res) => {
       const chunks = [];
       let n = 0;
       res.on('data', (c) => { n += c.length; if (n > ANSWER_MAX) { req.destroy(new Error('answer too large')); return; } chunks.push(c); });
-      res.on('end', () => { let json; try { json = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { json = null; /* not JSON: its status still says what it answered */ } finish({ status: res.statusCode, json }); });
+      res.on('end', () => { let json; try { json = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { json = null; /* not JSON: its status still says what it answered */ } finish({ status: res.statusCode, json, socket }); });
       res.on('error', (e) => finish({ error: e.code || e.message }));
     });
     deadline = setTimeout(() => { finish({ error: 'silent' }); req.destroy(); }, timeoutMs);
     req.on('error', (e) => finish({ error: e.code || e.message }));
-    req.end(body);
+    // Nothing is written before the connection is known: headers and body go only once it is the one asked for.
+    req.on('socket', (s) => {
+      socket = s;
+      if (only && s !== only) { finish({ error: 'reconnected' }); req.destroy(); return; }
+      req.end(body);
+    });
   });
 }
 function failWords(why, port, timeoutMs) {
   if (why === 'silent') return 'the program on port ' + port + ' did not answer within ' + timeoutMs / 1000 + ' s';
   if (why === 'ECONNREFUSED') return 'nothing answers on port ' + port;
   if (why === 'unproven') return 'the program on port ' + port + ' did not prove it holds this PC\'s AGMessage token';
+  if (why === 'reconnected') return 'AGMessage on port ' + port + ' closed the connection it proved itself on before anything else was sent';
   return 'port ' + port + ' could not be reached (' + said(why, 40) + ')';
 }
-/** The hello, checked: {ok, nonce, build} only when the server proves it holds `token`; else {ok: false, why, words}. */
-async function hello({ port, token, timeoutMs = ANSWER_MS }) {
+/**
+ * The hello, checked: {ok, nonce, build, socket} only when the server proves it holds `token`; else {ok: false, why,
+ * words}. `socket` is the connection it proved itself on (kept for the next request when `agent` keeps connections).
+ */
+async function hello({ port, token, timeoutMs = ANSWER_MS, agent = false }) {
   const challenge = crypto.randomBytes(16).toString('hex');
-  const r = await request({ port, path: '/api/machine/hello?c=' + challenge, timeoutMs });
+  const r = await request({ port, path: '/api/machine/hello?c=' + challenge, timeoutMs, agent });
   if (r.error) return { ok: false, why: r.error, words: failWords(r.error, port, timeoutMs) };
   const j = r.json;
   if (r.status !== 200 || !j || typeof j.nonce !== 'string' || !NONCE.test(j.nonce) || !sameProof(j.proof, serverProof(tokenOf(token), j.nonce, challenge))) {
     return { ok: false, why: 'unproven', words: failWords('unproven', port, timeoutMs) };
   }
-  return { ok: true, nonce: j.nonce, build: typeof j.build === 'string' ? said(j.build, 80) : '' };
+  return { ok: true, nonce: j.nonce, build: typeof j.build === 'string' ? said(j.build, 80) : '', socket: r.socket };
+}
+/**
+ * Requests to the server that proved itself, on the connection it proved itself on and no other: the hello first (its
+ * build, when `build` names one, the one asked for), then each of `then` in order on that same connection, so a program
+ * that took the port after the hello, or anything a closed connection would reach, is sent nothing more. For a request
+ * that carries what only the server may see (the token, a password). {ok: true, build, answers} (each {status, json}), or
+ * {ok: false, why, words, build}: 'build' when a proven server is another build.
+ */
+async function proven({ port, token, build = '', then = [], timeoutMs = ANSWER_MS }) {
+  const agent = new http.Agent({ keepAlive: true, maxSockets: 1, maxFreeSockets: 1 });
+  try {
+    const h = await hello({ port, token, timeoutMs, agent });
+    if (!h.ok) return h;
+    if (build && h.build !== build) return { ok: false, why: 'build', build: h.build, words: 'AGMessage on port ' + port + ' is build ' + h.build + ', not ' + build };
+    const answers = [];
+    for (const t of then) {
+      const r = await request({ port, timeoutMs, ...t, agent, only: h.socket });
+      if (r.error) return { ok: false, why: r.error, build: h.build, words: failWords(r.error, port, timeoutMs) };
+      answers.push({ status: r.status, json: r.json });
+    }
+    return { ok: true, build: h.build, answers };
+  } finally {
+    agent.destroy();
+  }
 }
 /** One request with the machine's proof, after the hello proved the server holds `token`; a nonce let go is asked once more. */
 async function ask({ port, token, method, path: p, body, timeoutMs = ANSWER_MS }) {
@@ -202,14 +280,15 @@ function busyIsBusy(line) {
   const l = busyLineOf(line);
   return !l || l.active > 0 || l.takes > 0 || l.help > 0 || l.countdowns > 0;
 }
-/** busy, through the machine's own wire half: {answered, running, busy, words}. */
+/** busy, through the machine's own wire half: {answered, running, busy, words, line}, `line` its counts when it answered one. */
 async function busyAsk({ port, token }) {
   const r = await ask({ port, token, method: 'GET', path: '/api/machine/busy' });
   if (!r.ok && r.why === 'ECONNREFUSED') return { answered: false, running: false, busy: false, words: 'nothing is serving' };
   if (!r.ok) return { answered: false, running: true, busy: true, words: r.words + ': read as busy' };
-  const line = r.status === 200 && r.json ? r.json.line : null;
-  if (!busyLineOf(line)) return { answered: false, running: true, busy: true, words: 'AGMessage answered no busy line (' + r.status + '): read as busy' };
-  return { answered: true, running: true, busy: busyIsBusy(line), words: typeof r.json.words === 'string' ? said(r.json.words, 200) : '' };
+  const line = r.status === 200 && r.json ? busyLineOf(r.json.line) : null;
+  if (!line) return { answered: false, running: true, busy: true, words: 'AGMessage answered no busy line (' + r.status + '): read as busy' };
+  const counts = Object.fromEntries(BUSY_KEYS.map((k) => [k, line[k]]));
+  return { answered: true, running: true, busy: busyIsBusy(counts), words: typeof r.json.words === 'string' ? said(r.json.words, 200) : '', line: counts };
 }
 /** stop, through the machine's own wire half: {reason, by, force}. */
 function stopAsk({ port, token, reason, by, force = '' }) {
@@ -446,22 +525,129 @@ function taskStateOf(text) {
   return { state: said(row[3], 40) || 'unknown', lastResult: last };
 }
 
+// ---------------------------------------------------------------- whose it is (the laptop's admin), pure
+
+/**
+ * Whether a SID names one person's account (pure): a local, domain or Microsoft account (S-1-5-21-<three>-<RID>, its RID
+ * the built-in Administrator's 500 or 1000 and up) or an Entra ID account (S-1-12-1-<four>). Never Windows' own groups and
+ * aliases (Everyone, Authenticated Users, S-1-5-32-…), a service (SYSTEM, LocalService, a task's or a service's SID) or a
+ * domain's own groups (its RIDs under 1000 but 500): AGMessage's admin is one person's Windows account.
+ */
+function personSid(sid) {
+  if (!isSid(sid)) return false;
+  const m = /^S-1-5-21-\d{1,10}-\d{1,10}-\d{1,10}-(\d{1,10})$/.exec(sid);
+  if (m) return Number(m[1]) === 500 || Number(m[1]) >= 1000;
+  return /^S-1-12-1-\d{1,10}-\d{1,10}-\d{1,10}-\d{1,10}$/.test(sid);
+}
+/** An account from `whoami /user /fo csv /nh` (pure): its first row's name and SID, by position; null when there is none. */
+function accountOf(text) {
+  const row = csvRows(text)[0];
+  if (!row || row.length < 2) return null;
+  const sid = row[1].trim();
+  return isSid(sid) ? { name: said(row[0], 120), sid } : null;
+}
+/** The words for a reading that does not name a person (pure). */
+function readingWhy(r, what) {
+  if (!r || !r.sid) return what + ' could not be read' + (r && r.why ? ' (' + r.why + ')' : '');
+  if (r.sid === SID.system) return what + ' is SYSTEM (a deployment), not a person\'s account';
+  return what + ' is ' + (r.name || r.sid) + ', which is not one person\'s account';
+}
+/**
+ * Whose AGMessage it is on this PC, from the plan's two readings (pure): `started`, the account that started Setup;
+ * `screen`, the owner of explorer.exe in the installer's session; `approver`, the account the elevation runs as; `admin`,
+ * the account /ADMIN named, already resolved (each {name, sid} or {why}). /ADMIN decides when it is given. Both readings
+ * naming one person decide it, said with who approved. Otherwise the person chooses between the readings that name a
+ * person, never a third; none is a refusal, which asks for /ADMIN. {admin, agree, choices, words, refused}.
+ */
+function whoseOf({ started = null, screen = null, approver = null, admin = null }) {
+  const named = (r) => r.name || r.sid;
+  const approved = (who) => (approver && isSid(approver.sid) && approver.sid !== who.sid ? ' ' + named(approver) + ' approved it and gets no AGMessage rights.' : '');
+  if (admin) return { admin, agree: true, choices: [admin], words: 'AGMessage\'s admin on this PC will be ' + named(admin) + ', as /ADMIN names it.' + approved(admin) };
+  const person = (r) => !!(r && personSid(r.sid));
+  if (person(started) && person(screen) && started.sid === screen.sid) {
+    return { admin: started, agree: true, choices: [started], words: 'AGMessage\'s admin on this PC will be ' + named(started) + ', the account that started this installer.' + approved(started) };
+  }
+  const choices = [];
+  if (person(started)) choices.push(started);
+  if (person(screen) && !choices.some((c) => c.sid === screen.sid)) choices.push(screen);
+  const one = person(started) ? 'The account that started this installer is ' + named(started) : readingWhy(started, 'the account that started this installer');
+  const two = person(screen) ? 'the account signed in at this screen is ' + named(screen) : readingWhy(screen, 'the account signed in at this screen');
+  const both = one.charAt(0).toUpperCase() + one.slice(1) + ', and ' + two + '.';
+  if (!choices.length) return { admin: null, agree: false, choices, refused: true, words: 'AGMessage needs to know whose it is: add /ADMIN=<account>. ' + both };
+  return { admin: null, agree: false, choices, words: both + ' Choose ' + (choices.length === 1 ? 'it' : 'which of them is AGMessage\'s admin on this PC') + ': AGMessage\'s admin holds its token and gives the rights to start, stop and upgrade it. Nobody else is offered.' };
+}
+/**
+ * The account /ADMIN named, as Windows resolved it (pure): {name, sid}, only when Windows confirms it is one person's
+ * account on this PC: a SID Windows names (`translated`), of a person's shape (personSid), not a local group, and either a
+ * local user (a Microsoft account signed in here is one) or an account with a profile on this PC (a domain or work
+ * account that has signed in here; no group ever has one). Anything else is refused, fail closed, with its words: an
+ * account Windows does not know, a group or a service, or one it cannot confirm (a domain or work account that has never
+ * signed in here, or a group of a domain or of Entra ID, which share a person's shape).
+ */
+function adminOf(asked, answer) {
+  const a = answer && typeof answer === 'object' ? answer : {};
+  const who = said(a.name || asked, 80);
+  if (!isSid(a.sid) || a.translated !== true) throw refusal('/ADMIN names "' + said(asked, 80) + '", which Windows does not know as an account on this PC' + (a.error ? ' (' + said(a.error, 120) + ')' : '') + '. Name one person\'s account: /ADMIN=LAPTOP\\ana.');
+  if (a.group === true || !personSid(a.sid)) throw refusal('/ADMIN names ' + who + ', which is not one person\'s account (a group or a service). Give it to one person\'s account: /ADMIN=LAPTOP\\ana.');
+  if (a.user !== true && a.profile !== true) throw refusal('/ADMIN names ' + who + ', which Windows cannot confirm is one person\'s account on this PC: it is no local account and has never signed in here (a group of a domain or of Entra ID is neither). Name a local account, or one that has signed in to this PC once.');
+  return { name: said(a.name || asked, 120), sid: a.sid };
+}
+
+// ---------------------------------------------------------------- the programs of {app}, pure
+
+/**
+ * Whether a program running from {app} is the server task's own (pure): node.exe on launch.js serve, the watchdog
+ * (supervise.js) or the server (server.js) beside it, or the server's cloudflared. Read from its executable's name and its
+ * command line, never kept: anything else from {app} is a person's console of the Start menu (launch.js token, status or
+ * open) or a program nobody named.
+ */
+function serverProgram(p) {
+  const name = String((p && p.name) || '').toLowerCase();
+  const cmd = String((p && p.cmd) || '');
+  if (name === 'cloudflared.exe') return true;
+  if (name !== 'node.exe') return false;
+  return /[\\/]app[\\/](?:supervise|server)\.js"?(?:\s|$)/i.test(cmd) || /[\\/]app[\\/]launch\.js"?\s+serve(?:\s|$)/i.test(cmd);
+}
+/** A kept installer's name in {app}\installers\ (the installer keeps itself there by its install version). */
+const KEPT_INSTALLER = /^AGMessage-Setup-\d{1,3}\.\d{1,3}\.\d{1,5}-unsigned\.exe$/i;
+/**
+ * The programs of {app} without the installer's own chain (pure): a kept installer (an AGMessage-Setup-…-unsigned.exe
+ * directly in {app}\installers\, which only an elevated install lays there) that is an ancestor of this process is the
+ * installer running this check, waiting for it to end, so it and every program of that same file (the instance that asked
+ * for the elevation) are left out. Its file is never replaced by the install it runs. Any other program of {app}, an
+ * ancestor or not, stays: a kept installer this check was not run by, or a node.exe of {app}, holds what an install replaces.
+ */
+function outsideOwnChain(list, app) {
+  const dir = path.win32.join(String(app), 'installers').toLowerCase();
+  const kept = (p) => path.win32.dirname(p.exe).toLowerCase() === dir && KEPT_INSTALLER.test(path.win32.basename(p.exe));
+  const mine = new Set(list.filter((p) => p.ancestor === true && p.exe && kept(p)).map((p) => p.exe.toLowerCase()));
+  return list.filter((p) => !(p.exe && mine.has(p.exe.toLowerCase())));
+}
+/** Programs as words (pure): "node.exe (pid 4120), …", at most three named. */
+function programWords(list) {
+  const named = list.slice(0, 3).map((p) => said(p.name || 'a program', 40) + ' (pid ' + p.pid + ')');
+  return named.join(', ') + (list.length > 3 ? ' and ' + (list.length - 3) + ' more' : '');
+}
+
 // ---------------------------------------------------------------- argument parsing
 
-/** The verbs this unit builds; import (U14), control (U17) and upgrade (U18) are refused as unknown until they land. */
-const VERBS = Object.freeze(['prepare', 'install', 'uninstall', 'preinstall-check', 'upgrade-stop', 'status', 'restore']);
+/** The verbs built so far; import (U14), control (U17) and upgrade (U18) are refused as unknown until they land. */
+const VERBS = Object.freeze(['prepare', 'install', 'uninstall', 'preinstall-check', 'upgrade-stop', 'status', 'restore', 'whose', 'start', 'first-account']);
 const LATER = Object.freeze({ import: 'U14', control: 'U17', upgrade: 'U18' });
 /** The flags (no value). */
-const FLAGS = new Set(['--public', '--signed', '--remove-data']);
+const FLAGS = new Set(['--public', '--signed', '--remove-data', '--rollback']);
 /** Each verb's options, each at most once: any other is refused, never ignored. */
 const VERB_OPTS = Object.freeze({
   prepare: ['--machine', '--sys', '--out'],
-  install: ['--machine', '--app', '--sys', '--build', '--port', '--admin', '--admin-name', '--public', '--signed', '--out'],
-  uninstall: ['--machine', '--sys', '--port', '--force', '--remove-data', '--out'],
-  'preinstall-check': ['--machine', '--sys', '--port', '--force', '--out'],
-  'upgrade-stop': ['--machine', '--port', '--by', '--force', '--out'],
+  install: ['--machine', '--app', '--sys', '--build', '--port', '--admin', '--admin-name', '--public', '--signed', '--rollback', '--out'],
+  uninstall: ['--machine', '--sys', '--port', '--force', '--remove-data', '--app', '--out'],
+  'preinstall-check': ['--machine', '--sys', '--port', '--force', '--app', '--rollback', '--out'],
+  'upgrade-stop': ['--machine', '--sys', '--port', '--by', '--force', '--app', '--out'],
   status: ['--machine', '--sys', '--port', '--out'],
   restore: ['--machine', '--backup', '--port', '--out'],
+  whose: ['--machine', '--sys', '--started', '--admin', '--out'],
+  start: ['--machine', '--sys', '--port', '--build', '--out'],
+  'first-account': ['--machine', '--port', '--account', '--build', '--out'],
 });
 
 /** The command line, read: {verb, opts} or {problem}. No value is a path read from the environment: each is an argument. */
@@ -505,7 +691,7 @@ function needPort(opts, { optional = false } = {}) {
 const POWERSHELL = 'WindowsPowerShell\\v1.0\\powershell.exe';
 /**
  * The programs this unit runs, each by its absolute path in the System32 folder `sys` names (never a bare name, which
- * Windows looks for in the current folder and on PATH first), each from that folder: schtasks, icacls, reg and
+ * Windows looks for in the current folder and on PATH first), each from that folder: schtasks, icacls, reg, whoami and
  * powershell. powershell.exe runs one fixed script, its values handed in by name in an environment of its own (the
  * Windows folder, its drive and Temp, and Windows' own module path, each made from `sys`; nothing of this process's), and
  * answers one line of JSON. `run` is
@@ -539,6 +725,7 @@ function hands(sys, run = childProcess.execFileSync) {
     schtasks: (args) => call('schtasks.exe', args),
     icacls: (args) => call('icacls.exe', args),
     reg: (args) => call('reg.exe', args),
+    whoami: (args) => call('whoami.exe', args),
     powershell,
   };
 }
@@ -583,6 +770,47 @@ try {
   if ($e.Count) { $o.codeIntegrity = @{ found = $true; id = [int]$e[0].Id; at = $e[0].TimeCreated.ToUniversalTime().ToString('o') } } else { $o.codeIntegrity = @{ found = $false } }
 } catch { $o.codeIntegrityError = (AgmWhy $_) };
 AgmSay $o`);
+/**
+ * Whose it is, read by Windows: the owners of explorer.exe in this process's session (the plan's second reading, by
+ * Win32_Process's GetOwnerSid), the names of AGM_SIDS and of those owners, and the account AGM_ACCOUNT names (/ADMIN),
+ * resolved to its SID, with whether Windows names it (`translated`), whether it is a local group or a local user, and
+ * whether it has a profile on this PC (ProfileList: an account that has signed in here, which a group never has).
+ */
+const PS_WHOSE = oneLine(PS_HEAD + String.raw`
+$o = @{};
+try {
+  AgmUse 'Microsoft.PowerShell.Management'; AgmUse 'CimCmdlets'; $s = [int](Get-Process -Id $PID).SessionId; $o.session = $s; $w = @();
+  foreach ($p in @(Get-CimInstance -ClassName Win32_Process -Filter ('Name = ''explorer.exe'' AND SessionId = ' + $s))) { $r = Invoke-CimMethod -InputObject $p -MethodName GetOwnerSid; if ($r.ReturnValue -eq 0) { $w += [string]$r.Sid } };
+  $o.screen = @($w | Select-Object -Unique)
+} catch { $o.screenError = (AgmWhy $_) };
+$names = @{};
+foreach ($x in @(@(([string]$env:AGM_SIDS) -split ',') + @($o.screen))) { if ($x -match '^S-1-[0-9-]+$' -and -not $names.ContainsKey($x)) { try { $names[$x] = [string](New-Object System.Security.Principal.SecurityIdentifier($x)).Translate([System.Security.Principal.NTAccount]).Value } catch { $names[$x] = '' } } };
+$o.names = $names;
+if ($env:AGM_ACCOUNT) {
+  try {
+    $n = [string]$env:AGM_ACCOUNT; if ($n -match '^S-1-') { $sid = New-Object System.Security.Principal.SecurityIdentifier($n) } else { $sid = (New-Object System.Security.Principal.NTAccount($n)).Translate([System.Security.Principal.SecurityIdentifier]) };
+    $a = @{ sid = [string]$sid.Value; name = ''; translated = $false; group = $false; user = $false; profile = $false };
+    try { $a.name = [string]$sid.Translate([System.Security.Principal.NTAccount]).Value; $a.translated = $true } catch { $a.name = '' };
+    try { AgmUse 'Microsoft.PowerShell.LocalAccounts'; $a.group = (@(Get-LocalGroup -SID $sid -ErrorAction SilentlyContinue).Count -gt 0); $a.user = (@(Get-LocalUser -SID $sid -ErrorAction SilentlyContinue).Count -gt 0) } catch { $a.user = $false };
+    try { AgmUse 'Microsoft.PowerShell.Management'; $a.profile = [bool](Test-Path -LiteralPath ('Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\' + [string]$sid.Value)) } catch { $a.profile = $false };
+    $o.account = $a
+  } catch { $o.accountError = (AgmWhy $_) }
+};
+AgmSay $o`);
+/**
+ * Every program whose executable is under AGM_APP: its pid, its name, its command line (classified, never kept), its
+ * executable and whether it is an ancestor of this script (its parent's chain from $PID, each parent made before its
+ * child, so a pid Windows gave again to a later program is never taken for a parent).
+ */
+const PS_PROGRAMS = oneLine(PS_HEAD + String.raw`
+try {
+  AgmUse 'CimCmdlets'; $app = ([string]$env:AGM_APP).TrimEnd('\') + '\'; $o = @(); $all = @{};
+  foreach ($p in @(Get-CimInstance -ClassName Win32_Process)) { $all[[int64]$p.ProcessId] = $p };
+  $up = @(); $c = $all[[int64]$PID];
+  for ($i = 0; $c -and $i -lt 32; $i++) { $q = $all[[int64]$c.ParentProcessId]; if (-not $q -or [int64]$q.ProcessId -eq [int64]$c.ProcessId -or ($q.CreationDate -and $c.CreationDate -and $q.CreationDate -gt $c.CreationDate)) { break }; $up += [int64]$q.ProcessId; $c = $q };
+  foreach ($p in @($all.Values)) { $x = [string]$p.ExecutablePath; if ($x -and $x.StartsWith($app, [System.StringComparison]::OrdinalIgnoreCase)) { $o += @{ pid = [int64]$p.ProcessId; name = [string]$p.Name; cmd = [string]$p.CommandLine; exe = $x; ancestor = ($up -contains [int64]$p.ProcessId) } } };
+  AgmSay @{ programs = $o }
+} catch { AgmSay @{ error = (AgmWhy $_) } }`);
 
 // ---------------------------------------------------------------- the record, the folder and its reads
 
@@ -650,8 +878,8 @@ function tokenFrom(root, fsImpl = fs) {
 
 /**
  * prepare: the machine folder made before anything is installed, in the plan's order. 1. The root, non-recursively; an
- * existing one taken only when the record shows an earlier install or a prepare of this root no install finished
- * (`Prepared`), lstat shows a real directory and its owner (read by Get-Acl) is SYSTEM or Administrators. 2. At once, its
+ * existing one taken only when the record shows an earlier install, a prepare of this root no install finished
+ * (`Prepared`) or the data an uninstall kept (`Kept`), lstat shows a real directory and its owner (read by Get-Acl) is SYSTEM or Administrators. 2. At once, its
  * inheritance cut and SYSTEM and Administrators in full control, by SID, never /T. 3. The root listed: a root made empty
  * that holds anything now is refused; a root made now is then marked `Prepared` in the record. 4. Each child made (or, in
  * a root that was there, found a real directory) with its own grants, then machine\'s subfolders. 5. setup\<128 random
@@ -668,8 +896,10 @@ function prepare(opts, { run = childProcess.execFileSync, fsImpl = fs } = {}) {
   try { fsImpl.mkdirSync(root); fresh = true; } catch (e) {
     if (e.code !== 'EEXIST') throw notDone('the machine folder ' + root + ' could not be made (' + (e.code || e.message) + ').');
     const record = readRecord(H);
-    const prepared = typeof record.values.Prepared === 'string' && record.values.Prepared.toLowerCase() === root.toLowerCase();
-    if (!record.installed && !prepared) throw refusal(root + ' is there, and the install record shows no earlier AGMessage install: it is not AGMessage\'s to take. Remove it, then install again.');
+    const names = (v) => typeof v === 'string' && v.toLowerCase() === root.toLowerCase();
+    // An earlier install's root; one a prepare made that no install finished (`Prepared`); or the data an uninstall kept
+    // (`Kept`): each written to HKLM by an elevated step of AGMessage's alone.
+    if (!record.installed && !names(record.values.Prepared) && !names(record.values.Kept)) throw refusal(root + ' is there, and the install record shows no earlier AGMessage install and no data an uninstall kept: it is not AGMessage\'s to take. Remove it, then install again.');
     const real = realDir(fsImpl, root);
     if (!real.ok) throw refusal(root + ' is there and ' + real.why + ': it is not AGMessage\'s to take.');
     const acl = H.powershell(PS_OWNER, { AGM_PATH: root });
@@ -770,9 +1000,11 @@ function install(opts, { run = childProcess.execFileSync, fsImpl = fs } = {}) {
   const fw = H.powershell(PS_FIREWALL_ADD, { AGM_RULE_TCP: RULE_TCP, AGM_RULE_UDP: RULE_UDP, AGM_NODE: node, AGM_PORT: String(port), AGM_UDP: String(DISCOVERY_PORT), AGM_PROFILES: rules[0].profiles.join(',') });
   if (fw.error || fw.ok !== true) throw notDone('the firewall rules could not be made (' + said(fw.error || 'no answer', 200) + ').');
   // The one install record, written last: by SID, no secret.
-  const previous = record.values.Version && record.values.Version !== built.version ? record.values.Version : (record.values.Previous || '');
+  // Previous is the build an upgrade replaced, the one the way back lays down; the way back itself leaves none (the build
+  // it replaced is the newer one that did not start, never one to go back to).
+  const previous = opts['--rollback'] ? '' : record.values.Version && record.values.Version !== built.version ? record.values.Version : (record.values.Previous || '');
   for (const v of recordValues({ dir: app, version: built.version, semver: built.semver, previous, admin, adminName, port, public: !!opts['--public'], signed: !!opts['--signed'] })) writeValue(H, v);
-  if (record.values.Prepared !== undefined) H.reg(['delete', HKLM, '/v', 'Prepared', '/f', '/reg:64']);
+  for (const mark of ['Prepared', 'Kept']) if (record.values[mark] !== undefined) H.reg(['delete', HKLM, '/v', mark, '/f', '/reg:64']);
   if (!kept) machineEvent(folder('machine'), { kind: 'machine.admin', by: adminName || admin, forSid: admin, words: 'AGMessage installed; the laptop\'s admin is ' + (adminName || admin) }, fsImpl);
   // setup\ held the one-time readings of who started the installer; removed at the install's end.
   let setupLeft = '';
@@ -796,7 +1028,7 @@ async function stopAndWait({ port, token, reason, by, force, n = {} }) {
   const r = await (n.stop || stopAsk)({ port, token, reason, by, force });
   if (!r.ok && r.why === 'ECONNREFUSED') return { state: 'none', at, words: 'nothing is serving on port ' + port };
   if (!r.ok) throw refusal('AGMessage could not be stopped at loopback: ' + r.words + '.', { why: r.why });
-  if (r.status === 409) throw refusal(said((r.json && r.json.error) || 'Not stopped: AGMessage is busy. Type a reason to stop it anyway.', 300));
+  if (r.status === 409) throw refusal(said((r.json && r.json.error) || 'Not stopped: AGMessage is busy. Type a reason to stop it anyway.', 300), { busy: true, forceable: true });
   if (r.status !== 200 || !r.json || r.json.stopping !== true) throw refusal('AGMessage did not take the stop (' + r.status + (r.json && r.json.error ? ': ' + said(r.json.error, 160) : '') + ').');
   const closed = await portCloses(port, { ms: n.waitMs || STOP_WAIT_MS, answers: n.portAnswers || portAnswers });
   if (!closed) throw refusal('AGMessage took the stop at ' + clock(at) + ' and still holds port ' + port + ' after ' + Math.round((n.waitMs || STOP_WAIT_MS) / 1000) + ' s: it is still saving, or it is stuck. Wait, then try again.');
@@ -892,18 +1124,23 @@ function backupEstimate(dataDir, uploadDir, fsImpl = fs) {
  * listing names (`schtasks /query /fo csv /nh`, by its first column), so a listing that cannot be read leaves none of
  * them registered.
  */
-function agmTasks(H, record) {
+function agmTasks(H, record, grants) {
   const names = new Set([SERVER_TASK]);
-  for (const sid of [record.values.Admin, ...Object.keys(readGrants(H))]) if (isSid(sid)) names.add(TASK_FOLDER + 'Control-' + sid);
+  for (const sid of [record.values.Admin, ...Object.keys(grants)]) if (isSid(sid)) names.add(TASK_FOLDER + 'Control-' + sid);
   const r = H.schtasks(['/Query', '/TN', TASK_FOLDER, '/FO', 'CSV', '/NH']);
   if (r.code === 0) for (const row of csvRows(r.out)) if (row[0] && row[0].toLowerCase().startsWith(TASK_FOLDER.toLowerCase())) names.add(row[0]);
   return [...names];
 }
 
 /**
- * uninstall: the server stopped at loopback first (it saves), then every task in \AGMessage\ ended and removed, the
- * rules and the record removed, before any file goes; with --remove-data the folders, the keys last (answer 43). Each
- * removal is checked; what was left is named in the words and makes the exit 2.
+ * uninstall: with --app, a person's console still open from {app} refused before anything (its node.exe holds files the
+ * uninstall removes); the server stopped at loopback (it saves), then every task in \AGMessage\ ended and removed and,
+ * with --app, every program of {app} waited for until it has ended, then the rules and the record removed, before any file
+ * goes. With --remove-data the folders go, the keys last (answer 43). Otherwise the data is kept for AGMessage installed
+ * again: every right a Windows account was given on it taken back (the laptop's admin's and each grantee's grants on the
+ * machine folder's children, their inbox\ and outbox\ folders), and the record replaced by `Kept`, naming the root, and its
+ * `Port`, which prepare takes as it takes an earlier install. Each step is checked; what was left is named in the words
+ * and makes the exit 2.
  */
 async function uninstall(opts, { run = childProcess.execFileSync, fsImpl = fs, net: n = {} } = {}) {
   const root = needPath(opts, '--machine');
@@ -913,6 +1150,10 @@ async function uninstall(opts, { run = childProcess.execFileSync, fsImpl = fs, n
   const port = needPort(opts, { optional: true }) || Number(record.values.Port) || 0;
   const told = [];
   const left = [];
+  if (opts['--app']) {
+    const others = programsIn(opts, run).filter((p) => !serverProgram(p));
+    if (others.length) throw refusal('AGMessage\'s own console is open (' + programWords(others) + ' runs from ' + opts['--app'] + '): close its window, then uninstall again. Nothing was removed.', { programs: others.map((p) => ({ pid: p.pid, name: p.name })) });
+  }
   // 1. The server's own stop, which saves; Task Scheduler's End (TerminateProcess) is never the stop.
   const token = tokenFrom(root, fsImpl);
   if (port && token) {
@@ -925,21 +1166,57 @@ async function uninstall(opts, { run = childProcess.execFileSync, fsImpl = fs, n
     }
   } else if (port) told.push('the token could not be read, so AGMessage was not stopped at loopback: it was ended without its save if it was serving');
   // 2. Every task of AGMessage's folder: ended (nothing to save now) and removed, each checked.
-  for (const tn of agmTasks(H, record)) {
+  const grants = readGrants(H);
+  for (const tn of agmTasks(H, record, grants)) {
     if (H.schtasks(['/Query', '/TN', tn]).code !== 0) continue;   // not there
     H.schtasks(['/End', '/TN', tn]);
     const del = H.schtasks(['/Delete', '/TN', tn, '/F']);
     if (del.code !== 0 || H.schtasks(['/Query', '/TN', tn]).code === 0) left.push('the task ' + tn + ' (' + (del.err || 'schtasks.exe ended with ' + del.code) + ')');
   }
+  // Nothing may still run from {app} when its files go: the server's own programs end after it (the watchdog, launch.js
+  // serve), so they are given PROGRAMS_WAIT_MS; what still runs then is named.
+  if (opts['--app']) {
+    const until = Date.now() + (n.programsWaitMs || PROGRAMS_WAIT_MS);
+    let still = programsIn(opts, run);
+    while (still.length && Date.now() < until) { await sleep(POLL_MS); still = programsIn(opts, run); }
+    if (still.length) left.push(programWords(still) + ', which still runs from ' + opts['--app'] + ' (close it, then uninstall again)');
+  }
   // 3. The firewall rules.
   const fw = H.powershell(PS_FIREWALL_REMOVE, { AGM_RULE_TCP: RULE_TCP, AGM_RULE_UDP: RULE_UDP });
   if (fw.error) left.push('the firewall rules (' + said(fw.error, 160) + ')');
-  // 4. The record.
+  // 4. Data kept: every right a Windows account was given on it taken back, while the record still names them.
+  const keep = !opts['--remove-data'] && fsImpl.existsSync(root);
+  if (keep) {
+    const sids = [...new Set([record.values.Admin, ...Object.keys(grants)].filter(isSid))];
+    for (const child of CHILDREN) {
+      const dir = P.join(root, child.name);
+      if (!sids.length || !fsImpl.existsSync(dir)) continue;
+      const r = H.icacls([dir, '/remove:g', ...sids.map((sid) => '*' + sid)]);
+      if (r.code !== 0) left.push('the rights on ' + dir + ' (' + (r.err || 'icacls.exe ended with ' + r.code) + ')');
+    }
+    for (const box of ['inbox', 'outbox']) {
+      const dir = P.join(root, 'machine', box);
+      let names = [];
+      try { names = fsImpl.readdirSync(dir); } catch (e) { if (e.code !== 'ENOENT') left.push(dir + ' (' + (e.code || e.message) + ')'); }
+      for (const name of names) {
+        const d = P.join(dir, name);
+        try { fsImpl.rmSync(d, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 }); } catch (e) { left.push(d + ' (' + (e.code || e.message) + ')'); continue; }
+        if (fsImpl.existsSync(d)) left.push(d);
+      }
+    }
+  }
+  // 5. The record; where the data is kept, the mark prepare takes it again by (HKLM, which only administrators write).
   if (record.exists) {
     const del = H.reg(['delete', HKLM, '/f', '/reg:64']);
     if (del.code !== 0) left.push('the install record (' + (del.err || 'reg.exe ended with ' + del.code) + ')');
   }
-  // 5. The data only when asked: everything but the keys, then the keys last.
+  if (keep) {
+    for (const v of [{ name: 'Kept', type: 'REG_SZ', value: root }, ...(port ? [{ name: 'Port', type: 'REG_DWORD', value: String(port) }] : [])]) {
+      const r = H.reg(['add', HKLM, '/v', v.name, '/t', v.type, '/d', v.value, '/f', '/reg:64']);
+      if (r.code !== 0) left.push('the mark (' + v.name + ') by which AGMessage installed again takes the kept data (' + (r.err || 'reg.exe ended with ' + r.code) + ')');
+    }
+  }
+  // 6. The data only when asked: everything but the keys, then the keys last.
   const removed = [];
   if (opts['--remove-data']) {
     for (const name of ['data', 'uploads', 'logs', 'token', 'machine', 'setup', 'keys']) {
@@ -952,10 +1229,26 @@ async function uninstall(opts, { run = childProcess.execFileSync, fsImpl = fs, n
   }
   const head = told.length ? told.join('; ') + '. ' : '';
   if (left.length) throw notDone(head + 'AGMessage is not wholly uninstalled; left: ' + left.join('; ') + '.', { removed, left });
-  return { removed, words: head + (opts['--remove-data'] ? 'AGMessage is uninstalled, and its data removed from this PC.' : 'AGMessage is uninstalled; its data is kept in ' + root + '.') };
+  return { removed, words: head + (opts['--remove-data'] ? 'AGMessage is uninstalled, and its data removed from this PC.' : keep ? 'AGMessage is uninstalled; its data is kept in ' + root + ', which AGMessage installed again takes, and no Windows account keeps a right to it but SYSTEM and Administrators.' : 'AGMessage is uninstalled; it had no data folder to keep.') };
 }
 
 // ---------------------------------------------------------------- preinstall-check, upgrade-stop
+
+/**
+ * The programs running from `--app` ({app}), read through powershell.exe from `--sys`, this process left out: each {pid,
+ * name, cmd}, the command line only to tell the server's own from the rest (serverProgram), never said or kept. A list
+ * that cannot be read refuses, fail closed: nothing is replaced under a program nobody could see.
+ */
+function programsIn(opts, run) {
+  const app = needPath(opts, '--app');
+  if (!DRIVE_PATH.test(String(opts['--sys'] || ''))) throw usage('--app needs --sys <{sys}>, the System32 folder the programs are read from.');
+  const r = hands(opts['--sys'], run).powershell(PS_PROGRAMS, { AGM_APP: app });
+  if (r.error || !(Array.isArray(r.programs) || (r.programs && typeof r.programs === 'object'))) throw refusal('What runs from ' + app + ' could not be read (' + said(r.error || 'no answer', 160) + '): nothing is replaced under a program nobody could see.');
+  const list = Array.isArray(r.programs) ? r.programs : [r.programs];
+  const programs = list.filter((p) => p && Number.isSafeInteger(p.pid) && p.pid > 0 && p.pid !== process.pid)
+    .map((p) => ({ pid: p.pid, name: said(p.name || '', 60), cmd: String(p.cmd || '').slice(0, 2000), exe: String(p.exe || '').slice(0, 400), ancestor: p.ancestor === true }));
+  return outsideOwnChain(programs, app);
+}
 
 /** The pid listening on `port` (Get-NetTCPConnection), or 0 when it cannot be read: `--sys` names where to run it from. */
 function holderPid(opts, run, port) {
@@ -973,15 +1266,23 @@ function holderPid(opts, run, port) {
 async function preinstallCheck(opts, { run = childProcess.execFileSync, fsImpl = fs, net: n = {} } = {}) {
   const root = needPath(opts, '--machine');
   const port = needPort(opts);
+  // A person's console from {app} (Show the admin token, AGMessage status, Open AGMessage) holds node.exe open: the files
+  // could not be replaced under it, so it is closed first, before anything is stopped.
+  if (opts['--app']) {
+    const others = programsIn(opts, run).filter((p) => !serverProgram(p));
+    if (others.length) throw refusal('AGMessage\'s own console is open (' + programWords(others) + ' runs from ' + opts['--app'] + '): close its window, then continue.', { programs: others.map((p) => ({ pid: p.pid, name: p.name })) });
+  }
   if (!(await (n.portAnswers || portAnswers)(port))) return { ready: true, words: 'Port ' + port + ' is free: nothing is serving on it.' };
   const pidWords = () => { const pid = (n.pid || holderPid)(opts, run, port); return pid ? ' (pid ' + pid + ')' : ''; };
+  // The way back lays an earlier build's files down with no stop of its own: only once the newer build has ended.
+  if (opts['--rollback']) throw refusal('Something answers on port ' + port + pidWords() + ': the way back lays an earlier build down only where nothing serves, once the newer build has ended. Stop it, then go back again.', { running: true });
   const token = tokenFrom(root, fsImpl);
   const h = token ? await (n.hello || hello)({ port, token }) : { ok: false, why: 'notoken' };
   if (h.ok) {
     const b = await (n.busy || busyAsk)({ port, token });
     if (!b.answered && b.running) throw refusal('AGMessage on port ' + port + pidWords() + ' did not answer how busy it is within ' + ANSWER_MS / 1000 + ' s (' + b.words + '): it cannot be stopped at loopback, so the install cannot go on.');
-    if (b.busy && !opts['--force']) throw refusal('AGMessage is busy (' + (b.words || 'activity in the last 10 minutes') + '): type a reason to go on anyway, or wait.');
-    return { ready: true, running: true, busy: b.busy, words: 'The installed AGMessage answered: ' + (b.words || 'ready') + '.' };
+    if (b.busy && !opts['--force']) throw refusal('AGMessage is busy (' + (b.words || 'activity in the last 10 minutes') + '): type a reason to go on anyway, or wait.', { busy: true, forceable: true, line: b.line || null });
+    return { ready: true, running: true, busy: b.busy, line: b.line || null, words: 'The installed AGMessage answered: ' + (b.words || 'ready') + '.' };
   }
   if (h.why === 'silent') throw refusal('AGMessage on port ' + port + pidWords() + ' does not answer within ' + ANSWER_MS / 1000 + ' s: it reads as busy, and it cannot be stopped at loopback, so the install cannot go on.');
   const holder = await (n.health || healthOf)(port);
@@ -997,7 +1298,7 @@ async function preinstallCheck(opts, { run = childProcess.execFileSync, fsImpl =
  * it asked. With no record, a stop that did not save, or no backup made, it refuses (exit 3) unless forced; its words say
  * when the stop saved and the backup it made.
  */
-async function upgradeStop(opts, { fsImpl = fs, net: n = {} } = {}) {
+async function upgradeStop(opts, { run = childProcess.execFileSync, fsImpl = fs, net: n = {} } = {}) {
   const root = needPath(opts, '--machine');
   const port = needPort(opts);
   const P = pathOf(root);
@@ -1008,17 +1309,25 @@ async function upgradeStop(opts, { fsImpl = fs, net: n = {} } = {}) {
   if (!token) throw refusal('the installed node\'s token (token\\admin-token) could not be read, so AGMessage cannot be stopped at loopback for the upgrade.');
   const est = (n.estimate || backupEstimate)(dataDir, P.join(root, 'uploads'), fsImpl);
   if (est.free !== null && est.free < est.copyBytes + BACKUP_RESERVE && !force) {
-    throw refusal('the disk has ' + MB(est.free) + ' free, under the ' + MB(est.copyBytes) + ' the way back\'s backup copies and the ' + MB(BACKUP_RESERVE) + ' kept beside them: free some space, or type a reason to upgrade without a way back. AGMessage was not stopped.');
+    throw refusal('the disk has ' + MB(est.free) + ' free, under the ' + MB(est.copyBytes) + ' the way back\'s backup copies and the ' + MB(BACKUP_RESERVE) + ' kept beside them: free some space, or give a reason to upgrade without a way back. AGMessage was not stopped.', { forceable: true });
   }
   const s = await stopAndWait({ port, token, reason: 'upgrade', by, force, n });
+  // Nothing may still run from {app} when its files are replaced: the server's own programs end after it (the watchdog,
+  // launch.js serve), so they are given PROGRAMS_WAIT_MS; anything left then is named and the upgrade refused.
+  if (opts['--app']) {
+    const until = Date.now() + (n.programsWaitMs || PROGRAMS_WAIT_MS);
+    let left = programsIn(opts, run);
+    while (left.length && Date.now() < until) { await sleep(POLL_MS); left = programsIn(opts, run); }
+    if (left.length) throw refusal('AGMessage stopped for the upgrade at ' + clock(s.at) + ', but ' + programWords(left) + ' still runs from ' + opts['--app'] + ': close it, then run the installer again.', { programs: left.map((p) => ({ pid: p.pid, name: p.name })) });
+  }
   if (s.state === 'none') {
-    if (!force) throw refusal('AGMessage is not serving on port ' + port + ', so no stop saved it for the upgrade and no backup was made for the way back: start it, or type a reason to upgrade without one.');
+    if (!force) throw refusal('AGMessage is not serving on port ' + port + ', so no stop saved it for the upgrade and no backup was made for the way back: start it, or give a reason to upgrade without one.', { forceable: true });
     return { saved: false, backup: '', forced: true, words: 'AGMessage was not serving: upgrading without a way back, as asked (' + force + ').' };
   }
   const rec = readLastStop(dataDir, fsImpl);
   const fresh = rec && !rec.unreadable && Number.isFinite(rec.at) && rec.at >= s.at;
   const problem = !rec ? 'no save record' : rec.unreadable ? 'its save record could not be read (' + rec.unreadable + ')' : !fresh ? 'no save record of this stop (the record there is older)' : !rec.saved ? 'it did not save (' + (rec.unsaved || 'not all of it') + ')' : !rec.backup ? rec.unbacked || 'no backup was made for the way back' : '';
-  if (problem && !force) throw refusal('AGMessage stopped for the upgrade at ' + clock(s.at) + ', and ' + problem + ': the upgrade is refused so no data is risked. Type a reason to upgrade anyway.');
+  if (problem && !force) throw refusal('AGMessage stopped for the upgrade at ' + clock(s.at) + ', and ' + problem + ': the upgrade is refused so no data is risked. Give a reason to upgrade anyway.', { forceable: true });
   if (problem) return { saved: !!(fresh && rec.saved), backup: fresh ? rec.backup : '', at: fresh ? rec.at : null, forced: true, words: 'AGMessage stopped at ' + clock(s.at) + ', and ' + problem + ': upgrading anyway, as asked (' + force + ').' };
   return { saved: true, backup: rec.backup, at: rec.at, words: 'AGMessage stopped for the upgrade and saved at ' + clock(rec.at) + '; backup ' + rec.backup + '.' };
 }
@@ -1078,6 +1387,169 @@ function statusWords(f) {
   else if (f.codeIntegrity.found === null) lines.push('  code integrity: not read (' + f.codeIntegrity.error + ')');
   if (f.serverLog.lines.length) lines.push('  the log\'s last line: ' + f.serverLog.lines[f.serverLog.lines.length - 1].slice(0, 160));
   return lines.join('\n');
+}
+
+// ---------------------------------------------------------------- whose, start and first-account (the installer's)
+
+/** The setup folder's one-time folders (prepare's setup\<128 random bits>\), each named by 32 hex characters. */
+const SETUP_ONCE = /^[0-9a-f]{32}$/;
+/**
+ * The plan's first reading, the file the account that started Setup wrote (`whoami /user /fo csv /nh`, run as it through
+ * Inno's ExecAsOriginalUser) into a one-time folder of setup\: read only when it is a real file there, then removed, so
+ * nothing written there is ever read twice. {name, sid}, or {why}. Its name is the console's code page's and its SID is
+ * what is used; the words take the name Windows gives that SID.
+ */
+function startedFrom(fsImpl, root, file) {
+  const P = pathOf(root);
+  const rel = P.relative(P.join(root, 'setup'), String(file)).split(/[\\/]/);
+  if (!fullPath(String(file)) || rel.length !== 2 || !SETUP_ONCE.test(rel[0]) || !/^[A-Za-z0-9.-]{1,40}$/.test(rel[1])) {
+    throw usage('--started is "' + said(file, 120) + '", which is not a file of one of ' + P.join(root, 'setup') + '\'s one-time folders.');
+  }
+  let st;
+  try { st = fsImpl.lstatSync(file); } catch (e) { return { why: e.code === 'ENOENT' ? 'it wrote no answer' : 'its answer could not be read (' + (e.code || e.message) + ')' }; }
+  if (!st.isFile() || st.isSymbolicLink()) return { why: 'what is there is not a file it wrote' };
+  let text;
+  try { text = fsImpl.readFileSync(file, 'latin1'); } catch (e) { return { why: 'its answer could not be read (' + (e.code || e.message) + ')' }; } finally {
+    try { fsImpl.unlinkSync(file); } catch { /* the setup folder goes at the install's end; it holds no secret */ }
+  }
+  return accountOf(text) || { why: 'its answer named no account' };
+}
+
+/**
+ * whose: the laptop's admin, as the plan's readings find it once the elevation is in. The account this process runs as
+ * (whoami.exe: the administrator who approved the elevation, or SYSTEM); the account that started Setup, from --started;
+ * the owner of explorer.exe in this session and the names Windows gives each SID (one powershell.exe); and the account
+ * --admin names (/ADMIN), resolved there. whoseOf decides; flat fields for the installer to read: `admin` and
+ * `adminName` when it is decided, `choiceCount` and `choice1Sid`… when the person chooses, `approverName`.
+ */
+function whose(opts, { run = childProcess.execFileSync, fsImpl = fs } = {}) {
+  const root = needPath(opts, '--machine');
+  const H = hands(opts['--sys'], run);
+  const me = H.whoami(['/user', '/fo', 'csv', '/nh']);
+  const approver = me.code === 0 ? accountOf(me.out) : null;
+  const started = opts['--started'] ? startedFrom(fsImpl, root, opts['--started']) : { why: 'the installer did not ask it' };
+  const sids = [approver, started].filter((r) => r && isSid(r.sid)).map((r) => r.sid);
+  const ps = H.powershell(PS_WHOSE, { AGM_SIDS: sids.join(','), ...(opts['--admin'] ? { AGM_ACCOUNT: String(opts['--admin']) } : {}) });
+  const names = ps.names && typeof ps.names === 'object' && !Array.isArray(ps.names) ? ps.names : {};
+  const nameOf = (r) => (r && isSid(r.sid) ? { ...r, name: said(typeof names[r.sid] === 'string' && names[r.sid] ? names[r.sid] : r.name || '', 120) } : r);
+  const owners = (Array.isArray(ps.screen) ? ps.screen : typeof ps.screen === 'string' ? [ps.screen] : []).filter(isSid);
+  let screen;
+  if (ps.error || ps.screenError) screen = { why: said(ps.error || ps.screenError, 160) };
+  else if (owners.length === 1) screen = nameOf({ sid: owners[0], name: '' });
+  else screen = { why: owners.length ? 'more than one account owns explorer.exe in this session' : 'no explorer.exe runs in this session' };
+  let admin = null;
+  if (opts['--admin']) admin = adminOf(opts['--admin'], ps.account || { error: ps.accountError || ps.error });
+  const w = whoseOf({ started: nameOf(started), screen, approver: nameOf(approver), admin });
+  const out = {
+    agree: w.agree, admin: w.admin ? w.admin.sid : '', adminName: w.admin ? (w.admin.name || w.admin.sid) : '',
+    approverName: approver ? (nameOf(approver).name || approver.sid) : '', choiceCount: w.choices.length,
+    startedSid: started && isSid(started.sid) ? started.sid : '', screenSid: screen && isSid(screen.sid) ? screen.sid : '',
+    words: w.words,
+  };
+  w.choices.forEach((c, i) => { out['choice' + (i + 1) + 'Sid'] = c.sid; out['choice' + (i + 1) + 'Name'] = c.name || c.sid; });
+  if (w.refused) throw refusal(w.words, out);
+  return out;
+}
+
+/** A build named by --build: one an installer lays down (installOf), or '' when none is named; else a usage error. */
+function wantedBuild(opts) {
+  if (opts['--build'] === undefined) return '';
+  const want = String(opts['--build']);
+  if (!installOf(want)) throw usage('--build is "' + said(want, 80) + '", which is not a build an installer lays down (0.6.0+41.abc1234, 0.6.0-dev.41+abc1234).');
+  return want;
+}
+
+/**
+ * start: the server task run (schtasks /Run), and the server asked every POLL_MS, within START_WAIT_MS, until it proves
+ * it holds this machine folder's token (the hello, its token read again each time, since a first start writes it) as
+ * `--build` when that is given: the installer's verify. A program that answers /api/health with the build's words but
+ * proves nothing is no answer. Whether the node has an account yet is asked of the proven server, on the connection it
+ * proved itself on (/api/auth/me's `setup`). {answered, build, needsAccount}. One that has not proved itself as asked in
+ * time is ended (schtasks /End: it never served, so it has nothing to save), and refused as not done (2), its words said
+ * with the last lines of server.log, the console the watchdog keeps (`tail`).
+ */
+async function start(opts, { run = childProcess.execFileSync, fsImpl = fs, net: n = {} } = {}) {
+  const root = needPath(opts, '--machine');
+  const H = hands(opts['--sys'], run);
+  const port = needPort(opts);
+  const want = wantedBuild(opts);
+  const waitMs = n.waitMs || START_WAIT_MS;
+  const ran = H.schtasks(['/Run', '/TN', SERVER_TASK]);
+  if (ran.code !== 0) throw notDone('The server task ' + SERVER_TASK + ' could not be started (' + (ran.err || 'schtasks.exe ended with ' + ran.code) + ').', { answered: false });
+  const until = Date.now() + waitMs;
+  let seen = '';
+  let last;
+  for (;;) {
+    const token = tokenFrom(root, fsImpl);
+    const p = token ? await (n.proven || proven)({ port, token, build: want, then: [{ path: '/api/auth/me' }] }) : { ok: false, why: 'notoken' };
+    if (p.ok) {
+      const me = p.answers[0];
+      return { answered: true, build: p.build, needsAccount: me.status === 200 && !!me.json && me.json.setup === true, words: 'AGMessage build ' + p.build + ' answers on port ' + port + ' and proves it holds this PC\'s token.' };
+    }
+    if (p.why === 'build') seen = p.build;
+    last = p;
+    if (Date.now() >= until) break;
+    await sleep(POLL_MS);
+  }
+  H.schtasks(['/End', '/TN', SERVER_TASK]);
+  await portCloses(port, { ms: 10_000, answers: n.portAnswers || portAnswers });
+  const tail = tailOf(fsImpl, pathOf(root).join(root, 'logs', 'server.log'), 8).lines;
+  const why = seen ? 'it answered as build ' + seen + ', not ' + want
+    : last.why === 'notoken' ? 'its token (token\\admin-token) was never there to read, so nothing could prove it is this PC\'s AGMessage'
+      : last.why === 'unproven' ? failWords('unproven', port, ANSWER_MS)
+        : 'nothing answered on port ' + port;
+  throw notDone('AGMessage' + (want ? ' ' + want : '') + ' did not start: ' + why + ' within ' + Math.round(waitMs / 1000) + ' s, so it was stopped. ' + (tail.length ? 'The last lines of its log: ' + tail.join(' | ') : 'Its log holds nothing.'), { answered: false, build: seen, tail: tail.join('\n') });
+}
+
+/** What first-account reads from the installer's file: three lines, the user name, the name and the password (pure). */
+function accountFile(text) {
+  const lines = String(text).replace(/^\uFEFF/, '').split(/\r?\n/);
+  return { username: lines[0] || '', name: lines[1] || '', password: lines[2] || '' };
+}
+/**
+ * first-account: the first admin account, made through /api/setup at loopback with the token of this machine folder, by
+ * the server's own rules (only while it has no account, only at the laptop, its password checked there). The user name,
+ * the name and the password come from `--account`, a file in machine\work\ (SYSTEM and Administrators only) the installer
+ * wrote, which is read only when it is a real file there and is removed before anything is asked; the password goes in
+ * no argument, URL, --out or log. The token and the password go only to a server that proved it holds the token, as
+ * `--build` when that is given, on the connection it proved itself on (`proven`): a program that took the port is asked
+ * the hello alone and sent neither. The server's refusal is said in its words (3). {made, username}.
+ */
+async function firstAccount(opts, { fsImpl = fs, net: n = {} } = {}) {
+  const root = needPath(opts, '--machine');
+  const port = needPort(opts);
+  const want = wantedBuild(opts);
+  const file = String(opts['--account'] || '');
+  const P = pathOf(root);
+  const rel = fullPath(file) ? P.relative(P.join(root, 'machine', 'work'), file).split(/[\\/]/) : [];
+  if (rel.length !== 1 || !/^[A-Za-z0-9.-]{1,40}$/.test(rel[0])) throw usage('first-account needs --account <file>, a file of ' + P.join(root, 'machine', 'work') + '.');
+  let text;
+  try {
+    const st = fsImpl.lstatSync(file);
+    if (!st.isFile() || st.isSymbolicLink()) throw refusal('--account names something that is not a file the installer wrote: no account was made.');
+    text = fsImpl.readFileSync(file, 'utf8');
+  } catch (e) {
+    if (e.refused) throw e;
+    throw notDone('The account\'s file could not be read (' + (e.code || e.message) + '): no account was made.');
+  } finally {
+    try { fsImpl.unlinkSync(file); } catch { /* gone already, or machine\work\'s, which only SYSTEM and Administrators read */ }
+  }
+  const a = accountFile(text);
+  const token = tokenFrom(root, fsImpl);
+  if (!token) throw refusal('The installed node\'s token (token\\admin-token) could not be read, so the first admin account cannot be made from here: make it at Admin login with the token.');
+  const body = Buffer.from(JSON.stringify({ token, username: a.username, name: a.name, password: a.password }), 'utf8');
+  const p = await (n.proven || proven)({ port, token, build: want, then: [{ method: 'POST', path: '/api/setup', headers: { 'content-type': 'application/json' }, body }] });
+  if (!p.ok && p.why === 'unproven') throw refusal('The program on port ' + port + ' did not prove it holds this PC\'s AGMessage token, so neither the token nor the password was sent to it: no account was made. Make it at Admin login once AGMessage serves.', { made: false });
+  if (!p.ok && p.why === 'build') throw refusal(p.words + ', the build this installer laid down: no account was made.', { made: false });
+  if (!p.ok) throw notDone('AGMessage did not answer on port ' + port + ' (' + p.words + '): no account was made.', { made: false });
+  const r = p.answers[0];
+  const error = r.json && typeof r.json.error === 'string' ? said(r.json.error, 200) : '';
+  if (r.status === 200 && r.json && r.json.ok === true) {
+    const username = r.json.account && typeof r.json.account.username === 'string' ? said(r.json.account.username, 80) : said(a.username, 80);
+    return { made: true, username, words: 'The first admin account, ' + username + ', is made: sign in with it on AGMessage\'s page (Start → AGMessage → Open AGMessage).' };
+  }
+  if (r.status >= 400 && r.status < 500) throw refusal(error || 'AGMessage did not make the account (' + r.status + ').', { made: false });
+  throw notDone('AGMessage did not make the account (' + r.status + (error ? ': ' + error : '') + ').', { made: false });
 }
 
 // ---------------------------------------------------------------- restore (the way back)
@@ -1160,7 +1632,11 @@ function writeOut(file, rec) {
 }
 
 /** The fields of a verb's result `--out` carries, by name (never `calls`, never anything a stand-in added). */
-const OUT_FIELDS = Object.freeze(['root', 'setup', 'taskSid', 'admin', 'version', 'previous', 'removed', 'left', 'ready', 'running', 'busy', 'saved', 'backup', 'at', 'forced', 'facts', 'restored', 'unchanged']);
+const OUT_FIELDS = Object.freeze([
+  'root', 'setup', 'taskSid', 'admin', 'version', 'previous', 'removed', 'left', 'ready', 'running', 'busy', 'line', 'saved', 'backup', 'at', 'forced', 'facts', 'restored', 'unchanged',
+  'programs', 'agree', 'adminName', 'approverName', 'startedSid', 'screenSid', 'choiceCount', 'choice1Sid', 'choice1Name', 'choice2Sid', 'choice2Name',
+  'answered', 'build', 'needsAccount', 'tail', 'made', 'username', 'forceable',
+]);
 
 /** Run one verb: {code, text, out}. */
 async function run(argv, stand = {}) {
@@ -1177,12 +1653,16 @@ async function run(argv, stand = {}) {
     else if (a.verb === 'preinstall-check') r = await preinstallCheck(a.opts, stand);
     else if (a.verb === 'upgrade-stop') r = await upgradeStop(a.opts, stand);
     else if (a.verb === 'status') r = status(a.opts, stand);
+    else if (a.verb === 'whose') r = whose(a.opts, stand);
+    else if (a.verb === 'start') r = await start(a.opts, stand);
+    else if (a.verb === 'first-account') r = await firstAccount(a.opts, stand);
     else r = await restore(a.opts, stand);
     text = r.words || 'Done.';
   } catch (e) {
     code = e && e.usage ? USAGE : e && e.refused ? REFUSED : NOT_DONE;
     text = (e && e.words) || 'machine.js ' + a.verb + ' did not finish: ' + said(e && e.message, 200);
-    r = e && e.left ? { removed: e.removed, left: e.left } : null;
+    // What a refusal or a step not done carried beside its words (OUT_FIELDS picks them by name).
+    r = e && typeof e === 'object' ? e : null;
   }
   if (a.opts['--out'] && fullPath(a.opts['--out'])) {
     const rec = { v: 1, verb: a.verb, code, words: text };
@@ -1199,14 +1679,17 @@ async function main(argv, { out = (t) => process.stdout.write(t + '\n'), ...stan
 }
 
 if (require.main === module) {
-  main(process.argv.slice(2)).then((code) => {
+  const argv = process.argv.slice(2);
+  main(argv).then((code) => {
     process.exitCode = code;
-    if (process.stdin.isTTY) { process.stdout.write('\nPress Enter to close this window.\n'); process.stdin.once('data', () => process.stdin.pause()); }
+    // A person reading it in a console waits for Enter; the installer's runs (--out, in a hidden console) never wait.
+    if (process.stdin.isTTY && !argv.includes('--out')) { process.stdout.write('\nPress Enter to close this window.\n'); process.stdin.once('data', () => process.stdin.pause()); }
   });
 }
 
 module.exports = {
-  main, run, parse, prepare, install, uninstall, preinstallCheck, upgradeStop, status, restore,
+  main, run, parse, prepare, install, uninstall, preinstallCheck, upgradeStop, status, restore, whose, start, firstAccount,
+  personSid, accountOf, whoseOf, adminOf, serverProgram, programWords, outsideOwnChain, accountFile, startedFrom, proven, PS_WHOSE, PS_PROGRAMS, START_WAIT_MS, PROGRAMS_WAIT_MS,
   CHILDREN, MACHINE_SUBS, BASE_GRANTS, SETUP_GRANT, inboxGrant, outboxGrant, serverTaskXml, winArg, firewallRules, recordValues, ownerSidOf, grant, machineEvent,
   csvRows, taskStateOf, installOf, kindOf, NEVER_ROLLED_BACK, backupEstimate, readLastStop, fullPath,
   hello, ask, serverProof, askProof, sameProof, tokenOf, busyLineOf, busyIsBusy, BUSY_KEYS, hands, portAnswers, portCloses, healthOf, HELLO_SAYS, ASK_SAYS,

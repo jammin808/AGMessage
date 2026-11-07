@@ -16,8 +16,9 @@ names the folder it starts from.
 
 THIRD-PARTY-NOTICES.md and the licenses folder beside this file name the
 libraries AGMessage's pages use (pdf.js, mammoth, SheetJS and what they
-bundle), each with its licence. Keep them with the folder when you pass
-it on.
+bundle) and the two programs this folder ships (Node.js in node\ and
+cloudflared in bin\), each with its licence. Keep them with the folder
+when you pass it on.
 
 First time on a new laptop
 --------------------------
@@ -413,6 +414,65 @@ folder, and each version you extract is a new folder.
   there may not reach AGMessage", "a block rule on Private: phones there
   cannot reach AGMessage"). Allow it once on the show's Windows account,
   on the kind of network the venue has, before you go.
+
+The installer, for your own show laptop
+---------------------------------------
+Venue laptops, and any laptop that is not yours, use this portable
+folder. For your own show laptop there is an installer too,
+AGMessage-Setup-<version>-unsigned.exe, on the same release page. It
+installs AGMessage in C:\Program Files\AGMessage, keeps its data in
+C:\ProgramData\AGMessage, and starts it with Windows, with nobody
+signed in. It has no window: Start -> AGMessage has Open AGMessage
+(opens it in your browser, or says what it found), Show the admin token
+and AGMessage status.
+- Run it from the Windows account you run shows from, standard or
+  administrator: Windows asks an administrator's approval once. That
+  account is AGMessage's admin on this PC, and reads its admin token
+  (Start -> AGMessage -> Show the admin token). The installer says
+  which account it found, and asks you to choose when two could be
+  meant (an administrator typed their own password for it, say).
+- "Also on Public networks (hotels, airports, fresh venue Wi-Fi)" is
+  unticked: phones and tablets on this PC's local subnet reach it on
+  Private and Domain networks only, until you tick it or make the
+  venue's network Private.
+- If AGMessage is busy (people are using it now), the installer shows
+  how busy and asks why you stop it now; the reason is kept in its
+  audit log. Upgrade between shows.
+- Its last page makes the first admin account, or leave it empty and
+  make it at Admin login with the token.
+- An upgrade stops AGMessage (it saves and keeps a copy of its data
+  first), lays the new build down and checks that it answers. If it
+  does not, the installer lays the earlier build and its data back by
+  itself. Only a newer build installs: "AGMessage 0.6.0 (build 41) is
+  newer than this installer's 0.6.0 (build 37): uninstall it first to
+  go back."
+- Uninstall (Settings -> Apps) asks "Remove all AGMessage data from this
+  PC?": No, the default, keeps every hall, account, file and key, so
+  AGMessage installed again finds them (and asks again whose AGMessage
+  it is: the uninstall takes back every account's rights to the data).
+  A busy AGMessage is uninstalled only with a reason, from a command
+  prompt: "C:\Program Files\AGMessage\unins000.exe" /FORCE="why".
+- Close AGMessage's own consoles (Show the admin token, AGMessage
+  status) before an upgrade or an uninstall: either says so if one is
+  open.
+- If AGMessage does not answer after a first install, the installer
+  says why. Its server task starts it with Windows, so restart the PC
+  once the cause is cleared, or uninstall it and install it again.
+- Smart App Control. The installer is not signed. On a PC where Smart
+  App Control is on (Windows Security -> App & browser control -> Smart
+  App Control), Windows blocks it and it never runs: turn Smart App
+  Control off there first, or use this portable folder. While Smart App
+  Control is evaluating the PC, the installer runs and says so on its
+  first page; once it turns itself on, the installer, its uninstaller
+  and the next installer are blocked. The installed AGMessage itself
+  runs on node.exe, which carries its publisher's signature; whether
+  Smart App Control then keeps it starting has not been measured on the
+  show laptop yet.
+- Silently, by an administrator: AGMessage-Setup-...-unsigned.exe
+  /VERYSILENT /ADMIN=LAPTOP\ana (a first install must name whose it is:
+  one person's account, local or one that has signed in to this PC once;
+  a group is refused), /PUBLICFIREWALL=1, /FORCE="why" (a busy AGMessage
+  stopped anyway); the uninstaller takes /REMOVEDATA.
 
 The words AGMessage uses
 ------------------------

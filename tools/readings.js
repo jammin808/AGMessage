@@ -78,14 +78,13 @@ const READINGS = [
     what: '`Get-AuthenticodeSignature` on `node.exe`, `cloudflared.exe` and the installer',
     mark: 'the first two Valid; the installer recorded',
     miss: '`README.txt` names the file Windows does not trust',
-    later: ['U13 (#73): the installer'],
   },
   {
     id: 'R6',
     what: 'over-the-shoulder elevation: U.5.1\'s two readings of the account that started Setup; the user\'s own export (U14) run through `ExecAsOriginalUser` into the laptop\'s admin\'s inbox; an elevated read of another account\'s `%LOCALAPPDATA%\\AGMessage`',
     mark: 'both readings name the standard account',
     miss: 'the admin page asks the person to choose, as U.5.1 says',
-    needs: ['U13 (#73): the installer', 'U14 (#75): the export'],
+    needs: ['U14 (#75): the export'],
   },
   {
     id: 'R7',
@@ -453,7 +452,8 @@ function judgeR5(r) {
   const cf = statusOf('cloudflared.exe');
   const facts = { node, cloudflared: cf, installer: r.installer || null };
   if (!node || !cf) return verdict('not run', 'Windows was not asked about ' + [!node && 'node.exe', !cf && 'cloudflared.exe'].filter(Boolean).join(' and '), facts);
-  const installer = r.installer ? 'the installer ' + String(r.installer.status || '?') : 'the installer not built yet (U13, #73)';
+  // The installer is recorded, never judged: it is unsigned by the owner's answer 36, so NotSigned is what it should say.
+  const installer = r.installer && r.installer.status ? 'the installer ' + String(r.installer.status) + (r.installer.name ? ' (' + String(r.installer.name) + ')' : '') : 'the installer not read (' + String((r.installer && r.installer.why) || 'its job built none for this run') + ')';
   const untrusted = [['node.exe', node], ['cloudflared.exe', cf]].filter(([, s]) => s.status !== 'Valid');
   if (untrusted.length) return verdict('missed', untrusted.map(([n, s]) => n + ' ' + (s.status || 'unread')).join(', ') + '; ' + installer, facts);
   return verdict('met', 'node.exe Valid (' + node.signer + '), cloudflared.exe Valid (' + cf.signer + '); ' + installer, facts);

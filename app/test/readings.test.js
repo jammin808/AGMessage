@@ -85,7 +85,10 @@ test('the register: R1-R13 as the plan\'s U7 table names them (R3 retired, R3′
   // built: the lane takes them now (the upgrade backup's time, and the server task's stop-saves).
   for (const id of ['R1', 'R3′', 'R9']) assert.equal(R.READINGS.find((x) => x.id === id).needs, undefined, id + ' waits for no unit');
   // R4, R7 and R12 took under a stand-in while U12 was not built; it is now, and their stand-in's settings are U12's.
-  for (const id of ['R5', 'R8', 'R13']) assert.match(R.READINGS.find((x) => x.id === id).later.join(' '), /U\d+ \(#\d+\)/, id);
+  for (const id of ['R8', 'R13']) assert.match(R.READINGS.find((x) => x.id === id).later.join(' '), /U\d+ \(#\d+\)/, id);
+  // U13 (#73) built the installer: R5 reads its signature beside the two programs', and R6 waits for U14's export alone.
+  assert.equal(R.READINGS.find((x) => x.id === 'R5').later, undefined, 'R5 no longer waits for U13');
+  assert.deepEqual(R.READINGS.find((x) => x.id === 'R6').needs, ['U14 (#75): the export']);
   for (const id of ['R4', 'R7', 'R12']) assert.equal(R.READINGS.find((x) => x.id === id).later, undefined, id + ' no longer waits for U12');
 });
 
@@ -119,8 +122,9 @@ test('a reading that waits for a later unit is held to it: once that unit\'s cod
       }
     }
   }
-  // U12 (#72) landed, so R3′, R4, R7, R9 and R12 no longer wait: the readings still waiting name U13, U14, U17 and U18.
-  assert.ok(named >= 7, 'every unit a reading waits for is asked');
+  // U12 (#72) landed, so R3′, R4, R7, R9 and R12 no longer wait, and U13 (#73), so R5 reads the installer and R6 waits for
+  // U14 alone: the readings still waiting name U14, U17 and U18.
+  assert.ok(named >= 5, 'every unit a reading waits for is asked');
 });
 
 test('nothing measured is nothing met: every reading not run with why (or retired), every lab line not run, Defender not asked', () => {
@@ -233,10 +237,19 @@ test('R5: met when Windows says node.exe and cloudflared.exe are Valid; one it d
   const files = (cf) => ({ files: [{ path: 'C:\\agm-readings\\payload\\x\\node\\node.exe', status: 'Valid', signer: 'CN=OpenJS Foundation' }, { path: 'C:\\agm-readings\\payload\\x\\bin\\cloudflared.exe', status: cf, signer: cf === 'Valid' ? 'CN=Cloudflare, Inc.' : '' }], installer: null });
   let x = byId(R.judge(raw({ R5: files('Valid') })), 'R5');
   assert.deepEqual([x.state, x.facts.node.status, x.facts.cloudflared.signer], ['met', 'Valid', 'CN=Cloudflare, Inc.']);
-  assert.match(x.words, /the installer not built yet \(U13, #73\)/);
+  assert.match(x.words, /; the installer not read \(its job built none for this run\)$/);
   x = byId(R.judge(raw({ R5: files('NotSigned') })), 'R5');
   assert.deepEqual([x.state, x.words.split(';')[0]], ['missed', 'cloudflared.exe NotSigned']);
   assert.equal(byId(R.judge(raw({ R5: { files: [files('Valid').files[0]] } })), 'R5').state, 'not run');
+  // The installer is recorded, never judged: it is unsigned by the owner's answer 36.
+  x = byId(R.judge(raw({ R5: { ...files('Valid'), installer: { status: 'NotSigned', name: 'AGMessage-Setup-0.6.0-dev.90_abc1234-unsigned.exe', signer: '' } } })), 'R5');
+  assert.deepEqual([x.state, x.facts.installer.status], ['met', 'NotSigned']);
+  assert.match(x.words, /; the installer NotSigned \(AGMessage-Setup-0\.6\.0-dev\.90_abc1234-unsigned\.exe\)$/);
+  // What the lane records of it: Windows' verdict on the file it was given, or why there is none.
+  const exe = 'C:\\a\\installer-dist\\AGMessage-Setup-0.6.0-unsigned.exe';
+  assert.deepEqual(T.installerSignature([...files('Valid').files, { path: exe, status: 'NotSigned', signer: '' }], exe), { status: 'NotSigned', name: 'AGMessage-Setup-0.6.0-unsigned.exe', signer: '' });
+  assert.deepEqual(T.installerSignature(files('Valid').files, ''), { why: 'its job built none for this run' });
+  assert.deepEqual(T.installerSignature(files('Valid').files, exe), { why: 'Windows gave no verdict on AGMessage-Setup-0.6.0-unsigned.exe' });
 });
 
 test('R7 and R8: an access list read from its SDDL by SID: who may read and write the folder pipe, and whether a standard account may make a folder', () => {
@@ -860,6 +873,7 @@ test('the lane takes its readings on Windows only, and refuses a word it does no
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   assert.deepEqual(T.parseArgs(['take', '--zip', 'a', '--tag', '']), { verb: 'take', flags: { zip: 'a', tag: '' }, positional: [] });
   assert.deepEqual(T.parseArgs(['take', '--previous', 'p.zip']).flags, { previous: 'p.zip' });
+  assert.deepEqual(T.parseArgs(['take', '--installer', 'AGMessage-Setup-0.6.0-unsigned.exe']).flags, { installer: 'AGMessage-Setup-0.6.0-unsigned.exe' });
   assert.match(T.parseArgs(['take', '--zap', 'a']).error, /--zap is not a word it knows/);
   assert.match(T.parseArgs(['take', '--zip']).error, /has no value/);
   for (const a of [['take'], ['take', '--zip', 'a', '--defender', 'b', '--out', 'c', '--port', '80'], ['probe-server'], ['nothing']]) assert.equal(await T.main(a), 64, a.join(' '));
@@ -932,7 +946,8 @@ test('the lane in CI: windows-2025, every action pinned by its commit, no creden
   // Every push's readings, a tag's and a run's asked for by hand (a pull request's commits are pushes already), one lane
   // at a time per ref and never cancelled once it runs: a newer push's waits its turn, so no run is thrown away
   // half-taken and a regression shows on the next readings taken.
-  assert.match(lane, /\n {4}if: \$\{\{ github\.event_name != 'pull_request' \}\}\n {4}needs: package\n {4}concurrency:\n {6}group: readings-\$\{\{ github\.ref \}\}\n {6}cancel-in-progress: false\n/, 'the zip the package job built');
+  // It waits for the installer job too, for R5's verdict on the installer, but is never held by it: only the zip is needed.
+  assert.match(lane, /\n {4}if: \$\{\{ !cancelled\(\) && github\.event_name != 'pull_request' && needs\.package\.result == 'success' \}\}\n {4}needs: \[package, installer\]\n {4}concurrency:\n {6}group: readings-\$\{\{ github\.ref \}\}\n {6}cancel-in-progress: false\n/, 'the zip the package job built, and the installer when its job built one');
   // No group holds the whole run, so a newer push cancels only the older run's tests and zip, each job by its own group;
   // a run by hand's are a group of their own, which a push never touches.
   assert.doesNotMatch(ci, /\nconcurrency:/, 'no group for the whole run: it would cancel the readings with the rest');
@@ -941,7 +956,9 @@ test('the lane in CI: windows-2025, every action pinned by its commit, no creden
     assert.ok(job(ci, name).includes('\n    concurrency:\n      group: ci-$' + '{{ github.ref }}-' + name + extra + '-$' + "{{ github.event_name == 'workflow_dispatch' && 'by-hand' || 'auto' }}\n      cancel-in-progress: $" + "{{ github.event_name != 'workflow_dispatch' }}\n"), name + ': cancelled by a newer push or pull request of its ref, never by one asked for by hand');
   }
   const uses = [...lane.matchAll(/^\s*(?:- )?uses: (\S+)(.*)$/gm)];
-  assert.deepEqual(uses.map((u) => u[1].split('@')[0]), ['actions/checkout', 'actions/setup-node', 'actions/download-artifact', 'actions/upload-artifact']);
+  assert.deepEqual(uses.map((u) => u[1].split('@')[0]), ['actions/checkout', 'actions/setup-node', 'actions/download-artifact', 'actions/download-artifact', 'actions/upload-artifact']);
+  const installerStep = lane.slice(lane.indexOf('name: agmessage-installer-$' + '{{ github.sha }}') - 200, lane.indexOf('name: agmessage-installer-$' + '{{ github.sha }}'));
+  assert.match(installerStep, /\n {8}continue-on-error: true\n {8}with:\n {10}$/, 'an installer job that built nothing stops no reading');
   for (const [, ref, comment] of uses) assert.match(ref + comment, /^[\w.-]+\/[\w.-]+@[0-9a-f]{40} # v\d+\.\d+\.\d+$/, ref + ' is pinned by its commit, its tag beside it');
   const steps = lane.split(/\n {6}- /).slice(1);
   assert.match(steps[0], /^uses: actions\/checkout@/);
@@ -950,7 +967,8 @@ test('the lane in CI: windows-2025, every action pinned by its commit, no creden
   assert.match(steps[1], /shell: powershell\n\s+timeout-minutes: \d+\n\s+run: \.\/tools\/defender-on\.ps1 -Out "\$env:RUNNER_TEMP\\defender\.json"/);
   const order = ['tools/defender-on.ps1', 'actions/download-artifact', 'node tools/readings-take.js take --zip', 'node tools/readings.js judge readings/readings.raw.json --out readings/readings.json --summary $env:GITHUB_STEP_SUMMARY', 'actions/upload-artifact'].map((s) => lane.indexOf(s));
   assert.ok(order.every((i, k) => i > 0 && (k === 0 || i > order[k - 1])), 'Defender, the zip, the readings, the verdicts, kept: ' + order);
-  assert.match(lane, /--defender "\$env:RUNNER_TEMP\\defender\.json" --out readings\/readings\.raw\.json @release @over\n/, 'the tag through the environment, never pasted into the script');
+  assert.match(lane, /--defender "\$env:RUNNER_TEMP\\defender\.json" --out readings\/readings\.raw\.json @release @over @installer\n/, 'the tag through the environment, never pasted into the script');
+  assert.match(lane, /\$installer = if \(\$setup\.Count -eq 1\) \{ @\('--installer', \$setup\[0\]\.FullName\) \} else \{ @\(\) \}/, 'the installer, when its job built it, for R5');
   assert.match(lane, /\$release = if \(\$env:RELEASE_TAG\) \{ @\('--repo', \$env:GITHUB_REPOSITORY, '--tag', \$env:RELEASE_TAG\) \} else \{ @\(\) \}/, 'no release named: no --tag, never an empty argument');
   assert.match(lane, /\$over = if \(\$previous\.Count -eq 1\) \{ @\('--previous', \$previous\[0\]\.FullName\) \} else \{ @\(\) \}/, 'the newest release\'s zip, when it was had, for R2');
   assert.ok(!/run: [^\n]*\$\{\{ steps\./.test(lane) && !/\n\s+node [^\n]*\$\{\{/.test(lane), 'no step output pasted into a command');
@@ -985,7 +1003,7 @@ test('the lane in CI: windows-2025, every action pinned by its commit, no creden
 test('the release waits for the lane and never is held by it: its notes carry the readings, or say there are none', () => {
   const ci = read('.github/workflows/ci.yml');
   const release = job(ci, 'release');
-  assert.match(release, /\n {4}if: \$\{\{ !cancelled\(\) && startsWith\(github\.ref, 'refs\/tags\/v'\) && needs\.package\.result == 'success' \}\}\n {4}needs: \[package, readings\]\n/);
+  assert.match(release, /\n {4}if: \$\{\{ !cancelled\(\) && startsWith\(github\.ref, 'refs\/tags\/v'\) && needs\.package\.result == 'success' && needs\.installer\.result == 'success' \}\}\n {4}needs: \[package, installer, readings\]\n/);
   const sparse = release.slice(release.indexOf('sparse-checkout: |'), release.indexOf('sparse-checkout-cone-mode'));
   for (const f of ['tools/readings.js', 'docs/INSTALL.md']) assert.ok(sparse.split('\n').some((l) => l.trim() === f), f + ' is checked out: the notes\' tool and the lab lines\' record');
   const dl = release.indexOf('name: agmessage-readings-$' + '{{ github.sha }}');

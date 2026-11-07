@@ -9,14 +9,26 @@ at its top, and each release's SBOM (`agmessage-sbom.cdx.json`) lists these libr
 
 Each file is shipped as its package published it, byte for byte. None is changed by AGMessage.
 
-Not listed here: the npm packages the server runs, which ship with their own licence files in `app\node_modules` and
-are listed in the SBOM (among them `supports-color` 8.1.1 and the `has-flag` 4.0.0 it requires, both MIT, Copyright (c)
-Sindre Sorhus, each with its `license` file: AGMessage ships `supports-color` so that `debug`'s search for it ends in
-`app\node_modules`, never in a folder above it); and the Node.js runtime (`node\`, Node.js 24.22.1) and cloudflared
-(`bin\`, 2026.3.0), which `tools/fetch-runtime.ps1` downloads at pinned versions checked by their SHA-256. A checksum is
-not a licence: the portable folder does not carry their licence texts yet. They are Node.js's
-(https://github.com/nodejs/node/blob/v24.22.1/LICENSE, the MIT licence and the licences of what it bundles) and
-cloudflared's (https://github.com/cloudflare/cloudflared/blob/2026.3.0/LICENSE, Apache-2.0).
+Not listed in the tables below: the npm packages the server runs, which ship with their own licence files in
+`app\node_modules` and are listed in the SBOM. The two programs the portable folder and the installer ship beside the app
+are listed in their own section, The programs, below.
+
+## The programs
+
+The portable folder and the installer (`AGMessage-Setup-<version>-unsigned.exe`, which lays down the same folder in
+Program Files without the two .bat files) ship two programs of others, each downloaded by `tools/fetch-runtime.ps1` at a
+pinned version and checked by its SHA-256, each as its publisher signed it, with its licence text in `licenses\` beside
+this file. The installed node runs no other program of its own: its server task runs `node.exe`, and no service host is
+shipped.
+
+| Program | Version | Licence | Copyright | Licence text |
+|---|---|---|---|---|
+| Node.js, `node\node.exe` | 24.22.1 | MIT, with the licences of what it bundles | Copyright Node.js contributors. All rights reserved. | `licenses/nodejs/` (https://github.com/nodejs/node/blob/v24.22.1/LICENSE) |
+| cloudflared, `bin\cloudflared.exe` | 2026.3.0 | Apache-2.0 | Cloudflare, Inc. (its signer; the licence names no other holder) | `licenses/cloudflared/` (https://github.com/cloudflare/cloudflared/blob/2026.3.0/LICENSE) |
+
+And one npm package named here for why it ships: `supports-color` 8.1.1 and the `has-flag` 4.0.0 it requires, both MIT,
+Copyright (c) Sindre Sorhus, each with its `license` file in `app\node_modules`: AGMessage ships `supports-color` so
+that `debug`'s search for it ends in `app\node_modules`, never in a folder above it.
 
 ## pdf.js 4.10.38, its legacy build
 

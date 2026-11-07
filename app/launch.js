@@ -31,12 +31,23 @@
  *                              an elevation reads — those two, the port's holder pid and a code-integrity event — is
  *                              machine.js status's and the admin page's "This laptop".
  *
+ *   open --machine <folder> --sys <folder>
+ *                              Open AGMessage, the launcher: the port from the install record (reg.exe, 64-bit view; 3023
+ *                              when it names none), and /api/health asked there once. When the AGMessage installed on this
+ *                              PC answers (its health's install.runs is `task`), http://localhost:<port> is opened in the
+ *                              person's browser by explorer.exe, by its absolute path in the Windows folder --sys sits in,
+ *                              and the console closes. Otherwise it says what it found and stays open until Enter: a
+ *                              portable copy or another program on the port, something that does not answer, or nothing
+ *                              serving, with the server task's state and last result, the log's last line and what to do.
+ *
  * start, stop and rights (U17), upgrade and back (U18), and the account export and key removal (U14) are later units:
  * until each lands its verb is refused as unknown. A verb it does not know is refused, never defaulted. Exit codes: 0
  * done; 2 not done, with the words of why; 64 a verb or an argument it does not know, or one missing. In a console window
- * it waits for Enter before it ends, so the window that the Start menu opened stays until the person has read it.
+ * it waits for Enter before it ends, so the window that the Start menu opened stays until the person has read it; open
+ * waits only when it did not open the browser.
  */
 const fs = require('node:fs');
+const http = require('node:http');
 const path = require('node:path');
 const childProcess = require('node:child_process');
 
@@ -98,7 +109,7 @@ function showToken({ machine, sys = '', read = fs.readFileSync, admin = adminNam
 // unit sits in this build's tree (test/readings.test.js holds that).
 const LATER = Object.freeze({ start: 'U17', stop: 'U17', rights: 'U17', upgrade: 'U18', back: 'U18' });
 /** The commands this build knows, for the words of an unknown one. */
-const KNOWN = 'serve, token or status';
+const KNOWN = 'serve, token, status or open';
 
 /** Options read by `--name value`, each once; a value missing or a name twice is a problem. */
 function options(rest, allowed, verb) {
@@ -118,6 +129,7 @@ function parse(argv) {
   const [verb, ...rest] = argv;
   if (verb === 'serve') return parseServe(rest);
   if (verb === 'status') return parseStatus(rest);
+  if (verb === 'open') return parseOpen(rest);
   if (LATER[verb]) return { problem: 'launch.js ' + verb + ' is built by ' + LATER[verb] + '; this build knows ' + KNOWN + '.' };
   if (verb !== 'token') return { problem: 'launch.js knows ' + KNOWN + '.' + (verb ? ' "' + said(verb, 40) + '" is not one of them.' : '') };
   const got = { '--machine': null, '--sys': null };
@@ -156,6 +168,17 @@ function parseStatus(rest) {
   const sys = o.got['--sys'];
   if (sys !== undefined && !DRIVE_PATH.test(sys)) return { problem: 'launch.js status\'s --sys is the System32 folder named from its drive; "' + said(sys, 80) + '" is not one.' };
   return { verb: 'status', machine, sys: sys || '', logs: o.got['--logs'] || '', port: Number(o.got['--port']) || 0, out: o.got['--out'] || '' };
+}
+
+/** open's command line: the machine folder and the System32 folder, each required, each a full path (--sys from its drive). */
+function parseOpen(rest) {
+  const o = options(rest, ['--machine', '--sys'], 'open');
+  if (o.problem) return { problem: o.problem };
+  const machine = o.got['--machine'] || '';
+  if (!machine || !path.isAbsolute(machine)) return { problem: 'launch.js open needs --machine <folder>, the installed node\'s folder as a full path (%ProgramData%\\AGMessage).' };
+  const sys = o.got['--sys'] || '';
+  if (!DRIVE_PATH.test(sys)) return { problem: 'launch.js open needs --sys <folder>, the System32 folder named from its drive (C:\\Windows\\System32): the browser is opened from the Windows folder it sits in.' };
+  return { verb: 'open', machine, sys };
 }
 
 const SERVER_TASK = '\\AGMessage\\Server';
@@ -232,6 +255,87 @@ function statusOf({ machine, sys = '', logs = '', port = 0, read = fs.readFileSy
   return { code: DONE, text: lines.join('\n'), facts };
 }
 
+/** The port the installed node serves on when its record names none: AGMessage's own default. */
+const DEFAULT_PORT = 3023;
+/** How long Open AGMessage waits for the port's answer before it says what it found. */
+const OPEN_ASK_MS = 3000;
+
+/**
+ * How the browser is opened on `url` (pure): explorer.exe by its absolute path in the Windows folder the System32 folder
+ * `sys` sits in (`C:\Windows\System32` → `C:\Windows\explorer.exe`), never its bare name, with the address its one
+ * argument; null where that cannot be named (not Windows, or no System32 folder from its drive), and then nothing is
+ * opened. This is launch.js's own copy of the opener's call (lib/startup.js openerPlan), since it requires Node's
+ * built-ins only.
+ */
+function openPlan({ sys, url, platform = process.platform }) {
+  if (platform !== 'win32' || !DRIVE_PATH.test(String(sys || ''))) return null;
+  const windows = path.win32.dirname(sys);
+  return { file: path.win32.join(windows, 'explorer.exe'), args: [url], cwd: windows };
+}
+
+/**
+ * Who answers /api/health on 127.0.0.1:`port`, asked once with no token: {state: 'agm', version, build, runs} when it
+ * reads as AGMessage's, 'other' for another answer, 'silent' when nothing came in OPEN_ASK_MS, 'none' when nothing takes
+ * the connection. The answer only chooses the words and whether the browser opens; it is never trusted with anything.
+ */
+function healthAt(port, { timeoutMs = OPEN_ASK_MS } = {}) {
+  return new Promise((resolve) => {
+    let done = false;
+    let timer = null;
+    const finish = (v) => { if (!done) { done = true; clearTimeout(timer); resolve(v); } };
+    const req = http.get({ host: '127.0.0.1', port, path: '/api/health', agent: false }, (res) => {
+      const chunks = [];
+      let n = 0;
+      res.on('data', (c) => { n += c.length; if (n > 64 * 1024) { req.destroy(); finish({ state: 'other' }); return; } chunks.push(c); });
+      res.on('end', () => {
+        let j;
+        try { j = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { j = null; /* not JSON: another program's answer */ }
+        const version = j && typeof j.version === 'string' ? said(j.version, 40) : '';
+        const build = j && typeof j.build === 'string' ? said(j.build, 80) : '';
+        if (res.statusCode !== 200 || !version || !build) { finish({ state: 'other' }); return; }
+        finish({ state: 'agm', version, build, runs: j.install && typeof j.install === 'object' && typeof j.install.runs === 'string' ? said(j.install.runs, 20) : '' });
+      });
+      res.on('error', () => finish({ state: 'other' }));
+    });
+    timer = setTimeout(() => { finish({ state: 'silent' }); req.destroy(); }, timeoutMs);
+    req.on('error', (e) => finish({ state: e && e.code === 'ECONNREFUSED' ? 'none' : 'silent' }));
+  });
+}
+
+/**
+ * Open AGMessage: {code, text, opened}. The port from the install record (3023 when it names none), its health asked
+ * once (`ask`, healthAt unless a test stands in for it); the installed node answering is opened in the person's browser
+ * (openPlan's explorer.exe, `spawn` childProcess.spawn unless a test stands in for it, detached so the console may close);
+ * anything else is said, with what to do, and nothing is opened. Never the token.
+ */
+async function openAgm({ machine, sys, run = childProcess.execFileSync, read = fs.readFileSync, ask = healthAt, spawn = childProcess.spawn, platform = process.platform } = {}) {
+  const { facts } = statusOf({ machine, sys, run, read });
+  const port = facts.port || DEFAULT_PORT;
+  const url = 'http://localhost:' + port;
+  const h = await ask(port);
+  if (h.state === 'agm' && h.runs === 'task') {
+    const plan = openPlan({ sys, url, platform });
+    if (!plan) return { code: NOT_DONE, opened: false, text: 'AGMessage ' + h.version + ' answers at ' + url + ', but no browser could be started from here: open that address in a browser on this PC.' };
+    try {
+      const child = spawn(plan.file, plan.args, { cwd: plan.cwd, detached: true, stdio: 'ignore', windowsHide: true });
+      if (child && typeof child.on === 'function') child.on('error', () => { /* said below as opened; the address is in the words */ });
+      if (child && typeof child.unref === 'function') child.unref();
+    } catch (e) {
+      return { code: NOT_DONE, opened: false, text: 'AGMessage ' + h.version + ' answers at ' + url + ', but the browser could not be started (' + said((e && (e.code || e.message)) || 'no reason given', 60) + '): open that address in a browser on this PC.' };
+    }
+    return { code: DONE, opened: true, text: 'Opening AGMessage ' + h.version + ' (build ' + h.build + ') at ' + url + ' in your browser.' };
+  }
+  const startIt = 'AGMessage starts with Windows. To start it now, restart this PC, or ask an administrator to run the task ' + SERVER_TASK + ' in Task Scheduler.';
+  if (h.state === 'agm') return { code: NOT_DONE, opened: false, text: 'A portable copy of AGMessage (' + h.version + ', build ' + h.build + ') holds port ' + port + ', not the AGMessage installed on this PC: use that copy\'s own window, or press Ctrl+C there to close it; the installed AGMessage takes the port back on its next try.' };
+  if (h.state === 'other') return { code: NOT_DONE, opened: false, text: 'Another program holds port ' + port + ', so the AGMessage installed on this PC cannot serve on it: close that program, and AGMessage takes the port back on its next try (AGMessage status, run as an administrator, names its process).' };
+  if (h.state === 'silent') return { code: NOT_DONE, opened: false, text: 'Something on port ' + port + ' did not answer within ' + OPEN_ASK_MS / 1000 + ' s: AGMessage may be starting, or saving. Try Open AGMessage again in a moment.' };
+  const lines = ['AGMessage is not serving on this PC.', '  the server task: ' + facts.task.state + (facts.task.lastResult === null ? '' : ' (last result ' + facts.task.lastResult + ')')];
+  if (facts.serverLog.read === 'read' && facts.serverLog.lines.length) lines.push('  the log\'s last line: ' + facts.serverLog.lines[facts.serverLog.lines.length - 1].slice(0, 160));
+  else if (facts.serverLog.read === 'refused') lines.push('  the log: refused to this account (AGMessage status, run as an administrator, reads it)');
+  lines.push('', startIt);
+  return { code: NOT_DONE, opened: false, text: lines.join('\n') };
+}
+
 /**
  * The names of the task's own environment the watchdog is handed: Windows' folders and the machine's names, which Node
  * and the programs the server runs by their absolute paths read (TMPDIR and HOME for the same off Windows). Nothing else:
@@ -276,11 +380,15 @@ function serve(a, { spawn = childProcess.spawn, supervise = path.join(__dirname,
   });
 }
 
-/** Runs one of the sync commands (token, status) and says its words: the exit code. serve runs through `serve`. */
+/**
+ * Runs one of the person's commands (token, status, open) and says its words: the exit code, or for open a promise of it
+ * (it asks the port). serve runs through `serve`.
+ */
 function main(argv, { out = (t) => process.stdout.write(t + '\n'), ...stand } = {}) {
   const a = parse(argv);
   if (a.problem) { out(a.problem); return USAGE; }
   if (a.verb === 'serve') { out('launch.js serve is the server task\'s action (Task Scheduler runs it); it is not run from this console.'); return USAGE; }
+  if (a.verb === 'open') return openAgm({ machine: a.machine, sys: a.sys, ...stand }).then((r) => { out(r.text); return r.code; });
   if (a.verb === 'status') {
     const r = statusOf({ machine: a.machine, sys: a.sys, logs: a.logs, port: a.port, ...stand });
     if (a.out) { try { fs.writeFileSync(a.out, JSON.stringify({ v: 1, ...r.facts })); } catch (e) { out('the status could not be written to ' + a.out + ' (' + (e.code || e.message) + ').'); return NOT_DONE; } }
@@ -298,12 +406,17 @@ if (require.main === module) {
     const a = parse(argv);
     if (a.problem) { process.stdout.write(a.problem + '\n'); process.exitCode = USAGE; } else serve(a).then((code) => { process.exitCode = code; });
   } else {
-    process.exitCode = main(argv);
-    if (process.stdin.isTTY) {
-      process.stdout.write('\nPress Enter to close this window.\n');
-      process.stdin.once('data', () => process.stdin.pause());
-    }
+    const hold = (code) => {
+      process.exitCode = code;
+      // The console the Start menu opened stays until the person has read it; a browser opened needs no reading.
+      if (process.stdin.isTTY && !(argv[0] === 'open' && code === DONE)) {
+        process.stdout.write('\nPress Enter to close this window.\n');
+        process.stdin.once('data', () => process.stdin.pause());
+      }
+    };
+    const code = main(argv);
+    if (typeof code === 'number') hold(code); else code.then(hold);
   }
 }
 
-module.exports = { main, parse, serve, taskEnv, TASK_PASSED, statusOf, showToken, adminName, csvRows, DONE, NOT_DONE, USAGE };
+module.exports = { main, parse, serve, taskEnv, TASK_PASSED, statusOf, showToken, adminName, csvRows, openPlan, healthAt, openAgm, DEFAULT_PORT, DONE, NOT_DONE, USAGE };

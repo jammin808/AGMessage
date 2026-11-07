@@ -361,6 +361,33 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   each folder as an argument and hands the watchdog Windows' own names alone, so no `NODE_OPTIONS`, `AGM_…` or secret from
   whatever started the task reaches the node; it ends with 0 on a stop, a give-up or a configuration refusal, so the task
   stays stopped. What only a Windows run proves is the Windows jobs'; the rest is held on Linux (`test/machine.test.js`).
+- The installer (`installer/AGMessage.iss`, `AGMessage-Setup-<version>-unsigned.exe`) and its uninstaller are AGMessage's
+  only unsigned executables (the owner's answer 36): SmartScreen warns on each new version, and under Smart App Control's
+  enforcement Windows blocks them, which `README.txt` and the release notes say, since a blocked installer shows no page.
+  Its SHA-256 is in the release's SHA256SUMS, and `SHA256SUMS.payload` holds the SHA-256 of every file it lays down. It
+  installs per machine only, administrators only with no per-user override, into Program Files\AGMessage alone (another
+  folder, `/DIR=` included, refused), and never closes a running AGMessage itself (`CloseApplications=no`): every
+  machine-level act is `machine.js`'s, run with the build's own `node.exe`, and the server is stopped only at loopback
+  with the proof of the token, where it saves. Only a newer build installs; `/ROLLBACK` lays back only the build the
+  record names as the one before (or the one it still names, when the files laid down are a newer build's that never
+  recorded itself), and only while nothing answers on the port, since the way back stops nothing. Whose AGMessage it is
+  is read from the account that started Setup and the account at the screen, never from Inno's `{username}` (the
+  elevating administrator's); a disagreement is the person's to choose between those two, never a third, and a quiet
+  first install names it with `/ADMIN=`, taken only for an account Windows confirms is one person's on this PC (a local
+  account, or one with a profile here): a group, a service, a domain's or Entra ID's group and a SID Windows names no
+  account for are refused, so no group is ever given the token's read. The verify that a new build answers is the
+  server's proof that it holds the token (the machine's hello), never `/api/health`'s public build words, so a program
+  that took the port during an upgrade cannot pass for the new build and keep the way back from running. The first admin
+  account's password goes from the installer's page to `machine.js` in a file of `machine\work\` (SYSTEM and
+  Administrators only), removed before `/api/setup` is asked, and is never in a command line, a URL, a `--out` or the
+  installer's log; it and the token go only to the server that proved it holds the token, on the connection it proved
+  itself on, and a program that proves nothing is asked the hello alone. Its Start menu items are `node.exe` on
+  `launch.js`, consoles run as the person, never elevated by themselves; Open AGMessage opens the browser by
+  `explorer.exe`'s absolute path, and only on the installed node's own answer at loopback. The uninstall keeps the data
+  unless the person says Yes to "Remove all AGMessage data from this PC?" (`/REMOVEDATA`), and then removes the keys
+  last; data kept is left with SYSTEM and Administrators alone (every right the laptop's admin and each grantee were given
+  on it taken back, their inbox and outbox folders removed), marked in HKLM (`Kept`) for an install to take again, which
+  finds whose it is anew.
 - A seat On stage holds messages and nothing else, on the server, for the admin seated there too: it is given no upload
   token, and an upload token is checked again when it is used, against the seat its page holds then; the admin's move of
   a page to a seat that shares no file ends its token in the same tick, so that page uploads nothing more with the one it

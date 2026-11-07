@@ -521,6 +521,18 @@ password**, shown once, which they replace at their first sign-in (two saves at 
 laptop's admin token still opens the admin page there; that sign-in lasts a day and survives a watchdog restart, which
 keeps the token, but not a fresh start of AGMessage, which makes a new one.
 
+On a PC where AGMessage is installed, the installer's last page makes the first admin account the same way, once the new
+node answers and while it has no account: the installer reads the token from the node's token folder (an elevated
+installer may) and `machine.js first-account` sends it typed with the name, the username and the password to
+`/api/setup` at the laptop's loopback, only once the server there has proved it holds that token (the machine's hello)
+and only on the connection it proved itself on, so a program that took the port is sent neither; the server's own
+rules (no account yet, the laptop, the token, the password's checks) decide and its `setup` row is "with the token
+typed". The password reaches `machine.js` in a file only SYSTEM
+and Administrators may read, which it removes before it asks, and is never in a command line, a URL or the installer's
+log. Left empty, the first admin is made at Admin login as above, with the token from Start → AGMessage → Show the
+admin token. The Windows account that ran the installer is **the laptop's admin** (a Windows account, `docs/INSTALL.md`),
+not an admin account: it reads the token, and an admin account is AGMessage's own.
+
 **Where the token is said.** The watchdog makes the token and says it only where a person sits: the banner's Token line,
 under Admin login, holds it in a console window (the portable folder's black window), and never in output that is kept
 (redirected to a file or a log), where the line says how to see it instead. A server run without its watchdog prints its

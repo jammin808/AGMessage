@@ -6362,6 +6362,104 @@ answers 35, 37 and 38; the code, its tests and a Linux stand-in for Windows — 
   `README.txt` already says. `docs/NODES.md` is unchanged: no machine command reaches the Show Bus, the context or the
   hello (the `install` context block is U3's).
 
+**The installer** (the plan's Part 6, unit U13, with the owner's answers 36, 37, 38, 39 and 43; the code, its tests and a
+Linux stand-in for Windows — CI builds it on the next push; its life cycle, run for real, is a later unit's)
+- **`installer/AGMessage.iss`**, Inno Setup 7.1 (PlayMap's tool and skeleton), `AGMessage-Setup-<version>-unsigned.exe`:
+  per machine, Program Files\AGMessage only and no folder page (another folder, `/DIR=` included, refused before
+  anything changes), one fixed `AppId`, `PrivilegesRequired=admin` with no per-user override, `CloseApplications=no` (Inno
+  never closes a running AGMessage: it is stopped only at loopback, where it saves), no `[Dirs]` and no `[Registry]` (the
+  machine folder and the one install record are `machine.js`'s). Every machine-level act is a `machine.js` command, run
+  with this build's `node.exe` and `machine.js` extracted before anything is laid down: the refusals (only a newer build
+  by its install version — "AGMessage 0.6.0 (build 41) is newer than this installer's 0.6.0 (build 37): uninstall it
+  first to go back." — the same build, and a quiet first install without `/ADMIN=`), `preinstall-check` and `prepare` in
+  `InitializeSetup`; `preinstall-check` again and `upgrade-stop` in `PrepareToInstall`; `install`, then the start and its
+  verify, after the files; the way back; and `uninstall` before any file goes. A refusal once `prepare` has made the
+  machine folder says nothing was installed, never that nothing changed; one a typed reason lifts (busy at the stop
+  itself, no save record, no backup, the disk short) says how to go on anyway (`/FORCE="<why>"` from a command prompt),
+  and going on without a way back is said to the person, not only logged. A first install whose server did not answer
+  says what works: its task starts it again with Windows, or an uninstall and a new install, since this installer would
+  refuse the build it recorded.
+- **Its pages:** Smart App Control's, only while it evaluates the PC; the laptop's admin (the account that started this
+  installer, as the plan's two readings find it, the person choosing between them when they disagree, never a third);
+  "Also on Public networks (hotels, airports, fresh venue Wi-Fi)", unticked, or as the record keeps it on an upgrade; the
+  busy page, shown only when AGMessage is busy, its counts in the server's words and a reason that must be typed, which
+  the server keeps as `server.stop.forced`; and, after the files, the first admin account, made through `/api/setup` with
+  the token the installer may read. The password goes to `machine.js` in a file of `machine\work\` (SYSTEM and
+  Administrators only), removed before it asks, never in a command line, a URL or the installer's log, and from there,
+  with the token, only to this build's server once it has proved it holds the token, on the connection it proved itself
+  on: a program that took the port is asked the hello alone and sent neither. Left empty, the account is made at Admin
+  login as before.
+- **The way back:** a new build that is not set up or does not prove itself within 35 s is ended, the backup its stop
+  made is laid back, and the kept installer of the earlier build runs with `/ROLLBACK`, which lays its files down, starts
+  it and verifies that it answers. `/ROLLBACK` is accepted only for the build the record names as `Previous`, or for the
+  build it still names when the files in Program Files are another build's that never recorded itself, and only while
+  nothing answers on the port (`preinstall-check --rollback`), since the way back stops nothing; its record then names no
+  `Previous`. The kept installer's own process (and its instance that asked for the elevation) is not taken for an open
+  console of the folder. Two installers are kept in `{app}\installers\`, so no download is needed. An install that
+  stopped the earlier server and did not reach its end starts it again.
+- **The uninstall** refuses while a console of the Start menu is open, stops the server at loopback, removes the tasks,
+  waits for every program of the folder to end (one that does not is named, and nothing is removed), then the rules and
+  the record. It asks "Remove all AGMessage data from this PC?", No the default (`/REMOVEDATA` quietly; the keys removed
+  last). Data kept has every right a Windows account was given on it taken back (the laptop's admin's and each grantee's,
+  their inbox and outbox folders) and the record replaced by a mark (`Kept`, the folder, and its `Port`), so AGMessage
+  installed again takes the folder, finds whose it is anew and serves on the same port. A busy AGMessage is uninstalled
+  only with `/FORCE="<why>"`, the uninstaller's own path said whole in its refusal (it has no page to type a reason on).
+- **The silent switches:** `/VERYSILENT`, `/ADMIN=<account>` (taken only for an account Windows confirms is one person's
+  on this PC: a local account, or one that has signed in here; a group, a service, a group of a domain or of Entra ID and
+  an account Windows names nothing for are refused), `/PUBLICFIREWALL=1` (or `=0`), `/FORCE="<reason>"`, `/REMOVEDATA` and
+  `/ROLLBACK`. `/UPGRADEBY` is a later unit's (U18).
+- **The Start menu:** Open AGMessage, Show the admin token and AGMessage status, each `node.exe app\launch.js <verb>`, a
+  console run as the person and never elevated by itself. **`launch.js open`**, the launcher, asks `/api/health` on the
+  record's port once: the installed node answering opens `http://localhost:<port>` by `explorer.exe`'s absolute path and
+  the console closes; a portable copy, another program, a silent port or nothing serving is said with the server task's
+  state, the log's last line and what to do. Start, Stop, Upgrade, Go back to build N and Who may run AGMessage… are
+  later units' (U17, U18).
+- **`machine.js` gains what the installer asks of it:** `whose` (the account that started Setup, from the `whoami` answer
+  it wrote into the one-time setup folder, read and removed; the owner of `explorer.exe` in the installer's session and
+  the names Windows gives each SID, from one `powershell.exe`; the account the elevation runs as, by `whoami.exe` by its
+  absolute path; `/ADMIN` resolved and confirmed: Windows names it, it is no local group, and it is a local user or has
+  a profile on this PC), `start` (the server task run and the server waited for until it proves, by the machine's hello,
+  that it holds the machine folder's token as the build, so a program answering `/api/health` with the build's public
+  words is no answer; whether the node has an account asked of it on that same connection; one that does not prove
+  itself ended with its log's last lines said), `first-account` (`--build`), `--app` on `preinstall-check` (a console of
+  the Start menu still open refused before anything is stopped; the server's own programs told from it by their command
+  lines, which are never said or kept, and the installer's own chain by its parents), on `upgrade-stop` (anything still
+  running from the folder once the server has ended refused) and on `uninstall`, `--rollback` on `preinstall-check` and
+  `install`, refusals a reason lifts marked `forceable`, and the busy line's counts in `preinstall-check`'s `--out`. A
+  `machine.js` run with `--out` never waits for Enter: the installer's hidden runs would wait for ever. `uninstall`
+  keeps the data as above, and `prepare` takes a folder an uninstall kept as it takes an earlier install's.
+- **Built in CI:** a new `installer` job on `windows-2025` builds it from the zip the package job built
+  (`installer/build-installer.ps1`: the zip's stage without its two .bat files, the defines `tools/installer-defines.js`
+  reads from the stage's `build.json`, the version the file carries checked, `SHA256SUMS.payload` written beside it).
+  The zip carries `app\machine.js` now (`tools/build-portable.ps1`), which the installer runs from the stage and its
+  uninstaller from the folder it laid down; a test holds the stage to every file the installer needs. The job takes
+  Inno Setup 7.1.0 pinned by hash and checked on each run against its release's digest and its publisher's signature,
+  every action pinned by its commit. It is built there and never run. A tag's release carries the installer and
+  `SHA256SUMS.payload`, SHA256SUMS made again over every file, and its notes say the Smart App Control words. The
+  readings lane waits for the installer job and is never held by it: R5 reads Windows' verdict on the installer beside
+  the two programs' (recorded: it is unsigned), and R6 waits for U14 alone.
+- **`THIRD-PARTY-NOTICES.md`** names the two programs the folder and the installer ship, Node.js (`node\node.exe`
+  24.22.1, MIT and what it bundles) and cloudflared (`bin\cloudflared.exe` 2026.3.0, Apache-2.0), whose licence texts now
+  ship in `licenses\nodejs\` and `licenses\cloudflared\`, and `supports-color`, which ships so that `debug`'s search ends
+  in `app\node_modules`. There is no service host to name: the installed node runs `node.exe`.
+- Held on Linux (`test/installer.test.js`): the script by its text (its `[Setup]`, its files, its Start menu items read by
+  `launch.js`'s own parser, every `machine.js` command and option it names, the order they run in, where the password
+  goes, its switches and refusals, ASCII only), the defines, the CI job, and every `machine.js` command it runs against
+  stand-ins for Windows' programs or a real server (`whose` and `/ADMIN`'s confirmation, `start` proving the server and
+  refusing a stand-in that answers the build's health but proves nothing, `first-account` making a first admin that then
+  signs in, and sending no byte of the token or the password to a program that proves nothing or to a connection other
+  than the one proved, the busy line, the console check and the installer's own chain, the way back's port check),
+  `uninstall` keeping the data and a later `prepare` and `install` taking it, and `launch.js open`; on Windows the same
+  file runs `whose`'s and the programs' scripts for real (an account confirmed, Users a group, this test an ancestor of
+  the script that listed it). What only a Windows run proves: that ISCC compiles the script (the installer job, on the next push);
+  the install, the upgrade, the way back and the uninstall themselves; the readings of whose it is under
+  over-the-shoulder elevation (R6, which waits for U14 too); the Start menu's consoles and the browser opening; and the
+  first admin account made from the page. None of them has run yet.
+- The papers: `README.md`, `README.txt` (the installer, for your own show laptop, with the Smart App Control words),
+  `docs/INSTALL.md` (The installer), `docs/ACCOUNTS.md` (the first admin account from the installer), `docs/ANALYSIS.md`,
+  `SECURITY.md`, `THIRD-PARTY-NOTICES.md` and `CLAUDE.md`. `docs/NODES.md` is unchanged: nothing of the installer
+  reaches the Show Bus, the context or the hello.
+
 **Fixed**
 - An upload whose stored path is no file (a folder in its place) is refused as one that could not be checked, on every
   platform. The archive's check opened it and, on Windows, read a folder as an empty file, so it was refused in the

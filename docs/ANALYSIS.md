@@ -873,9 +873,11 @@ folder named from its drive or a network share, else none) and its `spawn` hande
 with code 3 unless it is a full path by `isFullPath`, so on Windows never `\server.js` from the current drive's root or
 `C:server.js` on a drive's current folder, before anything runs or is written); `launch.js`'s
 `path.win32.join(sys, 'reg.exe')` (Show the admin token), `exe(name)` (`status`'s `schtasks.exe` and `reg.exe` in the
-System32 folder `--sys` names) and `execPath` (`serve`'s watchdog, `supervise.js` beside it); `machine.js`'s `exe(name)`
-(its `schtasks.exe`, `icacls.exe`, `reg.exe` and `WindowsPowerShell\v1.0\powershell.exe` in that System32 folder, each by
-its absolute path, the runner `run` handed to `hands` whose calls the fence reads there); `lib/laptop.js` and `lib/power.js`'s
+System32 folder `--sys` names), `execPath` (`serve`'s watchdog, `supervise.js` beside it) and `plan.file` (`open`'s
+`openPlan`: `explorer.exe` in the Windows folder `--sys` sits in, named from its drive, or nothing is opened), with the
+runner `run` that `open` hands to `status`; `machine.js`'s `exe(name)` (its `schtasks.exe`, `icacls.exe`, `reg.exe`,
+`whoami.exe` and `WindowsPowerShell\v1.0\powershell.exe` in that System32 folder, each by its absolute path, the runner
+`run` handed to `hands` whose calls the fence reads there); `lib/laptop.js` and `lib/power.js`'s
 `powershellPlan` file; `lib/startup.js`'s `openerPlan` file; and the tests' own (the smoke's browser, the two preloads
 handing on the server's calls and the tunnel's stand-in for a cloudflared that is not there, the readings' `icacls.exe`
 and `cmd.exe` for the .bat files). A

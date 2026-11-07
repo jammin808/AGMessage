@@ -117,7 +117,32 @@ test('vendor: each licence folder holds the licence its entry names and the copy
     assert.ok(text.includes(flat(c.copyright)) || own.includes(flat(c.copyright)), who + ': "' + c.copyright + '" is kept');
   }
   const folders = fs.readdirSync(path.join(ROOT, 'licenses')).map((f) => 'licenses/' + f);
-  assert.deepEqual(folders.filter((f) => !claimed.has(f)), [], 'every licence folder is some vendored library\'s');
+  assert.deepEqual(folders.filter((f) => !claimed.has(f) && !PROGRAMS.some((p) => p.notice === f)), [], 'every licence folder is some vendored library\'s, or a program\'s the folder ships');
+});
+
+// The two programs the portable folder and the installer ship beside the app (tools/fetch-runtime.ps1's pins), each with
+// its licence text in licenses/ and its row in THIRD-PARTY-NOTICES.md's The programs.
+const PROGRAMS = [
+  { program: 'node\\node.exe', name: 'Node.js', version: '24.22.1', licence: 'MIT', notice: 'licenses/nodejs', copyright: 'Copyright Node.js contributors. All rights reserved.' },
+  { program: 'bin\\cloudflared.exe', name: 'cloudflared', version: '2026.3.0', licence: 'Apache-2.0', notice: 'licenses/cloudflared' },
+];
+
+test('vendor: the programs the folder and the installer ship carry their licence texts, and the notices name each at its pinned version', () => {
+  const pins = read('tools/fetch-runtime.ps1');
+  const notices = read('THIRD-PARTY-NOTICES.md');
+  const section = notices.slice(notices.indexOf('\n## The programs\n'), notices.indexOf('\n## ', notices.indexOf('\n## The programs\n') + 5));
+  assert.ok(section.length > 100, 'THIRD-PARTY-NOTICES.md has its section The programs');
+  for (const p of PROGRAMS) {
+    const text = noticeText(p.notice);
+    for (const re of LICENCES[p.licence].has) assert.match(text, re, p.notice + ' holds the text of ' + p.licence);
+    if (p.copyright) assert.ok(text.includes(p.copyright), p.notice + ' keeps "' + p.copyright + '"');
+    assert.ok(pins.includes(p.program) && pins.includes(p.version), 'tools/fetch-runtime.ps1 pins ' + p.program + ' at ' + p.version);
+    const row = section.split('\n').find((l) => l.startsWith('| ' + p.name + ', `' + p.program + '`'));
+    assert.ok(row, 'The programs names ' + p.program);
+    const cells = row.split('|').slice(1, -1).map((x) => x.trim());
+    assert.deepEqual([cells[1], cells[2].split(',')[0], cells[4].split(' ')[0]], [p.version, p.licence, '`' + p.notice + '/`'], p.program + '\'s row');
+  }
+  assert.match(section.replace(/\s+/g, ' '), /`supports-color` 8\.1\.1/, 'supports-color, which ships so that debug\'s search ends in app\\node_modules, is named');
 });
 
 test('vendor: THIRD-PARTY-NOTICES.md lists each file with its packages, versions, licences, copyrights and licence folders, as VENDOR.json does', () => {

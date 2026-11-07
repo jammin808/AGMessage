@@ -7,7 +7,7 @@
  *
  *   node tools/readings-take.js take --zip <bundle.zip> --defender <defender.json> --out <raw.json>
  *                                    [--previous <the newest release's zip>] [--work C:\agm-readings] [--port 3124]
- *                                    [--repo <owner/name> --tag <vX.Y.Z>]
+ *                                    [--repo <owner/name> --tag <vX.Y.Z>] [--installer <AGMessage-Setup-…-unsigned.exe>]
  *       R2   the bundle's payload laid over the one before it (the newest release's, when its zip is given; this build's
  *            own when not, said so), round by round: each file inflated to a name of its own beside it, then renamed
  *            over the earlier one
@@ -15,7 +15,8 @@
  *       R1   the gap an upgrade makes, at an empty hall and at 20 halls × 10,000 messages: the bundle's watchdog
  *            serving, a page seated, the stop at loopback with the proof of a token made for the reading, the next start
  *            at once, and the page back at the hall page's own pace, round by round
- *       R5   Windows' verdict on node.exe's and cloudflared.exe's signatures (Get-AuthenticodeSignature)
+ *       R5   Windows' verdict on node.exe's and cloudflared.exe's signatures (Get-AuthenticodeSignature), and on the
+ *            installer's when --installer names the one the installer job built (unsigned: recorded)
  *       R8   the access lists of C:\ and %ProgramData% (icacls /save: SIDs, never localised names), and U12's server
  *            task's definition as app/machine.js writes it, registered under the lane's folder and never run: its
  *            descriptor (who may read it) and its XML (no secret), read back through Task Scheduler's own object
@@ -1024,8 +1025,10 @@ async function take(o) {
 
   await reading('R5', () => {
     needsPayload();
-    const files = L.ps(SCRIPTS.signatures, { AGM_READ_PATHS: [node, path.join(root, 'bin', 'cloudflared.exe')].join('|') });
-    return { files: Array.isArray(files) ? files : [files], installer: null };
+    const paths = [node, path.join(root, 'bin', 'cloudflared.exe'), ...(o.installer ? [o.installer] : [])];
+    const answer = L.ps(SCRIPTS.signatures, { AGM_READ_PATHS: paths.join('|') });
+    const files = Array.isArray(answer) ? answer : [answer];
+    return { files: files.filter((f) => !(o.installer && f && f.path === o.installer)), installer: installerSignature(files, o.installer) };
   });
 
   await reading('R1', () => {
@@ -1136,10 +1139,21 @@ async function take(o) {
   return 0;
 }
 
+/**
+ * R5's record of the installer (pure): Windows' verdict on its signature, read beside the programs', with its file's name;
+ * {why} when no installer was given (its job built none for this run) or Windows gave no verdict on it.
+ */
+function installerSignature(files, installer) {
+  if (!installer) return { why: 'its job built none for this run' };
+  const f = (files || []).find((x) => x && x.path === installer);
+  if (!f || !f.status) return { why: 'Windows gave no verdict on ' + path.win32.basename(installer) };
+  return { status: String(f.status), name: path.win32.basename(installer), signer: String(f.signer || '') };
+}
+
 /** The command line read as {verb, flags, rest}; a flag this does not know refused. */
 function parseArgs(argv) {
   const [verb, ...rest] = argv;
-  const known = ['--zip', '--previous', '--defender', '--out', '--work', '--port', '--repo', '--tag'];
+  const known = ['--zip', '--previous', '--defender', '--out', '--work', '--port', '--repo', '--tag', '--installer'];
   const flags = {};
   const positional = [];
   for (let i = 0; i < rest.length; i++) {
@@ -1160,9 +1174,9 @@ async function main(argv) {
   if (a.verb === 'take' && !a.positional.length && a.flags.zip && a.flags.defender && a.flags.out) {
     const port = Number(a.flags.port || 3124);
     if (!Number.isInteger(port) || port < 1024 || port > 65535) { console.error('readings-take: --port is a port from 1024 to 65535'); return 64; }
-    return take({ zip: a.flags.zip, previous: a.flags.previous || '', defender: a.flags.defender, out: a.flags.out, work: a.flags.work || 'C:\\agm-readings', port, repo: a.flags.repo || '', tag: a.flags.tag || '' });
+    return take({ zip: a.flags.zip, previous: a.flags.previous || '', defender: a.flags.defender, out: a.flags.out, work: a.flags.work || 'C:\\agm-readings', port, repo: a.flags.repo || '', tag: a.flags.tag || '', installer: a.flags.installer || '' });
   }
-  console.error('readings-take: take --zip <bundle.zip> --defender <defender.json> --out <raw.json> [--previous <zip>] [--work <folder>] [--port <n>] [--repo <owner/name> --tag <vX.Y.Z>] | probe-server <dir> | probe-exit <dir> | probe-release <dir>');
+  console.error('readings-take: take --zip <bundle.zip> --defender <defender.json> --out <raw.json> [--previous <zip>] [--work <folder>] [--port <n>] [--repo <owner/name> --tag <vX.Y.Z>] [--installer <exe>] | probe-server <dir> | probe-exit <dir> | probe-release <dir>');
   return 64;
 }
 
@@ -1172,7 +1186,7 @@ if (require.main === module) {
 
 module.exports = {
   zipEntries, memberParts, topFolder, releaseOf, layOut, extractOne, taskXml, winArg, utf16, SERVER_PRINCIPAL, SCRIPTS, lane, system32,
-  snapshot, snapshotDiff, udpHeard, waitHealth, quickTunnel, readRelease, probeExit, parseArgs, main, TRYCF,
+  snapshot, snapshotDiff, udpHeard, waitHealth, quickTunnel, readRelease, probeExit, parseArgs, main, TRYCF, installerSignature,
   sddlOfSave, pipeReach, keepTail, tokenIn, withoutSecrets, placeRefusal, takeR12, take,
   seedHalls, pageSocket, paceMs, takeR1, takeR9, takeR3prime, serveFolders, R1_SIZES, R1_QUIET_MS, PAGE_PACE,
   SERVER_TASK, STAND_IN, DEFINITION_TASK, RESTART_TASKS, WORK_MARK, BUDGET_MS,

@@ -358,6 +358,12 @@ with the token its window shows (the token is printed only in a console window, 
 start that cannot run says why in its window: a file missing beside the .bat, or who holds the port. Full instructions:
 [README.txt](README.txt).
 
+On your own show laptop, the installer (`AGMessage-Setup-<version>-unsigned.exe`, from a release) installs AGMessage in
+Program Files, its data in `C:\ProgramData\AGMessage`, and serves it from boot with nobody signed in; the Windows account
+that runs it is AGMessage's admin on that PC, and its Start menu has Open AGMessage, Show the admin token and AGMessage
+status. It is unsigned: where Smart App Control is on, Windows blocks it. Venue laptops use the portable folder.
+[docs/INSTALL.md](docs/INSTALL.md) says how it installs, upgrades, goes back and uninstalls.
+
 ## Versions
 
 One scheme for every build (`app/lib/version.js`): `app/package.json` names the version, CI stamps the build number and
@@ -394,8 +400,11 @@ their way into a page's HTML ([docs/ANALYSIS.md](docs/ANALYSIS.md)). CI runs the
 and Windows, the browser smoke on both, CodeQL and the dependency audit; it builds the stamped zip with its SBOM (npm's
 packages and the browser libraries vendored in `app/public/vendor`, each with its SHA-256) and SHA256SUMS on every push,
 extracts it and starts the bundle once (its own Node and watchdog must answer `/api/health` with the stamped build
-within 30 s), runs both .bat files under cmd on Windows, and a `v*` tag publishes a release with a build-provenance
-attestation, its notes saying each reading that missed its mark. For every push, a tag and a run asked for by hand
+within 30 s), runs both .bat files under cmd on Windows, builds the installer from that zip on `windows-2025`
+(`installer/AGMessage.iss`, Inno Setup 7.1.0 pinned by hash and checked against its release's digest and its publisher's
+signature; `installer/build-installer.ps1` lays the zip's stage down without its two .bat files and writes
+`SHA256SUMS.payload` beside it; it is built there, never run), and a `v*` tag publishes a release with the zip, the
+installer and a build-provenance attestation, its notes saying each reading that missed its mark. For every push, a tag and a run asked for by hand
 (Actions, CI, Run workflow), it takes the Windows readings of that zip on `windows-2025` with Defender's real-time
 monitoring turned back on first (the evidence lane, its actions pinned by commit: what each reading is, its mark and
 what a miss means are in [docs/INSTALL.md](docs/INSTALL.md)), one lane at a time per branch, never cancelled once it

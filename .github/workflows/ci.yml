@@ -3,10 +3,11 @@
 # (CR LF) on Linux, the tests and the browser smoke on Windows with Edge and on Linux with Chrome, then builds the
 # portable Windows zip, numbered by this run (tools/stamp-build.js): a development build 0.6.0-dev.<run>+<sha> on a
 # branch, a release 0.6.0+<run>.<sha> on the tag v0.6.0. The zip is extracted and started once, and must answer with that
-# build. The zip is also an artifact of its own, the zip itself (archive: false). A tag publishes a GitHub Release with
-# the zip, its SBOM, SHA256SUMS and a build-provenance attestation, once every job above is green and only when its
-# version is above every release already published and every other version tagged, asked again just before it
-# publishes, one release job at a time. For every push, a tag and a run asked for by hand (Actions, CI, Run workflow),
+# build. The zip is also an artifact of its own, the zip itself (archive: false). The installer is built from that zip on
+# windows-2025 (Inno Setup 7.1.0, pinned), without its two .bat files. A tag publishes a GitHub Release with the zip, the
+# installer and its payload's sums, the SBOM, SHA256SUMS and a build-provenance attestation, once every job above is
+# green and only when its version is above every release already published and every other version tagged, asked again
+# just before it publishes, one release job at a time. For every push, a tag and a run asked for by hand (Actions, CI, Run workflow),
 # the Windows evidence lane takes its readings of that zip on windows-2025, with Defender's real-time monitoring back
 # on, one lane at a time per ref and never cancelled once it runs: they inform the release's notes and never hold it.
 name: CI
@@ -311,6 +312,81 @@ jobs:
           archive: false
           if-no-files-found: error
 
+  # The installer (the 0.6.0 plan's Part 6, unit U13): installer/AGMessage.iss compiled by Inno Setup 7.1.0 on windows-2025,
+  # the image its life cycle is proven on, from the zip the package job built, extracted, without its two .bat files
+  # (installer/build-installer.ps1, which reads the build's defines with the zip's own node.exe and checks the version the
+  # file carries), with SHA256SUMS.payload beside it. Inno Setup is pinned by hash, and on every run the pin must equal
+  # the digest GitHub's release API gives the asset and the file must carry its publisher's valid signature. The installer
+  # is built here and never run: installing, upgrading, going back and uninstalling are its life cycle's, an elevated job
+  # of its own. Every action is pinned by its commit.
+  installer:
+    name: Windows installer
+    needs: package
+    runs-on: windows-2025
+    concurrency:
+      group: ci-${{ github.ref }}-installer-${{ github.event_name == 'workflow_dispatch' && 'by-hand' || 'auto' }}
+      cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        timeout-minutes: 5
+        with:
+          name: agmessage-portable-${{ github.sha }}
+          path: dist
+      - name: Inno Setup 7.1.0 (pinned)
+        shell: pwsh
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Inno Setup 7.1.0 (Jordan Russell's licence: any use; a commercial user is asked, not required, to buy a licence),
+          # installed for this job only. The pin is the release's own: it equals the digest GitHub's release API gives the
+          # asset (computed by GitHub when the asset was uploaded), and the file carries a valid Authenticode signature by its
+          # publisher, Pyrsys B.V.; a pin that is not both is refused.
+          $ErrorActionPreference = 'Stop'
+          $pin = '0362A383ED217D4C4239B5933866DD96D3EB2102737DA92F80F6057A4B40DF2F'
+          $asset = 'innosetup-7.1.0-x64.exe'
+          $url = "https://github.com/jrsoftware/issrc/releases/download/is-7_1_0/$asset"
+          $is = Join-Path $env:RUNNER_TEMP 'is.exe'
+          Invoke-WebRequest -Uri $url -OutFile $is
+          $hash = (Get-FileHash $is -Algorithm SHA256).Hash
+          if ($hash -ne $pin) { throw "$url is not the pinned build ($hash)" }
+          $release = gh api repos/jrsoftware/issrc/releases/tags/is-7_1_0
+          if ($LASTEXITCODE -ne 0) { throw "the release API could not be read ($LASTEXITCODE): $release" }
+          $digest = @((($release -join "`n") | ConvertFrom-Json).assets | Where-Object { $_.name -eq $asset } | ForEach-Object { $_.digest }) -join ' '
+          if ("$digest".Trim() -ne "sha256:$($pin.ToLowerInvariant())") { throw "the release API's digest of $asset is '$digest', not the pin's" }
+          $signature = Get-AuthenticodeSignature $is
+          if ($signature.Status -ne 'Valid') { throw "$asset carries no valid signature: $($signature.Status) $($signature.StatusMessage)" }
+          if ($signature.SignerCertificate.Subject -notmatch '(^|, )CN=Pyrsys B\.V\.(,|$)') { throw "$asset is signed by $($signature.SignerCertificate.Subject), not its publisher" }
+          "- Inno Setup 7.1.0: the pin equals the release API's digest; signed by $($signature.SignerCertificate.Subject)" |
+            Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8NoBOM
+          $dir = Join-Path $env:RUNNER_TEMP 'inno'
+          Start-Process $is -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', "/DIR=`"$dir`"" -Wait
+          $iscc = Join-Path $dir 'ISCC.exe'
+          if (-not (Test-Path $iscc)) { throw "Inno Setup did not install ISCC.exe in $dir" }
+          "ISCC=$iscc" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8NoBOM
+      - name: Build the installer from the zip's stage (installer/build-installer.ps1)
+        shell: pwsh
+        timeout-minutes: 8
+        run: |
+          $zip = @(Get-ChildItem dist -Filter 'AGMessage-Portable-*.zip')
+          if ($zip.Count -ne 1) { throw "expected one bundle zip in dist, found $($zip.Count)" }
+          $dest = Join-Path $env:RUNNER_TEMP 'installer-stage'
+          Expand-Archive -Path $zip[0].FullName -DestinationPath $dest -Force
+          ./installer/build-installer.ps1 -Stage (Join-Path $dest 'AGMessage') -Iscc $env:ISCC -Out installer-dist
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        timeout-minutes: 5
+        with:
+          name: agmessage-installer-${{ github.sha }}
+          path: |
+            installer-dist/AGMessage-Setup-*-unsigned.exe
+            installer-dist/SHA256SUMS.payload
+          if-no-files-found: error
+
   # The Windows evidence lane (the 0.6.0 plan's Part 6, unit U7): the readings R1-R13 of the zip the package job built,
   # taken on the image the installer is proven on, each judged against its mark (tools/readings.js, which says what each
   # miss means and which readings wait for a later unit's code). They inform the release and never hold it: a reading
@@ -324,8 +400,8 @@ jobs:
   # readings taken, never on a run cut short.
   readings:
     name: Windows readings (the evidence lane)
-    if: ${{ github.event_name != 'pull_request' }}
-    needs: package
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.package.result == 'success' }}
+    needs: [package, installer]
     concurrency:
       group: readings-${{ github.ref }}
       cancel-in-progress: false
@@ -352,6 +428,13 @@ jobs:
         with:
           name: agmessage-portable-${{ github.sha }}
           path: dist
+      # The installer, for R5's verdict on its signature: an installer job that failed leaves R5 saying so, and stops nothing.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        timeout-minutes: 5
+        continue-on-error: true
+        with:
+          name: agmessage-installer-${{ github.sha }}
+          path: installer-dist
       # R13 reads GitHub's answer for the newest release published, from a SYSTEM task that holds no token; R2 lays this
       # build over that release's payload. Only R13 and R2 need these, so a GitHub answer that fails here stops nothing:
       # R13 then reads not run, and R2 lays this build over its own, each saying why.
@@ -383,7 +466,10 @@ jobs:
           $over = if ($previous.Count -eq 1) { @('--previous', $previous[0].FullName) } else { @() }
           # No release named: no --tag at all, never an empty argument, and R13 reads not run with why.
           $release = if ($env:RELEASE_TAG) { @('--repo', $env:GITHUB_REPOSITORY, '--tag', $env:RELEASE_TAG) } else { @() }
-          node tools/readings-take.js take --zip $zip[0].FullName --defender "$env:RUNNER_TEMP\defender.json" --out readings/readings.raw.json @release @over
+          # The installer, when its job built it: R5 reads Windows' verdict on its signature beside the two programs'.
+          $setup = @(Get-ChildItem installer-dist -Filter 'AGMessage-Setup-*-unsigned.exe' -ErrorAction SilentlyContinue)
+          $installer = if ($setup.Count -eq 1) { @('--installer', $setup[0].FullName) } else { @() }
+          node tools/readings-take.js take --zip $zip[0].FullName --defender "$env:RUNNER_TEMP\defender.json" --out readings/readings.raw.json @release @over @installer
           if ($LASTEXITCODE -ne 0) { throw "the lane could not write its readings (exit $LASTEXITCODE)" }
       # The record is written before the first reading and after each, so a take step cut short still has what it took
       # judged.
@@ -405,9 +491,9 @@ jobs:
   release:
     name: GitHub Release
     # The Windows readings inform the notes and never hold the release: it waits for the lane to end, whatever it found
-    # and however it ended, and publishes once the package job has.
-    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v') && needs.package.result == 'success' }}
-    needs: [package, readings]
+    # and however it ended, and publishes once the package job and the installer job have.
+    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v') && needs.package.result == 'success' && needs.installer.result == 'success' }}
+    needs: [package, installer, readings]
     runs-on: ubuntu-latest
     # One release job at a time across every tag, none cancelled by the next: each reads the releases the one before it
     # published.
@@ -444,6 +530,17 @@ jobs:
         with:
           name: agmessage-portable-${{ github.sha }}
           path: dist
+      # The installer and its payload's sums beside the zip; SHA256SUMS is made again over every file the release carries.
+      - uses: actions/download-artifact@v8
+        with:
+          name: agmessage-installer-${{ github.sha }}
+          path: dist
+      - name: SHA256SUMS of every file the release carries
+        run: |
+          cd dist
+          find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' | LC_ALL=C sort | xargs -d '\n' sha256sum > SHA256SUMS
+          test "$(grep -c 'AGMessage-Setup-.*-unsigned\.exe$' SHA256SUMS)" = 1 || { echo "::error::the release carries no installer"; exit 1; }
+          cat SHA256SUMS
       - name: Refuse anything but a release build
         run: test "${{ needs.package.outputs.channel }}" = "release" || { echo "::error::the package job built ${{ needs.package.outputs.full }}, not a release"; exit 1; }
       - name: Build provenance (who built which zip from which commit)
@@ -463,8 +560,10 @@ jobs:
           {
             echo "Build ${{ needs.package.outputs.full }}. Extract All first (right-click the zip), then run start-agmessage.bat from the AGMessage folder it extracts: run from inside the zip it finds nothing beside it. The zip's SHA-256 is in SHA256SUMS; its packages are listed in agmessage-sbom.cdx.json. The audit log's verifier is agmessage-audit-verifier-${GITHUB_REF_NAME#v}.zip: take it from here to check an export on another computer, its SHA-256 in SHA256SUMS."
             echo
+            echo "The installer, AGMessage-Setup-${GITHUB_REF_NAME#v}-unsigned.exe, is for your own show laptop (venue laptops use the portable zip): it installs AGMessage in Program Files, its data in C:\\ProgramData\\AGMessage, and it serves from boot with nobody signed in. It is not signed. Smart App Control: on a PC where it is on (Windows Security > App & browser control > Smart App Control), Windows blocks the installer and it never runs; while Smart App Control is evaluating, the installer runs and says so on its first page, and once it turns itself on, the installer, its uninstaller and the next installer are blocked. Its SHA-256 is in SHA256SUMS, and SHA256SUMS.payload holds the SHA-256 of every file it lays down."
+            echo
             node tools/readings.js notes readings/readings.json --install docs/INSTALL.md || printf '### The Windows readings\n\nThe Windows readings for this build could not be read: nothing is claimed for them. They inform the release and never hold it.\n'
           } > "$RUNNER_TEMP/notes.md"
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "AGMessage ${GITHUB_REF_NAME#v}" \
             --notes-file "$RUNNER_TEMP/notes.md" \
-            --generate-notes dist/*.zip dist/agmessage-sbom.cdx.json dist/SHA256SUMS
+            --generate-notes dist/*.zip dist/AGMessage-Setup-*-unsigned.exe dist/SHA256SUMS.payload dist/agmessage-sbom.cdx.json dist/SHA256SUMS

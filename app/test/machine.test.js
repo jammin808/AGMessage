@@ -25,6 +25,7 @@ const W = 'C:\\ProgramData\\AGMessage';
 const SYS = 'C:\\Windows\\System32';
 const TASK_SID = 'S-1-5-87-11-22-33-44-55';
 const ANA = 'S-1-5-21-1-2-3-1001';
+const BEN = 'S-1-5-21-1-2-3-1002';
 const read = (f) => fs.readFileSync(f, 'utf8');
 const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
 const base = (exe) => path.win32.basename(exe);
@@ -50,7 +51,7 @@ function fakeWindows({ record = null, owner = 'O:SYG:SYD:PAI(A;OICI;FA;;;SY)(A;O
       if (args[0] === 'query' && args[1] === machine.HKLM + '\\Grants' && grants) return Object.entries(grants).map(([sid, rights]) => '    ' + sid + '    REG_SZ    ' + rights).join('\r\n');
       if (args[0] === 'query') throw fail(1);
       if (args[0] === 'add') { if (!reg) reg = {}; reg[args[args.indexOf('/v') + 1]] = args[args.indexOf('/d') + 1]; return ''; }
-      if (args[0] === 'delete') { if (args.includes('/v') && reg) delete reg[args[args.indexOf('/v') + 1]]; return ''; }
+      if (args[0] === 'delete') { if (args.includes('/v')) { if (reg) delete reg[args[args.indexOf('/v') + 1]]; } else if (args[1] === machine.HKLM) reg = null; return ''; }
     }
     if (name === 'schtasks.exe') {
       const tn = args[args.indexOf('/TN') + 1];
@@ -93,7 +94,7 @@ function prepared() {
 // ---------------------------------------------------------------- the command line and its exit codes
 
 test('machine.js knows its commands, each with its own options; a later unit\'s verb names it; an unknown word, an option of another verb and one given twice are refused', () => {
-  assert.deepEqual(machine.VERBS, ['prepare', 'install', 'uninstall', 'preinstall-check', 'upgrade-stop', 'status', 'restore']);
+  assert.deepEqual(machine.VERBS, ['prepare', 'install', 'uninstall', 'preinstall-check', 'upgrade-stop', 'status', 'restore', 'whose', 'start', 'first-account']);
   assert.deepEqual(machine.parse(['prepare', '--machine', W, '--sys', SYS]), { verb: 'prepare', opts: { '--machine': W, '--sys': SYS } });
   for (const [verb, unit] of Object.entries(machine.LATER)) assert.equal(machine.parse([verb]).problem, 'machine.js ' + verb + ' is built by ' + unit + '; it is not one of this build\'s commands (' + machine.VERBS.join(', ') + ').');
   assert.match(machine.parse(['zzz']).problem, /is not one of machine\.js's commands/);
@@ -526,8 +527,24 @@ test('upgrade-stop refuses an upgrade with no way back: the disk short of room (
   assert.equal(r.code, 3);
   assert.match(r.text, /and no save record of this stop \(the record there is older\)/);
   // A server that took the stop and still holds the port when the wait ends: refused, never read as stopped.
-  r = await machine.run(['upgrade-stop', '--machine', root, '--port', '3023'], { net: { ...net0, portAnswers: async () => true, waitMs: 300 } });
-  assert.deepEqual([r.code, /still holds port 3023 after 0 s/.test(r.text)], [3, true]);
+  const said = path.join(root, 'said.json');
+  r = await machine.run(['upgrade-stop', '--machine', root, '--port', '3023', '--out', said], { net: { ...net0, portAnswers: async () => true, waitMs: 300 } });
+  assert.deepEqual([r.code, /still holds port 3023 after 0 s/.test(r.text), JSON.parse(read(said)).forceable], [3, true, undefined], 'no reason lifts that one');
+  // Each refusal a reason lifts says so to whoever runs it (the installer says how), and the words never ask to type.
+  r = await machine.run(['upgrade-stop', '--machine', root, '--port', '3023', '--out', said], { net: net0 });
+  assert.deepEqual([r.code, JSON.parse(read(said)).forceable], [3, true]);
+  assert.match(r.text, /Give a reason to upgrade anyway\.$/);
+  r = await machine.run(['upgrade-stop', '--machine', root, '--port', '3023', '--out', said], { net: { ...net0, stop: async () => ({ ok: true, status: 409, json: { ok: false, error: 'Not stopped: AGMessage is busy (1 page active). Type a reason to stop it anyway.' } }) } });
+  assert.deepEqual([r.code, JSON.parse(read(said)).forceable, JSON.parse(read(said)).busy], [3, true, true], 'busy at the stop itself');
+});
+
+test('install for the way back (--rollback) records no Previous: the build it replaced is the newer one that did not start, never one to go back to', async () => {
+  const { root } = prepared();
+  const app = appFolder();
+  const win = fakeWindows({ record: { InstallDir: app, Version: '0.6.41', SemVer: '0.6.0', Previous: '0.6.40', Admin: ANA, AdminName: 'LAPTOP\\ana', Port: '3023' } });
+  const r = await machine.run(['install', '--machine', root, '--app', app, '--sys', SYS, '--build', '0.6.0+40.abc1234', '--port', '3023', '--rollback'], { run: win.run });
+  assert.equal(r.code, 0, r.text);
+  assert.deepEqual([win.reg().Version, win.reg().Previous, win.reg().Admin], ['0.6.40', '', ANA]);
 });
 
 // ---------------------------------------------------------------- restore (the way back)
@@ -709,7 +726,6 @@ test('uninstall: the server stopped at loopback first, then every task of \\AGMe
   assert.match(r2.text, /AGMessage is not wholly uninstalled; left: .*uploads \(EBUSY\)/);
   // A folder listing Windows will not give: the control tasks the record implies (the laptop's admin's, each grantee's)
   // are removed all the same, by their names.
-  const BEN = 'S-1-5-21-1-2-3-1002';
   const win5 = fakeWindows({ record: { Admin: ANA }, grants: { [BEN]: 'start,stop' }, noList: true, tasks: [machine.SERVER_TASK, '\\AGMessage\\Control-' + ANA, '\\AGMessage\\Control-' + BEN] });
   r2 = await machine.run(['uninstall', '--machine', tmp('agm-uninst5-'), '--sys', SYS], { run: win5.run });
   assert.equal(r2.code, 0, r2.text);
@@ -719,6 +735,80 @@ test('uninstall: the server stopped at loopback first, then every task of \\AGMe
   r2 = await machine.run(['uninstall', '--machine', root4, '--sys', SYS], { run: fakeWindows().run });
   assert.equal(r2.code, 0, r2.text);
   assert.ok(fs.existsSync(path.join(root4, 'data')), 'the data kept by default');
+});
+
+test('uninstall keeping the data takes back every right a Windows account was given on it and leaves Kept and Port in place of the record; prepare then takes the root again, and install records whose it is anew and drops the mark', async () => {
+  const root = path.join(tmp('agm-kept-'), 'AGMessage');
+  for (const d of ['data', 'uploads', 'keys', 'logs', 'token', path.join('machine', 'inbox', ANA), path.join('machine', 'outbox', ANA), path.join('machine', 'inbox', BEN), path.join('machine', 'work')]) fs.mkdirSync(path.join(root, d), { recursive: true });
+  fs.writeFileSync(path.join(root, 'data', 'settings.json'), '{"hall":"kept"}');
+  fs.writeFileSync(path.join(root, 'machine', 'inbox', ANA, 'ask.json'), '{}');
+  const win = fakeWindows({ record: { InstallDir: 'C:\\Program Files\\AGMessage', Version: '0.6.41', Admin: ANA, AdminName: 'LAPTOP\\ana', Port: '3123' }, grants: { [BEN]: 'start,stop' }, tasks: [machine.SERVER_TASK] });
+  const out = path.join(root, '..', 'uninstall.json');
+  const r = await machine.run(['uninstall', '--machine', root, '--sys', SYS, '--out', out], { run: win.run, net: { stop: async () => ({ ok: false, why: 'ECONNREFUSED' }) } });
+  assert.equal(r.code, 0, r.text);
+  assert.match(r.text, /AGMessage is uninstalled; its data is kept in .*AGMessage, which AGMessage installed again takes, and no Windows account keeps a right to it but SYSTEM and Administrators\.$/);
+  const revoked = win.calls.filter((c) => c.name === 'icacls.exe').map((c) => [path.basename(c.args[0]), ...c.args.slice(1)]);
+  assert.deepEqual(revoked, ['data', 'uploads', 'keys', 'logs', 'token', 'machine'].map((d) => [d, '/remove:g', '*' + ANA, '*' + BEN]), 'the laptop\'s admin\'s and each grantee\'s rights taken back on every child');
+  assert.deepEqual([fs.readdirSync(path.join(root, 'machine', 'inbox')), fs.readdirSync(path.join(root, 'machine', 'outbox'))], [[], []], 'their inbox\\ and outbox\\ folders gone');
+  assert.equal(read(path.join(root, 'data', 'settings.json')), '{"hall":"kept"}', 'the data itself kept as it was');
+  assert.deepEqual(win.reg(), { Kept: root, Port: '3123' }, 'the record replaced by the mark and the port the screens\' links name');
+  const at = (pred) => win.calls.findIndex(pred);
+  assert.ok(at((c) => c.name === 'icacls.exe') < at((c) => c.name === 'reg.exe' && c.args[0] === 'delete'), 'rights taken back while the record still names them');
+  assert.ok(!read(out).includes(h.TOKEN));
+  // A later install: prepare takes the kept root (a real directory SYSTEM or Administrators own), whose it is found again.
+  const again = fakeWindows({ record: win.reg() });
+  const p = machine.prepare({ '--machine': root, '--sys': SYS }, { run: again.run });
+  assert.equal(p.root, root);
+  assert.ok(again.calls.some((c) => c.name === 'powershell.exe' && c.args.at(-1) === machine.PS_OWNER), 'its owner read before it is taken');
+  const app = appFolder();
+  const i = await machine.run(['install', '--machine', root, '--app', app, '--sys', SYS, '--build', '0.6.0+42.abc1234', '--port', '3123', '--admin', BEN, '--admin-name', 'LAPTOP\\ben'], { run: again.run });
+  assert.equal(i.code, 0, i.text);
+  assert.deepEqual([again.reg().Admin, again.reg().Kept, again.reg().Previous, again.reg().Version], [BEN, undefined, '', '0.6.42'], 'whose it is recorded anew, the mark dropped, nothing to go back to');
+  assert.equal(read(path.join(root, 'data', 'settings.json')), '{"hall":"kept"}');
+  // Removing the data leaves no mark: a later install finds no root to take.
+  const gone = fakeWindows({ record: { InstallDir: 'x', Port: '3023' } });
+  const root2 = tmp('agm-kept2-');
+  fs.mkdirSync(path.join(root2, 'data'));
+  assert.equal((await machine.run(['uninstall', '--machine', root2, '--sys', SYS, '--remove-data'], { run: gone.run })).code, 0);
+  assert.equal(gone.reg(), null);
+  // A right that cannot be taken back is named, exit 2: the uninstall stops with every file in place.
+  const stuck = fakeWindows({ record: { Admin: ANA }, failIcacls: '/remove:g' });
+  const root3 = tmp('agm-kept3-');
+  fs.mkdirSync(path.join(root3, 'token'));
+  const s3 = await machine.run(['uninstall', '--machine', root3, '--sys', SYS], { run: stuck.run });
+  assert.equal(s3.code, 2);
+  assert.match(s3.text, /left: the rights on .*token \(Access is denied\.\)/);
+});
+
+test('uninstall with --app: a person\'s console open from {app} is refused before anything is stopped or removed; the server\'s own programs are waited for, and one still running is named, exit 2', async () => {
+  const APP = 'C:\\Program Files\\AGMessage';
+  const shell = { pid: 5000, name: 'node.exe', cmd: '"' + APP + '\\node\\node.exe" "' + APP + '\\app\\launch.js" status --machine x' };
+  const watchdog = { pid: 4121, name: 'node.exe', cmd: '"' + APP + '\\node\\node.exe" "' + APP + '\\app\\supervise.js"' };
+  const withPrograms = (answer) => {
+    const win = fakeWindows({ record: { Port: '3023' }, tasks: [machine.SERVER_TASK] });
+    const run = (e, a, o) => (base(e) === 'powershell.exe' && a.at(-1) === machine.PS_PROGRAMS ? JSON.stringify(answer()) + '\r\n' : win.run(e, a, o));
+    return { win, run };
+  };
+  let stopped = 0;
+  const n = { stop: async () => { stopped++; return { ok: false, why: 'ECONNREFUSED' }; }, programsWaitMs: 300 };
+  const root = tmp('agm-uninst-app-');
+  fs.mkdirSync(path.join(root, 'token'));
+  fs.writeFileSync(path.join(root, 'token', 'admin-token'), h.TOKEN);
+  let w = withPrograms(() => ({ programs: [shell, watchdog] }));
+  let r = await machine.run(['uninstall', '--machine', root, '--sys', SYS, '--app', APP], { run: w.run, net: n });
+  assert.deepEqual([r.code, stopped, w.win.tasks.size], [3, 0, 1], 'refused before the stop, every task in place');
+  assert.equal(r.text, 'AGMessage\'s own console is open (node.exe (pid 5000) runs from ' + APP + '): close its window, then uninstall again. Nothing was removed.');
+  // The watchdog ends once the server has: waited for, then the uninstall goes on.
+  let asked = 0;
+  w = withPrograms(() => ({ programs: asked++ < 3 ? [watchdog] : [] }));
+  r = await machine.run(['uninstall', '--machine', root, '--sys', SYS, '--app', APP], { run: w.run, net: n });
+  assert.equal(r.code, 0, r.text);
+  assert.ok(asked >= 4, 'asked again until the watchdog had ended');
+  // One that does not end is named, and the uninstall stops before Inno removes a file.
+  w = withPrograms(() => ({ programs: [watchdog] }));
+  r = await machine.run(['uninstall', '--machine', root, '--sys', SYS, '--app', APP], { run: w.run, net: n });
+  assert.equal(r.code, 2);
+  assert.match(r.text, /left: node\.exe \(pid 4121\), which still runs from C:\\Program Files\\AGMessage \(close it, then uninstall again\)/);
 });
 
 test('status (elevated): the task read by column, the record\'s admin and port, the port\'s holder and code integrity from one powershell.exe, the last stop and the logs each read, refused or absent; --out JSON with no token', async () => {
@@ -847,13 +937,13 @@ test('launch.js status: the person\'s reader, each fact read, refused or absent 
   assert.equal(none.facts.lastStop.read, 'absent');
 });
 
-test('launch.js knows serve, token and status; a later unit\'s verb names its unit', () => {
+test('launch.js knows serve, token, status and open; a later unit\'s verb names its unit', () => {
   const said = [];
   const out = (t) => said.push(t);
   assert.equal(launch.main([], { out }), 64);
   assert.equal(launch.main(['start'], { out }), 64);
   assert.equal(launch.main(['serve', '--data', '/tmp/x'], { out }), 64);
-  assert.match(said[0], /launch\.js knows serve, token or status\./);
+  assert.match(said[0], /launch\.js knows serve, token, status or open\./);
   assert.match(said[1], /launch\.js start is built by U17/);
   assert.match(said[2], /launch\.js serve needs --uploads/);
   said.length = 0;

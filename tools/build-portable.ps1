@@ -25,7 +25,9 @@ if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item -ItemType Directory -Force "$stage\app" | Out-Null
 
 Write-Host "==> Staging $name ($full, $channel)"
-Copy-Item app\server.js, app\supervise.js, app\launch.js, app\package.json, app\package-lock.json, app\README.md "$stage\app"
+# machine.js, the installed node's machine-level commands, is in the stage: the installer runs it from the stage, and its
+# uninstaller runs the copy the install laid down.
+Copy-Item app\server.js, app\supervise.js, app\launch.js, app\machine.js, app\package.json, app\package-lock.json, app\README.md "$stage\app"
 if (Test-Path app\build.json) { Copy-Item app\build.json "$stage\app" }
 Copy-Item app\lib "$stage\app\lib" -Recurse
 # The audit log's key-free rules, which lib\audit.js requires, and the verifier an export ships to the checker: without
