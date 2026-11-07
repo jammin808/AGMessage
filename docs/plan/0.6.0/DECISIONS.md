@@ -241,3 +241,14 @@ marked **(to confirm)**.
 3. **The Stagewatch request's items 3–7** → "Yes": they are asked, with items 1 and 2.
 4. **The Board device floor** → "Keep these as mim[imum]": iPadOS 14.5 and Chrome 84 stay the minimum. A Board device
    below it is not supported (retired or replaced), and the floor is not lowered.
+
+## The clock's lock: the owner's answer (2026-11-07)
+
+Asked once unit 20b (#69) was built: should the admin's lock on a person's clock or countdown also stop other managers
+from changing that person's choice?
+
+> "no"
+
+- Reading: the lock is the admin's alone to set and lift (`theAdmin()`), and it keeps the choice from the person's own
+  device. A manager who holds the right to set a person's view may still change the choice of a locked clock, and the
+  lock stays on it. That is how unit 20b was built (§17.3), so nothing changes. No "(to confirm)" remains.
