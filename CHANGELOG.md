@@ -6930,6 +6930,11 @@ and immutable releases are the repository's own setting, which its owner turned 
   chat-view test read the support view's copy of a relayed state as soon as the person's own page had its two (it now
   waits for both pages); the upgrade stop's test gave the wait for the server's programs 300 ms, which a runner's timers
   could end one ask early (it now waits for the ask that finds nothing running). Nothing that ships changed.
+- The event test's show-desk result is one a desk tick keeps. It named a Stagewatch other than the one the default link
+  points at, which the server rightly ends at its next tick (every 3 s) as having nobody to tell; the test read it back
+  before a tick on Linux, and CI's Windows run (99), slower, saw a tick land first. The result now names the default
+  link's own address, held there across a tick landing before the first archive and after the continue. Nothing that
+  ships changed.
 - The installer's build accepts the installer it built. `installer/build-installer.ps1` reads the version back from the
   file it compiled and compares it with the build's, and read its strings with the padding Windows' version resource
   keeps after them, so CI's first build of it (run 96) refused "0.6.0.96" padded with blanks as not "0.6.0.96". The

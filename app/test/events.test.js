@@ -11,6 +11,7 @@ const os = require('os');
 const path = require('path');
 const { io } = require('socket.io-client');
 const events = require('../lib/events');
+const nodes = require('../lib/nodes');
 const { startServer, stopServer, restartServer, api, connect, emit, until, inviteOf, TOKEN } = require('./helpers');
 
 const PASSWORD = 'the green room kettle';
@@ -50,8 +51,10 @@ async function eventServer(t, env = {}) {
   // The node's settings as an earlier run left them, and a hold on the default Stagewatch's frame.
   fs.writeFileSync(path.join(dataDir, 'settings.json'), JSON.stringify({ nodeId: 'c0ffee01', stagewatchUrl: '127.0.0.1:9', stagewatchKeySealed: 'enc1:not-this-machine', stagewatchFingerprint: 'sha256:' + 'ab'.repeat(32), peerLinks: { patterns01: { t: 'patterns', url: 'http://127.0.0.1:9', name: 'Patterns FOH', tokenSealed: 'enc1:node', hall: '' } }, tlsPins: { '127.0.0.1:9': 'sha256:' + 'cd'.repeat(32) }, contextTokenSealed: 'enc1:context', aiKeySealed: 'enc1:ai', machineSeq: 7 }, null, 2)); // secret-scan: fixture
   fs.writeFileSync(path.join(dataDir, 'pages.json'), JSON.stringify({ v: 1, views: {}, halls: {}, holds: { default: HOLD } }));
-  // A show-desk result waiting for a Stagewatch not linked now (lib/deskresults.js): kept, and archived with its event.
-  fs.writeFileSync(path.join(dataDir, 'desk-results.json'), JSON.stringify({ results: [{ sw: 'abcdef012345', link: 'default', id: 'p3', created: 1_700_000_000_000, line: 'Hall 2: Five minutes', target: 'c0ffee01', ok: true, words: 'Shown', ran: 1_700_000_000_500 }] }));
+  // A show-desk result waiting for the default Stagewatch, not linked now (lib/deskresults.js): its tag is that link's
+  // address, so a desk tick keeps it waiting (a result naming any other Stagewatch is ended as having nobody to tell),
+  // and it is archived with its event.
+  fs.writeFileSync(path.join(dataDir, 'desk-results.json'), JSON.stringify({ results: [{ sw: nodes.addressTag(nodes.normaliseBase('127.0.0.1:9')), link: 'default', id: 'p3', created: 1_700_000_000_000, line: 'Hall 2: Five minutes', target: 'c0ffee01', ok: true, words: 'Shown', ran: 1_700_000_000_500 }] }));
   const srv = await startServer({ AGM_DATA_DIR: dataDir, ...env });
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });
