@@ -7030,6 +7030,13 @@ smoke; the Windows legs are CI's)
   before a tick on Linux, and CI's Windows run (99), slower, saw a tick land first. The result now names the default
   link's own address, held there across a tick landing before the first archive and after the continue. Nothing that
   ships changed.
+- The keyed stores' speed fence counts the work instead of timing it. It held a start's open of 5,000 sessions, 1,000
+  accounts and 50 token sign-ins under 250 ms of the clock, which CI's Windows run (102), busy with the other test
+  files, took 938 ms over (10-21 ms here). It now holds what the plan's row is for: the open makes the same MACs,
+  hashes, reads and parses as one of 50 sessions (one MAC a file, never one a record, each byte read and MACed once),
+  and a save of the sessions and a set record each make one MAC, as the audit log's work is counted and never timed
+  (`test/audit-preload.js`). A MAC a record put into the sessions' load fails it; how long each took is said beside it,
+  a record and not a pass mark. Nothing that ships changed.
 - The installer's build accepts the installer it built. `installer/build-installer.ps1` reads the version back from the
   file it compiled and compares it with the build's, and read its strings with the padding Windows' version resource
   keeps after them, so CI's first build of it (run 96) refused "0.6.0.96" padded with blanks as not "0.6.0.96". The

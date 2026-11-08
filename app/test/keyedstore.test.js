@@ -698,29 +698,66 @@ test('what a start would decide is read with nothing written (lib/importfacts.js
   assert.deepEqual(fs.readdirSync(storesOf(dir)).map((f) => [f, read(path.join(storesOf(dir), f))]), records, 'nothing written');
 });
 
-test('speed: 5,000 sessions, 1,000 accounts and 50 token sign-ins open in under 250 ms; a save of the sessions and a record of 1,000 digests each under 50 ms', async () => {
-  const dir = tmp();
-  const st = openStores(dir);
+// What the stores' open, a save and a set record do, counted as work, never timed (how long they take is the machine's,
+// how much they do is the code's; test/audit-preload.js counts the audit log's work alike): MACs and hashes made and the
+// bytes each was given, files read and their bytes, and JSON parsed, while `fn` runs.
+function counted(fn) {
+  const n = { macs: 0, macBytes: 0, hashes: 0, hashBytes: 0, reads: 0, readBytes: 0, parses: 0 };
+  const made = { createHmac: crypto.createHmac, createHash: crypto.createHash };
+  const counting = (name, kind, bytes) => function (...args) {
+    const h = made[name].apply(this, args);
+    n[kind]++;
+    const update = h.update.bind(h);
+    h.update = (data, enc) => { n[bytes] += Buffer.isBuffer(data) ? data.length : Buffer.byteLength(String(data), enc || 'utf8'); return update(data, enc); };
+    return h;
+  };
+  const readFileSync = fs.readFileSync, parse = JSON.parse;
+  crypto.createHmac = counting('createHmac', 'macs', 'macBytes');
+  crypto.createHash = counting('createHash', 'hashes', 'hashBytes');
+  fs.readFileSync = function (...args) { const r = readFileSync.apply(this, args); n.reads++; n.readBytes += Buffer.isBuffer(r) ? r.length : Buffer.byteLength(r); return r; };
+  JSON.parse = function (...args) { n.parses++; return parse.apply(this, args); };
+  const t = process.hrtime.bigint();
+  try { return { value: fn(), n, ms: Number(process.hrtime.bigint() - t) / 1e6 }; } finally {
+    Object.assign(crypto, made); fs.readFileSync = readFileSync; JSON.parse = parse;
+  }
+}
+
+test('speed: 5,000 sessions, 1,000 accounts and 50 token sign-ins open with the work 50 sessions, 10 accounts and 5 sign-ins take (one MAC a file, never one a record, each byte read once and MACed once); a save of the sessions and a record of 1,000 digests each one MAC', async (t) => {
   const hash = await acc.hashPassword(PW);
-  for (let i = 0; i < 1000; i++) st.accounts.users.set('a' + String(i).padStart(11, '0'), { id: 'a' + String(i).padStart(11, '0'), username: 'u' + i, name: 'U' + i, role: 'staff', halls: [], grant: [], revoke: [], disabled: false, mustChange: false, pw: hash, epoch: 1, createdAt: 1, lastLoginAt: 0 });
-  const now = Date.now();
-  for (let i = 0; i < 5000; i++) { const h = crypto.randomBytes(32).toString('hex'); st.sessions.map.set(h, { h, uid: 'a' + String(i % 1000).padStart(11, '0'), epoch: 1, created: now, seen: now, ip: '10.0.0.' + (i % 250), ua: 'Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1' }); }
-  for (let i = 0; i < 50; i++) st.tokens.create(now);
-  st.accounts.save(); st.tokens.save();
-  let t = process.hrtime.bigint();
-  st.sessions.save(); st.sessions.flush();
-  const saveMs = Number(process.hrtime.bigint() - t) / 1e6;
-  st.flush();
-  t = process.hrtime.bigint();
-  st.ks.recordNow();
-  const recordMs = Number(process.hrtime.bigint() - t) / 1e6;
-  t = process.hrtime.bigint();
-  const b = openStores(dir);
-  const openMs = Number(process.hrtime.bigint() - t) / 1e6;
-  assert.deepEqual([b.accounts.size, b.sessions.map.size, b.tokens.map.size], [1000, 5000, 50]);
-  assert.ok(openMs < 250, 'open() ' + openMs.toFixed(1) + ' ms');
-  assert.ok(saveMs < 50, 'a save of 5,000 sessions ' + saveMs.toFixed(1) + ' ms');
-  assert.ok(recordMs < 50, 'a set record of 1,000 digests ' + recordMs.toFixed(1) + ' ms');
+  const run = (accounts, sessions, tokens) => {
+    const dir = tmp();
+    const st = openStores(dir);
+    for (let i = 0; i < accounts; i++) st.accounts.users.set('a' + String(i).padStart(11, '0'), { id: 'a' + String(i).padStart(11, '0'), username: 'u' + i, name: 'U' + i, role: 'staff', halls: [], grant: [], revoke: [], disabled: false, mustChange: false, pw: hash, epoch: 1, createdAt: 1, lastLoginAt: 0 });
+    const now = Date.now();
+    for (let i = 0; i < sessions; i++) { const h = crypto.randomBytes(32).toString('hex'); st.sessions.map.set(h, { h, uid: 'a' + String(i % accounts).padStart(11, '0'), epoch: 1, created: now, seen: now, ip: '10.0.0.' + (i % 250), ua: 'Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1' }); }
+    for (let i = 0; i < tokens; i++) st.tokens.create(now);
+    st.accounts.save(); st.tokens.save(); st.flush();
+    const save = counted(() => { st.sessions.save(); st.sessions.flush(); });
+    st.flush();
+    const record = counted(() => st.ks.recordNow());
+    const open = counted(() => openStores(dir));
+    const b = open.value;
+    assert.deepEqual([b.accounts.size, b.sessions.map.size, b.tokens.map.size], [accounts, sessions, tokens]);
+    const bytes = (f) => fs.statSync(path.join(dir, f)).size;
+    return { save, record, open, sessionsBytes: bytes('sessions.json'), filesBytes: ['accounts.json', 'sessions.json', 'admin-sessions.json'].reduce((s, f) => s + bytes(f), 0) };
+  };
+  const small = run(10, 50, 5);
+  const big = run(1000, 5000, 50);
+  const work = (c) => [c.n.macs, c.n.hashes, c.n.reads, c.n.parses];
+  // The open: what it makes and reads is the same however many records the files hold; only the bytes grow, every file
+  // read whole once and its bytes MACed once (a MAC a record would be 6,050 of them).
+  assert.deepEqual(work(big.open), work(small.open), 'the same MACs, hashes, reads and parses at both sizes: ' + JSON.stringify([small.open.n, big.open.n]));
+  assert.ok(big.open.n.macs <= 12, 'a MAC a file and its record, never one a record: ' + big.open.n.macs);
+  assert.ok(big.open.n.readBytes >= big.filesBytes, 'each of the three files read whole: ' + big.open.n.readBytes + ' of ' + big.filesBytes);
+  assert.ok(big.open.n.macBytes <= big.open.n.readBytes, 'nothing MACed twice: ' + big.open.n.macBytes + ' MACed of ' + big.open.n.readBytes + ' read');
+  // A save of the 5,000 sessions: one MAC, over the bytes it writes, and nothing read back.
+  assert.deepEqual([big.save.n.macs, big.save.n.hashes, big.save.n.reads, big.save.n.parses], [1, 0, 0, 0]);
+  assert.ok(big.save.n.macBytes <= big.sessionsBytes, 'the save MACs the file it writes, once: ' + big.save.n.macBytes + ' of ' + big.sessionsBytes);
+  // A set record with 1,000 accounts' digests: one MAC, one read and one parse, as with ten.
+  assert.deepEqual(work(big.record), work(small.record), 'the record: ' + JSON.stringify([small.record.n, big.record.n]));
+  assert.deepEqual(work(big.record), [1, 0, 1, 1]);
+  // How long each took here: a record, not a pass mark (the plan measured 10-11 ms for the open and 12-14 ms for the save).
+  t.diagnostic(`at 1,000 accounts, 5,000 sessions and 50 token sign-ins: open ${big.open.ms.toFixed(1)} ms, the save ${big.save.ms.toFixed(1)} ms, the record ${big.record.ms.toFixed(1)} ms (a record, not a pass mark)`);
 });
 
 test('guard rails: lib/keyedstore.js requires Node\'s crypto, path and lib/resilience.js alone, never lib/secretbox.js; its lane is one storesHead names', () => {
