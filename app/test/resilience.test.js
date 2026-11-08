@@ -153,8 +153,12 @@ test('watchdog: a stop asked of it lets its server save before it goes, on every
 test('watchdog: a signal to it leaves no server behind — asked to stop where signals reach it, ended with it on Windows', async () => {
   const dir = tmp('agm-wd-');
   const p = supervise(dir, fakeChild(dir, `beat(); fs.writeFileSync(path.join(path.dirname(runs), 'pid'), String(process.pid));`));
-  assert.ok(await until(() => fs.existsSync(path.join(dir, 'pid'))), 'started:\n' + p.out);
-  const pid = Number(fs.readFileSync(path.join(dir, 'pid'), 'utf8'));
+  // The pid as the server wrote it, waited for by what the file holds: a plain write makes the file before it fills it,
+  // so its name alone is no pid yet (an empty one reads as 0, which signals this test's own process group).
+  const pidFile = path.join(dir, 'pid');
+  const pidIn = () => { try { return /^\d+$/.test(fs.readFileSync(pidFile, 'utf8')); } catch (e) { if (e.code === 'ENOENT') return false; throw e; /* not made yet */ } };
+  assert.ok(await until(pidIn), 'started:\n' + p.out);
+  const pid = Number(fs.readFileSync(pidFile, 'utf8'));
   p.kill('SIGTERM');
   await p.done;
   const alive = () => { try { process.kill(pid, 0); return true; } catch { return false; } };
@@ -1214,21 +1218,10 @@ test('a second start on the same data folder changes nothing and goes away; ever
   const auditFile = () => fs.readFileSync(path.join(a.dataDir, 'audit.jsonl'), 'utf8');
   // The audit log's records, outside the data folder: a second start reads none of them and writes none.
   const recordsDir = path.join(a.dataDir + '-keys', 'audit');
-  const records = () => Object.fromEntries(fs.readdirSync(recordsDir).sort().map((f) => [f, fs.readFileSync(path.join(recordsDir, f), 'utf8')]));
-  // The records once the running server's head lane has saved what it wrote: no atomic write in progress in the folder
-  // (none of its .tmp files) and two reads 250 ms apart alike, however long the lane's write takes on this machine.
-  const settledRecords = async () => {
-    let last = null;
-    for (let i = 0; i < 40; i++) {
-      let now = null;
-      try { now = records(); } catch (e) { if (e.code !== 'ENOENT') throw e; /* a file renamed as it was read: a write in progress */ }
-      if (now && Object.keys(now).some((f) => f.endsWith('.tmp'))) now = null;
-      if (now && last && JSON.stringify(now) === JSON.stringify(last)) return now;
-      last = now;
-      await new Promise((resolve) => { setTimeout(resolve, 250); });
-    }
-    throw new Error('the records beside the key were still being written after 10 s');
-  };
+  // The records once the running server's head lane has saved what it wrote (h.settledFiles): no atomic write in progress
+  // in the folder (none of its .tmp files listed, none renamed away as it is read) and two reads 250 ms apart alike,
+  // however long the lane's write takes on this machine; bounded at 10 s.
+  const settledRecords = () => h.settledFiles(recordsDir, { read: true, agreeMs: 250, ms: 10000, what: 'the records beside the key, no write in progress' });
   const before = { rooms: roomFiles(), audit: auditFile(), records: await settledRecords() };
 
   const samePort = await second({ PORT: String(a.port), AGM_DATA_DIR: a.dataDir });

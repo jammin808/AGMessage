@@ -752,7 +752,8 @@ test('the installed server writes each machine event as its audit row exactly on
   let srv = await h.startServer(env);
   t.after(() => h.stopServer(srv.child));
   const log = () => { try { return read(path.join(dataDir, 'audit.jsonl')); } catch { return ''; } };
-  const rows = () => log().split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((e) => e.action.startsWith('machine.'));
+  // The log's whole lines alone: a row the server is appending is read at the next poll, never parsed cut short.
+  const rows = () => { try { return h.wholeLines(path.join(dataDir, 'audit.jsonl')).filter((e) => e.action.startsWith('machine.')); } catch (e) { if (e.code === 'ENOENT') return []; throw e; } };
   await h.until(() => rows().length === 4, 15000, 'the four events written after the hold');
   assert.deepEqual(rows().map((e) => [e.action, e.actor.t, e.actor.id, e.target]), [
     ['machine.admin', 'windows', ana.sid, ana.sid], ['machine.grant', 'windows', ana.sid, ben.sid], ['machine.start', 'windows', ben.sid, ben.sid], ['machine.grant', 'windows', ana.sid, eve.sid],

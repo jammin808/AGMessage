@@ -8,7 +8,7 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 const tlsmod = require('../lib/tls');
-const { startServer, restartServer, stopServer, api, connect, emit, wait, until, pngOf, inviteOf, fakeStagewatch, setupAdmin } = require('./helpers');
+const { startServer, restartServer, stopServer, api, connect, emit, wait, until, wholeLines, pngOf, inviteOf, fakeStagewatch, setupAdmin } = require('./helpers');
 const ai = require('../lib/ai');
 const board = require('../lib/board');
 const { entryOf, storedEntry } = require('../lib/stagerecord');
@@ -23,10 +23,17 @@ async function act(s, ev, arg) {
   }
   throw new Error(ev + ' was refused for the rate twenty times');
 }
-/** Every audit row of an action, as [target, words, actor's name]. */
-const rowsOf = (dataDir, action) => fs.readFileSync(path.join(dataDir, 'audit.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
-  .filter((e) => e.action === action).map((e) => [e.target, e.words, e.actor.name]);
+/**
+ * Every audit row of an action, as [target, words, actor's name]. The server appends whole lines, so an append in flight
+ * (a download's row, written as its bytes end, while a test polls for it) is read up to its last whole line.
+ */
+const rowsOf = (dataDir, action) => wholeLines(path.join(dataDir, 'audit.jsonl')).filter((e) => e.action === action).map((e) => [e.target, e.words, e.actor.name]);
 const pagesJson = (dataDir) => JSON.parse(fs.readFileSync(path.join(dataDir, 'pages.json'), 'utf8'));
+/**
+ * pages.json as a poll reads it: {} until its lane's first save lands on a fresh folder, then the file, renamed into place
+ * whole, so a read is the old file or the new one.
+ */
+const pagesNow = (dataDir) => { try { return pagesJson(dataDir); } catch (e) { if (e.code === 'ENOENT') return {}; throw e; /* not written yet */ } };
 const pdf = Buffer.from('%PDF-1.4\n1 0 obj << >> endobj\ntrailer << >>\n%%EOF\n', 'latin1');
 
 /** A stand-in for the AI's endpoint (the SDK's ANTHROPIC_BASE_URL): every request's body kept, a draft or minutes answered. */
@@ -444,7 +451,7 @@ test('the line: a confidential push\'s line only from where it is in use in the 
   assert.equal((await act(tom, 'ai:draft', { question: 'How was Q3?' })).ok, true);
   assert.ok(!model.bodies.slice(before).join('').includes('Revenue Q3'), 'the AI\'s brief carries none of it');
   // Held across a restart: the first frame after it is held too.
-  await until(() => !!(pagesJson(srv.dataDir).holds || {})['hall:' + hall], 4000, 'the hold kept');
+  await until(() => !!(pagesNow(srv.dataDir).holds || {})['hall:' + hall], 4000, 'the hold kept');
   assert.ok(!JSON.stringify(pagesJson(srv.dataDir).holds).includes('Revenue'), 'no text kept');
   srv = await restartServer(srv, ENV);
   mo = await page(moCookie, 'Mo in Media again');
@@ -477,7 +484,7 @@ test('the line: a confidential push\'s line only from where it is in use in the 
   assert.equal(lastStage(mo).message, '', 'held after the approval');
   own.frame({ message: 'Break', messageId: 80, messageAck: '' });
   await until(() => lastStage(mo).message === 'Break', 4000, 'released on the next message');
-  const holdNow = () => (pagesJson(srv.dataDir).holds || {})['hall:' + hall] || null;
+  const holdNow = () => (pagesNow(srv.dataDir).holds || {})['hall:' + hall] || null;
 
   // Two confidential lines in a row: the first stays held while the second waits for its own, which is held as it comes.
   const lineA = await act(tom2, 'page:push', { code: hall, to: 'board', content: quote('Line A: 1.1m') });
@@ -535,7 +542,9 @@ test('the line: a confidential push\'s line only from where it is in use in the 
   assert.deepEqual(await act(tom2, 'stage:send', { withTake: lineE.seq }), { ok: false, error: FULL });
   assert.deepEqual(await act(tom2, 'stage:propose', { withTake: lineE.seq }), { ok: false, error: FULL });
   assert.equal((await act(mo, 'join', { roomCode: MEDIA, as: 'account', docs: true })).stage.secretLine, FULL);
-  assert.equal(holdNow().sends.length, 20, 'every wait kept');
+  // Every wait kept on disk: the hold's save lands a moment after the last send's answer (its lane, never flushed while
+  // the server runs), so pages.json is read until it holds the twenty; it is renamed into place whole.
+  await until(() => { const kept = holdNow(); return !!kept && kept.sends.length === 20; }, 4000, 'every wait kept on disk');
   own.frame({ message: 'Line E: 5.5m', messageId: 90, messageAck: '' });
   await until(() => lastStage(mo).messageId === 90, 4000, 'Media told E');
   assert.equal(lastStage(mo).message, '');

@@ -154,6 +154,9 @@ test('the admin\'s On stage settings: three switches, off by default and never s
   assert.deepEqual([patched.status, patched.body.changed, patched.body.user.onStage], [200, ['onStage'], { screens: false, people: true, clears: true }]);
   await until(() => events(beaPage, 'onStage').length === 2, 4000, 'the PATCH told Bea\'s page');
   assert.deepEqual(events(beaPage, 'onStage').at(-1), { screens: false, people: true, clears: true });
+  // On disk before the refusals below: the PATCH's save lands a moment after its answer, so what they leave is read
+  // against the file the PATCH wrote, never the one before it.
+  await until(() => { const a = onAccount('bea'); return !!a && !!a.onStage && a.onStage.clears === true; }, 4000, 'accounts.json keeps the PATCH');
   // A users.manage holder who is not an admin: refused, whatever it names; on oneself, the self-change words first.
   const moPatch = await api(srv.base, 'PATCH', '/api/users/' + bea.id, { onStage: { clears: false } }, { cookie: mo.cookie });
   assert.deepEqual([moPatch.status, moPatch.body.error], [403, ADMIN_ONLY]);
@@ -166,7 +169,7 @@ test('the admin\'s On stage settings: three switches, off by default and never s
     const r = await api(srv.base, 'PATCH', '/api/users/' + bea.id, { onStage }, { cookie: admin });
     assert.deepEqual([r.status, r.body.error], [400, 'Choose on or off.'], JSON.stringify(onStage));
   }
-  await wait(300);
+  await wait(300);   // time for a refusal's wrongful save to land: a slow one could only pass this falsely, never fail it
   assert.deepEqual(onAccount('bea').onStage, { screens: false, people: true, clears: true }, 'unchanged by each refusal');
   assert.ok(events(beaPage, 'account:changed').length === 0 && beaPage.connected, 'a change of the switches alone ends no socket');
 
@@ -286,7 +289,8 @@ test('a message from On stage also goes where the admin allows: refused in words
   assert.deepEqual(await act(hana, 'page:report', { seq: salOver.seq, state: 'minimised' }), { ok: true });
   const first = await send(gil, { text: 'Is that net?', also: { people: true } });
   assert.deepEqual([first.ok, first.also], [true, { people: { seq: salOver.seq + 1, of: 2 } }], JSON.stringify(first));
-  await wait(300);
+  // pages.json as the line's take saved it (its lane writes a moment after the answer), read whole once it holds it.
+  await until(() => { try { const b = book(); return !!(b.board.line && b.board.line.seq === first.also.people.seq && b.answers[hanaKey] && b.answers[hanaKey].info && b.answers[hanaKey].info.state === 'minimised'); } catch { return false; } }, 4000, 'pages.json holds the line beside the quote');   // read again until the save lands
   assert.deepEqual([book().board.info.seq, book().answers[hanaKey].info.seq, book().answers[hanaKey].info.state, book().board.line.seq], [salOver.seq, salOver.seq, 'minimised', first.also.people.seq]);
   const hanaBack = await page(undefined, 'Hana, back');
   const back0 = await joined(hanaBack, { roomCode: hall, name: 'Hana', role: 'board', uid: hanaJoin.identity });
@@ -317,8 +321,9 @@ test('a message from On stage also goes where the admin allows: refused in words
   }
   assert.equal(lineOf(ria).length + lineOf(sal).length, 0, 'a backstage page is told no card');
   // It supersedes nothing: the operator's quote over the chat, Sal's card beside it for the Board, and Sal's card for Hana
-  // with her answer all stay, in the store and on a page that comes back.
-  await wait(300);
+  // with her answer all stay, in the store and on a page that comes back. The pages are told the line in the turn its
+  // save is asked, so pages.json is waited for by what it holds.
+  await until(() => { try { const b = book(); return !!(b.board.line && b.board.line.seq === line.also.people.seq && b.answers[hanaKey] && b.answers[hanaKey].beside && b.answers[hanaKey].beside.state === 'minimised'); } catch { return false; } }, 4000, 'pages.json holds the line beside the rest');   // read again until the save lands
   const now = book();
   assert.deepEqual([now.board.info.seq, now.board.beside.seq, now.board.line.seq, now.people[hanaKey].beside.seq, now.answers[hanaKey].beside.seq, now.answers[hanaKey].beside.state],
     [quote.seq, salBoard.seq, line.also.people.seq, salHana.seq, salHana.seq, 'minimised']);

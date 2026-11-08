@@ -235,6 +235,9 @@ test('events: copy, then continue, then fresh: each archived whole, what the nod
   assert.deepEqual([ev3.event.name, ev3.event.kind, ev3.archives.length], ['Winter Gala', 'fresh', 3]);
   assert.deepEqual(ev3.earlierLinks.map((l) => [l.key, l.url, l.hall]), [[e.hallA, 'http://127.0.0.1:19', 'Hall 2']], 'an earlier hall\'s Stagewatch link, listed');
   assert.equal(keptOf(settingsOf(dataDir)), keptBefore, 'the node\'s settings unchanged');
+  // The hold in the fresh event's pages.json: the live one went into the archive, and the new event's is written by its
+  // lane a moment after the answer, from the state that already holds the hold.
+  await until(() => { try { return readJson(path.join(dataDir, 'pages.json')).holds; } catch { return null; } }, 3000, 'pages.json written');
   assert.deepEqual(readJson(path.join(dataDir, 'pages.json')).holds.default, HOLD);
   // The token at the laptop makes the first admin account, as at a first start.
   const made = await setupAdmin(base, { username: 'root', name: 'Root Admin', password: PASSWORD });

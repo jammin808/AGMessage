@@ -435,6 +435,66 @@ async function until(fn, ms = 6000, what = 'the condition') {
   throw new Error('timed out waiting for ' + what);
 }
 
+// ---------------------------------------------------------------- what a running server is writing
+/**
+ * A name a save in progress holds: the atomic writer's `<file>.<pid>.tmp` (lib/resilience.js writeFileAtomic), renamed
+ * into place once it is whole, and publishOnce's `<file>.<pid>-<hex>.new`, linked into place and removed. Neither is a
+ * file the folder keeps.
+ */
+const SAVING = /\.\d+\.tmp$|\.\d+-[0-9a-f]{8}\.new$/;
+/**
+ * A folder's files as they stand at a moment no save is under way in it, or null while one is: a listing that names a
+ * save in progress (SAVING), or a name gone between the listing and its read (a `.tmp` renamed away, a `.new` removed),
+ * is a save under way, never a file to read. Its file names, sorted (with `recursive`, those in every folder below too,
+ * '/' between folders), or with `read` an object of each one's text by name: every file when `read` is true, or the
+ * files whose own name `read` (a RegExp) matches, the rest left out. A folder is never one of its files.
+ */
+function filesAtRest(dir, { recursive = false, read = false } = {}) {
+  const names = fs.readdirSync(dir, { recursive }).map(String).sort();
+  if (names.some((f) => SAVING.test(f))) return null;
+  const files = [];
+  const texts = {};
+  for (const f of names) {
+    const p = path.join(dir, f);
+    const name = f.split(path.sep).join('/');
+    const wanted = read === true || (read instanceof RegExp && read.test(path.basename(f)));
+    if (read && !wanted) continue;
+    try {
+      if (wanted) texts[name] = fs.readFileSync(p, 'utf8');
+      else if (fs.statSync(p).isFile()) files.push(name);
+    } catch (e) {
+      if (e.code === 'ENOENT') return null;   // renamed or removed as it was listed: a save under way
+      if (e.code !== 'EISDIR') throw e;   // a folder whose name `read` matched is no file of it
+    }
+  }
+  return read ? texts : files;
+}
+/**
+ * filesAtRest(dir) once a reading is had, polling every 50 ms; with `agreeMs`, once two readings `agreeMs` apart are
+ * alike too, for a test that compares a folder before and after an act, where a lane may still have a write to follow the
+ * first (a record after its store, a twice save's second). Bounded at `ms`: gives up saying what it waited for.
+ */
+async function settledFiles(dir, { recursive = false, read = false, agreeMs = 0, ms = 10000, what = 'a moment no save is under way in ' + dir } = {}) {
+  const end = Date.now() + ms;
+  let last = null;
+  for (;;) {
+    const now = filesAtRest(dir, { recursive, read });
+    if (now && (!agreeMs || (last && JSON.stringify(now) === JSON.stringify(last)))) return now;
+    last = now;
+    if (Date.now() >= end) throw new Error('timed out after ' + ms + ' ms waiting for ' + what);
+    await wait(now && agreeMs ? agreeMs : 50);
+  }
+}
+/**
+ * The JSON lines of a file the server appends whole lines to (the audit log, `audit.jsonl`), each parsed: the text up to
+ * its last newline. An append in flight, read part-way, is read up to its last whole line and the rest at the next read,
+ * never parsed cut short; every whole line is already on disk, so no row is missed, only met a poll later.
+ */
+function wholeLines(file) {
+  const text = fs.readFileSync(file, 'utf8');
+  return text.slice(0, text.lastIndexOf('\n') + 1).split('\n').filter(Boolean).map((l) => JSON.parse(l));
+}
+
 // ---------------------------------------------------------------- the files the source fences read
 /**
  * Every file under `dir` (relative to `root`), in every folder below it but those named in `skip`, whose name matches
@@ -862,7 +922,7 @@ function inviteOf(dataDir, code, role = 'board', n = 0) {
 
 module.exports = {
   inviteOf,
-  stagewatchQuery, ROOT, REPO, TOKEN, readSource, freePort, freeUdpPort, wait, until, startServer, stopServer, restartServer, api, connect, emit, answer, once, pngOf, fakeStagewatch, fakeNode,
+  stagewatchQuery, ROOT, REPO, TOKEN, readSource, freePort, freeUdpPort, wait, until, SAVING, filesAtRest, settledFiles, wholeLines, startServer, stopServer, restartServer, api, connect, emit, answer, once, pngOf, fakeStagewatch, fakeNode,
   filesUnder, handlerFiles, pageScripts,
   FIXTURE_KEY, OTHER_KEY, HOST, auditKeys, recordsOf, auditLog, serverKey, serverAudit, storesKeys, storesKid, storesOf, openStores, setupAdmin, resealStore, sealStore, signInHash, chainOf, keyedChainOf, keyedLogWithPoints, auditMeter, acceptAll, brief,
   readZip, unzipTo, SEED_WORDS, sheetParts,

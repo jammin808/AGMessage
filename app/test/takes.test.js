@@ -932,6 +932,8 @@ test('the clock or countdown: the admin\'s choice and lock for a guest or an acc
   // An account is made with no clock (create neither picks nor stores one): their choice.
   const bea = await account('bea', 'Bea Board', 'staff', { halls: [hall], board: [hall], clock: { show: 'off', locked: true } });
   assert.deepEqual(bea.user.clock, NONE, 'made with none, whatever the make asked');
+  // The account as its make saved it (the accounts' lane writes a moment after the answer), then what it keeps.
+  await until(() => !!onAccount('bea'), 4000, 'accounts.json holds Bea');
   assert.equal(Object.hasOwn(onAccount('bea'), 'clock'), false, 'and none kept');
   const tom = await account('tom', 'Tom Tech', 'tech', { halls: [hall] });
   // An account a manager may reach (no more rights or halls than the manager's), whose clock holds no lock.
@@ -1031,6 +1033,9 @@ test('the clock or countdown: the admin\'s choice and lock for a guest or an acc
   assert.deepEqual([moNull.status, moNull.body.error], [403, ADMIN_LOCK], 'clearing a lock is a change of it');
   const moPick = await api(srv.base, 'PATCH', '/api/users/' + bea.id, { clock: { show: 'time', locked: true } }, { cookie: mo.cookie });
   assert.deepEqual([moPick.status, moPick.body.changed, moPick.body.user.clock], [200, ['clock'], { show: 'time', locked: true }], 'a choice, the lock named as it stands');
+  // On disk before the refusals below: the choice's save lands a moment after its answer, and every later save of the
+  // accounts carries it, so what they leave is read against the file that holds it, never the one before it.
+  await until(() => { const a = onAccount('bea'); return !!a && !!a.clock && a.clock.show === 'time' && a.clock.locked === true; }, 4000, 'accounts.json keeps the choice');
   // A lock put on a clock that holds none is a change of it too, refused whole: the account keeps its own choice.
   const moAdds = await api(srv.base, 'PATCH', '/api/users/' + cy.id, { clock: { show: 'time', locked: true } }, { cookie: mo.cookie });
   assert.deepEqual([moAdds.status, moAdds.body.error], [403, ADMIN_LOCK]);
@@ -1050,7 +1055,7 @@ test('the clock or countdown: the admin\'s choice and lock for a guest or an acc
   }
   const unlockedNone = await api(srv.base, 'PATCH', '/api/users/' + bea.id, { clock: { show: null } }, { cookie: admin });
   assert.deepEqual([unlockedNone.status, unlockedNone.body.error], [400, 'Choose one to lock it.']);
-  await wait(300);
+  await wait(300);   // time for a refusal's wrongful save to land: a slow one could only pass this falsely, never fail it
   assert.deepEqual(onAccount('bea').clock, { show: 'time', locked: true }, 'unchanged by each refusal');
   await wait(300);
   assert.ok(heard.get(beaPage).every(([ev]) => ev !== 'account:changed') && beaPage.connected, 'a clock-only change ends no socket');

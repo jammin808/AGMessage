@@ -95,7 +95,10 @@ test('halls end to end: two Stagewatches, the board, help', async (t) => {
     const s = await emit(ctl, 'hall:settings', { code: hallA });
     assert.equal(s.stagewatch.keySet, true);
     assert.equal(s.stagewatch.url, 'http://' + swA.url);
-    await wait(300);   // the settings lane writes within 100 ms
+    // The settings as the configures' save wrote them (its lane writes a moment after each is answered), waited for by what
+    // the file holds, never by the clock: it is renamed into place whole, so a read is the old file or the new one.
+    const settingsOnDisk = () => { try { return JSON.parse(fs.readFileSync(path.join(srv.dataDir, 'settings.json'), 'utf8')); } catch (e) { if (e.code === 'ENOENT') return null; throw e; /* not written yet */ } };
+    await until(() => { const st = settingsOnDisk(); return !!(st && st.hallStagewatch && st.hallStagewatch[hallA] && st.hallStagewatch[hallB]); }, 4000, 'settings.json holds both halls\' links');
     const settingsFile = fs.readFileSync(path.join(srv.dataDir, 'settings.json'), 'utf8');
     assert.ok(!settingsFile.includes(KEY_A), 'no clear key on disk');
     assert.match(settingsFile, /hallStagewatch/);
@@ -278,8 +281,8 @@ test('halls end to end: two Stagewatches, the board, help', async (t) => {
   await t.test('a hall back on the default: its own link stops and its key is forgotten', async () => {
     assert.ok((await emit(ctl, 'hall:configure', { code: hallB, stagewatchUrl: '' })).ok);
     await until(() => !swB.connected, 6000, 'hall B\'s link closed');
-    await wait(300);
-    assert.ok(!fs.readFileSync(path.join(srv.dataDir, 'settings.json'), 'utf8').includes(hallB), 'no settings left for hall B');
+    // No settings left for hall B, once the configure's save has landed (its lane writes a moment after the answer).
+    await until(() => !fs.readFileSync(path.join(srv.dataDir, 'settings.json'), 'utf8').includes(hallB), 4000, 'settings.json saved without hall B');
     const s = await emit(ctl, 'hall:settings', { code: hallB });
     assert.equal(s.stagewatch.url, '');
     assert.equal(s.stagewatch.keySet, false);

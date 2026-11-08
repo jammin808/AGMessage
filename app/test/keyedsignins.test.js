@@ -25,8 +25,18 @@ async function kill(srv) {
   srv.child.kill('SIGKILL');
   await gone;
 }
-/** The lanes' waits (the sessions' 500 ms, the record's 200 ms) gone by, so a kill finds every save on disk. */
-const settled = () => h.wait(900);
+/**
+ * Wait until each file of `dir` named holds what its check asks: before a kill, which saves nothing, so that the kill
+ * finds the act's saves on disk. A sign-in's or an account's save lands a moment after its answer (its lane's wait: the
+ * sessions' 500 ms, the token sign-ins' 100 ms, the accounts' 50 ms), and a file not there yet (a fresh folder's first
+ * save) is waited for too. Every store is renamed into place whole, so each read is the old file or the new one. A stop
+ * (h.stopServer, h.restartServer) saves every lane itself, so nothing waits before one.
+ */
+const onDisk = (dir, checks, what) => h.until(() => Object.entries(checks).every(([f, ok]) => {
+  try { return ok(JSON.parse(read(path.join(dir, f)))); } catch (e) { if (e.code === 'ENOENT') return false; throw e; /* not written yet: a fresh folder's first save */ }
+}), 6000, what);
+/** Sign-ins of a store's file made at or after `t` (the file's own `created` stamps). */
+const madeSince = (d, t) => d.sessions.filter((s) => s.created >= t).length;
 const start = (srv, env = {}) => h.startServer({ AGM_DATA_DIR: srv.dataDir, PORT: String(srv.port), ...env });
 /** Whether a socket with this cookie is the admin (the dashboard's own verb answers it). */
 async function socketAdmin(base, cookie, headers = {}) {
@@ -68,9 +78,10 @@ test('a token sign-in written into admin-sessions.json is nobody: with the file\
     }],
   ];
   for (const [what, plant] of plants) {
+    const t0 = Date.now();
     const genuine = await tokenLogin(srv.base);
     assert.equal((await adminMe(srv.base, genuine)).ok, true);
-    await settled();
+    await onDisk(srv.dataDir, { 'admin-sessions.json': (d) => madeSince(d, t0) >= 1 }, what + ': the token sign-in on disk');
     await kill(srv);
     const S = crypto.randomBytes(24).toString('hex');
     fs.writeFileSync(file, plant(JSON.parse(read(file)), S));
@@ -92,11 +103,20 @@ test('a token sign-in written into admin-sessions.json is nobody: with the file\
 test('an account\'s sign-in written into sessions.json is nobody, a genuine one retargeted to the admin ends with its file, and a restart keeps the genuine ones', async (t) => {
   let srv = await h.startServer();
   t.after(() => h.stopServer(srv.child));
+  const t0 = Date.now();
   const ana = (await h.setupAdmin(srv.base)).cookie;
   assert.equal((await h.api(srv.base, 'POST', '/api/users', { username: 'sam', name: 'Sam', role: 'staff', password: STAFF_PW }, { cookie: ana })).status, 200);
   const sam = (await login(srv.base, 'sam', STAFF_PW)).cookie;
   const tok = await tokenLogin(srv.base);
-  await settled();
+  // On disk before the kill: Sam's account, both account sign-ins and the token's, and the set's record, without which
+  // a fresh folder's first saves would open unrecorded rather than ok.
+  await onDisk(srv.dataDir, {
+    'accounts.json': (d) => d.users.some((u) => u.username === 'sam'),
+    'sessions.json': (d) => madeSince(d, t0) >= 2,
+    'admin-sessions.json': (d) => madeSince(d, t0) >= 1,
+  }, 'the account and the three sign-ins on disk');
+  const storeRecords = path.join(srv.dataDir + '-keys', 'stores');
+  await h.until(() => fs.existsSync(storeRecords) && fs.readdirSync(storeRecords).some((x) => /^set-[0-9a-f]{32}\.json$/.test(x)), 6000, 'the set\'s record beside the key');
   // A restart under the same token: every genuine sign-in kept, each socket the admin it was.
   await kill(srv);
   srv = await start(srv);
@@ -105,8 +125,9 @@ test('an account\'s sign-in written into sessions.json is nobody, a genuine one 
   assert.deepEqual([await socketAdmin(srv.base, ana), await socketAdmin(srv.base, tok)], [true, true]);
   const states = (await h.api(srv.base, 'GET', '/api/health')).body.signins;
   assert.deepEqual([states.accounts.state, states.sessions.state, states.adminSessions.state], ['ok', 'ok', 'ok']);
-  // The admin's sign-in planted as 0.5.1 kept it: {h: sha256(T), uid: the admin's, epoch, created, seen}.
-  await settled();
+  // The admin's sign-in planted as 0.5.1 kept it: {h: sha256(T), uid: the admin's, epoch, created, seen}, into the file
+  // that holds the genuine ones it ends with.
+  await onDisk(srv.dataDir, { 'sessions.json': (d) => madeSince(d, t0) >= 2 }, 'the genuine sign-ins on disk');
   await kill(srv);
   const file = path.join(srv.dataDir, 'sessions.json');
   const data = JSON.parse(read(file));
@@ -118,16 +139,18 @@ test('an account\'s sign-in written into sessions.json is nobody, a genuine one 
   assert.equal((await h.api(srv.base, 'GET', '/api/auth/me', undefined, { cookie: ana })).body.account, null, 'and the file\'s genuine ones ended with it');
   assert.match((await h.api(srv.base, 'GET', '/api/health')).body.signins.sessions.words, /^\d+ sign-ins? ended: changed after AGMessage saved them/);
   // A Staff account's own genuine sign-in with its uid and epoch changed to the admin's: the file ends whole.
+  const t1 = Date.now();
   const sam2 = (await login(srv.base, 'sam', STAFF_PW)).cookie;
-  await settled();
+  await onDisk(srv.dataDir, { 'sessions.json': (d) => madeSince(d, t1) >= 1 }, 'Sam\'s new sign-in on disk');
   await kill(srv);
   fs.writeFileSync(file, read(file).replace(/"uid":"[^"]+"/, '"uid":"' + admin.id + '"'));
   srv = await start(srv);
   assert.equal((await h.api(srv.base, 'GET', '/api/auth/me', undefined, { cookie: sam2 })).body.account, null, 'retargeted: nobody, never the admin');
   // A new token: the token's sign-in ends silently (its tag is another token's), the account's kept.
+  const t2 = Date.now();
   const ana2 = (await login(srv.base, 'ana', ANA.password)).cookie;
   const tok2 = await tokenLogin(srv.base);
-  await settled();
+  await onDisk(srv.dataDir, { 'sessions.json': (d) => madeSince(d, t2) >= 1, 'admin-sessions.json': (d) => madeSince(d, t2) >= 1 }, 'Ana\'s and the token\'s new sign-ins on disk');
   await kill(srv);
   srv = await start(srv, { ADMIN_TOKEN: 'anothertoken0002' });
   assert.deepEqual([(await adminMe(srv.base, tok2)).ok, (await h.api(srv.base, 'GET', '/api/auth/me', undefined, { cookie: ana2 })).body.account.username], [false, 'ana']);
@@ -157,7 +180,6 @@ test('accounts.json written into: held aside as changed until the token at the l
   t.after(() => h.stopServer(srv.child));
   const ana = (await h.setupAdmin(srv.base)).cookie;
   assert.equal((await h.api(srv.base, 'POST', '/api/users', { username: 'sam', name: 'Sam', role: 'staff', password: STAFF_PW }, { cookie: ana })).status, 200);
-  await settled();
   await h.stopServer(srv.child);
   const file = path.join(srv.dataDir, 'accounts.json');
   const eve = { id: 'aeve00000001', username: 'eve', name: 'Eve', role: 'admin', halls: [], grant: [], revoke: [], disabled: false, mustChange: false, pw: await acc.hashPassword('the writer chose this'), pwSetAt: 1, epoch: 1, createdAt: 1, createdBy: '', lastLoginAt: 0 };
@@ -229,7 +251,6 @@ test('accounts.json written into: held aside as changed until the token at the l
   const users = (await h.api(base, 'GET', '/api/users', undefined, { cookie: ana })).body;
   assert.match(users.leftOut, /^1 account was left out on \d+ \w+ and is kept aside: the token at the laptop may adopt them$/, 'the Accounts page tells an admin');
   // A restart keeps them, ok; the one left out is offered again.
-  await settled();
   srv = await h.restartServer(srv);
   const states = (await h.api(srv.base, 'GET', '/api/health')).body.signins;
   assert.deepEqual([states.accounts.state, states.accounts.held], ['ok', 1]);
@@ -249,7 +270,6 @@ test('another machine: a folder run under one key folder and started under anoth
   const ana = (await h.setupAdmin(srv.base)).cookie;
   assert.equal((await h.api(srv.base, 'POST', '/api/users', { username: 'sam', name: 'Sam', role: 'staff', password: STAFF_PW }, { cookie: ana })).status, 200);
   await tokenLogin(srv.base);
-  await settled();
   await h.stopServer(srv.child);
   const moved = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-e2e-'));
   for (const f of fs.readdirSync(srv.dataDir)) if (fs.statSync(path.join(srv.dataDir, f)).isFile()) fs.copyFileSync(path.join(srv.dataDir, f), path.join(moved, f));
@@ -281,7 +301,6 @@ test('another machine: a folder run under one key folder and started under anoth
   assert.equal((await h.api(base, 'GET', '/api/auth/me')).body.setup, true, 'the first admin account may be made now');
   assert.equal((await h.api(base, 'POST', '/api/setup', ANA)).status, 401, 'never from loopback alone');
   assert.equal((await h.api(base, 'POST', '/api/setup', { token: h.TOKEN, ...ANA })).status, 200, 'with the token typed');
-  await settled();
   srv = await h.restartServer(srv);
   assert.deepEqual([(await h.api(srv.base, 'GET', '/api/health')).body.signins.accounts.state, (await login(srv.base, 'ana', ANA.password)).status], ['ok', 200], 'a restart keeps it ok');
 });
@@ -306,7 +325,9 @@ test('the first start on 0.5.1 files: the Staff accounts sign in at once, the ad
   assert.ok(rowsOf(dataDir).some((e) => e.action === 'accounts.keyed' && /^3 accounts from AGMessage 0\.5\.1 keyed as accounts\.json held them; waiting for the token: ana$/.test(e.words)));
   assert.match(srv.out(), /Accounts: {4}3 accounts from AGMessage 0\.5\.1 are keyed to this laptop from here on/);
   assert.ok(fs.existsSync(path.join(dataDir + '-keys', 'stores', 'keyed.json')));
-  await h.until(() => fs.existsSync(opened), 4000, 'the opener');
+  // The opener's line whole: its preload appends it, which makes the file first and fills it after, so the name alone
+  // is no line yet.
+  await h.until(() => { try { return read(opened).includes('\n'); } catch (e) { if (e.code === 'ENOENT') return false; throw e; /* not made yet */ } }, 4000, 'the opener\'s line');
   assert.match(JSON.parse(read(opened).split('\n')[0]).args[0], /\/admin$/, 'the opener opens /admin while accounts wait');
 });
 
@@ -316,7 +337,6 @@ test('no secret: the keys, the token, a session token and a token sign-in\'s id 
   const ana = (await h.setupAdmin(srv.base)).cookie;
   assert.equal((await h.api(srv.base, 'POST', '/api/users', { username: 'sam', name: 'Sam', role: 'staff', password: STAFF_PW }, { cookie: ana })).status, 200);
   const tok = await tokenLogin(srv.base);
-  await settled();
   await h.stopServer(srv.child);
   h.resealStore(srv.dataDir, 'accounts', (f) => { f.users[0].name = 'Ana (changed by a key holder)'; });
   fs.writeFileSync(path.join(srv.dataDir, 'accounts.json'), read(path.join(srv.dataDir, 'accounts.json')).replace('changed by a key holder', 'changed by a writer'));
@@ -325,14 +345,18 @@ test('no secret: the keys, the token, a session token and a token sign-in\'s id 
   const view = (await h.api(srv.base, 'GET', '/api/accounts/held', undefined, { cookie: tok2 })).body;
   const r = await h.api(srv.base, 'POST', '/api/accounts/adopt', { token: h.TOKEN, digest: view.digest, adopt: view.accounts.map((a) => ({ id: a.ref, reset: true })), confirm: view.accounts.filter((a) => a.confirm).map((a) => a.ref) });
   assert.equal(r.status, 200, JSON.stringify(r.body));
-  await settled();
   const K = h.storesKeys(h.serverKey(srv.dataDir))();
   const values = [h.TOKEN, ...Object.values(K).flatMap((k) => [k.toString('hex'), k.toString('base64')]), ...r.body.passwords.map((p) => p.password)];
   for (const c of [ana, tok, tok2]) { const v = decodeURIComponent(c.split('=')[1]); values.push(v, sha256(v)); }
+  // Every store, record and row, read once the adoption's last saves have landed (the sessions' kept sign-ins, its set
+  // record): at a moment no save is under way in either folder (no `<file>.<pid>.tmp` listed, none renamed away as it
+  // is read) and two readings 250 ms apart alike, so no name is read that a write is still renaming.
   const texts = [];
-  const walk = (dir) => { for (const f of fs.readdirSync(dir)) { const p = path.join(dir, f); if (fs.statSync(p).isDirectory()) walk(p); else if (/\.(json|jsonl|bak)$/.test(f)) texts.push([p, read(p)]); } };
-  walk(srv.dataDir);
-  walk(path.join(srv.dataDir + '-keys', 'stores'));
+  const STORE_TEXT = /\.(json|jsonl|bak)$/;
+  for (const dir of [srv.dataDir, path.join(srv.dataDir + '-keys', 'stores')]) {
+    const kept = await h.settledFiles(dir, { recursive: true, read: STORE_TEXT, agreeMs: 250, what: 'the adoption\'s saves in ' + dir });
+    for (const [f, text] of Object.entries(kept)) texts.push([path.join(dir, f), text]);
+  }
   for (const route of ['/api/health', '/api/auth/me', '/api/admin/me', '/api/accounts/held']) texts.push([route, JSON.stringify((await h.api(srv.base, 'GET', route, undefined, { cookie: tok2 })).body)]);
   assert.ok(texts.some(([p]) => /accounts\.held-/.test(p)) && texts.some(([p]) => /set-[0-9a-f]{32}\.json$/.test(p)), 'the held copy and the records are searched');
   for (const [where, text] of texts) for (const v of values) assert.ok(!text.includes(v), where + ' holds a secret (' + v.slice(0, 6) + '…)');
@@ -350,7 +374,8 @@ test('events: an archive claims and pins its accounts, a continue brings them ba
   const name = r.body.archive;
   const records = path.join(srv.dataDir + '-keys', 'stores');
   const setOf = () => { const f = fs.readdirSync(records).find((x) => /^set-[0-9a-f]{32}\.json$/.test(x)); return JSON.parse(read(path.join(records, f))); };
-  await settled();
+  // The record as the act left it: the claim is cleared once the next event's saves are flushed, and the record written at
+  // once (KeyedStores.clearClaim), before the answer, so it is read with no wait.
   let rec = setOf();
   assert.deepEqual([rec.archiving, Object.keys(rec.archived)], [null, [name]], 'pinned, and the claim cleared once the next event\'s saves landed');
   const archived = JSON.parse(read(path.join(srv.dataDir, 'archive', name, 'accounts.json')));
@@ -364,7 +389,6 @@ test('events: an archive claims and pins its accounts, a continue brings them ba
   assert.equal((await login(base, 'root', ANA.password)).status, 200, 'the continued event\'s account signs in');
   assert.equal((await h.api(base, 'GET', '/api/health')).body.signins.accounts.state, 'ok');
   // A .partial written into data\archive\ naming a continue of an older archive, then a restart: set aside, nothing moved.
-  await settled();
   await h.stopServer(srv.child);
   const partial = path.join(srv.dataDir, 'archive', '.2026-10-31T14-02-00-000Z.partial');
   fs.mkdirSync(partial, { recursive: true });
@@ -376,7 +400,6 @@ test('events: an archive claims and pins its accounts, a continue brings them ba
   assert.equal((await h.api(srv.base, 'GET', '/api/health')).body.event.unclaimed, 1);
   assert.equal((await login(srv.base, 'root', ANA.password)).status, 200, 'the live accounts open ok');
   // Accounts held aside: Archive this event… waits.
-  await settled();
   await h.stopServer(srv.child);
   fs.writeFileSync(path.join(srv.dataDir, 'accounts.json'), read(path.join(srv.dataDir, 'accounts.json')).replace('"root"', '"rooo"'));
   srv = await start(srv);
@@ -396,7 +419,6 @@ test('events after a move: an event archived before the folder moved (a portable
   const r = await h.api(srv.base, 'POST', '/api/event/archive', { next: { kind: 'fresh' }, name: 'Autumn Forum', current: 'Spring Summit', reason: 'testing' }, { cookie: root });
   assert.equal(r.status, 200, JSON.stringify(r.body));
   const name = r.body.archive;
-  await settled();
   await h.stopServer(srv.child);
   // The folder copied to a new path and started there under the same key folder: a move, its set forked.
   const moved = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-moved-'));

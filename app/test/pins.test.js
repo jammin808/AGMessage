@@ -173,9 +173,12 @@ test('pins for the room or for me: every seat pins for itself, kept by its key a
   await t.test('a deleted message\'s id is dropped at the person\'s next pin write; 50 a room, the 51st refused', async () => {
     const doomed = await emit(ana, 'message', { type: 'text', text: 'Wrong room, sorry' });
     assert.deepEqual((await emit(obi, 'pin:mine', { messageId: doomed.id, on: true })).ids, [doomed.id]);
+    // On disk before the delete: the pin's save lands a moment after its answer, so what the delete leaves is read against
+    // the file that holds the pin.
+    await until(() => { const k = kept(); return !!k && ((k['u:' + obiJoin.uid] || {})[hall] || []).includes(doomed.id); }, 4000, 'the pin kept');
     assert.deepEqual(await emit(ana, 'delete', { messageId: doomed.id }), { ok: true });
     // Kept until then, but never told: a page that joins again is told only the pins whose messages the room holds.
-    await wait(200);
+    await wait(200);   // time for a wrongful save of the delete to land: a slow one could only pass this falsely, never fail it
     assert.deepEqual(kept()['u:' + obiJoin.uid], { [hall]: [doomed.id] });
     const obiAgain = await page(undefined, 'Obi, reloaded');
     assert.deepEqual((await joined(obiAgain, { roomCode: hall, name: 'Obi', role: 'observer', uid: obiJoin.identity })).pins, [], 'a gone message\'s id is not told');

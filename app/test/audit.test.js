@@ -1109,13 +1109,18 @@ test('end to end: no secret in any audit file, record, health, the rows, /api/ad
   const forms = (b) => [b.toString('hex'), b.toString('base64'), b.toString('base64url'), b.toString('utf8')].filter((x) => x.length >= 12);
   const texts = [];
   for (const f of fs.readdirSync(srv.dataDir).filter((x) => /^audit/.test(x))) texts.push(['data/' + f, fs.readFileSync(path.join(srv.dataDir, f), 'utf8')]);
+  // The records beside the key, read at a moment the head lane has no write in hand: it writes `<name>.<pid>.tmp` and
+  // renames it into place, so they are read only when none is listed and none vanishes as it is read.
   const records = path.join(srv.dataDir + '-keys', 'audit');
-  for (const f of fs.readdirSync(records)) texts.push(['records/' + f, fs.readFileSync(path.join(records, f), 'utf8')]);
+  const recorded = await h.settledFiles(records, { read: true, ms: 5000, what: 'the records beside the key, no save under way' });
+  for (const [f, text] of Object.entries(recorded)) texts.push(['records/' + f, text]);
   for (const [what, url, cookie] of [['health', '/api/health', tok], ['rows', '/api/audit?limit=500', admin], ['me', '/api/admin/me', tok], ['check', '/api/audit/verify', admin]]) {
     texts.push([what, JSON.stringify((await h.api(base, 'GET', url, undefined, { cookie })).body)]);
   }
   // An export, by the token and by the admin account: its header and every member, uncompressed.
-  const sent = () => entries(path.join(srv.dataDir, 'audit.jsonl')).filter((e) => e.action === 'audit.export.sent').length;
+  // The server appends whole lines, and the export's end is appended as its stream ends, while this polls for it: an
+  // append in flight is read up to its last newline (h.wholeLines), the rest at the next poll.
+  const sent = () => h.wholeLines(path.join(srv.dataDir, 'audit.jsonl')).filter((e) => e.action === 'audit.export.sent').length;
   for (const cookie of [tok, admin]) {
     const before = sent();
     const r = await fetch(base + '/api/audit/export', { method: 'POST', headers: { cookie } });

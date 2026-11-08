@@ -7131,6 +7131,24 @@ laptop and no Board device walked)
   test read the records beside the key 400 ms after the running server's last write, and on Windows met the head lane's
   write still in progress (its `.tmp`, renamed away as it was read): it now reads them once no write is in progress and
   two reads 250 ms apart agree, before the second start and after it. Nothing that ships changed.
+- The tests that read a file a running server writes wait for what they read, never a fixed time, and never read a
+  save in progress. CI's run 104 (Node 26) found one more: the export test listed the data and key folders and stat'ed
+  each name, and met a head record's `.tmp` renamed into place between the two (ENOENT). A reading of every test that
+  reads a store, a record or the audit log while its server runs found the rest, each with nothing it waited on that
+  meant the write had landed, and a run with every write lane held back 0.6 to 1 s found two more. `test/helpers.js`
+  reads a folder only at a moment no save is under way in it (`filesAtRest`, `settledFiles`: no `<file>.<pid>.tmp` or
+  `.new` listed, no name gone as it is read, and for a before and after two readings alike) and an appended log up to
+  its last newline (`wholeLines`: an append read part-way is read whole a poll later). The export test, the audit log's
+  no-secret scan, the second start's records and the keyed stores' no-secret walk read their folders through them, the
+  export test leaving out the peaks, which the server saves on a 5 s window of its own; the export's, a download's and
+  the machine events' rows are polled through `wholeLines`. The hall test waits for `settings.json` to hold both halls' links, then none of
+  hall B's; the On stage and clock refusals for the PATCH or the choice before them to be in `accounts.json`, and the
+  clock test for a new account to be there before it reads what the account keeps; the Board's line and the twenty
+  confidential waits for `pages.json` to hold them, and the hold's polls read no `pages.json` as none yet rather than
+  throwing; the fresh event for its new `pages.json`; a pin for the file to hold it before its message is deleted; the
+  keyed stores' kills for the act's account, sign-ins and set record on disk (a stop saves every lane, so nothing sleeps
+  before one any more); the watchdog's signal test for the pid the file holds, not its name; and the opener's test for
+  its whole line. Nothing that ships changed.
 - The admin page's Accounts held aside keeps each account's row as it draws its bars again (at every answer of the
   settings, every 5 s, and at each tick), as its rooms, links and event rows already were: the row, its box, its lines
   and its ⋯ are kept by the account's key and drawn again in place. It threw them away and made them again, so a
