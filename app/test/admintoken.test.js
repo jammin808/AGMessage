@@ -281,7 +281,9 @@ test('the first admin account is made only with the token: typed at the laptop, 
   r = await h.api(srv.base, 'POST', '/api/setup', { ...ANA, token: 'wrongtoken5' });
   assert.deepEqual([r.status, r.body.error], [429, 'Too many wrong tokens — wait a minute.']);
   assert.equal(rows('login.token.fail').length, 5, 'not written while the lock holds');
-  assert.equal((await h.api(srv.base, 'POST', '/api/admin/login', { token: h.TOKEN })).status, 429, 'the token sign-in waits for the lock, as it did');
+  // The token sign-in judges the typed token first too: a wrong one there is refused while the lock holds, not written.
+  assert.equal((await h.api(srv.base, 'POST', '/api/admin/login', { token: 'wrongtoken6' })).status, 429, 'a wrong token at the token sign-in, while the lock holds');
+  assert.equal(rows('login.token.fail').length, 5, 'and not written');
   r = await h.api(srv.base, 'POST', '/api/setup', { ...ANA, token: ' ' + h.TOKEN.toUpperCase() + ' ' });
   assert.equal(r.status, 200, 'the right token, typed while the lock holds, is taken: ' + JSON.stringify(r.body));
   assert.match(r.cookie, /^agm_s=/);

@@ -68,6 +68,8 @@ reliability (`docs/DESIGN.md` says which practice lives where). Every build is v
   it and every event to a page that hears it (one no page uses yet only by an allow-list row with its reason, which fails
   once a page uses it), and fails on a socket listener in any other shipped file or in a form the
   fuzz does not read.
+- **A store that holds a way in** (accounts, sign-ins) is keyed through `lib/keyedstore.js`, and only ENOENT means it is
+  absent: a file that fails its check is never trusted record by record, and one that cannot be read is never written over.
 - **Every store** on disk goes through a `WriteLane` that is in `saveLanes()` (flushed at stop and crash, named in
   health; health's `saves.built` counts the lanes made and not closed (a removed hall's stage record closes its lane) and
   `saves.named` the distinct lanes in that list, and a test holds them equal); one server per data folder (the folder
@@ -196,6 +198,7 @@ A sentence and the files; the detail is the code's and the CHANGELOG's. A test n
 | Rights and roles (pure), checked per room behind a fence; a code guest's rights; the escalation fence | `app/lib/rbac.js`; tests `accounts`, `halls` |
 | What a seat may do on its page, on the server (the seat read before any right; a Board account held to On stage where its halls seat it) | `app/server.js` (`allowed()`); test `onstage` |
 | Accounts (with their side rooms, On stage halls and chat view), password hashing, sessions, their routes; the Accounts page (its tree of halls and rooms) | `app/lib/accounts.js`, `app/lib/http-accounts.js`, `app/public/users.js`; test `accounts` |
+| The keyed stores: the accounts and both kinds of sign-in kept in files keyed to the machine key, each save recorded outside the data folder, what a start decides of a folder, the accounts held aside and adopted with the token at the laptop (Admin → Accounts held aside), and an event archive's claim and pins | `app/lib/keyedstore.js`, `app/lib/accounts.js`, `app/lib/http-accounts.js`, `app/public/admin-plus.js`, `app/public/join.js`, `app/public/catalog.js` (kinds `accounts`, `heldAccount`); tests `keyedstore`, `keyedsignins` |
 | The audit log, chained with a key; its check and Accept; its work counted in tests, never timed | `app/lib/audit.js`, `app/test/audit-preload.js` |
 | The audit log's rules that need no key, shared with a checker on another computer | `app/verify/auditrules.js` |
 | The audit log's signed export and the zip it streams | `app/lib/auditexport.js`, `app/lib/zip.js`, `app/public/audit-export.js` |

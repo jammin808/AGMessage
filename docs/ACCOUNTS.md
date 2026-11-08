@@ -570,8 +570,8 @@ task, so either one there stops it with code 3.
   password ends the wait, and a signed-in person changing their own password counts only their own tries. An unknown
   username, a wrong password and a turned-off account take the same time and get the same words.
 - A session is a random 256-bit token in a cookie the page's script cannot read (`HttpOnly`), never sent by another
-  site (`SameSite=Strict`), only over HTTPS when the page is (`Secure`, through the Cloudflare tunnel too). Only its hash
-  is stored. Idle for 14 hours or 7 days old, it ends; a page left open counts as in use, so a hall or the halls board
+  site (`SameSite=Strict`), only over HTTPS when the page is (`Secure`, through the Cloudflare tunnel too). Only its keyed
+  hash is stored (Keyed to this laptop, below). Idle for 14 hours or 7 days old, it ends; a page left open counts as in use, so a hall or the halls board
   open all day stays signed in. An account keeps its 20 newest sessions (a 21st sign-in ends its oldest), so one account
   signing in again and again never signs anyone else out. Signing out ends that session and closes the pages open on it;
   changing a password, turning an account off or "sign out everywhere" ends every session of that account at once — and
@@ -588,6 +588,91 @@ task, so either one there stops it with code 3.
   the Cloudflare tunnel" (Admin → Accounts and access); turning it off ends admin rights on every page open through the
   tunnel at once. Such a sign-in is answered as a wrong password is, so the tunnel never tells a stranger that a password
   was right.
+
+## Keyed to this laptop
+
+The accounts (`accounts.json`), their sign-ins (`sessions.json`) and the token's sign-ins at the laptop
+(`admin-sessions.json`) are keyed to this laptop's machine key, which lives outside the data folder (`lib/keyedstore.js`).
+Someone who can write the data folder and cannot read the key folder can no longer plant a sign-in, mint or change an
+account, or put an older copy back unseen.
+
+- **Each file is keyed whole.** It is the store's JSON with its save's fields first (`v: 2`, the store, the folder's set,
+  the save's number `gen`, the key's id, the time) and an HMAC-SHA256 of every byte before it last, under a key of its own
+  derived from the machine key. A changed byte, a repeated key or an added space fails it, and no record of a file that
+  fails is trusted on its own: a sign-in file that fails ends all its sign-ins (each person signs in once more); an
+  accounts file that fails is **held aside** whole.
+- **A sign-in is kept by its keyed hash** (an HMAC of its secret under a key of its own), never by its SHA-256: a record in
+  0.5.1's form never resolves. The token's sign-ins are tied to the token by a keyed tag, so the file gives no offline test
+  of a guessed token. A sign-in stamped more than 5 minutes ahead of now is dropped at load.
+- **A record outside the data folder** (`<keyDir>\stores\`: `%LOCALAPPDATA%\AGMessage\stores` portable,
+  `%ProgramData%\AGMessage\keys\stores` installed) names each store's newest save, the one before it, and the floor below
+  which a save that took a right away makes an older one; which set of saves this data folder holds; the set this laptop
+  saved last (`latest.json`); and that this laptop has keyed a folder (`keyed.json`). Each record carries its own HMAC.
+- **One save behind is loaded, and said** (△): a power cut can lose a store's last rename while its record's later write
+  survives. A save that takes a right away or ends a sign-in (an account made, changed, its password set, signed out
+  everywhere, removed or adopted; a sign-out) is written twice and its record at once, so the copy from before it reads as
+  an older save (✕), held aside.
+- **What a restart keeps.** A watchdog restart (a crash, a hang, a wake from sleep) keeps the accounts, the account
+  sign-ins and the token's sign-ins. A new start of AGMessage keeps the accounts and their sign-ins, and ends the token's
+  (a new token). A portable upgrade from the copy this laptop ran last keeps everything but the token's sign-ins (the set
+  forks: the folder takes a set of its own, and the old copy goes on with its own); one from a copy this laptop did not run
+  last holds the accounts aside (`other`) until the token adopts them. The installed import carries `stores\` with the
+  keys, so the installed node's first start is such a move, and its verify checks that no account is held aside and no
+  account's sign-in ends there.
+- **The first start of 0.6.0 on this laptop** keys 0.5.1's accounts as accounts.json held them, and ends 0.5.1's sign-ins
+  (each person signs in once more). The accounts that can manage AGMessage (`users.manage`, `settings.manage`,
+  `audit.export`; the admin role) or reach past their halls (`halls.manage`, `audit.read`; the project manager role) wait
+  once for the person at the laptop, as does every account a folder holds twice: refused at sign-in as an unknown name is,
+  until they are opened at Admin → Accounts held aside with the token. Only once per laptop: after it, a plain folder is
+  held aside whole (`plain`). Its writes go the accounts first: the sign-in files are saved keyed only once the accounts'
+  keyed save has landed, and nothing is recorded outside the data folder until every one of them has (health says the
+  record waits), so a stop part way leaves a first start again, never a plain `accounts.json` beside a keyed laptop. A copy
+  of the accounts that wait is kept only where some wait.
+- **A folder from another computer or Windows account** (or a rebuilt profile) holds its accounts aside (`elsewhere`): this
+  laptop cannot check them. Guests, screens and the token go on; account sign-ins are refused with "Accounts are not open
+  on this AGMessage yet. The admin at the AGMessage laptop opens them with its token.", and no first admin account is made.
+- **Adopting them** (Admin → Accounts held aside, drawn for the token at the laptop, signed in by this run): the copy held
+  aside (`accounts.held-<time>.json`, byte for byte what was read, never removed) is listed account by account, each
+  marked "as this laptop last saved it", "changed since" or "new to this laptop", and "repeated" where its id or username
+  is in it twice. An account that can manage AGMessage starts unticked and asks its own confirmation, unless this laptop
+  last saved it so. A one-time password starts ticked for every account that can manage AGMessage; under `elsewhere` also
+  for every account that reaches past its halls; and under a copy that may have been changed (`changed`, `older`, `other`,
+  `plain`) for every account; never for one "as this laptop last saved it", nor at the first start. Unticking one that
+  started ticked asks its own confirmation: the password in the copy is the copy's own claim. **Adopt the ticked…** takes
+  the token typed (judged first: the right one is taken while wrong ones hold the lockout); one-time passwords are shown
+  once, on the page. **Start with no accounts…** (at the first start, **Leave these out…**) adopts none; **Adopt more…**
+  and **Leave the rest out…** follow an adoption that left some out, and the Accounts page tells an admin account how many
+  are kept aside. A copy changed since it was held, or one that cannot be read, offers no account: the panel says so, and
+  Leave these out… (Leave the rest out…) ends the hold. Each row shows the account's rights, when it was made, its last
+  sign-in and when its password was set, read from the copy. An adoption is saved before it answers, and names only the
+  accounts it took: one whose name an account made meanwhile holds is said and stays for Adopt more…. Each is an audit row: `accounts.held`, `accounts.adopted`, `accounts.fresh`, with `accounts.keyed`,
+  `accounts.behind`, `signins.ended`, `stores.record` and `stores.changed` beside them; no row holds a password, a token,
+  a sign-in's id or hash, a key, or a digest that is not a file's.
+- **An event archive keeps its accounts by the save it took** (its pin, with the set that save was made in, so an event
+  archived before the folder moved continues after it). A continue or a copy opens only that file, or, for a continue a
+  stop cut short, the continue's own save made after it began; anything else is held aside. An archive whose contents were
+  deleted is continued with no accounts, said as missing until the first admin account is made with the token. An archive
+  under way whose record cannot be read at a start keeps its claim for a start that can read it.
+- **The first admin account is made with the token typed** (or the token's sign-in made by this run), in both channels;
+  never beside accounts held aside, nor where the accounts could not be read at this start.
+- **The token's sign-in counts only at the laptop**, where it is made: a cookie copied to another device, or sent through
+  the tunnel, is nobody.
+- **A store or a record that cannot be read** (another program holding it) is never written over: account sign-ins wait
+  for a start that can read it, with its words in health and on the console; new token sign-ins are kept in memory for the
+  run. A run without the machine key keys and writes nothing of them, and account sign-ins wait.
+- **Going back to 0.5.1 and forward again** holds the accounts aside until the token adopts them (each one 0.5.1 left as
+  this laptop last saved it is marked so, ticked, with no one-time password), and signs everyone out.
+
+**What it cannot defend.** Whoever holds the machine key (this Windows account; installed, the server task's account,
+SYSTEM and Administrators), or a copy of it taken earlier, derives every key here and writes files and records that check.
+In the portable layout, whoever can write the AGMessage folder can change the code. A whole machine put back (keys,
+records and data from one moment) is its own newest save. One save put back undoes a sign-in's stamp, a rehash, a touch or
+a new sign-in, and is said. A record that lags (a crash between a store's rename and its record's, or a record that cannot
+be written) lets a save put back that is not older than it read as the newest; health names a failing record. The first
+start trusts a 0.5.1 folder's accounts that reach only their halls, as they are. An `elsewhere` copy's passwords are its
+own claim. Keying gives integrity, not secrecy: the stores still hold names, usernames, scrypt hashes, addresses and
+browsers. Removing the stores ends the sign-ins and leaves the accounts missing (the token makes the first account again).
+`secret.key`, `settings.json` (its switches and links), the room files and `pages.json` are not keyed.
 
 ## The audit log
 

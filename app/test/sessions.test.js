@@ -11,7 +11,7 @@ const os = require('os');
 const path = require('path');
 const { io } = require('socket.io-client');
 const acc = require('../lib/accounts');
-const { startServer, stopServer, api, connect, emit, once, wait, until, TOKEN } = require('./helpers');
+const { startServer, stopServer, api, connect, emit, once, wait, until, sealStore, resealStore, signInHash, TOKEN, setupAdmin } = require('./helpers');
 
 let addr = 0;
 /** Cloudflare's headers for a visitor at an address of its own (each address has its own sign-in allowance). */
@@ -34,7 +34,7 @@ test('a refused sign-in never says a password was right, nor writes down a passw
   const { base } = srv;
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });
-  const admin = (await api(base, 'POST', '/api/setup', ANA)).cookie;
+  const admin = (await setupAdmin(base)).cookie;
   assert.equal((await api(base, 'POST', '/api/users', { username: 'pat', name: 'Pat PM', role: 'manager', password: 'clipboard and coffee' }, { cookie: admin })).status, 200);
   const dee = (await api(base, 'POST', '/api/users', { username: 'dee', name: 'Dee Former', role: 'staff', password: 'old crew password here' }, { cookie: admin })).body.user;
   assert.equal((await api(base, 'PATCH', '/api/users/' + dee.id, { disabled: true }, { cookie: admin })).status, 200);
@@ -87,10 +87,13 @@ test('a password stored at an older cost is stored again only once its sign-in i
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-e2e-'));
   const old = await acc.hashPassword(ANA.password, { ...acc.SCRYPT, logN: acc.SCRYPT.logN - 1 });
   const at = Date.now();
-  fs.writeFileSync(path.join(dataDir, 'accounts.json'), JSON.stringify({ v: 1, users: [{
+  // The account as a key holder writes it, beside the machine key a first start made (a 0.5.1 admin account would wait
+  // for the token at the first start of 0.6.0).
+  await stopServer((await startServer({ AGM_DATA_DIR: dataDir })).child);
+  sealStore(dataDir, 'accounts', { users: [{
     id: 'aoldcost0001', username: 'ana', name: ANA.name, role: 'admin', halls: [], grant: [], revoke: [], disabled: false, mustChange: false,
     pw: old, pwSetAt: at, epoch: 1, createdAt: at, createdBy: 'setup', lastLoginAt: 0,
-  }] }));
+  }] });
   const srv = await startServer({ AGM_DATA_DIR: dataDir });
   t.after(() => stopServer(srv.child));
   const stored = () => JSON.parse(fs.readFileSync(path.join(dataDir, 'accounts.json'), 'utf8')).users[0].pw;
@@ -111,7 +114,7 @@ test('a stranger\'s wrong passwords hold a username only where the stranger is; 
   const srv = await startServer();
   const { base } = srv;
   t.after(() => stopServer(srv.child));
-  const admin = (await api(base, 'POST', '/api/setup', { token: TOKEN, ...ANA, password: 'gaffer tape and coffee' })).cookie;
+  const admin = (await setupAdmin(base, { password: 'gaffer tape and coffee' })).cookie;
   const sam = (await api(base, 'POST', '/api/users', { username: 'sam', name: 'Sam Tech', role: 'tech' }, { cookie: admin })).body;
   assert.equal((await api(base, 'POST', '/api/users', { username: 'pat', name: 'Pat PM', role: 'manager', password: 'clipboard and coffee' }, { cookie: admin })).status, 200);
   const strangerTries = async (username) => {
@@ -160,7 +163,7 @@ test('a flood of guesses through the tunnel holds no sign-in on the venue networ
   const srv = await startServer();
   const { base } = srv;
   t.after(() => stopServer(srv.child));
-  assert.equal((await api(base, 'POST', '/api/setup', ANA)).status, 200);
+  assert.equal((await setupAdmin(base)).status, 200);
   const failLines = () => fs.readFileSync(path.join(srv.dataDir, 'audit.jsonl'), 'utf8').split('\n').filter((l) => l.includes('"login.fail"')).length;
   // One hash, timed on a name that is an account: the flood below is the first to ask about names that are none, as after
   // a restart, so the hash those are checked against is not made yet when it starts.
@@ -209,7 +212,7 @@ test('when a session ends its open pages end with it; admin rights through the t
   const { base } = srv;
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });
-  const admin = (await api(base, 'POST', '/api/setup', ANA)).cookie;
+  const admin = (await setupAdmin(base)).cookie;
   const hall = (await api(base, 'POST', '/api/rooms', { name: 'Hall 3' }, { cookie: admin })).body.code;
   assert.equal((await api(base, 'POST', '/api/users', { username: 'sam', name: 'Sam Tech', role: 'tech', halls: [hall], password: 'mixing desk on stage left' }, { cookie: admin })).status, 200);
 
@@ -300,12 +303,12 @@ test('a page in use all day keeps its session past 14 hours; an idle one still e
   const { base } = srv;
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });
-  const ana = (await api(base, 'POST', '/api/setup', ANA)).cookie;
+  const ana = (await setupAdmin(base)).cookie;
   const hall = (await api(base, 'POST', '/api/rooms', { name: 'Main hall' }, { cookie: ana })).body.code;
   assert.equal((await api(base, 'POST', '/api/users', { username: 'kim', name: 'Kim Staff', role: 'staff', halls: [hall], password: 'a quiet desk lamp here' }, { cookie: ana })).status, 200);
   const idle = (await login(base, 'kim', 'a quiet desk lamp here')).cookie;   // signed in, then nothing open
   const tok = (await api(base, 'POST', '/api/admin/login', { token: TOKEN })).cookie;
-  const h = crypto.createHash('sha256').update(decodeURIComponent(ana.slice('agm_s='.length))).digest('hex');
+  const h = signInHash(srv.dataDir, decodeURIComponent(ana.slice('agm_s='.length)));
   const seen = () => {
     try { const s = JSON.parse(fs.readFileSync(path.join(srv.dataDir, 'sessions.json'), 'utf8')).sessions.find((x) => x.h === h); return s ? s.seen : 0; } catch { return 0; }
   };
@@ -339,17 +342,16 @@ test('a restart keeps the admin token\'s sign-in; one account signing in again a
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });
   const tok = (await api(srv.base, 'POST', '/api/admin/login', { token: TOKEN })).cookie;
   assert.match(tok, /^agm_admin=/);
-  const ana = (await api(srv.base, 'POST', '/api/setup', ANA)).cookie;
+  const ana = (await setupAdmin(srv.base)).cookie;
   const vic = (await api(srv.base, 'POST', '/api/users', { username: 'vic', name: 'Vic Viewer', role: 'viewer', password: 'a viewer password here' }, { cookie: ana })).body.user;
   assert.equal((await login(srv.base, 'vic', 'a viewer password here', visitor())).status, 200);
   await stopServer(srv.child);
   // What 5000 more sign-ins of the viewer leave behind, without ten minutes of hashing.
-  const file = path.join(dataDir, 'sessions.json');
-  const data = JSON.parse(fs.readFileSync(file, 'utf8'));
-  const mine = data.sessions.find((x) => x.uid === vic.id);
-  const now = Date.now();
-  while (data.sessions.length < 5000) data.sessions.push({ ...mine, h: crypto.randomBytes(32).toString('hex'), created: now, seen: now });
-  fs.writeFileSync(file, JSON.stringify(data));
+  resealStore(dataDir, 'sessions', (data) => {
+    const mine = data.sessions.find((x) => x.uid === vic.id);
+    const now = Date.now();
+    while (data.sessions.length < 5000) data.sessions.push({ ...mine, h: crypto.randomBytes(32).toString('hex'), created: now, seen: now });
+  });
   srv = await startServer({ AGM_DATA_DIR: dataDir });
   const me = async (cookie) => (await api(srv.base, 'GET', '/api/admin/me', undefined, { cookie })).body.ok;
 

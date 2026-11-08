@@ -17,7 +17,8 @@
  * code?}), the key folder's machine key and the audit log's key id under it; `sealed` ({total, open, shut}), every value the
  * stores keep sealed and the certificate's private key, opened with that key, those that do not named by their store and
  * field; `cert` ({state, fp, code?}: its state as a start reads it, 'ok', 'renew', 'absent' or 'unusable'); `chain`, the audit log
- * as it lies ({done, mark, words, entries, from, archives, kid, newestKid}).
+ * as it lies ({done, mark, words, entries, from, archives, kid, newestKid}); `stores`, each keyed store's state as the
+ * folder's first start would find it ({accounts, sessions, adminSessions}: lib/keyedstore.js judgeFolder).
  *
  * Invariants:
  *   - Nothing is written, held or made: the rooms load with no compaction, each store is read through its own reader, the
@@ -31,7 +32,8 @@
 const fsp = require('fs/promises');
 const path = require('path');
 const { RoomStore } = require('./store');
-const { Accounts } = require('./accounts');
+const { validAccount } = require('./accounts');
+const keyedstore = require('./keyedstore');
 const { Displays } = require('./displays');
 const { AuditLog, LABELS, kidOf } = require('./audit');
 const secretbox = require('./secretbox');
@@ -100,12 +102,13 @@ function countsOf(dataDir) {
   const all = store.allRooms();
   let messages = 0;
   for (const room of all) messages += room.messages.length;
-  const accounts = new Accounts(path.join(dataDir, 'accounts.json'));
+  // The accounts counted as their store takes them, read and never opened: whether they would open is `stores`'s.
+  const { data } = resilience.readJsonWhole(path.join(dataDir, 'accounts.json'));
+  const accounts = new Set((data && Array.isArray(data.users) ? data.users : []).filter(validAccount).map((u) => u.id)).size;
   const screens = new Displays(path.join(dataDir, 'displays.json'), { seal: () => '', open: () => '' });
-  // Each store's lane is closed unused: these readers write nothing.
-  accounts.lane.close();
+  // The store's lane is closed unused: this reader writes nothing.
   screens.lane.close();
-  return { halls: store.rooms.size, rooms: all.length - store.rooms.size, messages, accounts: accounts.size, screens: screens.list.size };
+  return { halls: store.rooms.size, rooms: all.length - store.rooms.size, messages, accounts, screens: screens.list.size };
 }
 
 /** The audit log as it lies, under the key read (none: every keyed entry reads as another key's). */
@@ -139,6 +142,16 @@ async function heldOf(dataDir) {
   return { held: false, busy: '' };
 }
 
+/**
+ * What the installed node's first start would decide of its stores (lib/keyedstore.js), read with the key folder's keys and
+ * its records, nothing written: each store's state, `keyless` without a machine key.
+ */
+function storesOf(dataDir, keyDir, k) {
+  if (k.state !== 'key') return { accounts: 'keyless', sessions: 'keyless', adminSessions: 'keyless' };
+  const K = keyedstore.keysFrom((label) => secretbox.deriveFrom(k.key, label))();
+  return keyedstore.judgeFolder({ dataDir, records: path.join(keyDir, 'stores'), K, kid: kidOf(secretbox.deriveFrom(k.key, LABELS.entry)) });
+}
+
 /** The facts of one data folder and its key folder, as the head of this file names them. */
 async function factsOf({ dataDir, keyDir }) {
   const k = await keyIn(keyDir);
@@ -161,6 +174,7 @@ async function factsOf({ dataDir, keyDir }) {
     sealed: { total: sealed.length, open: sealed.length - shut.length, shut: [...new Set(shut)] },
     cert: { state: cert.state, fp: cert.fp, ...(cert.code ? { code: cert.code } : {}) },
     chain: await chainOf(dataDir, keyDir, k),
+    stores: storesOf(dataDir, keyDir, k),
   };
 }
 

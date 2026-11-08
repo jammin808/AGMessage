@@ -375,6 +375,14 @@ run the show on the build you rehearsed.
 - The first start of a version that keys the audit log asks you to
   accept the older entries at Admin -> Health (type the token from this
   window).
+- After the first start of 0.6.0 everyone signs in once more; their
+  accounts are kept. Admin and project manager accounts wait until you
+  open them at Admin -> Accounts held aside, with the token from this
+  window (sign in there with the token first).
+- Upgrade from the copy you ran last on this laptop. A copy you did not
+  run last holds its accounts aside until you adopt them with the token
+  (the window says which folder it was saved at, and which you ran
+  last), and everyone signs in again.
 - Newer is the build number: 0.6.0+41 is newer than 0.6.0+37, and
   0.6.1+40 than 0.6.0+39. Admin -> This laptop's "Data folder" line
   names the build that wrote the folder before this start; "a newer
@@ -394,8 +402,29 @@ run the show on the build you rehearsed.
   admits again and the new one does not (choose New code again). An
   account given a hall's On stage seat sits backstage there under 0.5.1,
   with every right it holds; its rooms, On stage halls and chat view are
-  kept, and 0.6 reads them again. Do not go back to 0.5.1 during a show.
+  kept, and 0.6 reads them again. Going back to 0.5.1 and forward again
+  holds the accounts aside until the token adopts them (each one 0.5.1
+  left as it was is marked "as this laptop last saved it" and ticked),
+  and signs everyone out. Do not go back to 0.5.1 during a show.
   The admin page says so too, under its build line.
+
+Moving AGMessage to another laptop
+----------------------------------
+The accounts and sign-ins are keyed to this laptop's machine key, which
+stays in this Windows account's %LOCALAPPDATA%\AGMessage. A folder
+copied to another laptop, another Windows account or a rebuilt profile:
+- holds its accounts aside: nobody signs in by account until you open
+  them, at that laptop, at Admin -> Accounts held aside, with the token
+  from its window. Guests, screens and the token go on meanwhile;
+- ends every sign-in: each person signs in once more;
+- gives admin and project manager accounts one-time passwords by
+  default (the copy's passwords are its own claim: that laptop cannot
+  check them), shown once on the page as you adopt them;
+- or, with Start with no accounts..., makes the first admin account
+  again with the token.
+A file of the data folder written into, or an older copy put back, is
+held aside the same way, and the window and Admin -> Health say what was
+found.
 
 Windows Firewall, a new folder, a standard account, a Public network
 ---------------------------------------------------------------------

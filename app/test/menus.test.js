@@ -12,7 +12,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
 const vm = require('vm');
-const { ROOT, startServer, stopServer, api, connect, emit, once, until, fakeStagewatch, fakeNode, inviteOf, TOKEN, readSource } = require('./helpers');
+const { ROOT, startServer, stopServer, api, connect, emit, once, until, fakeStagewatch, fakeNode, inviteOf, readSource, setupAdmin } = require('./helpers');
 
 function loadCatalog() {
   const ctx = vm.createContext({});
@@ -81,7 +81,7 @@ test('every act hidden from a seat by its rights is refused by the server as tha
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); await sw.close(); });
   const open = async (cookie) => { const s = await connect(base, cookie); sockets.push(s); return s; };
 
-  const root = (await api(base, 'POST', '/api/setup', { token: TOKEN, username: 'root', name: 'Root Admin', password: 'the green room kettle' })).cookie;
+  const root = (await setupAdmin(base, { username: 'root', name: 'Root Admin', password: 'the green room kettle' })).cookie;
   const hall = async (name) => (await api(base, 'POST', '/api/rooms', { name }, { cookie: root })).body.code;
   const [hallA, hallB, hallC] = [await hall('Hall A'), await hall('Hall B'), await hall('Hall C')];
   const account = async (username, role, halls, password, extra = {}) => {
@@ -331,7 +331,7 @@ test('the join\'s forwardable is the forward picker\'s rule: a hall to send to, 
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });
   const open = async (cookie) => { const s = await connect(base, cookie); sockets.push(s); return s; };
-  const root = (await api(base, 'POST', '/api/setup', { token: TOKEN, username: 'root', name: 'Root Admin', password: 'the green room kettle' })).cookie;
+  const root = (await setupAdmin(base, { username: 'root', name: 'Root Admin', password: 'the green room kettle' })).cookie;
   const hall = async (name) => (await api(base, 'POST', '/api/rooms', { name }, { cookie: root })).body.code;
   const [hallA, hallB] = [await hall('Hall A'), await hall('Hall B')];
   const join = async (s, code, name, role, extra = {}) => { const j = await emit(s, 'join', { roomCode: code, name, role, ...extra }); assert.ok(j.ok, JSON.stringify(j)); return j; };
@@ -394,7 +394,7 @@ test('every act of the admin page, the halls board and the Accounts page hidden 
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); await node.close(); });
   const open = async (cookie) => { const s = await connect(base, cookie); sockets.push(s); return s; };
-  const root = (await api(base, 'POST', '/api/setup', { token: TOKEN, username: 'root', name: 'Root Admin', password: 'the green room kettle' })).cookie;
+  const root = (await setupAdmin(base, { username: 'root', name: 'Root Admin', password: 'the green room kettle' })).cookie;
   const hall = async (name) => (await api(base, 'POST', '/api/rooms', { name }, { cookie: root })).body.code;
   const [hallA, hallB] = [await hall('Hall A'), await hall('Hall B')];
   const account = async (username, role, halls, password, extra = {}) => {
@@ -443,6 +443,10 @@ test('every act of the admin page, the halls board and the Accounts page hidden 
   const current = { name: ev.event.name, kind: ev.event.kind, began: ev.event.began, busy: ev.busy, busyWords: ev.busyWords, stuck: '', stuckWords: '', copies: [], continues: [] };
   objects.event = [current];
   objects.archive = [{ name: '2026-10-27T14-02-00-000Z', title: 'Spring Summit', contents: true, continued: false, purged: false, current }];
+  // Accounts held aside, as the panel would draw them: the token at the laptop's alone, refused to every other seat.
+  const heldFile = 'accounts.held-2026-10-31T14-02-00-000Z.json';
+  objects.accounts = [{ mode: 'aside', listed: true, ticked: 1, tickedWords: 'Adopt sid.', file: heldFile }, { mode: 'left', listed: false, ticked: 0, tickedWords: '', file: heldFile }];
+  objects.heldAccount = [{ ref: 'asid', username: 'sid', adopt: true, reset: false }];
 
   // Each seat of a page: its socket (or none), its HTTP cookie, and its facts from the server's answers.
   const me = async (cookie) => (await api(base, 'GET', '/api/admin/me', undefined, { cookie })).body;
@@ -514,11 +518,12 @@ test('every act of the admin page, the halls board and the Accounts page hidden 
     'event.archive': { next: { kind: 'fresh' }, name: 'Taken by a seat that may not', current: 'Spring Summit', reason: 'testing' },
     'archive.continue': { next: { kind: 'continue', from: '2026-10-27T14-02-00-000Z' }, name: 'Spring Summit', current: 'Spring Summit', reason: 'testing' },
     'archive.copy': { next: { kind: 'copy', from: '2026-10-27T14-02-00-000Z' }, name: 'Taken by a seat that may not', current: 'Spring Summit', reason: 'testing' },
-    'archive.delete': { archive: '2026-10-27T14-02-00-000Z', token: 'not-the-token' } };
+    'archive.delete': { archive: '2026-10-27T14-02-00-000Z', token: 'not-the-token' },
+    'accounts.adopt': { token: 'not-the-token', digest: '0'.repeat(64), adopt: [{ id: 'asid' }] }, 'accounts.fresh': { token: 'not-the-token', adopt: [] }, 'accounts.leave': { token: 'not-the-token', adopt: [] } };
   const HTTP = { 'adminRoom.members': (o) => ({ id: sidId, body: o.main ? { board: [o.code] } : { rooms: [o.code] } }) };
   // The halls board draws a hall's rooms in its Set up (kind adminRoom, the same rooms as the admin page's), and its room
   // buttons (kind room: its hall's Set up from there).
-  const KINDS = { admin: ['adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop', 'event', 'archive'], board: ['hall', 'room', 'help', 'adminRoom'], accounts: ['account', 'audit'] };
+  const KINDS = { admin: ['adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop', 'event', 'archive', 'accounts', 'heldAccount'], board: ['hall', 'room', 'help', 'adminRoom'], accounts: ['account', 'audit'] };
   // The acts these pages draw: each that fits some seat's facts and some object here (a kind's rows the hall page draws, a
   // person's Show them ▸ among them, never fit these pages).
   const fitsOn = (page, k, e) => Object.values(seats[page]).some((seat) => ((seat.objects && seat.objects[k]) || objects[k]).some((o) => e.fits(seat.f, o)));

@@ -12,7 +12,7 @@ const path = require('path');
 const rbac = require('../lib/rbac');
 const acc = require('../lib/accounts');
 const guard = require('../lib/guard');
-const { startServer, stopServer, api, connect, emit, once, wait, until, fakeStagewatch, inviteOf, TOKEN, FIXTURE_KEY, auditLog, serverAudit, chainOf, keyedChainOf, auditMeter, acceptAll, brief } = require('./helpers');
+const { startServer, stopServer, api, connect, emit, once, wait, until, fakeStagewatch, inviteOf, TOKEN, FIXTURE_KEY, auditLog, serverAudit, chainOf, keyedChainOf, auditMeter, acceptAll, brief, openStores, resealStore, setupAdmin } = require('./helpers');
 const { meter } = require('./audit-preload');
 
 const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
@@ -376,7 +376,7 @@ test('rbac: an account\'s side rooms, On stage halls and chat view: a side room 
 test('accounts: side rooms, On stage halls and a chat view are kept as given, each read by type; an untouched save changes none', async () => {
   const dir = tmp('agm-acc-');
   const file = path.join(dir, 'accounts.json');
-  const accounts = new acc.Accounts(file);
+  const { accounts } = openStores(dir);
   const pw = 'blue door at the back';
   // Made with them: kept, upper case, once; a value that is no name dropped, never made into one and never a throw.
   const made = await accounts.create({ username: 'kim', role: 'tech', halls: ['halla1', { toString: 1 }], rooms: ['lgq4mzp8', 'LGQ4MZP8', { toString: 1 }, 7], board: ['HALLA1'], view: 'simple', password: pw });
@@ -425,16 +425,17 @@ test('passwords: scrypt, the same work for an unknown name, the policy', async (
 
 test('sessions: only a hash on disk; idle, age, a moved epoch and a turned-off account end them', async () => {
   const dir = tmp('agm-acc-');
-  const accounts = new acc.Accounts(path.join(dir, 'accounts.json'));
-  const sessions = new acc.Sessions(path.join(dir, 'sessions.json'), accounts);
+  const st = openStores(dir);
+  const { accounts, sessions } = st;
   const { account } = await accounts.create({ username: 'sam', name: 'Sam Patel', role: 'tech', password: 'blue door at the back' });
   const token = sessions.create(account, { ip: '10.0.0.9' });
   assert.equal(sessions.resolve(token).account.id, account.id);
-  sessions.flush(); accounts.flush();
+  st.flush();
   const onDisk = fs.readFileSync(path.join(dir, 'sessions.json'), 'utf8');
   assert.ok(!onDisk.includes(token), 'the token itself is never stored');
+  assert.ok(!onDisk.includes(crypto.createHash('sha256').update(token).digest('hex')), 'nor its SHA-256: its keyed hash alone');
   assert.ok(!fs.readFileSync(path.join(dir, 'accounts.json'), 'utf8').includes('blue door'), 'nor a password');
-  const again = new acc.Sessions(path.join(dir, 'sessions.json'), accounts);
+  const again = openStores(dir).sessions;
   assert.ok(again.resolve(token), 'a restart keeps people signed in');
   assert.equal(sessions.resolve(token, Date.now() + acc.IDLE_MS + 1), null, 'idle too long');
   const t2 = sessions.create(account);
@@ -448,7 +449,7 @@ test('sessions: only a hash on disk; idle, age, a moved epoch and a turned-off a
 
 test('accounts: a check changes nothing; a password at an older cost is stored again by upgrade, never over a new one', async () => {
   const dir = tmp('agm-acc-');
-  const accounts = new acc.Accounts(path.join(dir, 'accounts.json'));
+  const { accounts } = openStores(dir);
   const pw = 'blue door at the back';
   const { account } = await accounts.create({ username: 'sam', role: 'tech', password: pw });
   const old = await acc.hashPassword(pw, { ...acc.SCRYPT, logN: acc.SCRYPT.logN - 1 });
@@ -469,8 +470,7 @@ test('accounts: a check changes nothing; a password at an older cost is stored a
 
 test('sessions: an account\'s device count is the sessions that still let it in', async () => {
   const dir = tmp('agm-acc-');
-  const accounts = new acc.Accounts(path.join(dir, 'accounts.json'));
-  const sessions = new acc.Sessions(path.join(dir, 'sessions.json'), accounts);
+  const { accounts, sessions } = openStores(dir);
   const { account } = await accounts.create({ username: 'sam', name: 'Sam Patel', role: 'tech', password: 'blue door at the back' });
   sessions.create(account); sessions.create(account);
   assert.equal(sessions.of(account.id).length, 2);
@@ -487,11 +487,10 @@ test('sessions: an account\'s device count is the sessions that still let it in'
 test('sessions: a session with a page open is in use, and the sweep names the open ones that have ended', async () => {
   const HOUR = 3600_000;
   const dir = tmp('agm-acc-');
-  const accounts = new acc.Accounts(path.join(dir, 'accounts.json'));
-  const sessions = new acc.Sessions(path.join(dir, 'sessions.json'), accounts);
+  const { accounts, sessions } = openStores(dir);
   const { account } = await accounts.create({ username: 'ana', name: 'Ana', role: 'admin', password: 'the green room kettle' });
   const T = Date.now();
-  const sha = (t) => crypto.createHash('sha256').update(t).digest('hex');
+  const sha = (t) => sessions.hashOf(t);
   const token = sessions.create(account);
   const h = sha(token);
   const idle = sha(sessions.create(account));
@@ -506,8 +505,7 @@ test('sessions: a session with a page open is in use, and the sweep names the op
 
 test('sessions: one account signing in again and again keeps its 20 newest and never signs anyone else out', async () => {
   const dir = tmp('agm-acc-');
-  const accounts = new acc.Accounts(path.join(dir, 'accounts.json'));
-  const sessions = new acc.Sessions(path.join(dir, 'sessions.json'), accounts);
+  const { accounts, sessions } = openStores(dir);
   const ana = (await accounts.create({ username: 'ana', name: 'Ana', role: 'admin', password: 'the green room kettle' })).account;
   const vic = (await accounts.create({ username: 'vic', name: 'Vic', role: 'viewer', password: 'a viewer password here' })).account;
   const [MAX, PER] = [5000, 20];
@@ -519,7 +517,7 @@ test('sessions: one account signing in again and again keeps its 20 newest and n
   assert.ok(sessions.resolve(last), 'the newest sign-in holds');
   assert.deepEqual([acc.MAX_SESSIONS, acc.MAX_PER_ACCOUNT], [MAX, PER]);
   // Past MAX_SESSIONS in all, the account with the most gives up its oldest: an account with one keeps it.
-  const many = new acc.Sessions(path.join(dir, 'many.json'), { get: (id) => ({ id, epoch: 1 }) });
+  const many = openStores(tmp('agm-acc-'), { accountsOf: { get: (id) => ({ id, epoch: 1 }) } }).sessions;
   const lone = many.create({ id: 'lone' });
   for (let u = 0; u <= MAX / PER; u++) for (let i = 0; i < PER; i++) many.create({ id: 'u' + u });
   assert.equal(many.map.size, MAX);
@@ -530,28 +528,35 @@ test('sessions: one account signing in again and again keeps its 20 newest and n
 test('token sessions: only a hash on disk, kept across a restart under the same token, ended by a new token, a day at most', () => {
   const dir = tmp('agm-acc-');
   const file = path.join(dir, 'admin-sessions.json');
-  const a = new acc.TokenSessions(file, 'tag-one');
+  const st = openStores(dir, { token: 'token-one' });
+  const a = st.tokens;
   const sid = a.create();
   const gone = a.create();
   assert.ok(a.has(sid) && a.has(gone));
   a.destroy(gone);
   assert.ok(!a.has(gone), 'signed out');
-  a.flush();
-  assert.ok(!fs.readFileSync(file, 'utf8').includes(sid), 'the cookie itself is never stored');
-  assert.ok(new acc.TokenSessions(file, 'tag-one').has(sid), 'a restart with the same token keeps it');
+  st.flush();
+  const onDisk = fs.readFileSync(file, 'utf8');
+  assert.ok(!onDisk.includes(sid), 'the cookie itself is never stored');
+  assert.ok(!onDisk.includes(crypto.createHash('sha256').update(sid).digest('hex')), 'nor its SHA-256: its keyed hash alone');
+  assert.ok(!onDisk.includes('token-one'), 'nor the token');
+  assert.ok(openStores(dir, { token: 'token-one' }).tokens.has(sid), 'a restart with the same token keeps it');
   // Made here: only the sign-ins this run made, never one read back from the file (whoever wrote it there).
   assert.ok(a.mintedHere(sid), 'this run made it');
-  assert.ok(!new acc.TokenSessions(file, 'tag-one').mintedHere(sid), 'read back at a restart: not made by that run');
+  assert.ok(!openStores(dir, { token: 'token-one' }).tokens.mintedHere(sid), 'read back at a restart: not made by that run');
   assert.ok(!a.mintedHere(gone) && !a.mintedHere('') && !a.mintedHere(undefined), 'signed out, or no sign-in');
-  assert.ok(!new acc.TokenSessions(file, 'tag-two').has(sid), 'a new token ends it');
+  const other = openStores(dir, { token: 'token-two' });
+  assert.ok(!other.tokens.has(sid), 'a new token ends it');
+  assert.deepEqual([other.ks.report().adminSessions.state, other.rows.filter((r) => r.action === 'signins.ended')], ['ok', []], 'silently: the save checks, its tag is another token\'s');
   assert.ok(!a.has(sid, Date.now() + acc.TOKEN_SESSION_MS), 'a day at most');
   assert.ok(!a.has(sid) && !a.has('') && !a.has(undefined));
   a.flush();
 });
 
 test('token sessions: a new sign-in takes the ended ones with it, in memory and on disk', () => {
-  const file = path.join(tmp('agm-acc-'), 'admin-sessions.json');
-  const a = new acc.TokenSessions(file, 'tag-one');
+  const dir = tmp('agm-acc-');
+  const file = path.join(dir, 'admin-sessions.json');
+  const a = openStores(dir).tokens;
   const T = Date.now();
   for (let i = 0; i < 50; i++) a.create(T - acc.TOKEN_SESSION_MS - i);   // signed in more than a day ago, never back
   const sid = a.create(T);
@@ -563,11 +568,11 @@ test('token sessions: a new sign-in takes the ended ones with it, in memory and 
 
 test('accounts: two creates of one name at once make one, and two first admins at once make one', async () => {
   const dir = tmp('agm-acc-');
-  const accounts = new acc.Accounts(path.join(dir, 'accounts.json'));
+  const { accounts } = openStores(dir);
   const pw = 'blue door at the back';
   const [x, y] = await Promise.all([accounts.create({ username: 'sam', role: 'tech', password: pw }), accounts.create({ username: 'Sam', role: 'tech', password: pw })]);
   assert.deepEqual([x, y].map((r) => (r.account ? 'made' : r.error)).sort(), ['That username is taken.', 'made'], 'the name is reserved before its hash is made');
-  const fresh = new acc.Accounts(path.join(dir, 'fresh.json'));
+  const fresh = openStores(tmp('agm-acc-')).accounts;
   const [a, b] = await Promise.all(['ada', 'ben'].map((u) => fresh.create({ username: u, role: 'admin', password: pw }, 'setup', { firstAdmin: true })));
   assert.deepEqual([a, b].map((r) => (r.account ? 'made' : r.exists ? 'exists' : r.error)).sort(), ['exists', 'made'], 'one first admin');
   assert.equal(fresh.size, 1);
@@ -577,7 +582,7 @@ test('accounts: two creates of one name at once make one, and two first admins a
 
 test('accounts: what an untouched editor sends back is no change; only a field that now holds something else is one', async () => {
   const dir = tmp('agm-acc-');
-  const accounts = new acc.Accounts(path.join(dir, 'accounts.json'));
+  const { accounts } = openStores(dir);
   const pw = 'blue door at the back';
   const { account } = await accounts.create({ username: 'kim', name: 'Kim Tech', role: 'tech', halls: ['HALL01'], allHalls: false, grant: ['nodes.control'], revoke: ['stage.send'], password: pw });
   assert.deepEqual(accounts.update(account.id, { name: 'Kim Tech', role: 'tech', halls: ['hall01', 'HALL01'], allHalls: false, grant: ['nodes.control', 'nodes.control'], revoke: ['stage.send'] }), []);
@@ -598,7 +603,8 @@ test('accounts: keys of halls and rooms that are gone pruned from every account 
     user('a2', 'lou', { halls: ['HALL01'], rooms: ['LGQ4MZP8'] }),
     user('a3', 'kim', { halls: ['HALL03'] }),
   ] }));
-  const accounts = new acc.Accounts(file);
+  // A 0.5.1 file, on a laptop that has never keyed: the first start keys these accounts as found (none reaches past its halls).
+  const { accounts } = openStores(dir);
   assert.deepEqual([accounts.names('HALL02'), accounts.names('PRS3SS45'), accounts.names('HALL09'), accounts.names('MDR7VX2C')], [true, true, false, false]);
   // A side room: out of each account's rooms; the ids of the accounts changed, each once.
   assert.deepEqual(accounts.prune({ rooms: ['LGQ4MZP8'] }), ['a1', 'a2']);
@@ -949,7 +955,7 @@ test('accounts end to end: first admin, sign-in, rights, joining a hall, revocat
 
   // Nobody has an account: the page says so; the first admin is made on this laptop.
   const me0 = await api(base, 'GET', '/api/auth/me');
-  assert.deepEqual(me0.body, { ok: true, account: null, setup: true });
+  assert.deepEqual(me0.body, { ok: true, account: null, setup: true, held: null });
   // A page served under another name that resolves to this laptop (its Origin matching its Host) is not the laptop.
   const rebound = await new Promise((resolve, reject) => {
     const body = JSON.stringify({ username: 'ivy', name: 'Ivy', password: 'the green room kettle' });
@@ -961,13 +967,13 @@ test('accounts end to end: first admin, sign-in, rights, joining a hall, revocat
   });
   assert.equal(rebound, 403, 'the first admin is not made from a page under another name');
   assert.equal((await api(base, 'GET', '/api/auth/me')).body.setup, true, 'still no accounts');
-  const weak = await api(base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'short' });
+  const weak = await setupAdmin(base, { username: 'ana', name: 'Ana Admin', password: 'short' });
   assert.equal(weak.status, 400);
-  const setup = await api(base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' });
+  const setup = await setupAdmin(base);
   assert.equal(setup.status, 200, JSON.stringify(setup.body));
   const admin = setup.cookie;
   assert.match(admin, /^agm_s=/);
-  assert.equal((await api(base, 'POST', '/api/setup', { token: TOKEN, username: 'ben', name: 'B', password: 'the green room kettle' })).status, 409, 'only once');
+  assert.equal((await setupAdmin(base, { username: 'ben', name: 'B', password: 'the green room kettle' })).status, 409, 'only once');
 
   // A hall, two accounts: a tech in that hall, a project manager everywhere. One-time passwords, changed at first sign-in.
   const hall = (await api(base, 'POST', '/api/rooms', { name: 'Hall 3' }, { cookie: admin })).body.code;
@@ -1326,7 +1332,7 @@ test('two first admins sent at once make one; two accounts of one name sent at o
   const { base } = srv;
   t.after(() => stopServer(srv.child));
   const pw = 'purple stage lights';
-  const [a, b] = await Promise.all([api(base, 'POST', '/api/setup', { token: TOKEN, name: 'Ada Lovelace', username: 'ada', password: pw }), api(base, 'POST', '/api/setup', { token: TOKEN, name: 'Ben Admin', username: 'ben', password: pw })]);
+  const [a, b] = await Promise.all([setupAdmin(base, { name: 'Ada Lovelace', username: 'ada', password: pw }), setupAdmin(base, { name: 'Ben Admin', username: 'ben', password: pw })]);
   assert.deepEqual([a.status, b.status].sort(), [200, 409]);
   const admin = (a.status === 200 ? a : b).cookie;
   assert.equal((await api(base, 'GET', '/api/users', undefined, { cookie: admin })).body.users.length, 1, 'one first admin');
@@ -1346,7 +1352,7 @@ test('a one-hall tech given users.manage manages only accounts within its own ri
   const srv = await startServer();
   const { base } = srv;
   t.after(() => stopServer(srv.child));
-  const admin = (await api(base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await setupAdmin(base)).cookie;
   const hallA = (await api(base, 'POST', '/api/rooms', { name: 'Hall A' }, { cookie: admin })).body.code;
   const hallB = (await api(base, 'POST', '/api/rooms', { name: 'Hall B' }, { cookie: admin })).body.code;
   const made = {};
@@ -1415,7 +1421,7 @@ test('saving an account unchanged changes nothing; the device count is what stil
   const { base } = srv;
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });
-  const admin = (await api(base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await setupAdmin(base)).cookie;
   const hall = (await api(base, 'POST', '/api/rooms', { name: 'Hall 3' }, { cookie: admin })).body.code;
   const users = {};
   for (const username of ['sam', 'kim', 'lee']) {
@@ -1480,7 +1486,7 @@ test('an account is given side rooms, On stage halls and a chat view: each entry
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });
   const PW = 'clipboard and coffee';
-  let admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  let admin = (await setupAdmin(srv.base)).cookie;
   const hall = async (name) => (await api(srv.base, 'POST', '/api/rooms', { name }, { cookie: admin })).body.code;
   const [hallA, hallB] = [await hall('Hall A'), await hall('Hall B')];
   const ctl = await connect(srv.base, admin); sockets.push(ctl);
@@ -1553,12 +1559,11 @@ test('an account is given side rooms, On stage halls and a chat view: each entry
   // Kept across a restart; a key an account still holds that no room has now (written while the server was stopped, as a
   // room that comes back at the next start keeps it) passes an untouched Save, and a Save sends it back changing nothing.
   await stopServer(srv.child);
-  const file = path.join(srv.dataDir, 'accounts.json');
-  const stored = JSON.parse(fs.readFileSync(file, 'utf8'));
-  const kimStored = stored.users.find((x) => x.username === 'kim');
-  assert.deepEqual([kimStored.rooms, kimStored.board, kimStored.view], [[LEGAL], [hallA], 'simple'], 'on disk');
-  kimStored.rooms = [LEGAL, 'GONE2345'];
-  fs.writeFileSync(file, JSON.stringify(stored));
+  resealStore(srv.dataDir, 'accounts', (stored) => {
+    const kimStored = stored.users.find((x) => x.username === 'kim');
+    assert.deepEqual([kimStored.rooms, kimStored.board, kimStored.view], [[LEGAL], [hallA], 'simple'], 'on disk');
+    kimStored.rooms = [LEGAL, 'GONE2345'];
+  });
   srv = await startServer({ AGM_DATA_DIR: srv.dataDir, PORT: String(srv.port) });
   admin = (await api(srv.base, 'POST', '/api/auth/login', { username: 'ana', password: 'the green room kettle' })).cookie;
   const row = await rowOf(srv.base, admin, 'kim');
@@ -1581,7 +1586,7 @@ test('a chat view changed alone is said to the account\'s pages in a room, live,
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });
   const PW = 'clipboard and coffee';
-  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await setupAdmin(srv.base)).cookie;
   const hall = async (name) => (await api(srv.base, 'POST', '/api/rooms', { name }, { cookie: admin })).body.code;
   const [hallA, hallB] = [await hall('Hall A'), await hall('Hall B')];
   const ctl = await connect(srv.base, admin); sockets.push(ctl);
@@ -1644,7 +1649,7 @@ test('an account given a side room alone joins it and not its hall, and no frame
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); await sw.close(); });
   const PW = 'clipboard and coffee';
-  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await setupAdmin(srv.base)).cookie;
   const hall = async (name) => (await api(srv.base, 'POST', '/api/rooms', { name }, { cookie: admin })).body.code;
   const [hallA, hallB] = [await hall('Hall A'), await hall('Hall B')];
   const ctl = await connect(srv.base, admin); sockets.push(ctl);
@@ -1758,7 +1763,7 @@ test('a change to accounts.json that cannot be written is retried until it lands
   const { dataDir } = srv;
   t.after(async () => { await stopServer(srv.child); });
   const file = path.join(dataDir, 'accounts.json');
-  const setup = await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' });
+  const setup = await setupAdmin(srv.base);
   const admin = setup.cookie;
   const bob = await api(srv.base, 'POST', '/api/users', { username: 'bob', name: 'Bob Staff', role: 'staff', password: 'clipboard and coffee' }, { cookie: admin });
   assert.equal(bob.status, 200, JSON.stringify(bob.body));
@@ -1805,7 +1810,7 @@ for (const seed of ['plain', 'keyed']) test('six quick clicks on Check the log o
   const meter = auditMeter(dataDir);
   const srv = await startServer({ AGM_DATA_DIR: dataDir, ...meter.env });
   t.after(async () => { await stopServer(srv.child); meter.remove(); });
-  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await setupAdmin(srv.base)).cookie;
   const first = await api(srv.base, 'GET', '/api/audit/verify', undefined, { cookie: admin });
   assert.equal(first.status, 200, 'the check at start, or one after it, answered: no walk runs now');
   const checks = await Promise.all(Array.from({ length: 6 }, () => api(srv.base, 'GET', '/api/audit/verify', undefined, { cookie: admin, headers: { 'x-agm-test-hold': '6' } })));

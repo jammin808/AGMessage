@@ -15,7 +15,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 const { RoomStore } = require('../lib/store');
-const { ROOT, startServer, restartServer, stopServer, api, connect, emit, once, until, wait, inviteOf, TOKEN, readSource } = require('./helpers');
+const { ROOT, startServer, restartServer, stopServer, api, connect, emit, once, until, wait, inviteOf, TOKEN, readSource, setupAdmin } = require('./helpers');
 const ops = require('../lib/ops');
 
 /** An audit row as the tests read it: its target, its words, who. */
@@ -55,7 +55,7 @@ test('which rooms may send into a room: the admin\'s alone, each key a room that
   const sockets = [];
   t.after(() => sockets.forEach((s) => s.close()));
   const page = async (cookie) => { const s = await connect(srv.base, cookie); sockets.push(s); return s; };
-  let admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: PASSWORD })).cookie;
+  let admin = (await setupAdmin(srv.base, { username: 'ana', name: 'Ana Admin', password: PASSWORD })).cookie;
   const account = async (username, role, extra = {}) => {
     const made = await api(srv.base, 'POST', '/api/users', { username, name: username, role, password: 'clipboard and coffee', ...extra }, { cookie: admin });
     assert.equal(made.status, 200, JSON.stringify(made.body));
@@ -307,7 +307,7 @@ test('a message or a file is sent into another room by that room\'s list, with a
   const sockets = [];
   t.after(() => sockets.forEach((s) => s.close()));
   const page = async (cookie) => { const s = await connect(srv.base, cookie); sockets.push(s); return s; };
-  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: PASSWORD })).cookie;
+  const admin = (await setupAdmin(srv.base, { username: 'ana', name: 'Ana Admin', password: PASSWORD })).cookie;
   const account = async (username, role, extra = {}) => {
     const made = await api(srv.base, 'POST', '/api/users', { username, name: username, role, password: 'clipboard and coffee', ...extra }, { cookie: admin });
     assert.equal(made.status, 200, JSON.stringify(made.body));
@@ -513,7 +513,7 @@ test('On stage nothing is sent into another room (owner answer B2): a Board gues
   const sockets = [];
   t.after(() => sockets.forEach((s) => s.close()));
   const page = async (cookie) => { const s = await connect(srv.base, cookie); sockets.push(s); return s; };
-  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: PASSWORD })).cookie;
+  const admin = (await setupAdmin(srv.base, { username: 'ana', name: 'Ana Admin', password: PASSWORD })).cookie;
   const hall = async (name) => (await api(srv.base, 'POST', '/api/rooms', { name }, { cookie: admin })).body.code;
   const [hallA, hallB] = [await hall('Hall A'), await hall('Hall B')];
   const ctl = await page(admin);
@@ -586,7 +586,7 @@ test('a mis-sent message is withdrawn: by its sender or the admin, never another
   const sockets = [];
   t.after(() => sockets.forEach((s) => s.close()));
   const page = async (cookie) => { const s = await connect(srv.base, cookie); sockets.push(s); return s; };
-  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: PASSWORD })).cookie;
+  const admin = (await setupAdmin(srv.base, { username: 'ana', name: 'Ana Admin', password: PASSWORD })).cookie;
   const account = async (username, role, extra = {}) => {
     const made = await api(srv.base, 'POST', '/api/users', { username, name: username, role, password: 'clipboard and coffee', ...extra }, { cookie: admin });
     assert.equal(made.status, 200, JSON.stringify(made.body));

@@ -86,6 +86,10 @@
     // only at the laptop, with its token typed.
     eventAdmin: 'Only an admin may archive an event.',
     purgeHere: 'Delete an archive\'s contents at the AGMessage laptop, with its token.',
+    // Accounts held aside (plan 3-K.6): opened by the person at the AGMessage laptop who has its token, as the server
+    // refuses anyone else; Adopt the ticked… waits for a tick.
+    heldHere: 'Open the accounts held aside at the AGMessage laptop itself, signed in with its token.',
+    heldNone: 'Tick the accounts to adopt first.',
   });
   /** The support view's words (R8): every door the person has, drawn, and none of them acts. */
   const supportWords = (name) => 'This is ' + name + '\'s view — act from your own page.';
@@ -1120,6 +1124,38 @@
           fields: [{ name: 'token', type: 'password', label: 'The admin token', max: 64 }], yes: 'Delete its contents', no: 'Keep them', danger: true }) },
     ],
 
+    // Accounts held aside (the admin page's panel, plan 3-K.6): its `mode` ('aside': every account of the copy held, 'first':
+    // the first start's waiting ones, 'left': some left out of an adoption), whether its list is drawn (`listed`), how many
+    // are ticked (`ticked`), the copy's file (`file`), the state's words, and whether no account can be adopted from the
+    // copy (`unusable`: changed since it was held, or unreadable; only leaving them out is offered). Each act takes the
+    // token typed at the laptop.
+    accounts: [
+      { id: 'accounts.adopt', label: 'Adopt the ticked…', icon: '🛂', group: '4_manage', inline: () => 1, verb: 'http:POST /api/accounts/adopt', mode: 'now',
+        may: (f) => f.token, fits: (f, o) => !!o.listed && !o.unusable, ready: (f, o) => (o.ticked > 0 ? true : WORDS.heldNone),
+        confirm: (f, o) => ({ title: 'Adopt the ticked accounts?', words: [o.tickedWords || '', 'Type the token from the AGMessage window (installed: Start → AGMessage → Show the admin token).'],
+          fields: [{ name: 'token', type: 'password', label: 'The admin token', max: 64 }], yes: 'Adopt them', no: 'Not now' }) },
+      { id: 'accounts.more', label: 'Adopt more…', icon: '🧾', group: '4_manage', inline: () => 1, verb: 'http:GET /api/accounts/held', mode: 'now',
+        may: (f) => f.token, fits: (f, o) => o.mode === 'left' && !o.listed && !o.unusable },
+      { id: 'accounts.fresh', label: (f, o) => (o.mode === 'first' ? 'Leave these out…' : 'Start with no accounts…'), icon: '🫙', group: '9_danger', inline: () => 2, verb: 'http:POST /api/accounts/adopt', mode: 'now',
+        may: (f) => f.token, fits: (f, o) => o.mode === 'aside' || o.mode === 'first',
+        confirm: (f, o) => (o.mode === 'first'
+          ? { title: 'Leave these accounts out?', words: ['They stay kept aside in ' + o.file + ', and the accounts keyed as found stay open.', 'Type the token from the AGMessage window.'], fields: [{ name: 'token', type: 'password', label: 'The admin token', max: 64 }], yes: 'Leave them out', no: 'Not now', danger: true }
+          : { title: 'Start with no accounts?', words: ['Nobody signs in by account until a first admin account is made with the token. The accounts stay kept aside in ' + o.file + '.', 'Type the token from the AGMessage window.'], fields: [{ name: 'token', type: 'password', label: 'The admin token', max: 64 }], yes: 'Start with none', no: 'Not now', danger: true }) },
+      { id: 'accounts.leave', label: 'Leave the rest out…', icon: '🧺', group: '9_danger', inline: () => 2, verb: 'http:POST /api/accounts/adopt', mode: 'now',
+        may: (f) => f.token, fits: (f, o) => o.mode === 'left',
+        confirm: (f, o) => ({ title: 'Leave the rest out?', words: ['They stay kept aside in ' + o.file + ', and are no longer offered here.', 'Type the token from the AGMessage window.'], fields: [{ name: 'token', type: 'password', label: 'The admin token', max: 64 }], yes: 'Leave them out', no: 'Not now', danger: true }) },
+    ],
+    // One account of the copy held aside, in the panel's list: its `ref`, `username`, and its ticks (`adopt`, `reset`), each
+    // menu item in step with them. Nothing is sent until Adopt the ticked….
+    heldAccount: [
+      { id: 'heldAccount.adopt', label: 'Adopt', icon: '🪪', group: '3_keep', verb: 'local', mode: 'local', checked: (f, o) => !!o.adopt,
+        may: (f) => f.token, fits: () => true },
+      { id: 'heldAccount.leave', label: 'Leave out', icon: '❎', group: '3_keep', verb: 'local', mode: 'local', checked: (f, o) => !o.adopt,
+        may: (f) => f.token, fits: () => true },
+      { id: 'heldAccount.reset', label: 'With a one-time password', icon: '🔓', group: '3_keep', verb: 'local', mode: 'local', checked: (f, o) => !!o.reset,
+        may: (f) => f.token, fits: () => true },
+    ],
+
     // ------------------------------------------------------------ the halls board (boardFacts)
     // A hall's row: `code` (its key), `name`, `guestCode`: the code its guests type, as the server tells this watcher ('' to
     // one that may not know it), and `rooms`: its side rooms this watcher may enter, as the board lists them ({key, name,
@@ -1319,13 +1355,14 @@
    * The admin page's facts (/api/admin/me's answer): whom its gate admits (`ok`: the laptop's token, or an account that
    * may manage settings), "the admin" (`admin`: the token, or an account whose role is admin), whether this page's account
    * may manage accounts (`manageUsers`: a room's Members…), whether AI drafts are on, the halls a node may be linked for,
-   * whether the page is connected now, and whether it is open on the AGMessage laptop itself (`local`: an archive's
-   * contents are deleted there, with the token typed). Pure.
+   * whether the page is connected now, whether it is open on the AGMessage laptop itself (`local`: an archive's contents
+   * are deleted there, with the token typed), and whether it is the laptop's token, signed in by this run (`token`: the
+   * accounts held aside are opened there). Pure.
    */
   function adminFacts(s) {
     const halls = Array.isArray(s.halls) ? s.halls.filter((h) => h && typeof h.code === 'string').map((h) => Object.freeze({ code: h.code, name: typeof h.name === 'string' ? h.name : '' })) : [];
     // The socket the gate admits is the server's admin (isAdmin), whom mayDriveNode lets drive every node: `canDrive`.
-    return Object.freeze({ page: 'admin', admin: !!s.ok, theAdmin: !!s.admin, manageUsers: s.manageUsers === true, canDrive: !!s.ok, ai: !!s.ai, halls: Object.freeze(halls), connected: !!s.connected, support: '', local: s.local === true });
+    return Object.freeze({ page: 'admin', admin: !!s.ok, theAdmin: !!s.admin, manageUsers: s.manageUsers === true, canDrive: !!s.ok, ai: !!s.ai, halls: Object.freeze(halls), connected: !!s.connected, support: '', local: s.local === true, token: s.token === true });
   }
   /**
    * The halls board's facts (/api/halls's answer and the board's): who may set halls up, the admin (`admin`, its

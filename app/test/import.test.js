@@ -94,7 +94,7 @@ async function portable() {
     const keyed = await h.emit(ctl, 'admin:settings', { aiKey: 'a key typed for the import test' });
     assert.equal(keyed.ok, true, JSON.stringify(keyed));
     ctl.close();
-    assert.equal((await h.api(srv.base, 'POST', '/api/setup', { token: h.TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).status, 200);
+    assert.equal((await h.setupAdmin(srv.base)).status, 200);
     const g = await h.connect(srv.base);
     assert.equal((await h.emit(g, 'join', { roomCode: hall, name: 'Gus', role: 'research' })).ok, true);
     for (const text of ['one', 'two']) { const sent = await h.emit(g, 'message', { type: 'text', text, cid: 'c-' + text }); assert.equal(sent.ok, true, JSON.stringify(sent)); }
@@ -159,6 +159,9 @@ test('end to end: a stopped portable copy is exported as its account, taken and 
     assert.equal(laid[rel], sha, 'data/' + rel + ' laid byte for byte');
   }
   assert.equal(bytesOf(tree(path.join(root, 'keys')))['machine.key'], keysBefore['machine.key'], 'the machine key travelled: every sealed value opens with it');
+  // The keyed stores' records travelled with it (latest.json among them), so the installed node's first start is a move.
+  assert.equal(typeof keysBefore['stores/latest.json'], 'string', 'the portable copy kept its keyed stores\' records');
+  assert.equal(bytesOf(tree(path.join(root, 'keys')))['stores/latest.json'], keysBefore['stores/latest.json'], 'the keyed stores\' records travelled with the keys');
   assert.equal(bytesOf(tree(path.join(root, 'uploads')))['abc123.png'], require('crypto').createHash('sha256').update(h.pngOf(2, 2)).digest('hex'));
   assert.deepEqual(fs.readdirSync(dir).filter((n) => n.endsWith('.part')), [], 'each part goes once it is laid');
   const verdict = JSON.parse(read(machine.importVerdict(root, ANA)));
@@ -167,7 +170,7 @@ test('end to end: a stopped portable copy is exported as its account, taken and 
   const fk = launch.forgetKeys({ source: src, machine: root, sys: SYS, id: ex.id, run: win.run, profile: keys });
   assert.equal(fk.code, launch.DONE, fk.text);
   assert.deepEqual([fk.verified, fk.moved, fk.bat, fk.keys, fk.secret], [true, true, 'replaced', { ok: true, was: true }, { ok: true, was: true }]);
-  assert.ok(!fs.existsSync(keys), 'the profile\'s AGMessage folder is gone');
+  assert.ok(!fs.existsSync(keys), 'the profile\'s AGMessage folder is gone, its stores\\ with it');
   assert.ok(!fs.existsSync(path.join(data, 'secret.key')), 'and the folder\'s secret.key');
   assert.equal(dataformat.movedOf(data).state, 'moved');
   assert.equal(read(path.join(src, 'start-agmessage.bat.moved')), '@echo off\r\nREM the portable folder\'s own start\r\n', 'the original start file kept');
@@ -536,7 +539,15 @@ test('the verify says each check that did not pass, and takes out what was copie
   assert.deepEqual(off(() => ({ held: true, busy: 'busy: 2 pages active' })), ['held']);
   assert.match(machine.verifyChecks(s, { ...structuredClone(s), held: true, busy: 'busy: 2 pages active' })[0].words, /^a copy of AGMessage runs on this PC's AGMessage data folder \(it says it is busy: 2 pages active\): stop it, then import again$/);
   assert.deepEqual(off(() => ({ moved: 'moved' })), ['moved']);
-  assert.deepEqual(machine.verifyChecks(s, {}).map((c) => c.check), ['counts', 'key', 'sealed', 'fingerprint', 'chain', 'format', 'usable', 'held', 'moved'], 'nothing read is nothing passed');
+  assert.deepEqual(machine.verifyChecks(s, {}).map((c) => c.check), ['counts', 'key', 'sealed', 'fingerprint', 'chain', 'format', 'usable', 'held', 'moved', 'stores'], 'nothing read is nothing passed');
+  // The keyed stores as the installed node's first start would open them (lib/keyedstore.js): a move of the set this laptop
+  // saved last passes; accounts held aside, or sign-ins ended, do not, and the words say which, and why.
+  // (This portable folder is a copy of the one seeded, so its own start would be a move too.)
+  assert.ok(['ok', 'move'].includes(s.stores.accounts) && ['ok', 'move'].includes(s.stores.sessions), 'the export reads its own stores as they are: ' + JSON.stringify(s.stores));
+  assert.deepEqual(machine.verifyChecks(s, { ...structuredClone(s), stores: { accounts: 'move', sessions: 'move', adminSessions: 'none' } }), [], 'a move passes');
+  const held = machine.verifyChecks(s, { ...structuredClone(s), stores: { accounts: 'elsewhere', sessions: 'ended', adminSessions: 'ended' } });
+  assert.deepEqual(held.map((c) => [c.check, c.words]), [['stores', 'the accounts would be held aside at its first start (elsewhere), and the accounts\' sign-ins would end (ended): the keyed stores\' records did not come with the keys']]);
+  assert.match(machine.verifyChecks({ ...s, stores: { accounts: 'changed' } }, { ...structuredClone(s), stores: { accounts: 'changed', sessions: 'ok' } })[0].words, /held aside in the portable folder too; open them there first/);
   // Taken, with the copy's facts read otherwise: the words name the check, and nothing stays.
   const wrong = (runFile) => machine.run(['import', '--step', 'take', '--for', ANA, '--machine', root, '--app', h.REPO, '--source', p.src, '--sys', SYS], { runFile });
   const asked = [];
@@ -690,7 +701,7 @@ test('what an export carries, and the paths a bundle may name: launch.js and mac
     'watchdog.json', 'watchdog.log', 'watchdog.seen.json', 'moved.json', 'settings.json.tmp', 'rooms/.partial-1/x.json', 'machine.key', 'tls.json', 'audit/head-abc.json', 'audit', 'stores/latest.json', 'secret.key', 'abc123.png'];
   for (const area of ['data', 'uploads', 'keys', 'other']) for (const rel of rels) assert.equal(machine.importCarries(area, rel), launch.carried(area, rel), area + '/' + rel);
   assert.deepEqual(rels.filter((r) => launch.carried('data', r)), ['settings.json', 'rooms/ABC234.json', 'rooms/ABC234.LEGAL1.log', 'audit-archive/audit-0a1b2c3d-1-9/log/audit.jsonl', 'stage/ABC234.json', 'machine.key', 'tls.json', 'audit/head-abc.json', 'audit', 'stores/latest.json', 'secret.key', 'abc123.png']);
-  assert.deepEqual(rels.filter((r) => launch.carried('keys', r)), ['machine.key', 'tls.json', 'audit/head-abc.json'], 'of the profile\'s key folder: the machine key, the certificate and the audit records (answer 42)');
+  assert.deepEqual(rels.filter((r) => launch.carried('keys', r)), ['machine.key', 'tls.json', 'audit/head-abc.json', 'stores/latest.json'], 'of the profile\'s key folder: the machine key, the certificate, the audit records (answer 42) and the keyed stores\' records, latest.json among them');
   assert.equal(launch.carried('other', 'settings.json'), false, 'an unknown place carries nothing');
   const names = ['settings.json', 'a/b/c.json', 'Hall 2 notes.txt', '..', '.', 'a/../b', 'a//b', '', '/abs', 'C:\\x', 'c:x', 'a\\b', 'x'.repeat(201), 'a/' + 'b'.repeat(239), 'nul\u0000', 'bell\u0007', 'pipe|x', 'q?', 'star*'];
   for (const n of names) assert.equal(machine.importRelOk(n), launch.relOk(n), JSON.stringify(n));
@@ -716,7 +727,7 @@ test('a manifest is read by type: whole JSON of an import\'s shape, its files in
   bad((j) => ({ ...j, files: 'all' }), /no list of files/);
   bad((j) => ({ ...j, files: [{ ...j.files[0], area: 'machine' }] }), /names a file an import does not carry/);
   bad((j) => ({ ...j, files: [{ ...j.files[0], rel: '../settings.json' }] }), /does not carry/);
-  bad((j) => ({ ...j, files: [{ ...j.files[0], area: 'keys', rel: 'stores/latest.json' }] }), /does not carry/);
+  bad((j) => ({ ...j, files: [{ ...j.files[0], area: 'keys', rel: 'keyless/latest.json' }] }), /does not carry/);
   bad((j) => ({ ...j, files: [{ ...j.files[0], size: -1 }] }), /does not carry/);
   bad((j) => ({ ...j, files: [{ ...j.files[0], sha256: 'zz' }] }), /does not carry/);
   bad((j) => ({ ...j, files: [j.files[0], { ...j.files[0], rel: 'SETTINGS.json' }] }), /names one file twice \(data\/SETTINGS\.json\)/);

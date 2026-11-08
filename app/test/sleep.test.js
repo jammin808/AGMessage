@@ -564,7 +564,7 @@ async function powerServer(answer = 'held', env = {}) {
   const log = path.join(tmp('agm-power-'), 'power.jsonl');
   const srv = await h.startServer({ NODE_OPTIONS: preload('power-preload.js'), AGM_TEST_POWER_LOG: log, AGM_TEST_POWER_ANSWER: answer, ...env });
   const health = async () => (await h.api(srv.base, 'GET', '/api/health')).body;
-  const admin = (await h.api(srv.base, 'POST', '/api/setup', { token: h.TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await h.setupAdmin(srv.base)).cookie;
   const hall = (await h.api(srv.base, 'POST', '/api/rooms', { name: 'Hall 3' }, { cookie: admin })).body.code;
   return { srv, log, health, admin, hall };
 }
@@ -688,7 +688,7 @@ test('the power request refused (Constrained Language Mode) is said, never asked
 test('off Windows a live hall\'s power request is not held, and says why', async (t) => {
   const srv = await h.startServer();
   t.after(() => h.stopServer(srv.child));
-  const admin = (await h.api(srv.base, 'POST', '/api/setup', { token: h.TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await h.setupAdmin(srv.base)).cookie;
   const hall = (await h.api(srv.base, 'POST', '/api/rooms', { name: 'Hall 1' }, { cookie: admin })).body.code;
   const s = await h.connect(srv.base);
   t.after(() => s.close());

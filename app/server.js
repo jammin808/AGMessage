@@ -76,6 +76,7 @@ const upgradebackup = require('./lib/upgradebackup');
 const { StageRecord, confidentialOf, whoSaid, didSaid, seenSaid } = require('./lib/stagerecord');
 const tunnelend = require('./lib/tunnelend');
 const events = require('./lib/events');
+const keyedstore = require('./lib/keyedstore');
 const busy = require('./lib/busy');
 const machinewire = require('./lib/machinewire');
 const { MachineEvents, seqOfRow: machineSeqOfRow } = require('./lib/machineevents');
@@ -270,11 +271,20 @@ const unsealable = () => { const p = secretbox.keyProblem(); return p ? 'Not sav
 // Individual logins beside the guest codes (lib/accounts.js, lib/rbac.js); every action that matters is in the
 // audit log, chained with a key derived from this machine's key (lib/audit.js), its records kept beside that key, outside
 // the data folder. The host laptop's admin token stays as the way in before any account exists.
-const accounts = new Accounts(path.join(DATA_DIR, 'accounts.json'));
-const sessions = new Sessions(path.join(DATA_DIR, 'sessions.json'), accounts);
+// The accounts and both kinds of sign-in are keyed to the machine key (lib/keyedstore.js): each file keyed whole, each
+// sign-in by its keyed hash, every save recorded beside the key in <keyDir>/stores. Nothing of them is read until
+// stores.open(), after the folder is held and the audit log is open, and before anything is served.
+const STORES_DIR = path.join(secretbox.keyDir(), 'stores');
+const stores = new keyedstore.KeyedStores({
+  keys: keyedstore.keysFrom(secretbox.derive), kid: () => audit.kid, made: () => secretbox.madeHere(), records: STORES_DIR, dataDir: DATA_DIR,
+  archive: (time) => archiveAt(time),
+  say: (line) => console.log(line), row: (action, target, words) => audit.write(SYSTEM_ACTOR, action, target, words),
+});
+const accounts = new Accounts(path.join(DATA_DIR, 'accounts.json'), { keyed: stores.part('accounts') });
+const sessions = new Sessions(path.join(DATA_DIR, 'sessions.json'), accounts, { keyed: stores.part('sessions') });
 // The admin token's sign-ins survive a watchdog restart (the supervisor hands every restart the same token) and end
-// when AGMessage starts again with a new one: they are kept under a keyed hash of the token.
-const tokenSessions = new TokenSessions(path.join(DATA_DIR, 'admin-sessions.json'), guard.mac(SECRET, 'admin-token:' + ADMIN_TOKEN, 43));
+// when AGMessage starts again with a new one: they are kept under the token's keyed tag.
+const tokenSessions = new TokenSessions(path.join(DATA_DIR, 'admin-sessions.json'), { keyed: stores.part('adminSessions'), token: ADMIN_TOKEN });
 const audit = new AuditLog(path.join(DATA_DIR, 'audit.jsonl'), { keys: keysFrom(secretbox.derive), records: path.join(secretbox.keyDir(), 'audit'), version: VERSION });
 const HOST_ACTOR = Object.freeze({ t: 'admin', id: 'host', name: 'AGMessage laptop' });
 // What AGMessage does of itself, with no person's act: a start by another build, the internet link turned on again or ended.
@@ -329,7 +339,7 @@ function savePeaks() {
  * removed (`stage <HALL>`): health's `saves.built` counts the lanes made and not closed and `saves.named` the distinct
  * lanes here, and a test holds both to this list.
  */
-const saveLanes = () => [['settings', settingsLane], ['accounts', accounts.lane], ['sessions', sessions.lane], ['adminSessions', tokenSessions.lane], ['screens', displays.lane], ['pages', pages.lane], ['deskResults', deskLane], ['peaks', peaksLane], ['auditHead', audit.headLane], ...stageRecord.lanes()];
+const saveLanes = () => [['settings', settingsLane], ['accounts', accounts.lane], ['sessions', sessions.lane], ['adminSessions', tokenSessions.lane], ['storesHead', stores.head], ['screens', displays.lane], ['pages', pages.lane], ['deskResults', deskLane], ['peaks', peaksLane], ['auditHead', audit.headLane], ...stageRecord.lanes()];
 /**
  * Write the audit entries still waiting and the head that covers them first, then every lane, now (shutdown, a crash);
  * what still cannot be written is named on the console, and returned in words ([] when everything was written): a hall's
@@ -637,6 +647,9 @@ function healthFacts() {
     // The current event (lib/events.js): its id, name, start, how it began and how many archives the folder holds, and an
     // archive under way or one that stopped part way (`changing`).
     event: eventView(),
+    // The accounts and the sign-ins as stores.open() found them (lib/keyedstore.js): each store's state and words, the
+    // record outside the data folder, the set and each store's newest save. No secret, hash or digest.
+    signins: stores.report(),
   };
 }
 /**
@@ -1468,7 +1481,7 @@ app.use((req, res, next) => {
   return res.status(503).json({ ok: false, error: changingWords() });
 });
 const web = mountAccounts(app, {
-  accounts, sessions, audit, settings, isEncrypted, isLoopback,
+  accounts, sessions, stores, audit, settings, isEncrypted, isLoopback,
   isTokenAdmin: (req) => isValidAdminCookie(req),
   // The token typed at the laptop (the first admin account): judged as the token sign-in judges it, the typed token first.
   typedToken: (req, typed, where) => typedTokenProblem(req, typed, where),
@@ -1543,7 +1556,9 @@ app.get('/uploads/:name', async (req, res) => {
 
 // ----- admin auth
 const readCookie = (req, name) => guard.readCookie(req.headers.cookie, name);
-const isValidAdminCookie = (req) => tokenSessions.has(readCookie(req, 'agm_admin'));
+// The token's sign-in counts only at the laptop, where it is made: a cookie copied to another device, or sent through the
+// tunnel, is nobody.
+const isValidAdminCookie = (req) => guard.isHostMachine(req) && tokenSessions.has(readCookie(req, 'agm_admin'));
 const adminLockout = new guard.Lockout(5, 60_000);
 /**
  * The laptop's token typed at the laptop to make the first admin account: null when it is the token, else {status, error}.
@@ -1563,11 +1578,18 @@ function typedTokenProblem(req, typed, where) {
   return { status: 401, error: 'That is not the token in the AGMessage window.' };
 }
 
+// The token sign-in judges the typed token first, as the first admin account and an adoption do: the right one is taken
+// even while wrong ones hold the lockout, so nobody else at the laptop keeps its person from the panel that opens accounts
+// held aside. A wrong one counts toward the lockout and is written only while the lock does not hold.
 app.post('/api/admin/login', (req, res) => {
   if (!guard.isHostMachine(req)) return res.status(403).json({ ok: false, error: 'Admin login is only allowed on the host laptop.' });
-  if (adminLockout.locked('host')) return res.status(429).json({ ok: false, error: 'Too many wrong tokens — wait a minute.' });
-  const t = String((req.body && req.body.token) || '').toLowerCase().trim();
-  if (!t || !guard.safeEqual(t, ADMIN_TOKEN)) { adminLockout.fail('host'); audit.write(HOST_ACTOR, 'login.token.fail', 'host', 'a wrong admin token', guard.clientIp(req)); return res.status(401).json({ ok: false, error: 'Invalid admin token.' }); }
+  const t = req.body && typeof req.body.token === 'string' ? req.body.token.toLowerCase().trim() : '';
+  if (!t || !guard.safeEqual(t, ADMIN_TOKEN)) {
+    if (adminLockout.locked('host')) return res.status(429).json({ ok: false, error: 'Too many wrong tokens — wait a minute.' });
+    adminLockout.fail('host');
+    audit.write(HOST_ACTOR, 'login.token.fail', 'host', 'a wrong admin token', guard.clientIp(req));
+    return res.status(401).json({ ok: false, error: 'Invalid admin token.' });
+  }
   adminLockout.ok('host');
   const sid = tokenSessions.create();
   audit.write(HOST_ACTOR, 'login.token', 'host', 'signed in with the host laptop\'s admin token', guard.clientIp(req));
@@ -1588,7 +1610,13 @@ app.post('/api/admin/logout', (req, res) => {
 // `admin`: this request is "the admin" (the token, or an account whose role is admin), who may split the log.
 // `manageUsers`, at the end: this request's account may manage accounts (mayManageUsers), so the admin page offers a room's
 // Members… only where its saves are taken.
-app.get('/api/admin/me', (req, res) => res.json({ ok: isAdminReq(req), local: guard.isHostMachine(req), accounts: accounts.size, token: guard.isHostMachine(req) && tokenSessions.mintedHere(readCookie(req, 'agm_admin')), admin: web.theAdminReq(req), manageUsers: mayManageUsers(req) }));
+// `held`, last: the accounts held aside or waiting for the token, or null: to a page the admin page's gate admits, the
+// admin page's facts (lib/keyedstore.js heldFacts: those left out of an adoption too); to anyone else, what the sign-in
+// page is told (pageFacts, as /api/auth/me's).
+app.get('/api/admin/me', (req, res) => {
+  const admin = isAdminReq(req);
+  res.json({ ok: admin, local: guard.isHostMachine(req), accounts: accounts.size, token: guard.isHostMachine(req) && tokenSessions.mintedHere(readCookie(req, 'agm_admin')), admin: web.theAdminReq(req), manageUsers: mayManageUsers(req), held: admin ? stores.heldFacts() : stores.pageFacts() });
+});
 /**
  * Whether a request's account may manage accounts, as the Accounts routes judge it (signedIn('users.manage')): signed in,
  * its own password chosen, holding users.manage, and not an admin right kept off the tunnel. The laptop's token is no
@@ -2267,6 +2295,7 @@ function eventView() {
   return {
     id: eventNow.id, name: eventNow.name, began: eventNow.began || oldestHall() || null, kind: eventNow.kind, from: eventNow.from, archives: archiveNames.length,
     ...(eventUnread ? { unread: eventUnread } : {}),
+    ...(unclaimed.length ? { unclaimed: unclaimed.length } : {}),
     ...(c ? { changing: { since: c.since, stuck: c.step ? c.name || c.step : '', step: c.step, words: c.step ? stuckWords(c) : '' } } : {}),
   };
 }
@@ -2318,6 +2347,10 @@ function eventAskOf(b) {
 }
 /** Why the act cannot run as asked, before anything is written: {status, error}, or null. */
 function eventRefusal(ask) {
+  // The stores not opened this run, or accounts held aside: the archive's pin and its claim could not be written, or would
+  // vouch for accounts that are not open.
+  const waits = stores.archiveRefusal();
+  if (waits) return { status: 409, error: waits };
   if (settingsUnsaved()) return { status: 409, error: 'Not archived: ' + settingsUnsaved().replace(/^Not saved: /, '') };
   if (eventUnread) return { status: 503, error: 'Not archived: this event\'s record (' + events.LIVE + ') could not be read at this start (' + eventUnread + '), and nothing is written over it. Start AGMessage again once nothing else holds it.' };
   for (const [what, why] of [['the screens', displays.unread], ['people\'s pages', pages.unread]]) {
@@ -2450,11 +2483,20 @@ function readDeskResults() {
   deskResults.splice(0, deskResults.length, ...results);
 }
 /**
- * The stores of one file each read again from the data folder (a continue whose files did not all come back): what this
- * run holds is then what is on disk, so a save that lands writes back what came back, never the empty ones.
+ * An archive's accounts file opened against the pin its archive took (lib/keyedstore.js), never against the live save: a
+ * file that is not the one archived (an older copy, another set's, changed) is held aside, as at a start.
  */
-function readStoresAgain() {
-  accounts.reload();
+function accountsFromArchive(file, pinned) {
+  const r = stores.openArchived(file, pinned);
+  accounts.replace(r.users ? { users: r.users } : null);
+}
+/**
+ * The stores of one file each read again from the data folder (a continue whose files did not all come back): what this
+ * run holds is then what is on disk, so a save that lands writes back what came back, never the empty ones. The accounts
+ * against the pin of the archive continued (`pinned`).
+ */
+function readStoresAgain(pinned) {
+  accountsFromArchive(path.join(DATA_DIR, 'accounts.json'), pinned);
   displays.reload();
   pages.reload();
   readDeskResults();
@@ -2470,7 +2512,7 @@ function readStoresAgain() {
  */
 function copyEvent(src, keepScreens, screensLive) {
   const dir = events.folderOf(DATA_DIR, src);
-  accounts.replace(resilience.readJsonWithBak(path.join(dir, 'accounts.json'))); accounts.save();
+  accountsFromArchive(path.join(dir, 'accounts.json'), src); accounts.save();
   const views = resilience.readJsonWithBak(path.join(dir, 'pages.json'));
   pages.replace({ v: 1, views: isRecord(views) && isRecord(views.views) ? views.views : {}, halls: {} }); pages.save();
   const from = new RoomStore(path.join(dir, 'rooms'), { make: false });
@@ -2517,9 +2559,9 @@ function beginNext(rec, name, kept) {
   let began;
   if (next.kind === 'continue') {
     const from = events.readArchived(DATA_DIR, next.from);
-    try { events.moveBack(DATA_DIR, UPLOAD_DIR, next.from, { beat }); } catch (e) { readStoresAgain(); throw e; }
+    try { events.moveBack(DATA_DIR, UPLOAD_DIR, next.from, { beat }); } catch (e) { readStoresAgain(next.from); throw e; }
     store.loadAll(migrateRoom);
-    readStoresAgain();
+    readStoresAgain(next.from);
     stageRecord.reset({ loaded: false });
     stageRecord.load((hall) => store.has(hall) || store.hallsOnDisk.has(hall)).catch((e) => console.error('  [stage] the stage record of the event continued could not be read: ' + (e && e.message ? e.message : e)));
     eventSends(from ? from.sends : {});
@@ -2538,6 +2580,10 @@ function beginNext(rec, name, kept) {
   for (const id of pages.holdLinks()) pages.setHold(id, null);
   for (const [id, h] of kept.holds) if (h) pages.setHold(id, h);
   for (const room of store.rooms.values()) configureHallLink(room);
+  // The next event's accounts and its empty sign-ins saved at once, under the folder's set, so the record names its saves
+  // before the archive says it began.
+  stores.nextEvent();
+  for (const s of [accounts, sessions, tokenSessions]) { s.save({ twice: true }); s.lane.flushSync(); }
   if (!events.markArchived(DATA_DIR, name, (raw) => ({ next: { ...raw.next, began } }))) throw Object.assign(new Error('its record cannot be read'), { words: path.join(events.ARCHIVE, name, events.LIVE) + ' cannot be read, so the next event is not begun' });
   return events.liveOf(name, began);
 }
@@ -2612,6 +2658,8 @@ function nextSteps(name, rec, actor, ip, { carried = null, split = false } = {})
       if (split && !splitStarted && at) { splitDone = auditArchiver.split(at.seq, actor, ip); splitStarted = true; }
       live = beginNext(rec, name, kept);
     }
+    // Step 7's saves landed: the archive under way is no longer claimed.
+    if (stores.underWay()) stores.clearClaim();
     events.writeLive(DATA_DIR, live);
   } catch (e) {
     const stuck = eventStuck('next', name, thrownWords(e), { carried: kept, point, splitStarted });
@@ -2665,12 +2713,16 @@ function archiveEvent(ask, actor, ip) {
     ...(isBusy ? { busy: busy.words(line), reason: ask.reason } : {}),
   };
   eventChanging = { since: at, by: actor.name || '', step: '', name, words: '' };
-  // Step 2: the audit log, every lane and each hall that changed saved, as a stop saves them.
+  // Step 2: the audit log, every lane and each hall that changed saved, as a stop saves them (the stores' record last).
   let unsaved;
   try { ({ unsaved } = saveAll()); } catch (e) { unsaved = ['the event (' + (e.code || e.message) + ')']; }
   if (unsaved.length) { eventChanging = null; return { ok: false, status: 503, error: 'Not archived: ' + unsaved.join(', ') + ' could not be saved, so its archive would not be whole. Nothing was moved.' }; }
+  // The claim: the archive under way and the accounts file it takes, pinned in the record outside the data folder, so a
+  // start finishes only this archive and a continue of it opens only the accounts it took.
+  const claimed = stores.claim({ time: name, kind: ask.kind, next: fromName });
+  if (claimed) { eventChanging = null; return { ok: false, status: 503, error: 'Not archived: the record of this folder\'s saves could not be written (' + claimed + '). Nothing was moved.' }; }
   // Step 3: the archive made aside, its record first, so a stop from here on leaves its intent on disk.
-  try { events.begin(DATA_DIR, name, rec); } catch (e) { eventChanging = null; return { ok: false, status: 503, error: 'Not archived: its folder could not be made in ' + events.archiveDir(DATA_DIR) + ' (' + (e.code || e.message) + '). Nothing was moved.' }; }
+  try { events.begin(DATA_DIR, name, rec); } catch (e) { stores.clearClaim(); eventChanging = null; return { ok: false, status: 503, error: 'Not archived: its folder could not be made in ' + events.archiveDir(DATA_DIR) + ' (' + (e.code || e.message) + '). Nothing was moved.' }; }
   for (const r of store.allRooms()) store.closeLog(r);
   return archiveSteps(name, events.cleanArchived(rec), actor, ip, { carried: 'memory', split: ask.split === true });
 }
@@ -2716,9 +2768,14 @@ function eventFolderAtStart() {
   if (parts.length > 1) { eventStuck('held', '', parts.length + ' archives were being made at the last stop (' + parts.map(partialAt).join(', ') + '), and one is made at a time, so each is left as it is'); return; }
   if (parts.length) {
     const name = parts[0];
+    // Finished only when the record outside the data folder claims it: one written into the data folder ("continue" an
+    // older archive) is set aside, and the live stores open as they are. Without that record nothing is finished or set aside.
+    const claim = stores.peekClaim();
+    if (claim.state === 'keyless' || claim.state === 'unread') { eventStuck('held', name, 'The archive being made (' + partialAt(name) + ') waits for a start that can read the record of this folder\'s saves: ' + claim.words); return; }
     if (settingsRead.unread) { eventStuck('moves', name, settingsRead.words + ', so the next event could not be saved'); return; }
     const rec = events.readArchived(DATA_DIR, name, { partial: true });
     if (!rec || !rec.next) { eventStuck('moves', name, path.join(partialAt(name), events.LIVE) + ' cannot be read'); return; }
+    if (!claims(claim, name, rec)) { setAsideUnclaimed(name); return; }
     let moved;
     try { moved = events.moveIn(DATA_DIR, UPLOAD_DIR, name, { beat }); } catch (e) { eventStuck('moves', name, thrownWords(e)); return; }
     asideSaid(name, moved.aside);
@@ -2748,6 +2805,13 @@ function eventFolderAtStart() {
     const name = a.unbegun[0];
     const rec = events.readArchived(DATA_DIR, name);
     if (!rec || !rec.next) { unsure('The record of ' + path.join(events.ARCHIVE, name) + ' could not be read'); return; }
+    // Its next event begins only when the record outside the data folder claims it as the archive under way.
+    const claim = stores.peekClaim();
+    if (claim.state === 'keyless' || claim.state === 'unread') { unsure('The record of this folder\'s saves could not be read (' + claim.words + ')'); return; }
+    if (!claims(claim, name, rec)) {
+      console.error('  [event] ' + path.join(events.ARCHIVE, name) + ' names a next event that never began, and no archive under way is recorded for it outside the data folder: nothing of it begins, and it is left as it is');
+      return;
+    }
     if (settingsRead.unread) { eventStuck('next', name, settingsRead.words + ', so the next event could not be saved'); return; }
     leaveEvent();
     eventFinishAtStart = { name, rec, kind: 'begin' };
@@ -2764,6 +2828,30 @@ function eventFolderAtStart() {
     console.log('  Event:   “' + live.name + '”\'s record was put in place at this start, from ' + path.join(events.ARCHIVE, newest.name));
   } catch (e) { console.error('  [event] the record of “' + live.name + '” could not be put in place (' + (e.code || e.message) + '): the next start tries again'); }
 }
+/** Whether the claim read before the start (lib/keyedstore.js peekClaim) names this archive and what comes after it. */
+function claims(claim, name, rec) {
+  return claim.state === 'claim' && claim.claim.time === name && claim.claim.kind === rec.next.kind && claim.claim.next === (rec.next.from || '');
+}
+/** The archives being made that no archive under way claimed, set aside at this start, and the rows they wait to write. */
+const unclaimed = [];
+const unclaimedRows = [];
+function setAsideUnclaimed(name) {
+  let to;
+  try { to = events.setAside(DATA_DIR, name); } catch (e) {
+    eventStuck('held', name, 'An archive being made (' + path.join(events.ARCHIVE, '.' + name + '.partial') + ') is claimed by no archive under way, and could not be set aside (' + (e.code || e.message) + ')');
+    return;
+  }
+  unclaimed.push(to);
+  const words = 'a .partial folder no archive under way names was set aside as ' + to + '; nothing was archived or continued';
+  console.error('  [event] ' + words);
+  unclaimedRows.push(['event.unclaimed', to, words]);
+}
+/**
+ * An event archive as the stores' claim asks of it at a start (lib/events.js archiveState): whether it was made (whole
+ * or being made), whether its next event began, and why its record could not be read. Only ENOENT is no archive: one
+ * that cannot be read keeps its claim and its pin.
+ */
+const archiveAt = (time) => events.archiveState(DATA_DIR, time);
 /**
  * At a start, once the audit log is open and before this copy serves: what eventFolderAtStart left to finish gets its
  * archive point (where the archive has none yet), its next event and its record. A step that stops waits, as in a run.
@@ -3053,7 +3141,7 @@ io.on('connection', (socket) => {
   // off ends this socket, and the next connection is judged afresh.
   const hs = { headers: socket.handshake.headers, socket: socket.request && socket.request.socket };
   const adminSid = guard.readCookie(hs.headers.cookie, 'agm_admin') || '';
-  const tokenAdmin = tokenSessions.has(adminSid);
+  const tokenAdmin = guard.isHostMachine(hs) && tokenSessions.has(adminSid);
   const acct = web.who(hs);
   socket.data.account = acct && !acct.account.mustChange ? acct.account : null;
   socket.data.accountId = socket.data.account ? socket.data.account.id : '';
@@ -4809,8 +4897,9 @@ io.on('connection', (socket) => {
       stageContext: stageLink.context ? { headline: stageLink.context.headline, light: stageLink.context.light, peers: stageLink.context.peers || [] } : null,
       tls: tlsFacts(), stagewatchFingerprint: settings.stagewatchFingerprint || '',
       remoteAdmin: !!settings.remoteAdmin, accounts: accounts.size, build: BUILD.full,
-      // Where devices reach this laptop, as the banner's LAN lines say it, and "This laptop".
-      addresses: lanNow(), port: PORT, laptop: laptopAnswer(),
+      // Where devices reach this laptop, as the banner's LAN lines say it, and "This laptop". Then the accounts held aside
+      // or waiting for the token (`held`), in place of "No accounts yet" while it is set.
+      addresses: lanNow(), port: PORT, laptop: laptopAnswer(), held: stores.heldFacts(),
     });
   });
 
@@ -7235,8 +7324,11 @@ holdDataFolder(() => front.listen(PORT, HOST, () => {
     }
   }
   audit.open();
+  // The accounts and the sign-ins, opened by what their files and their records say, once the log can take their rows.
+  stores.open();
+  for (const [action, target, words] of unclaimedRows.splice(0)) audit.write(SYSTEM_ACTOR, action, target, words);
   // An archive a stop cut short is finished, and a folder left between two events begins the next one, before anything is
-  // served (its archive point needs the log open).
+  // served (its archive point needs the log open, its step 7 the stores).
   eventAtStart();
   const upgraded = dataformat.rowWords(formatNow, BUILD.full);
   if (upgraded) audit.write(SYSTEM_ACTOR, 'server.upgraded', BUILD.full, upgraded);
@@ -7270,6 +7362,7 @@ holdDataFolder(() => front.listen(PORT, HOST, () => {
   const bannerSaid = sayToken('    URL:   http://localhost:' + PORT + '/admin').then(() => {
     console.log('  ============================================');
     for (const line of auditBanner(said)) console.log(line);
+    for (const line of stores.bannerLines()) console.log(line);
     console.log('  AI drafts:   ' + (aiKey() ? 'on (' + ai.MODEL + ')' : 'off — add a key in Admin → AI (messaging and the show network work without it)'));
     if (RESTARTS) console.log('  Restarted by the watchdog (' + RESTARTS + 'x)' + (lastCrash ? ' — last crash: ' + String(lastCrash.message || '').slice(0, 120) : ''));
     console.log('  Stagewatch:  ' + (settings.stagewatchUrl || 'not linked (Admin → Show network)'));
@@ -7289,7 +7382,10 @@ holdDataFolder(() => front.listen(PORT, HOST, () => {
     if (audit.from > 1) console.log('  Audit log:   keyed (key ' + audit.kid + ') · from entry ' + audit.from + ', ' + audit.archives.length + ' archive' + (audit.archives.length === 1 ? '' : 's') + ' · Admin → Health');
     const more = auditAttentionLines(said);
     if (more.length) console.log(more.join('\n') + '\n');
-    startup.openBrowser(startup.openerPlan(process.env, { restarts: RESTARTS, port: PORT, platform: process.platform, path: audit.attention().length ? '/admin' : '' }), spawn, (line) => console.log(line));
+    // Accounts held aside, or waiting at the first start, open it there too: the token at this laptop opens them.
+    const held = stores.heldFacts();
+    const heldAside = !!held && held.state !== 'left' && held.state !== 'keyless' && held.state !== 'unread';
+    startup.openBrowser(startup.openerPlan(process.env, { restarts: RESTARTS, port: PORT, platform: process.platform, path: audit.attention().length || heldAside ? '/admin' : '' }), spawn, (line) => console.log(line));
   });
 }));
 

@@ -21,6 +21,8 @@ const { pathToFileURL } = require('url');
 const { fakeStagewatch, fakeNode, chainOf, unzipTo, keyedLogWithPoints, FIXTURE_KEY, connect, emit, freePort, readSource, officeZip, wordParts, wordPicture, deckParts, deckShape, deckPicture, deckSlide, workbookParts, inviteOf, pngOf, sheetParts } = require('./helpers');
 const { io: ioClient } = require('socket.io-client');
 const ops = require('../lib/ops');
+const keyedstore = require('../lib/keyedstore');
+const accountsLib = require('../lib/accounts');
 
 const ROOT = path.join(__dirname, '..');
 const OUT = process.env.AGM_SMOKE_OUT || path.join(ROOT, '..', 'artifacts', 'smoke');
@@ -736,6 +738,9 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
   let dataDir4 = null;
   let server5 = null;
   let dataDir5 = null;
+  let server6 = null;
+  let dataDir6 = null;
+  let dataDir7 = null;
   let link5 = null;
   try {
     const login = await fetch(base + '/api/admin/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: TOKEN }) });
@@ -5546,8 +5551,9 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       `a hall whose code is still its address says so where its code is shown, and its row in the list is marked (${residual}; ${residualRow})`);
     // The admin page's rollback line names what 0.5.1 would lose of the codes (plan 1-§1.8).
     const rollbackLine = await admin.eval(`document.getElementById('rollbackLine').textContent`);
-    report(/^Do not go back to 0\.5\.1 during a show\./.test(rollbackLine) && rollbackLine.includes('a hall\'s code switched off admits guests again') && rollbackLine.includes('a hall\'s New code is lost'),
-      `the admin page says what going back to 0.5.1 loses of the codes (${rollbackLine})`);
+    report(/^Do not go back to 0\.5\.1 during a show\./.test(rollbackLine) && rollbackLine.includes('a hall\'s code switched off admits guests again') && rollbackLine.includes('a hall\'s New code is lost')
+      && rollbackLine.includes('Going back to 0.5.1 and forward again holds the accounts aside until the token adopts them, and signs everyone out.'),
+      `the admin page says what going back to 0.5.1 loses of the codes, and that coming back holds the accounts aside (${rollbackLine})`);
     const sideRemoveAsk = JSON.parse(await askOn('window.__sideRow', 'adminRoom.remove'));
     await admin.eval(`document.querySelector('.agm-ask [data-answer=yes]').click()`);
     const sideRemoved = await admin.until(`!document.querySelector('#roomList > li[data-key="${sideKey}"]') && currentRoom && currentRoom.code === '${code}' && !document.getElementById('roomHeader').hidden && (document.getElementById('agmToast') || {}).textContent`, 5000);
@@ -6089,6 +6095,115 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const archiveCheck = await users3.until(`(() => { const s = document.querySelector('#auditArchives .archive-check'); return s && s.dataset.mark && s.dataset.mark + '|' + s.textContent; })()`, 20000);
     report(/^intact\|✓ Intact — entries 1–8 in the archive audit-c0ffee00-1-8, split off on \d+ \w{3}: signed by this laptop's key, every file what its SHA256SUMS says; 8 entries keyed here checked$/.test(archiveCheck || ''), `the archive is checked on its own (${archiveCheck})`);
     await users3.shot(path.join(OUT, 'audit-archive.png'));
+
+    // Accounts keyed to this laptop, on a sixth AGMessage: its folder started again under another laptop's key holds its
+    // accounts aside. The sign-in page says so in place of its tabs and a code still joins; the token at the laptop is
+    // given the copy, an admin unticked with a one-time password ticked for it, each row's doors the catalogue's; the
+    // passwords are shown once, and the Accounts page says who was left out. Then, on AGMessage 0.5.1's files, the first
+    // start: the tabs stay, with one line, and the admin who waits is the panel's.
+    {
+      dataDir6 = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-smoke-keyed-'));
+      const elsewhere = dataDir6 + '-elsewhere';
+      const port6 = await freePort();
+      const base6 = `http://127.0.0.1:${port6}`;
+      const post6 = (route, body, cookie6) => fetch(base6 + route, { method: 'POST', headers: { 'content-type': 'application/json', ...(cookie6 ? { cookie: cookie6 } : {}) }, body: JSON.stringify(body) });
+      server6 = await startServer(port6, dataDir6);
+      await post6('/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' });
+      const ana6 = (await post6('/api/auth/login', { username: 'ana', password: 'the green room kettle' })).headers.get('set-cookie').split(';')[0];
+      await post6('/api/users', { username: 'sam', name: 'Sam Stage', role: 'staff', password: 'the stage door is red' }, ana6);
+      await stopServer(server6);
+      server6 = await startServer(port6, dataDir6, { AGM_KEY_DIR: elsewhere });   // the same folder, under another laptop's key
+      const refused6 = await post6('/api/auth/login', { username: 'sam', password: 'the stage door is red' });
+      const refusedSaid = JSON.stringify({ status: refused6.status, ...(await refused6.json()) });
+      const signin6 = await edge.tab(`${base6}/`);
+      const heldPage = await signin6.until(`(() => { const t = document.getElementById('heldText'); return !document.getElementById('heldPane').hidden && JSON.stringify({ tabs: document.querySelector('.entry-tabs').hidden, panes: [...document.querySelectorAll('.entry-pane')].filter((p) => !p.hidden).map((p) => p.id), mark: t.dataset.mark, words: t.textContent, code: document.getElementById('heldCode').getAttribute('href') }); })()`, 20000);
+      await signin6.shot(path.join(OUT, 'signin-held.png'));
+      await signin6.eval(`document.getElementById('heldCode').click()`);
+      const codeStill = await signin6.until(`location.search === '?tab=code' && !document.getElementById('joinForm').hidden && document.getElementById('heldPane').hidden && !document.querySelector('.entry-tabs').hidden`, 10000);
+      report(heldPage === JSON.stringify({ tabs: true, panes: ['heldPane'], mark: 'broken', words: '✕ ' + keyedstore.HELD_WORDS, code: '/?tab=code' }) && !!codeStill
+        && refusedSaid === JSON.stringify({ status: 503, ok: false, error: keyedstore.HELD_WORDS, held: true }),
+        `accounts saved under another laptop's key: the sign-in page says so in place of its tabs, a sign-in is refused in the same words, and Join with a code still joins (${heldPage}; ${refusedSaid})`);
+
+      const admin6 = await edge.tab(`${base6}/admin.html`);
+      await admin6.until('document.readyState === "complete"');
+      await admin6.eval(`fetch('/api/admin/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: '${TOKEN}' }) }).then(() => location.reload())`);
+      const HELD_ROWS = `[...document.querySelectorAll('#heldList > li[data-key]')]`;
+      const HELD_ROW = (ref) => `document.querySelector('#heldList > li[data-key="${ref}"]')`;
+      const LINES = (li) => `[...${li}.querySelectorAll(':scope > label')].map((l) => l.querySelector('span').textContent + '=' + l.querySelector('input').checked)`;
+      const READ_HELD = `${HELD_ROWS}.map((li) => ({ who: li.querySelector('.adopt-who strong').textContent, adopt: li.querySelector('input[data-adopt]').checked, lines: ${LINES('li')} }))`;
+      const listed6 = await admin6.until(`!document.getElementById('dashboard').hidden && !document.getElementById('heldSection').hidden && ${HELD_ROWS}.length === 2 && JSON.stringify({ why: document.getElementById('heldWhy').textContent, copy: /^The copy held aside: accounts\\.held-[^ ]+\\.json \\(digest [0-9a-f]{16}…\\)\\.$/.test(document.getElementById('heldCopy').textContent), rows: ${READ_HELD}, acts: [...document.querySelectorAll('#heldActs [data-action]')].map((b) => b.dataset.action) })`, 20000);
+      const seen6 = listed6 && JSON.parse(listed6);
+      const [anaRef, samRef] = await admin6.eval(`${HELD_ROWS}.map((li) => li.dataset.key)`);
+      // Each row says what the account may do, read from the copy, and when it was made, last signed in and set its password.
+      const rowFacts = await admin6.eval(`JSON.stringify(${HELD_ROWS}.map((li) => li.querySelectorAll('.adopt-who .adopt-what')[1].textContent))`);
+      const facts6 = JSON.parse(rowFacts || '[]');
+      report(facts6.length === 2 && /^Rights: (?=.*users\.manage)(?=.*settings\.manage).* · made \S+ · last sign-in \S+ · password set \S+$/.test(facts6[0]) && /^Rights: (?!.*users\.manage).+ · made \S+ · last sign-in \S+ · password set \S+$/.test(facts6[1]),
+        `each account held aside shows its rights, when it was made, its last sign-in and when its password was set (${rowFacts})`);
+      const heldDoors = await doorsOf(admin6, 'heldAccount', HELD_ROW(anaRef), `AGM.page.object('heldAccount', '${anaRef}')`, { ...PAGE_DOORS_HALLS, hit: 'strong' });
+      report(!!seen6 && /^✕ accounts\.json was saved under another machine key \([0-9a-f]{4}…, its own claim\): .* This laptop cannot check them \(kept aside as accounts\.held-[^ ]+\.json\)\. Someone may have changed this file: /.test(seen6.why) && seen6.copy
+        && JSON.stringify(seen6.rows) === JSON.stringify([{ who: 'Adopt ana', adopt: false, lines: ['With a one-time password=true'] }, { who: 'Adopt sam', adopt: true, lines: ['With a one-time password=false'] }])
+        && seen6.acts.includes('accounts.adopt') && doorsInStep(heldDoors) && heldDoors.want === JSON.stringify(['heldAccount.adopt', 'heldAccount.leave', 'heldAccount.reset']),
+        `the token at the laptop is given the copy held aside: the admin unticked with a one-time password ticked, the Staff account ticked, each row's doors the catalogue's (${listed6}; ${heldDoors.want}; ${heldDoors.right} / ${heldDoors.dots} / ${heldDoors.key})`);
+      // Ana ticked by her box, which asks for the confirmation an admin needs; Sam left out from his menu.
+      await admin6.eval(`(() => { const b = ${HELD_ROW(anaRef)}.querySelector('input[data-adopt]'); b.checked = true; b.dispatchEvent(new Event('change')); })()`);
+      const anaLines = await admin6.until(`(() => { const l = ${LINES(HELD_ROW(anaRef))}; return l.length === 2 && JSON.stringify(l); })()`, 3000);
+      await admin6.eval(`${HELD_ROW(samRef)}.querySelector('.obj-more').click()`);
+      await admin6.until(`!!document.querySelector('.agm-menu [data-action="heldAccount.leave"]')`, 3000);
+      await admin6.eval(`document.querySelector('.agm-menu [data-action="heldAccount.leave"]').click()`);
+      const samOut = await admin6.until(`${HELD_ROW(samRef)}.querySelector('input[data-adopt]').checked === false`, 3000);
+      await admin6.eval(`(() => { const b = ${HELD_ROW(anaRef)}.querySelector(':scope > label input'); b.checked = true; b.dispatchEvent(new Event('change')); })()`);
+      await admin6.eval(`document.querySelector('#heldActs [data-action="accounts.adopt"]').click()`);
+      await admin6.until(`!!document.querySelector('.agm-ask input[name="token"]')`, 3000);
+      const asked6 = await admin6.eval(`document.querySelector('.agm-ask').textContent`);
+      await admin6.eval(`(() => { document.querySelector('.agm-ask input[name="token"]').value = '${TOKEN}'; document.querySelector('.agm-ask [data-answer=yes]').click(); })()`);
+      const shown6 = await admin6.until(`(() => { const box = document.getElementById('heldPasswords'); const c = box.querySelector('code'); return !box.hidden && c && JSON.stringify({ lines: [...box.querySelectorAll('p')].map((p) => p.textContent.replace(c.textContent, '<password>')), password: c.textContent, why: document.getElementById('heldWhy').textContent, acts: [...document.querySelectorAll('#heldActs [data-action]')].map((b) => b.dataset.action) }); })()`, 20000);
+      const adopted6 = shown6 && JSON.parse(shown6);
+      await admin6.shot(path.join(OUT, 'accounts-adopted.png'));
+      report(anaLines === JSON.stringify(['ana can manage AGMessage. Adopt ana only if this folder has been in your hands since ana was given that.=false', 'With a one-time password=true']) && !!samOut && /Adopt the ticked accounts\?.*Adopt ana, with a one-time password for ana\./.test(asked6 || '')
+        && !!adopted6 && JSON.stringify(adopted6.lines) === JSON.stringify(['One-time passwords, shown once: give each to its person, who chooses their own at the first sign-in.', 'ana: <password>'])
+        && /^△ 1 account was left out on \d+ \w{3} and is kept aside: the token at the laptop may adopt them\.$/.test(adopted6.why) && adopted6.acts.includes('accounts.more'),
+        `ticked, confirmed and adopted with the token typed: ana's one-time password is shown, and the panel says who was left out (${anaLines}; ${shown6 && shown6.replace(/"password":"[^"]+"/, '"password":"…"')})`);
+      await admin6.eval('location.reload()');
+      const onceOnly = await admin6.until(`!document.getElementById('dashboard').hidden && !document.getElementById('heldSection').hidden && document.getElementById('heldPasswords').hidden && !document.body.textContent.includes(${codeLiteral(adopted6 ? adopted6.password : '-')})`, 20000);
+      report(!!onceOnly && !!adopted6, 'the one-time passwords are shown once: the page loaded again holds none');
+      // Ana signs in with her one-time password, chooses her own, and the Accounts page says who was left out.
+      await signin6.eval(`fetch('/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'ana', password: ${codeLiteral(adopted6 ? adopted6.password : '')} }) })
+        .then(() => fetch('/api/auth/password', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ current: ${codeLiteral(adopted6 ? adopted6.password : '')}, next: 'a fresh kettle backstage' }) })).then(() => { location.href = '/users.html'; })`);
+      const leftOut = await signin6.until(`(() => { const l = document.getElementById('leftOut'); return location.pathname === '/users.html' && !l.hidden && l.dataset.mark + '|' + l.textContent; })()`, 20000);
+      report(/^unvouched\|△ 1 account was left out on \d+ \w{3} and is kept aside: the token at the laptop may adopt them$/.test(leftOut || ''), `the Accounts page says who was left out (${leftOut})`);
+      const problems6 = [...signin6.problems, ...admin6.problems];
+      report(problems6.length === 0, `the sign-in page, the admin page and the Accounts page of accounts held aside: no script errors or CSP violations${problems6.length ? ' — ' + problems6.slice(0, 3).join(' | ') : ''}`);
+      signin6.close();
+      admin6.close();
+      await stopServer(server6);
+      server6 = null;
+      fs.rmSync(elsewhere, { recursive: true, force: true });
+
+      // AGMessage 0.5.1's files at the first start: the Staff account signs in at once, the admin waits for the token.
+      dataDir7 = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-smoke-first-'));
+      const at7 = Date.now();
+      const user7 = async (id, username, name, role, password) => ({ id, username, name, role, halls: [], grant: [], revoke: [], disabled: false, mustChange: false, pw: await accountsLib.hashPassword(password), pwSetAt: at7, epoch: 1, createdAt: at7, createdBy: '', lastLoginAt: 0 });
+      fs.writeFileSync(path.join(dataDir7, 'accounts.json'), JSON.stringify({ v: 1, users: [await user7('aana00000001', 'ana', 'Ana Admin', 'admin', 'the green room kettle'), await user7('asam00000001', 'sam', 'Sam Stage', 'staff', 'the stage door is red')] }, null, 1));
+      server6 = await startServer(port6, dataDir7);
+      const at = [(await post6('/api/auth/login', { username: 'sam', password: 'the stage door is red' })).status, (await post6('/api/auth/login', { username: 'ana', password: 'the green room kettle' })).status];
+      const first7 = await edge.tab(`${base6}/`);
+      const firstPage = await first7.until(`(() => { const w = document.getElementById('waitingLine'); return !w.hidden && JSON.stringify({ tabs: !document.querySelector('.entry-tabs').hidden, panes: [...document.querySelectorAll('.entry-pane')].filter((p) => !p.hidden).map((p) => p.id), mark: w.dataset.mark, words: w.textContent }); })()`, 20000);
+      await first7.shot(path.join(OUT, 'signin-first.png'));
+      const admin7 = await edge.tab(`${base6}/admin.html`);
+      await admin7.until('document.readyState === "complete"');
+      await admin7.eval(`fetch('/api/admin/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: '${TOKEN}' }) }).then(() => location.reload())`);
+      const waiting7 = await admin7.until(`!document.getElementById('dashboard').hidden && !document.getElementById('heldSection').hidden && ${HELD_ROWS}.length === 1 && JSON.stringify({ rows: ${READ_HELD}, open: document.getElementById('heldOpen').textContent, acts: [...document.querySelectorAll('#heldActs [data-action]')].map((b) => b.dataset.action + ':' + b.textContent.trim()) })`, 20000);
+      report(JSON.stringify(at) === '[200,401]' && firstPage === JSON.stringify({ tabs: true, panes: ['signInPane'], mark: 'unvouched', words: '△ ' + keyedstore.FIRST_WORDS })
+        && !!waiting7 && JSON.parse(waiting7).open === 'Open, keyed as found: sam.' && JSON.stringify(JSON.parse(waiting7).rows) === JSON.stringify([{ who: 'Adopt ana', adopt: false, lines: ['With a one-time password=false'] }])
+        && JSON.parse(waiting7).acts.some((a) => /^accounts\.fresh:.*Leave these out…$/.test(a)),
+        `the first start on 0.5.1's files: the Staff account signs in at once, the admin waits (${at}); the sign-in page keeps its tabs with one line, and the token at the laptop is given the admin who waits (${firstPage}; ${waiting7})`);
+      const problems7 = [...first7.problems, ...admin7.problems];
+      report(problems7.length === 0, `the first start's sign-in page and admin page: no script errors or CSP violations${problems7.length ? ' — ' + problems7.slice(0, 3).join(' | ') : ''}`);
+      first7.close();
+      admin7.close();
+      await stopServer(server6);
+      server6 = null;
+    }
 
     // Pages come back by themselves, on a fourth AGMessage of their own (its connections drained, then stopped and
     // started again): a page refused at connect says the wait and comes back without a reload; a drop says
@@ -7055,8 +7170,9 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     if (server3) await stopServer(server3);
     if (server4) await stopServer(server4);
     if (server5) await stopServer(server5);
+    if (server6) await stopServer(server6);
     if (link5) link5.close();
-    const dirs = [dataDir, dataDir2, dataDir3, dataDir4, dataDir5].filter(Boolean);
+    const dirs = [dataDir, dataDir2, dataDir3, dataDir4, dataDir5, dataDir6, dataDir7].filter(Boolean);
     const beside = dirs.flatMap((d) => { try { return fs.readFileSync(d + '-snapshots.txt', 'utf8').split('\n').filter(Boolean); } catch { return []; /* the fence found nothing */ } });
     report(beside.length === 0, `every hall a start or a stop left unwritten holds what the store last wrote or loaded: nothing changed beside the store, which a stop would lose (${beside.join(', ') || 'none'})`);
     setTimeout(() => { for (const d of dirs) { for (const f of [d, d + '-snapshots.txt']) { try { fs.rmSync(f, { recursive: true, force: true }); } catch { /* ignore */ } } } }, 1000);

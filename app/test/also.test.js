@@ -11,7 +11,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
-const { startServer, stopServer, api, connect, emit, wait, until, inviteOf, TOKEN } = require('./helpers');
+const { startServer, stopServer, api, connect, emit, wait, until, inviteOf, setupAdmin } = require('./helpers');
 const { io } = require('socket.io-client');
 
 const PASSWORD = 'clipboard and coffee';
@@ -51,7 +51,7 @@ async function rig(t) {
   };
   const joined = async (s, args) => { const r = await emit(s, 'join', invited(srv.dataDir, args)); assert.equal(r.ok, true, s.who + ': ' + JSON.stringify(r)); return r; };
   const events = (s, name) => heard.get(s).filter(([ev]) => ev === name).map(([, v]) => v);
-  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await setupAdmin(srv.base)).cookie;
   const hall = (await api(srv.base, 'POST', '/api/rooms', { name: 'Hall 2' }, { cookie: admin })).body.code;
   const account = async (username, name, role, extra) => {
     const made = await api(srv.base, 'POST', '/api/users', { username, name, role, password: PASSWORD, ...extra }, { cookie: admin });

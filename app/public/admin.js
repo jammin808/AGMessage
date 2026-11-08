@@ -28,7 +28,7 @@ let currentRoom = null;
 // What the server told this page: whom its gate admits (/api/admin/me), "the admin", whether its account may manage
 // accounts (a room's Members…), whether AI drafts are on, the halls a node may be linked for, and whether it is connected
 // now. A change redraws every bar and the open menu in place.
-const adminState = { ok: false, admin: false, manageUsers: false, ai: false, halls: [], connected: false, local: false };
+const adminState = { ok: false, admin: false, manageUsers: false, ai: false, halls: [], connected: false, local: false, token: false };
 /**
  * The event as admin-plus.js last read it: each earlier hall's own Stagewatch link New hall offers (`links`, from
  * /api/event), and whether this page archived the event itself (`archiving`): every sign-in then ends, and the page reads
@@ -68,7 +68,7 @@ const ADMIN_DRAWERS = [];
   // First, check if we're already logged in (cookie set) and on the host
   const me = await fetch('/api/admin/me').then((r) => r.json()).catch(() => ({}));
   // An admin account works from any device on the venue network; the host's token only on the host laptop.
-  if (me.ok) { adminState.ok = true; adminState.admin = !!me.admin; adminState.manageUsers = me.manageUsers === true; adminState.local = me.local === true; showDashboard(); return; }
+  if (me.ok) { adminState.ok = true; adminState.admin = !!me.admin; adminState.manageUsers = me.manageUsers === true; adminState.local = me.local === true; adminState.token = me.token === true; showDashboard(); return; }
   loginPanel.hidden = false;
   if (!me.local) {
     loginNotice.innerHTML =

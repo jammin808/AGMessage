@@ -1010,7 +1010,7 @@ async function serverWithPoints(t, n, points, { counted = false } = {}) {
 
 test('end to end: only the admin splits (the token, an admin account); never a manager, one granted settings.manage, Staff, a code guest or the tunnel; health, /api/audit and the window name the archive', async (t) => {
   let srv = await serverWithPoints(t, 12, [9]);
-  const admin = (await h.api(srv.base, 'POST', '/api/setup', { token: h.TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await h.setupAdmin(srv.base)).cookie;
   const mk = async (username, role, password, grant = []) => {
     const made = await h.api(srv.base, 'POST', '/api/users', { username, name: username, role, grant, password }, { cookie: admin });
     assert.equal(made.status, 200, JSON.stringify(made.body));
@@ -1064,7 +1064,7 @@ test('end to end: only the admin splits (the token, an admin account); never a m
 // waiting to read: it waits for nothing the split holds.
 test('speed: a split of the 56,000-entry log at entry 50,000 walks at most 1,000 entries and hashes at most one file between two turns of the event loop, reads the log off the loop one read at a time, and a sign-in is answered while it holds its slot; the check after walks about 6,000 entries; the archive\'s own Check walks and MAC-checks at most 1,000 entries between two turns', async (t) => {
   const srv = await serverWithPoints(t, 56_000, [50_000], { counted: true });
-  const admin = (await h.api(srv.base, 'POST', '/api/setup', { token: h.TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await h.setupAdmin(srv.base)).cookie;
   await h.api(srv.base, 'POST', '/api/users', { username: 'bob', name: 'Bob', role: 'staff', password: 'clipboard and coffee' }, { cookie: admin });
   assert.equal((await h.api(srv.base, 'GET', '/api/audit/verify', undefined, { cookie: admin })).status, 200, 'the check at start, or one after it, answered: no walk runs now');
   // The seed's two files: entries 1-49,999, the one the split moves, and the live one from the archive point on.

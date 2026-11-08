@@ -12,7 +12,7 @@ const path = require('path');
 const { io } = require('socket.io-client');
 const events = require('../lib/events');
 const nodes = require('../lib/nodes');
-const { startServer, stopServer, restartServer, api, connect, emit, until, inviteOf, TOKEN } = require('./helpers');
+const { startServer, stopServer, restartServer, api, connect, emit, until, inviteOf, TOKEN, setupAdmin } = require('./helpers');
 
 const PASSWORD = 'the green room kettle';
 const STAFF_PASSWORD = 'cable ties and gaffer';
@@ -59,7 +59,7 @@ async function eventServer(t, env = {}) {
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });
   const base = srv.base;
-  const root = (await api(base, 'POST', '/api/setup', { token: TOKEN, username: 'root', name: 'Root Admin', password: PASSWORD })).cookie;
+  const root = (await setupAdmin(base, { username: 'root', name: 'Root Admin', password: PASSWORD })).cookie;
   assert.ok(root, 'the first admin');
   const hallA = (await api(base, 'POST', '/api/rooms', { name: 'Hall 2' }, { cookie: root })).body.code;
   const hallB = (await api(base, 'POST', '/api/rooms', { name: 'Hall 3' }, { cookie: root })).body.code;
@@ -237,7 +237,7 @@ test('events: copy, then continue, then fresh: each archived whole, what the nod
   assert.equal(keptOf(settingsOf(dataDir)), keptBefore, 'the node\'s settings unchanged');
   assert.deepEqual(readJson(path.join(dataDir, 'pages.json')).holds.default, HOLD);
   // The token at the laptop makes the first admin account, as at a first start.
-  const made = await api(base, 'POST', '/api/setup', { token: TOKEN, username: 'root', name: 'Root Admin', password: PASSWORD });
+  const made = await setupAdmin(base, { username: 'root', name: 'Root Admin', password: PASSWORD });
   assert.equal(made.status, 200);
   // A new hall is offered the earlier link, on the admin page and on the halls board alike: it moves to the new hall.
   assert.equal((await emit(tctl, 'admin:createRoom', { name: 'Hall 9', link: 'NOSUCH' })).error, 'That earlier hall\'s Stagewatch link is not kept now: make the hall, then set its Stagewatch up.');
@@ -298,7 +298,7 @@ test('events: a move refused part way leaves the archive aside, every join and w
   assert.deepEqual(archives(dataDir), [partial]);
   assert.deepEqual(events.partials(dataDir), []);
   for (const f of before) assert.ok(archivedFiles(path.join(dataDir, 'archive', partial)).includes(f), f + ' archived: every file the event had is in its archive');
-  assert.deepEqual(eventFiles(dataDir, dataDir + '-uploads').filter((f) => !/^(rooms|stage)\//.test(f) && !/sessions\.json/.test(f) && f !== 'pages.json' && f !== 'accounts.json' && f !== 'displays.json' && f !== 'desk-results.json'), [], 'and nothing of it is left in the folder');
+  assert.deepEqual(eventFiles(dataDir, dataDir + '-uploads').filter((f) => !/^(rooms|stage)\//.test(f) && !/sessions\.json/.test(f) && f !== 'pages.json' && f !== 'accounts.json' && f !== 'accounts.json.bak' && f !== 'displays.json' && f !== 'desk-results.json'), [], 'and nothing of it is left in the folder (the next event\'s accounts are saved twice: their .bak is theirs)');
   assert.equal(allAudit(dataDir).filter((x) => x.action === 'audit.archive').length, 1, 'one point');
   const token = await signIn(base);
   assert.deepEqual((await rooms(await connect(base, token).then((s) => { e.sockets.push(s); return s; }))).rooms, [], 'the fresh event');
@@ -469,7 +469,8 @@ test('events: a continue whose files do not all come back waits, its accounts ke
   const token = await signIn(base);
   const done = await archive(e, token, {});
   assert.equal(done.status, 200, JSON.stringify(done.body));
-  assert.ok((await api(base, 'POST', '/api/auth/login', { username: 'sid', password: STAFF_PASSWORD })).cookie, 'its accounts');
+  const sidIn = await api(base, 'POST', '/api/auth/login', { username: 'sid', password: STAFF_PASSWORD });
+  assert.ok(sidIn.cookie, 'its accounts: ' + JSON.stringify([sidIn.body, (await api(base, 'GET', '/api/health')).body.signins]));
   const t2 = await signIn(base);
   const ctl = await connect(base, t2); e.sockets.push(ctl);
   assert.deepEqual((await rooms(ctl)).rooms.map((x) => [x.code, x.guestCode]).sort(), e.was.map((x) => [x.code, x.guestCode]).sort(), 'its halls and codes');
@@ -633,6 +634,34 @@ test('events: an archive\'s name is its time to the millisecond, and a record is
   assert.deepEqual(events.liveOf('2026-10-27T14-02-00-000Z', { id: 'e0123456789ab', at: 7, name: 'x', kind: 'copy', from: '' }), { v: 1, id: 'e0123456789ab', name: 'x', began: 7, kind: 'copy', from: '', after: '2026-10-27T14-02-00-000Z' });
   assert.equal(events.cleanArchived({ id: 'e0123456789ab', kind: 'first', next: { kind: 'merge' } }).next, null, 'a next that is none');
   assert.equal(events.cleanArchived({ id: 'e0123456789ab', kind: 'first', next: { kind: 'fresh', from: '2026-10-27T14-02-00-000Z' } }).next.from, '', 'a fresh start comes from nothing');
+});
+
+test('events: an archive as the keyed stores\' claim asks of it at a start: absent only by ENOENT; one being made, or whose record reads, exists; one whose record or list cannot be read exists, unread', () => {
+  const f = eventFolder();
+  const name = '2026-11-01T10-00-00-000Z';
+  assert.deepEqual(events.archiveState(f.data, name), { exists: false, begun: false }, 'no archive folder at all');
+  fs.mkdirSync(path.join(events.archiveDir(f.data), '.' + name + '.partial'), { recursive: true });
+  assert.deepEqual(events.archiveState(f.data, name), { exists: true, begun: false }, 'one being made');
+  fs.rmSync(path.join(events.archiveDir(f.data), '.' + name + '.partial'), { recursive: true });
+  const dir = path.join(events.archiveDir(f.data), name);
+  fs.mkdirSync(dir, { recursive: true });
+  assert.deepEqual(events.archiveState(f.data, name), { exists: false, begun: false }, 'a folder whose record and its .bak are absent');
+  const rec = { v: 1, id: 'e0123456789ab', name: 'Spring Summit', kind: 'first', began: 1, ended: 2, next: { kind: 'fresh', name: 'x' } };
+  fs.writeFileSync(path.join(dir, events.LIVE), JSON.stringify(rec));
+  assert.deepEqual(events.archiveState(f.data, name), { exists: true, begun: false });
+  fs.writeFileSync(path.join(dir, events.LIVE), JSON.stringify({ ...rec, next: { ...rec.next, began: { id: 'e0123456789ab', at: 3, name: 'x', kind: 'fresh', from: '' } } }));
+  assert.deepEqual(events.archiveState(f.data, name), { exists: true, begun: true });
+  // A record that cannot be read (a folder in its place: EISDIR) or is not whole: the archive is there, and unread.
+  fs.rmSync(path.join(dir, events.LIVE));
+  fs.mkdirSync(path.join(dir, events.LIVE));
+  assert.deepEqual(events.archiveState(f.data, name), { exists: true, begun: false, unread: 'EISDIR' });
+  fs.rmSync(path.join(dir, events.LIVE), { recursive: true });
+  fs.writeFileSync(path.join(dir, events.LIVE), '{"v":1,');
+  assert.deepEqual(events.archiveState(f.data, name), { exists: true, begun: false, unread: 'not whole' });
+  // The archives that cannot be listed (a file where their folder is): unread, never absent.
+  const g = eventFolder();
+  fs.writeFileSync(events.archiveDir(g.data), 'not a folder');
+  assert.equal(events.archiveState(g.data, name).unread, 'ENOTDIR');
 });
 
 test('events: an archive moved across volumes copies the uploads, sized alike, before any is removed; a continue copies them back', async (t) => {

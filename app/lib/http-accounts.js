@@ -12,6 +12,10 @@
  * rights (users.manage, settings.manage, audit.export) may not sign in, nor use those rights on a session it has, unless
  * the admin turned on "Admin sign-in through the tunnel"; everyone else may. A refused sign-in gets the same answer as a wrong
  * password, so it never tells a stranger that a password was right.
+ *
+ * The accounts are opened by lib/keyedstore.js (`stores`): while they are held aside, or could not be opened at this
+ * start, every account sign-in is refused at once with why, and no first admin is made. The token at the laptop reads the
+ * copy held aside and adopts its accounts, or starts with none (Admin → Accounts held aside).
  */
 const { Accounts, passwordProblem, temporaryPassword, isView, NO_MATCH } = require('./accounts');
 const rbac = require('./rbac');
@@ -25,7 +29,7 @@ const UNKNOWN_NAME = '(unknown username)';
 const FAIL_WORDS = { unknown: 'no such username', wrong: 'wrong password', disabled: 'the account is turned off' };
 
 function mountAccounts(app, o) {
-  const { accounts, sessions, audit, settings, isEncrypted, isLoopback, onAccountChanged, onSessionEnded, hallNames, roomNames } = o;
+  const { accounts, sessions, stores, audit, settings, isEncrypted, isLoopback, onAccountChanged, onSessionEnded, hallNames, roomNames } = o;
   const ipBuckets = new guard.Buckets(0.5, 5, 5000);
   // Wrong passwords for a username count where they come from: a device on the venue network by its address, the whole
   // tunnel as one place (anyone on the internet is there). A stranger's guesses hold that username only where the
@@ -97,6 +101,12 @@ function mountAccounts(app, o) {
     const where = username + '|' + (throughTunnel(req) ? 'tunnel' : ip);
     if (!ipBuckets.take(ip) || ipLock.locked(ip) || (!host && userLock.locked(where))) return res.status(429).json({ ok: false, error: 'Too many attempts — wait a few minutes and try again.' });
     if (!username || !password) return res.status(400).json({ ok: false, error: 'Type your username and password.' });
+    // Accounts held aside, or not opened at this start: refused at once, no hash run, and the typed name never written.
+    const closed = stores.signInRefusal();
+    if (closed) {
+      audit.write({ t: 'account', id: '', name: UNKNOWN_NAME }, 'login.refused', UNKNOWN_NAME, 'accounts are not open: ' + (stores.heldFacts() || {}).state, ip);
+      return res.status(503).json({ ok: false, error: closed, held: true });
+    }
     // Every refusal says the same: an unknown name, a wrong password, a turned-off account, and admin rights through the
     // tunnel (with the right password) are told apart only in the audit log.
     const noMatch = NO_MATCH + (throughTunnel(req) && !settings.remoteAdmin ? ' Accounts with admin rights sign in on the venue network, not through the tunnel.' : '');
@@ -107,6 +117,12 @@ function mountAccounts(app, o) {
     if (r.busy) return res.status(429).json({ ok: false, error: BUSY, busy: true });
     if (r.error) {
       failed();
+      // An account that waits for the token at the first start is no account until it is opened: refused as an unknown
+      // name is, its own name never in the row.
+      if (r.reason === 'unknown' && stores.waits(username)) {
+        audit.write({ t: 'account', id: '', name: UNKNOWN_NAME }, 'login.refused', UNKNOWN_NAME, 'waiting for the token at the laptop', ip);
+        return res.status(401).json({ ok: false, error: noMatch });
+      }
       // A name that is no account may be a password typed into the wrong box: it is never written down.
       const known = accounts.byUsername(username);
       audit.write(known ? actorOf({ account: known }) : { t: 'account', id: '', name: UNKNOWN_NAME }, 'login.fail', known ? known.username : UNKNOWN_NAME, FAIL_WORDS[r.reason] || 'refused', ip);
@@ -139,11 +155,15 @@ function mountAccounts(app, o) {
     res.json({ ok: true });
   });
 
+  // `held`, last: why account sign-ins wait (accounts held aside, waiting at the first start, or not opened at this start),
+  // or null, as the sign-in page says it (lib/keyedstore.js pageFacts); while it is set no first admin is made (`setup`
+  // false).
+  const heldForPages = () => stores.pageFacts();
   app.get('/api/auth/me', (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     const w = who(req);
-    if (!w) return res.json({ ok: true, account: null, setup: accounts.size === 0 });
-    res.json({ ok: true, account: Accounts.view(w.account), roles: roleList(), caps: rbac.CAPS });
+    if (!w) return res.json({ ok: true, account: null, setup: accounts.size === 0 && !stores.setupRefusal(), held: heldForPages() });
+    res.json({ ok: true, account: Accounts.view(w.account), roles: roleList(), caps: rbac.CAPS, held: heldForPages() });
   });
 
   app.post('/api/auth/password', async (req, res) => {
@@ -178,6 +198,8 @@ function mountAccounts(app, o) {
   // never makes one: a second Windows account on the laptop reaches it too.
   app.post('/api/setup', async (req, res) => {
     if (accounts.size > 0) return res.status(409).json({ ok: false, error: 'Accounts are set up already — sign in.' });
+    const held = stores.setupRefusal();
+    if (held) return res.status(409).json({ ok: false, error: held, held: true });
     if (!guard.isHostMachine(req)) return res.status(403).json({ ok: false, error: 'The first admin account is made on the AGMessage laptop itself, with its token.' });
     const b = req.body && typeof req.body === 'object' ? req.body : {};
     const typed = typeof b.token === 'string' && b.token.trim() !== '';
@@ -189,7 +211,7 @@ function mountAccounts(app, o) {
     const problem = passwordProblem(b.password, { username: b.username, name: b.name });
     if (problem) return res.status(400).json({ ok: false, error: problem });
     const r = await accounts.create({ username: b.username, name: b.name, role: 'admin', password: b.password }, 'setup', { firstAdmin: true });
-    if (r.exists) return res.status(409).json({ ok: false, error: r.error });
+    if (r.exists || r.held) return res.status(409).json({ ok: false, error: r.error });
     if (r.error) return res.status(400).json({ ok: false, error: r.error });
     const token = sessions.create(r.account, { ip: guard.clientIp(req), ua: req.headers['user-agent'] });
     res.setHeader('Set-Cookie', cookie(req, token, 7 * 86400));
@@ -268,8 +290,11 @@ function mountAccounts(app, o) {
       };
     });
     const rooms = roomNames().filter((r) => holds(r.key)).map((r) => ({ key: r.key, name: r.name, hall: reaches(r.hall) ? r.hall : '', hallName: r.hallName }));
-    // `capGroups`, last: the rights in the page's three groups (rbac.CAP_GROUPS), each by its rights' names.
-    res.json({ ok: true, users, roles: roleList(), caps: rbac.CAPS, halls: hallNames().filter((h) => reaches(h.code)), giveable, rooms, giveableRooms, capGroups: rbac.CAP_GROUPS });
+    // `capGroups`: the rights in the page's three groups (rbac.CAP_GROUPS), each by its rights' names. `leftOut`, last: to an
+    // account whose role is admin, the accounts an adoption left out and keeps aside, in words ('' when none).
+    const held = stores.heldFacts();
+    const leftOut = req.agm.account.role === 'admin' && held && held.state === 'left' ? held.words : '';
+    res.json({ ok: true, users, roles: roleList(), caps: rbac.CAPS, halls: hallNames().filter((h) => reaches(h.code)), giveable, rooms, giveableRooms, capGroups: rbac.CAP_GROUPS, leftOut });
   });
 
   app.post('/api/users', signedIn('users.manage'), async (req, res) => {
@@ -350,6 +375,66 @@ function mountAccounts(app, o) {
     onAccountChanged(target.id, 'removed');
     audit.write(actorOf(req.agm), 'user.remove', target.username, 'account removed', guard.clientIp(req));
     res.json({ ok: true });
+  });
+
+  // ---------------------------------------------------------------- accounts held aside (the token at the laptop)
+  // The copy held aside, and adopting its accounts (lib/keyedstore.js judges, lib/accounts.js takes them). Only the person
+  // at the AGMessage laptop who has its token: the panel is read by the token's sign-in made by this run, and an adoption
+  // takes the token typed (judged first, as the first admin account's is), since it vouches for data this machine cannot
+  // check. No account adopts: none can sign in while accounts are held aside, and whoever wrote the folder could have
+  // written one. The one-time passwords go in the answer alone, once, over loopback.
+  const HELD_HERE = 'Open the accounts held aside at the AGMessage laptop itself, signed in with its token.';
+  app.get('/api/accounts/held', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!guard.isHostMachine(req) || !o.tokenHere(req)) return res.status(403).json({ ok: false, error: HELD_HERE });
+    const r = stores.heldView(Array.from(accounts.users.values()), (a) => Accounts.view(a));
+    const { status, ...answer } = r;
+    return res.status(status || 200).json(answer);
+  });
+  const isList = (v) => (Array.isArray(v) ? v : []);
+  const idOf = (v) => (typeof v === 'string' ? v.slice(0, 48) : '');
+  let adopting = false;
+  app.post('/api/accounts/adopt', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!guard.isHostMachine(req)) return res.status(403).json({ ok: false, error: 'Adopt accounts at the AGMessage laptop itself, with its token.' });
+    const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+    const no = o.typedToken(req, b.token, 'adoption');
+    if (no) return res.status(no.status).json({ ok: false, error: no.error });
+    if (adopting) return res.status(409).json({ ok: false, error: 'An adoption is being made now: wait for it, then read the copy again.' });
+    const ask = {
+      digest: typeof b.digest === 'string' ? b.digest.slice(0, 64) : '',
+      adopt: isList(b.adopt).slice(0, 5000).filter((x) => x && typeof x === 'object').map((x) => ({ id: idOf(x.id), reset: x.reset === true })),
+      confirm: isList(b.confirm).slice(0, 5000).map(idOf), keep: isList(b.keep).slice(0, 5000).map(idOf),
+    };
+    const open = Array.from(accounts.users.values());
+    const j = stores.judgeAdoption(ask, open);
+    if (j.status) return res.status(j.status).json({ ok: false, error: j.error });
+    adopting = true;
+    try {
+      const made = await accounts.prepareAdoption(j.rows);
+      // Only the accounts taken are adopted: one whose id or username an account made meanwhile (during the hashes) holds
+      // is not, is said, and stays in the copy for Adopt more….
+      const taken = accounts.take(made.accounts);
+      const tookIds = new Set(taken.map((a) => a.id));
+      const passwords = made.passwords.filter((p) => taken.some((a) => a.username === p.username));
+      const notTaken = made.accounts.filter((a) => !tookIds.has(a.id)).map((a) => a.username);
+      const all = Array.from(accounts.users.values());
+      const after = stores.adopted(all, { leaveRest: j.fresh });
+      // Saved twice and flushed before the answer: the record, written as the first write lands, then says the hold ended.
+      accounts.save({ twice: true });
+      accounts.flush();
+      sessions.restoreKept();
+      const ip = guard.clientIp(req);
+      const names = taken.map((a) => a.username);
+      if (j.fresh) {
+        audit.write(o.hostActor, 'accounts.fresh', 'accounts', (open.length ? 'left the rest out' : 'started with no accounts') + '; ' + (after.why ? after.why + ', and its accounts were left out' : after.left + ' kept aside in ' + after.file), ip);
+      } else {
+        const reset = passwords.map((p) => p.username);
+        const some = reset.length > 5 ? reset.slice(0, 5).join(', ') + ' and ' + (reset.length - 5) + ' more' : reset.join(', ');
+        audit.write(o.hostActor, 'accounts.adopted', 'accounts', 'adopted ' + names.length + (reset.length ? ' (one-time passwords: ' + some + ')' : '') + '; ' + after.left + ' left out' + (notTaken.length ? '; not adopted, an account of its name made meanwhile: ' + notTaken.slice(0, 5).join(', ') : ''), ip);
+      }
+      return res.json({ ok: true, adopted: names, passwords, left: after.left, notTaken });
+    } finally { adopting = false; }
   });
 
   // ---------------------------------------------------------------- the audit log (audit.read)

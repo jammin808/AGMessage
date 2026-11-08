@@ -785,8 +785,12 @@ function relOk(rel) {
 }
 /** What a portable data folder holds that the import leaves: its copies, its console, its watchdog's own, an import's mark. */
 const DATA_LEFT = new Set(['backups', 'logs', 'watchdog.json', 'watchdog.seen.json', 'watchdog.log', 'moved.json']);
-/** What a portable key folder holds that the import carries (answer 42): the machine key, the certificate, the audit records. */
-const KEYS_CARRIED = Object.freeze(['machine.key', 'tls.json', 'audit']);
+/**
+ * What a portable key folder holds that the import carries (answer 42): the machine key, the certificate, the audit records,
+ * and the keyed stores' records (latest.json among them, so the installed node's first start is a move of the set this
+ * laptop saved last).
+ */
+const KEYS_CARRIED = Object.freeze(['machine.key', 'tls.json', 'audit', 'stores']);
 /**
  * Whether the import carries a file, by its place (`data`, `uploads` or `keys`) and its path inside it (pure): never a
  * temporary file or one a save left part way; of the data folder, all but DATA_LEFT; of the key folder, KEYS_CARRIED.
@@ -795,7 +799,7 @@ function carried(area, rel) {
   const parts = String(rel).split('/');
   if (/\.tmp$/i.test(parts[parts.length - 1]) || parts.some((p) => p.startsWith('.partial-'))) return false;
   if (area === 'data') return !DATA_LEFT.has(parts[0]);
-  if (area === 'keys') return parts.length === 1 ? parts[0] === 'machine.key' || parts[0] === 'tls.json' : parts[0] === 'audit';
+  if (area === 'keys') return parts.length === 1 ? parts[0] === 'machine.key' || parts[0] === 'tls.json' : parts[0] === 'audit' || parts[0] === 'stores';
   return area === 'uploads';
 }
 /** A portable folder's own places (pure): its data and uploads folders and its start file, as start-agmessage.bat runs it. */

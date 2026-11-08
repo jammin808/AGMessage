@@ -106,6 +106,9 @@ const stopServer = (child) => new Promise((resolve, reject) => {
   setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* gone */ } done(); }, 3000);
 });
 
+/** The first admin account, made at the laptop with its token typed (the only way one is made): api's answer. */
+const setupAdmin = (base, body = {}) => api(base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle', ...body });
+
 /** fetch with JSON in and out; returns {status, body, cookie, headers}. */
 async function api(base, method, url, body, { cookie, headers = {} } = {}) {
   const r = await fetch(base + url, {
@@ -482,6 +485,60 @@ const serverKey = (dataDir) => Buffer.from(fs.readFileSync(path.join(dataDir + '
 /** A server's log opened in this process, under the server's own key and records. */
 const serverAudit = (dataDir) => auditLog(path.join(dataDir, 'audit.jsonl'), { key: serverKey(dataDir), records: path.join(dataDir + '-keys', 'audit') });
 
+// ---------------------------------------------------------------- the keyed stores, in-process
+// No test reaches a real key folder: the stores are given the fixture key (or `key`) and a records folder beside their
+// data folder (<data>-keys/stores, as a test server's AGM_KEY_DIR has it).
+const keyedstore = require('../lib/keyedstore');
+const acc = require('../lib/accounts');
+/** The keyed stores' five keys and their key id under a machine key, as lib/secretbox.js derives them. */
+const storesKeys = (key = FIXTURE_KEY) => keyedstore.keysFrom((label) => secretbox.deriveFrom(key, label));
+const storesKid = (key = FIXTURE_KEY) => audit.kidOf(secretbox.deriveFrom(key, audit.LABELS.entry));
+/** The records folder of a folder's keyed stores: <data>-keys/stores. */
+const storesOf = (dir) => path.join(dir + '-keys', 'stores');
+/**
+ * A data folder's keyed stores opened as a start opens them: {ks, accounts, sessions, tokens, flush()}. `open: false`
+ * leaves open() to the test; `made` says this run made the key; `rows` and `lines` collect what it writes and says.
+ */
+function openStores(dir, { key = FIXTURE_KEY, records = storesOf(dir), token = TOKEN, open = true, made = false, archive, accountsOf } = {}) {
+  const rows = [];
+  const lines = [];
+  const ks = new keyedstore.KeyedStores({
+    keys: storesKeys(key), kid: storesKid(key), made: () => made, records, dataDir: dir, archive,
+    say: (l) => lines.push(l), row: (action, target, words) => rows.push({ action, target, words }),
+  });
+  const accounts = accountsOf ? null : new acc.Accounts(path.join(dir, 'accounts.json'), { keyed: ks.part('accounts') });
+  const sessions = new acc.Sessions(path.join(dir, 'sessions.json'), accountsOf || accounts, { keyed: ks.part('sessions') });
+  const tokens = new acc.TokenSessions(path.join(dir, 'admin-sessions.json'), { keyed: ks.part('adminSessions'), token });
+  if (open) ks.open();
+  const flush = () => { if (accounts) accounts.flush(); sessions.flush(); tokens.flush(); ks.head.flushSync(); };
+  return { ks, accounts, sessions, tokens, rows, lines, flush };
+}
+
+/**
+ * A stopped server's keyed store written as a key holder could write it: its fields changed by `edit(fields)` (which
+ * changes them in place, or answers new ones), sealed under the server's own machine key as the save after the one on
+ * disk. What a test once wrote by hand into a store a page cannot change yet; a writer without the key is refused.
+ */
+function resealStore(dataDir, name, edit) {
+  const file = path.join(dataDir, keyedstore.FILES[name]);
+  const { v, store, set, gen, kid, at, m, ...fields } = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const out = edit(fields) || fields;
+  const K = storesKeys(serverKey(dataDir))();
+  fs.writeFileSync(file, keyedstore.sealText(K[name], keyedstore.LABELS[name], { v: 2, store: name, set, gen: gen + 1, kid, at: Date.now() }, out, name === 'accounts' ? 1 : undefined).text);
+}
+
+/**
+ * A keyed store written into a stopped server's folder that holds none yet, as a key holder could: sealed under its
+ * machine key in a set of its own (the start reads it as unrecorded △, and loads it).
+ */
+function sealStore(dataDir, name, fields) {
+  const K = storesKeys(serverKey(dataDir))();
+  const head = { v: 2, store: name, set: require('crypto').randomBytes(16).toString('hex'), gen: 1, kid: storesKid(serverKey(dataDir)), at: Date.now() };
+  fs.writeFileSync(path.join(dataDir, keyedstore.FILES[name]), keyedstore.sealText(K[name], keyedstore.LABELS[name], head, fields, name === 'accounts' ? 1 : undefined).text);
+}
+/** A sign-in's keyed hash as a server keeps it (`kind` 'session' or 'token sign-in'), under its machine key. */
+const signInHash = (dataDir, secret, kind = 'session') => require('crypto').createHmac('sha256', storesKeys(serverKey(dataDir))().id).update(kind + '\n' + secret).digest('hex');
+
 const SAM = Object.freeze({ t: 'account', id: 'a1', name: 'sam' });
 const SEED_WORDS = (i) => 'Lectern screen ' + (i % 4) + ' \u2192 message \u201cFive minutes left\u201d';
 /** A whole chain of `n` entries from the genesis hash with plain hashes, as AGMessage 0.5.1 and earlier wrote them. */
@@ -807,7 +864,7 @@ module.exports = {
   inviteOf,
   stagewatchQuery, ROOT, REPO, TOKEN, readSource, freePort, freeUdpPort, wait, until, startServer, stopServer, restartServer, api, connect, emit, answer, once, pngOf, fakeStagewatch, fakeNode,
   filesUnder, handlerFiles, pageScripts,
-  FIXTURE_KEY, OTHER_KEY, HOST, auditKeys, recordsOf, auditLog, serverKey, serverAudit, chainOf, keyedChainOf, keyedLogWithPoints, auditMeter, acceptAll, brief,
+  FIXTURE_KEY, OTHER_KEY, HOST, auditKeys, recordsOf, auditLog, serverKey, serverAudit, storesKeys, storesKid, storesOf, openStores, setupAdmin, resealStore, sealStore, signInHash, chainOf, keyedChainOf, keyedLogWithPoints, auditMeter, acceptAll, brief,
   readZip, unzipTo, SEED_WORDS, sheetParts,
   officeZip, wordParts, wordPicture, relsOf, typesOf, OOXML, W_NS, deckParts, deckShape, deckPicture, deckSlide, workbookParts, docWorker,
 };

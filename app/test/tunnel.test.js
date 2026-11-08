@@ -13,7 +13,7 @@ const os = require('os');
 const path = require('path');
 const WebSocket = require('ws');
 const { io } = require('socket.io-client');
-const { ROOT, TOKEN, startServer, stopServer, api, connect, emit, wait, until } = require('./helpers');
+const { ROOT, TOKEN, startServer, stopServer, api, connect, emit, wait, until, setupAdmin } = require('./helpers');
 const readings = require('../lib/peaks');
 const tunnelend = require('../lib/tunnelend');
 
@@ -121,27 +121,29 @@ test('the tunnel\'s places: in all and per network, worded and counted; a venue 
     await until(async () => (await health(base)).tunnel.places === 0, 4000, 'every place given back');
   });
 
-  await t.test('a tunnel page that has not joined within the wait is let go and counted; one that joins, one with an account and the admin\'s stay', async () => {
-    const ana = (await api(base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  await t.test('a tunnel page that has not joined within the wait is let go and counted; one that joins and one with an account stay; the token\'s cookie through the tunnel is nobody, and is let go too', async () => {
+    const ana = (await setupAdmin(base)).cookie;
     assert.match(ana, /^agm_s=/);
     const idle = await open(base, viaTunnel('198.51.100.1'));
     const gone = new Promise((resolve) => { idle.s.once('disconnect', resolve); });
     const joins = await seated('198.51.100.2');
     const account = await open(base, viaTunnel('198.51.100.3', { cookie: ana }));
     const theAdmin = await open(base, viaTunnel('198.51.100.4', { cookie: admin }));
+    const adminGone = new Promise((resolve) => { theAdmin.s.once('disconnect', resolve); });
     sockets.push(idle.s, account.s, theAdmin.s);
     assert.ok([idle, joins, account, theAdmin].every((r) => !r.err));
     assert.equal(await gone, 'io server disconnect', 'let go by the server');
+    assert.equal(await adminGone, 'io server disconnect', 'the token\'s sign-in counts only at the laptop: through the tunnel it is nobody');
     await wait(500);
-    assert.deepEqual([joins.s.connected, account.s.connected, theAdmin.s.connected], [true, true, true]);
+    assert.deepEqual([joins.s.connected, account.s.connected], [true, true]);
     const h = await health(base);
-    assert.deepEqual([h.tunnel.refused.idle, h.tunnel.places], [1, 3], 'counted, and its place given back');
+    assert.deepEqual([h.tunnel.refused.idle, h.tunnel.places], [2, 2], 'counted, and their places given back');
     // Connected again, it is counted afresh.
     const again = await open(base, viaTunnel('198.51.100.1'));
     sockets.push(again.s);
     await new Promise((resolve) => { again.s.once('disconnect', resolve); });
-    assert.equal((await health(base)).tunnel.refused.idle, 2);
-    for (const r of [joins, account, theAdmin]) r.s.close();
+    assert.equal((await health(base)).tunnel.refused.idle, 3);
+    for (const r of [joins, account]) r.s.close();
     await until(async () => (await health(base)).tunnel.places === 0, 4000, 'every place given back');
   });
 

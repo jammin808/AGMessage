@@ -8,7 +8,7 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 const tlsmod = require('../lib/tls');
-const { startServer, restartServer, stopServer, api, connect, emit, wait, until, pngOf, inviteOf, fakeStagewatch, TOKEN } = require('./helpers');
+const { startServer, restartServer, stopServer, api, connect, emit, wait, until, pngOf, inviteOf, fakeStagewatch, setupAdmin } = require('./helpers');
 const ai = require('../lib/ai');
 const board = require('../lib/board');
 const { entryOf, storedEntry } = require('../lib/stagerecord');
@@ -65,7 +65,7 @@ async function hallOf(srv, t, { name = 'Hall 2' } = {}) {
     assert.equal(r.ok, true, s.who + ': ' + JSON.stringify(r));
     return r;
   };
-  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'root', name: 'Root Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await setupAdmin(srv.base, { username: 'root', name: 'Root Admin', password: 'the green room kettle' })).cookie;
   const hall = (await api(srv.base, 'POST', '/api/rooms', { name }, { cookie: admin })).body.code;
   const ctl = await page(admin, 'the admin');
   await joined(ctl, { roomCode: hall, as: 'account' });

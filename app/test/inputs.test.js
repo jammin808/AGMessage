@@ -8,7 +8,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const path = require('path');
 const { io } = require('socket.io-client');
-const { ROOT, startServer, stopServer, api, connect, emit, handlerFiles, inviteOf, TOKEN, readSource } = require('./helpers');
+const { ROOT, startServer, stopServer, api, connect, emit, handlerFiles, inviteOf, readSource, setupAdmin } = require('./helpers');
 
 const EVENTS = [...new Set(handlerFiles().flatMap((f) => [...readSource(path.join(ROOT, f)).matchAll(/socket\.on\('([^']+)'/g)].map((m) => m[1])))]
   .filter((e) => e !== 'disconnect');
@@ -37,7 +37,7 @@ test('every socket event survives every argument shape, from every kind of socke
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });
   assert.ok(EVENTS.length > 50, 'the events were read from the handler files: ' + EVENTS.length);
 
-  const admin = (await api(base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await setupAdmin(base)).cookie;
   const hall = (await api(base, 'POST', '/api/rooms', { name: 'Hall 3' }, { cookie: admin })).body.code;
   await api(base, 'POST', '/api/users', { username: 'sam', name: 'Sam Tech', role: 'tech', halls: [hall], password: 'mixing desk on stage left' }, { cookie: admin });
   const sam = (await api(base, 'POST', '/api/auth/login', { username: 'sam', password: 'mixing desk on stage left' })).cookie;
@@ -73,7 +73,7 @@ test('client values are read by their type: a value String() cannot convert reac
   const { base } = srv;
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });
-  const admin = (await api(base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await setupAdmin(base)).cookie;
   const hall = (await api(base, 'POST', '/api/rooms', { name: 'Hall 3' }, { cookie: admin })).body.code;
   const ctl = await connect(base, admin); sockets.push(ctl);
   const made = await emit(ctl, 'display:create', { code: hall, name: 'Lectern monitor' });

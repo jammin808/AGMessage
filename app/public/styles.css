@@ -2443,3 +2443,13 @@ body[data-view="simple"] .bv-cleared { margin: 0 auto; padding: 0 max(16px, env(
   .page-layer, .doc-panel, .take-cards, #webPreview { display: none !important; }
   .stage-print-note { display: block; }
 }
+
+/* Accounts held aside (Admin → Accounts held aside, and the start page): each state's mark beside its words, in the
+   audit log's four colours, so no state is told by colour alone; the one-time passwords an adoption gave, shown once. */
+.keyed-line[data-mark] { color: var(--mark, inherit); font-weight: 600; }
+.adopt-list .adopt-who { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); align-items: baseline; }
+.adopt-list .adopt-what { color: var(--c-ink-muted); font-size: var(--fs-sm); }
+.adopt-list .confirm-line { margin: .3rem 0 0 1.6rem; }
+.adopt-passwords { margin: var(--sp-2) 0; padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--card); }
+.adopt-passwords code { font-size: var(--fs-md, 1rem); letter-spacing: .04em; }
+.entry-held { margin: var(--sp-3) 0; }

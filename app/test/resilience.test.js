@@ -13,7 +13,7 @@ const nodes = require('../lib/nodes');
 const { buildContext, showBrief } = require('../lib/context');
 
 const ROOT = path.join(__dirname, '..');
-const { filesUnder, handlerFiles, pageScripts, readSource } = require('./helpers');
+const { filesUnder, handlerFiles, pageScripts, readSource, setupAdmin } = require('./helpers');
 const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
 const wait = (ms) => new Promise((res) => setTimeout(res, ms));
 async function until(fn, ms = 8000) { const end = Date.now() + ms; while (Date.now() < end) { if (fn()) return true; await wait(50); } return false; }
@@ -173,9 +173,9 @@ test('watchdog: a signal to it leaves no server behind — asked to stop where s
 });
 
 test('a server whose watchdog has gone saves what is waiting and leaves, so no orphan holds the folder', async () => {
-  const { startServer, api, TOKEN } = require('./helpers');
+  const { startServer } = require('./helpers');
   const srv = await startServer();
-  const setup = await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' });
+  const setup = await setupAdmin(srv.base);
   assert.equal(setup.status, 200);
   const gone = new Promise((resolve) => { srv.child.once('exit', (code) => resolve(code)); });
   srv.child.disconnect();   // the watchdog ended without a word (Task Manager, a crash of its own)
@@ -673,7 +673,7 @@ test('guard rails: no eval, no key in a URL, and synchronous file calls only whe
     'lib/dataformat.js': { max: 8, why: 'the data folder\'s format, once a start: read through to tell a new folder from a 0.5 one, and a folder of a lower format copied whole into backups/ (a copy a stop left part way removed, its size and the disk\'s free space read, its folder made, a partial copy made, renamed whole, or removed when it failed, the watchdog\'s beat sent while it runs) before anything else is written in it, never on a request' },
     'lib/upgradebackup.js': { max: 15, why: 'the upgrade\'s backup for the way back, made only at a stop this PC\'s machine asked for an upgrade, after everything is saved, never on a request: the folder walked and each file\'s size and the volumes read, the disk\'s free space read, the backups\' folder listed (a backup a stop left part way removed) and made, each file linked or copied, its record written, renamed whole, the older ones beyond the two kept removed; the watchdog\'s beat sent while it runs' },
     'lib/audit.js': { max: 11, why: 'the audit trail: an entry is on disk (fsync) before the action is acknowledged, a short write cut back, the file rotated at 20 MB; read once at startup, and the records outside the data folder, read once at open; verify reads asynchronously in slices' },
-    'lib/events.js': { max: 11, why: 'an event archived, only at the admin\'s act behind the busy check, or finished once at a start before it serves, never on any other request: each of the event\'s files moved into its archive in one turn of the loop (a rename on one volume, so no save of the event lands between two of its files and nothing is answered half way; the uploads copied, sized and removed where they are on another volume, the watchdog\'s beat sent meanwhile), the folder\'s names, kinds, sizes, volume and free space read, its folders made and the emptied ones removed; the archives listed and an archive\'s contents deleted through fs.promises' },
+    'lib/events.js': { max: 12, why: 'an event archived, only at the admin\'s act behind the busy check, or finished once at a start before it serves, never on any other request: each of the event\'s files moved into its archive in one turn of the loop (a rename on one volume, so no save of the event lands between two of its files and nothing is answered half way; the uploads copied, sized and removed where they are on another volume, the watchdog\'s beat sent meanwhile), the folder\'s names, kinds, sizes, volume and free space read, its folders made and the emptied ones removed; at a start, an archive being made that no archive under way claims set aside by one rename; the archives listed and an archive\'s contents deleted through fs.promises' },
   };
   for (const f of files) {
     const src = readSource(path.join(ROOT, f));
@@ -1079,7 +1079,7 @@ test('a 0.5.1 data folder boots as halls with one room each, keeping codes, mess
   // The folder as 0.5.1 kept it, made through the acts a show takes: two halls, the first with its own Stagewatch and a
   // screen, an account given the second, a backstage guest in both who forwards a message, and the first hall locked.
   const PASSWORD = 'the green room kettle';
-  let admin = (await h.api(srv.base, 'POST', '/api/setup', { token: h.TOKEN, username: 'ada', name: 'Ada Admin', password: PASSWORD })).cookie;
+  let admin = (await h.setupAdmin(srv.base, { username: 'ada', name: 'Ada Admin', password: PASSWORD })).cookie;
   assert.match(admin, /^agm_s=/, 'the first admin account');
   const A = (await h.api(srv.base, 'POST', '/api/rooms', { name: 'Hall A' }, { cookie: admin })).body.code;
   const B = (await h.api(srv.base, 'POST', '/api/rooms', { name: 'Hall B' }, { cookie: admin })).body.code;

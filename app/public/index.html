@@ -21,8 +21,16 @@
       <button class="entry-tab" id="tabCode" role="tab" aria-selected="false" aria-controls="joinForm" type="button">Join with a code</button>
     </div>
 
+    <!-- Accounts held aside, or not opened at this start: the server's words, in place of the tabs. -->
+    <div id="heldPane" class="entry-pane" hidden>
+      <h2 class="entry-title">Accounts are not open yet</h2>
+      <p class="hint keyed-line" id="heldText" data-mark="" role="status"></p>
+      <p class="hint">Guests and presenters still join a hall with its code: <a href="/?tab=code" id="heldCode">Join with a code</a>.</p>
+    </div>
+
     <!-- An account: crew, project managers, admins. -->
     <form id="signInPane" class="entry-pane" role="tabpanel" aria-labelledby="tabSignIn" autocomplete="on">
+      <p class="hint keyed-line entry-held" id="waitingLine" data-mark="unvouched" role="status" hidden></p>
       <label class="field">
         <span>Username</span>
         <input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="32" required />

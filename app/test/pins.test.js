@@ -8,7 +8,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
-const { startServer, stopServer, restartServer, api, connect, emit, until, wait, inviteOf, TOKEN } = require('./helpers');
+const { startServer, stopServer, restartServer, api, connect, emit, until, wait, inviteOf, TOKEN, setupAdmin } = require('./helpers');
 
 const PASSWORD = 'the green room kettle';
 const BACKSTAGE_PINS = 'Pinning for everyone is for the backstage team.';
@@ -36,7 +36,7 @@ test('pins for the room or for me: every seat pins for itself, kept by its key a
   const told = (s, ev) => heard.get(s).filter(([e]) => e === ev).map(([, v]) => v);
   const kept = () => { try { return JSON.parse(fs.readFileSync(path.join(srv.dataDir, 'pages.json'), 'utf8')).pins || {}; } catch { return null; } };
 
-  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'root', name: 'Root Admin', password: PASSWORD })).cookie;
+  const admin = (await setupAdmin(srv.base, { username: 'root', name: 'Root Admin', password: PASSWORD })).cookie;
   const hall = (await api(srv.base, 'POST', '/api/rooms', { name: 'Hall 2' }, { cookie: admin })).body.code;
   const account = async (username, name, role, extra) => {
     const made = await api(srv.base, 'POST', '/api/users', { username, name, role, password: PASSWORD, ...extra }, { cookie: admin });

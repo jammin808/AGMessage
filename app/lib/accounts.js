@@ -14,20 +14,31 @@
  *     username or the person's name, or one character repeated.
  *
  * Sessions
- *   - A random 256-bit token in an HttpOnly, SameSite=Strict cookie (Secure over HTTPS); only its SHA-256 is stored, so
- *     the sessions file cannot be replayed. Idle for 14 hours or 7 days old: signed out (a page kept open is in use: the
- *     server touches the session of every open socket). A password change, a disabled account or an admin's "sign out
- *     everywhere" ends them all (the account's epoch moves). An account keeps its 20 newest; past 5000 in all, the
- *     account with the most gives up its oldest, so one account signing in again and again never signs anyone else out.
+ *   - A random 256-bit token in an HttpOnly, SameSite=Strict cookie (Secure over HTTPS); only its keyed hash is stored
+ *     (lib/keyedstore.js: an HMAC under a key derived from the machine key), so the sessions file can neither be replayed
+ *     nor written into. Idle for 14 hours or 7 days old: signed out (a page kept open is in use: the server touches the
+ *     session of every open socket). A password change, a disabled account or an admin's "sign out everywhere" ends them
+ *     all (the account's epoch moves). An account keeps its 20 newest; past 5000 in all, the account with the most gives
+ *     up its oldest, so one account signing in again and again never signs anyone else out. A sign-in stamped more than
+ *     5 minutes ahead of now is dropped at load.
  *   - Saved through one write lane (tmp → fsync → rename), so a watchdog restart keeps everyone signed in. The host
  *     laptop's admin-token sign-ins are kept the same way (TokenSessions), tied to the token they were made with.
+ *
+ * The keyed stores
+ *   - Each of the three is given its part of lib/keyedstore.js (`keyed`) and refuses to start without it: nothing of
+ *     them is read or written but through it. Their maps stay empty until its open() fills them (`fill`), and a save is
+ *     written only while it says the store may be (never before open(), in a run without the machine key, a store that
+ *     could not be read, accounts held aside, or the sign-ins while the accounts are not open).
+ *   - A save that takes a right away or ends a sign-in (an account made, changed, its password set, signed out
+ *     everywhere, removed or adopted; a sign-out) is written twice, its record at once (`save({twice: true})`).
  */
 const crypto = require('crypto');
-const { WriteLane, readJsonWithBak } = require('./resilience');
+const { WriteLane } = require('./resilience');
 const { customAlphabet } = require('./ids');
 const { cleanText } = require('./guard');
 const rbac = require('./rbac');
 const views = require('./views');
+const { AHEAD_MS } = require('./keyedstore');
 
 const SCRYPT = Object.freeze({ logN: 15, r: 8, p: 3, keylen: 32 });
 const USERNAME = /^[a-z0-9][a-z0-9._-]{1,31}$/;
@@ -151,35 +162,61 @@ const temporaryPassword = () => [tempChunk(), tempChunk(), tempChunk()].join('-'
 
 const sha256 = (t) => crypto.createHash('sha256').update(String(t)).digest('hex');
 
+/** The part of lib/keyedstore.js a store is given: without it the store refuses to start (fail closed). */
+function keyedOf(keyed, what) {
+  if (!keyed || typeof keyed.seal !== 'function' || typeof keyed.attach !== 'function' || typeof keyed.laneOptions !== 'function') {
+    throw new Error(what + ' need their keyed store (lib/keyedstore.js): they are never read or written without it');
+  }
+  return keyed;
+}
+const finite = (v) => typeof v === 'number' && Number.isFinite(v);
+/** Whether a record is an account the store takes, read by type: an id, a username and a role it knows. */
+const validAccount = (u) => !!u && typeof u === 'object' && typeof u.id === 'string' && USERNAME.test(u.username || '') && rbac.isRole(u.role);
+
 // ---------------------------------------------------------------- the accounts
 
 class Accounts {
   /**
    * @param {string} file data/accounts.json
+   * @param {object} o `keyed`: its part of lib/keyedstore.js
    */
-  constructor(file) {
+  constructor(file, { keyed } = {}) {
+    this.keyed = keyedOf(keyed, 'the accounts');
     this.file = file;
-    this.lane = new WriteLane(file, { delayMs: 50, keepBak: true, mode: 0o600 });
+    this.lane = new WriteLane(file, { delayMs: 50, keepBak: true, mode: 0o600, ...keyed.laneOptions() });
     this.users = new Map();
     this.pending = new Set();   // usernames whose account is being made (its hash in flight)
-    this.replace(readJsonWithBak(file));
+    keyed.attach(this);
   }
 
+  /** Whether a record is an account this store takes (validAccount). */
+  validUser(u) { return validAccount(u); }
+  /**
+   * What an account could reach, judged as if turned on: whether it can manage AGMessage (rbac.holdsAdminOnly) and
+   * whether it reaches past its halls (a right outside rbac.HALL_SCOPED: halls.manage, audit.read, or those above).
+   */
+  reachOf(u) {
+    const caps = rbac.effective({ ...u, disabled: false }).caps;
+    return { admin: rbac.holdsAdminOnly(u), past: [...caps].some((c) => !rbac.HALL_SCOPED.has(c)) };
+  }
+  /** The accounts lib/keyedstore.js opened: each read by type. Saves nothing. */
+  fill(list) {
+    this.users = new Map();
+    for (const u of Array.isArray(list) ? list : []) if (this.validUser(u)) this.users.set(u.id, u);
+  }
   /**
    * The accounts held now become those of `data` (the file's shape, `{users}`; none for anything else), each read by
-   * type: the file read again (an archived event continued), a copy of an event's (its accounts and their rights), or none
-   * (a fresh event). Saves nothing: a caller that changed them saves.
+   * type: an archive's opened against its pin (an archived event continued, or a copy of an event's), or none (a fresh
+   * event). Saves nothing: a caller that changed them saves.
    */
-  replace(data) {
-    this.users = new Map();
-    for (const u of data && Array.isArray(data.users) ? data.users : []) {
-      if (u && typeof u.id === 'string' && USERNAME.test(u.username || '') && rbac.isRole(u.role)) this.users.set(u.id, u);
-    }
-  }
-  /** The accounts read again from their file. */
-  reload() { this.replace(readJsonWithBak(this.file)); }
+  replace(data) { this.fill(data && Array.isArray(data.users) ? data.users : []); }
 
-  save() { this.lane.save(() => JSON.stringify({ v: 1, users: Array.from(this.users.values()) }, null, 1)); }
+  /** Ask for a save, written once lib/keyedstore.js says it may be; `twice` for one that takes a right away. */
+  save({ twice = false } = {}) {
+    if (!this.keyed.writable()) return;
+    if (twice) this.keyed.twice();
+    this.lane.save(() => this.keyed.seal({ users: Array.from(this.users.values()) }, 1));
+  }
   flush() { this.lane.flushSync(); }
 
   get size() { return this.users.size; }
@@ -219,6 +256,9 @@ class Accounts {
     const u = String(username || '').trim().toLowerCase();
     if (!USERNAME.test(u)) return { error: 'A username is 2 to 32 lowercase letters, digits, dots, dashes or underscores, starting with a letter or digit.' };
     if (firstAdmin && (this.users.size > 0 || this.pending.size > 0)) return { error: 'Accounts are set up already — sign in.', exists: true };
+    // Never beside accounts held aside, nor where the accounts could not be opened this run: a first admin is made only
+    // where none is kept.
+    if (firstAdmin && (this.keyed.holding() || !this.keyed.writable())) return { error: 'Adopt the accounts held aside, or start with none, first (Admin → Accounts held aside).', held: true };
     if (this.byUsername(u) || this.pending.has(u)) return { error: 'That username is taken.' };
     if (!rbac.isRole(role)) return { error: 'Unknown role.' };
     const display = cleanText(name, 40) || u;
@@ -240,7 +280,7 @@ class Accounts {
       createdAt: now, createdBy: String(actorId || ''), lastLoginAt: 0,
     };
     this.users.set(a.id, a);
-    this.save();
+    this.save({ twice: true });
     return { account: a, password: temp ? pw : undefined };
   }
 
@@ -289,7 +329,7 @@ class Accounts {
       a.disabled = change.disabled; changed.push('disabled');
       if (a.disabled) a.epoch = (a.epoch || 1) + 1;   // a disabled account is signed out everywhere at once
     }
-    if (changed.length) this.save();
+    if (changed.length) this.save({ twice: true });
     return changed;
   }
 
@@ -301,14 +341,47 @@ class Accounts {
     a.pwSetAt = Date.now();
     a.mustChange = !!mustChange;
     a.epoch = (a.epoch || 1) + 1;
-    this.save();
+    this.save({ twice: true });
     return true;
   }
 
   /** End every session of an account (its epoch moves). */
-  signOutEverywhere(id) { const a = this.get(id); if (!a) return false; a.epoch = (a.epoch || 1) + 1; this.save(); return true; }
+  signOutEverywhere(id) { const a = this.get(id); if (!a) return false; a.epoch = (a.epoch || 1) + 1; this.save({ twice: true }); return true; }
 
-  remove(id) { const ok = this.users.delete(id); if (ok) this.save(); return ok; }
+  remove(id) { const ok = this.users.delete(id); if (ok) this.save({ twice: true }); return ok; }
+
+  /**
+   * Accounts adopted from a copy held aside (lib/keyedstore.js judged which): each as the copy holds it, or with a
+   * one-time password (`reset`), which also asks it to choose its own and ends its sign-ins (its epoch moves), as an
+   * admin's reset does. Their hashes made first, then all of them taken in one turn: {accounts, passwords}, the
+   * one-time passwords for the page to show once. Saved by the caller, once the hold is lifted.
+   */
+  async prepareAdoption(rows) {
+    const out = [];
+    const passwords = [];
+    for (const { account, reset } of rows) {
+      const a = { ...account };
+      if (reset) {
+        const pw = temporaryPassword();
+        a.pw = await hashPassword(pw);
+        a.mustChange = true;
+        a.pwSetAt = Date.now();
+        a.epoch = (Number.isSafeInteger(a.epoch) && a.epoch > 0 ? a.epoch : 1) + 1;
+        passwords.push({ username: a.username, password: pw });
+      }
+      out.push(a);
+    }
+    return { accounts: out, passwords };
+  }
+  /**
+   * Accounts prepared for an adoption, taken into the live map: each whose id and username no open account holds. The
+   * accounts taken, in order.
+   */
+  take(list) {
+    const taken = [];
+    for (const a of list) if (this.validUser(a) && !this.users.has(a.id) && !this.byUsername(a.username)) { this.users.set(a.id, a); taken.push(a); }
+    return taken;
+  }
 
   /**
    * Keys of halls and rooms that are gone, taken out of every account that names one: its halls and its On stage halls
@@ -401,22 +474,56 @@ function sameSet(x, y) {
 
 // ---------------------------------------------------------------- sessions
 
+/** A sign-in's stamp as a start takes it: a time, never more than lib/keyedstore.js AHEAD_MS past now. */
+const stampOk = (t, now) => finite(t) && t <= now + AHEAD_MS;
+
 class Sessions {
-  constructor(file, accounts) {
+  /**
+   * @param {string} file data/sessions.json
+   * @param {Accounts} accounts
+   * @param {object} o `keyed`: its part of lib/keyedstore.js
+   */
+  constructor(file, accounts, { keyed } = {}) {
+    this.keyed = keyedOf(keyed, 'the sessions');
     this.accounts = accounts;
-    this.lane = new WriteLane(file, { delayMs: 500, keepBak: true, mode: 0o600 });
-    this.map = new Map();   // sha256(token) -> {h, uid, epoch, created, seen, ip, ua}
-    const data = readJsonWithBak(file);
-    const now = Date.now();
-    for (const s of data && Array.isArray(data.sessions) ? data.sessions : []) {
-      if (s && /^[0-9a-f]{64}$/.test(s.h || '') && typeof s.uid === 'string' && now - s.created < MAX_AGE_MS && now - s.seen < IDLE_MS) this.map.set(s.h, s);
-    }
+    this.lane = new WriteLane(file, { delayMs: 500, keepBak: true, mode: 0o600, ...keyed.laneOptions() });
+    this.map = new Map();   // keyed hash of the token -> {h, uid, epoch, created, seen, ip, ua}
+    this.kept = [];         // a file's sign-ins that checked, kept while their accounts are not open (restoreKept)
+    keyed.attach(this);
   }
 
-  save() { this.lane.save(() => JSON.stringify({ v: 1, sessions: Array.from(this.map.values()) })); }
+  /** A cookie token's keyed hash: the one way a session is looked up. */
+  hashOf(token) { return this.keyed.hash('session', token); }
+
+  /**
+   * The sign-ins lib/keyedstore.js opened, each read by type: a hash, an account, and stamps neither too old nor ahead of
+   * now. `kept`: their accounts are not open, so they are kept apart (nothing resolves, touches or sweeps them) until
+   * restoreKept. Returns how many it took.
+   */
+  fill(list, { kept = false } = {}) {
+    const now = Date.now();
+    this.map = new Map();
+    this.kept = [];
+    const good = (Array.isArray(list) ? list : []).filter((s) => s && /^[0-9a-f]{64}$/.test(s.h || '') && typeof s.uid === 'string' && stampOk(s.created, now) && stampOk(s.seen, now) && now - s.created < MAX_AGE_MS && now - s.seen < IDLE_MS);
+    if (kept) this.kept = good; else for (const s of good) this.map.set(s.h, s);
+    return good.length;
+  }
+  /** The sign-ins kept while their accounts were not open, put back and pruned against the accounts as they are now. */
+  restoreKept() {
+    const kept = this.kept;
+    this.kept = [];
+    for (const s of kept) this.map.set(s.h, s);
+    if (!this.prune()) this.save();
+  }
+
+  save({ twice = false } = {}) {
+    if (!this.keyed.writable()) return;
+    if (twice) this.keyed.twice();
+    this.lane.save(() => this.keyed.seal({ sessions: Array.from(this.map.values()) }));
+  }
   flush() { this.lane.flushSync(); }
   /** Every session ended (a new event): none lets its holder in again, and the file is written so. */
-  clear() { this.map.clear(); this.save(); }
+  clear() { this.map.clear(); this.kept = []; this.save({ twice: true }); }
 
   /** Whether a session still lets its holder in: its account there and on, its epoch current, not too old, not idle. */
   live(s, now = Date.now()) {
@@ -425,13 +532,13 @@ class Sessions {
   }
 
   /**
-   * A new session for an account: the token goes in the cookie, only its hash is kept. An account keeps its
+   * A new session for an account: the token goes in the cookie, only its keyed hash is kept. An account keeps its
    * MAX_PER_ACCOUNT newest sessions; past MAX_SESSIONS in all, ended sessions go first, then the oldest of the account
    * with the most — one account signing in again and again never ends another's.
    */
   create(account, { ip = '', ua = '' } = {}) {
     const token = crypto.randomBytes(32).toString('base64url');
-    const h = sha256(token);
+    const h = this.hashOf(token);
     const now = Date.now();
     this.map.set(h, { h, uid: account.id, epoch: account.epoch || 1, created: now, seen: now, ip: String(ip).slice(0, 64), ua: String(ua).slice(0, 120) });
     const mine = Array.from(this.map.values()).filter((s) => s.uid === account.id && s.h !== h).sort((a, b) => a.seen - b.seen);
@@ -450,7 +557,7 @@ class Sessions {
   /** The signed-in account for a token, or null (expired, idle, revoked, or the account gone or turned off). */
   resolve(token, now = Date.now()) {
     if (typeof token !== 'string' || token.length < 32 || token.length > 64) return null;
-    return this.touch(sha256(token), now);
+    return this.touch(this.hashOf(token), now);
   }
 
   /** A session in use, by its stored hash (a request, or an open socket): {account, session}, or null once it has ended. */
@@ -481,7 +588,7 @@ class Sessions {
     return n;
   }
 
-  destroy(token) { if (typeof token === 'string' && this.map.delete(sha256(token))) this.save(); }
+  destroy(token) { if (typeof token === 'string' && this.map.delete(this.hashOf(token))) this.save({ twice: true }); }
 
   /** The live sessions of one account (for "signed in on" lists): no hashes. */
   of(uid, now = Date.now()) {
@@ -490,35 +597,60 @@ class Sessions {
 }
 
 /**
- * The host laptop's admin-token sign-ins (the agm_admin cookie). Like account sessions only a hash of each is kept, on
- * disk through one write lane, so a watchdog restart keeps the dashboard signed in. Each file is tied to the token it
- * was made under (`tag`, a keyed hash of the token, never the token): the next start of AGMessage prints a new token
- * and every earlier sign-in ends. One lasts a day, as its cookie does.
+ * The host laptop's admin-token sign-ins (the agm_admin cookie). Like account sessions only a keyed hash of each is kept,
+ * on disk through one write lane, so a watchdog restart keeps the dashboard signed in. Each file is tied to the token it
+ * was made under (`k`, the token's keyed tag from lib/keyedstore.js, never the token): the next start of AGMessage
+ * prints a new token and every earlier sign-in ends. One lasts a day, as its cookie does.
  */
 class TokenSessions {
-  constructor(file, tag) {
-    this.tag = String(tag);
-    this.lane = new WriteLane(file, { delayMs: 100, keepBak: true, mode: 0o600 });
-    this.map = new Map();   // sha256(sid) -> {h, created}
+  /**
+   * @param {string} file data/admin-sessions.json
+   * @param {object} o `keyed`: its part of lib/keyedstore.js; `token`: the laptop's admin token, whose tag names the file
+   */
+  constructor(file, { keyed, token } = {}) {
+    this.keyed = keyedOf(keyed, 'the token\'s sign-ins');
+    this.token = String(token || '');
+    this.lane = new WriteLane(file, { delayMs: 100, keepBak: true, mode: 0o600, ...keyed.laneOptions() });
+    this.map = new Map();   // keyed hash of the cookie's id -> {h, created}
     // The sign-ins this run made, by their hash: one read from the file never counts as made here, whoever wrote it.
     this.minted = new Set();
-    const data = readJsonWithBak(file);
-    const now = Date.now();
-    if (data && data.k === this.tag && Array.isArray(data.sessions)) {
-      for (const s of data.sessions) if (s && /^[0-9a-f]{64}$/.test(s.h || '') && Number.isFinite(s.created) && now - s.created < TOKEN_SESSION_MS) this.map.set(s.h, { h: s.h, created: s.created });
-    }
+    keyed.attach(this);
   }
 
-  save() { this.lane.save(() => JSON.stringify({ v: 1, k: this.tag, sessions: Array.from(this.map.values()) })); }
+  /** A cookie id's keyed hash. */
+  hashOf(sid) { return this.keyed.hash('token sign-in', sid); }
+  /** The tag of the token this run runs under. */
+  get tag() { return this.keyed.tag(this.token); }
+
+  /**
+   * The sign-ins lib/keyedstore.js opened: only a file made under this token (`k`, its tag) keeps any, each read by type,
+   * younger than a day and stamped no more than AHEAD_MS ahead of now. A file of another token ends silently.
+   */
+  fill(list, { k } = {}) {
+    const now = Date.now();
+    this.map = new Map();
+    const tag = this.tag;
+    if (typeof k !== 'string' || k.length !== tag.length || !crypto.timingSafeEqual(Buffer.from(k), Buffer.from(tag))) return 0;
+    for (const s of Array.isArray(list) ? list : []) {
+      if (s && /^[0-9a-f]{64}$/.test(s.h || '') && stampOk(s.created, now) && now - s.created < TOKEN_SESSION_MS) this.map.set(s.h, { h: s.h, created: s.created });
+    }
+    return this.map.size;
+  }
+
+  save({ twice = false } = {}) {
+    if (!this.keyed.writable()) return;
+    if (twice) this.keyed.twice();
+    this.lane.save(() => this.keyed.seal({ k: this.tag, sessions: Array.from(this.map.values()) }));
+  }
   flush() { this.lane.flushSync(); }
   /** Every sign-in ended (a new event), those this run made too, and the file written so. */
-  clear() { this.map.clear(); this.minted.clear(); this.save(); }
+  clear() { this.map.clear(); this.minted.clear(); this.save({ twice: true }); }
 
-  /** A new sign-in: its id goes in the cookie, only its hash is kept. Those whose day is over go as it comes. */
+  /** A new sign-in: its id goes in the cookie, only its keyed hash is kept. Those whose day is over go as it comes. */
   create(now = Date.now()) {
     for (const [k, s] of this.map) if (now - s.created >= TOKEN_SESSION_MS) this.map.delete(k);
     const sid = crypto.randomBytes(24).toString('hex');
-    const h = sha256(sid);
+    const h = this.hashOf(sid);
     this.map.set(h, { h, created: now });
     this.minted.add(h);
     this.save();
@@ -526,21 +658,21 @@ class TokenSessions {
   }
 
   /** Whether a cookie's id is a sign-in that still holds and that this run made (not one read back at start). */
-  mintedHere(sid, now = Date.now()) { return this.has(sid, now) && this.minted.has(sha256(sid)); }
+  mintedHere(sid, now = Date.now()) { return this.has(sid, now) && this.minted.has(this.hashOf(sid)); }
 
   /** Whether a cookie's id is a sign-in that still holds. */
   has(sid, now = Date.now()) {
     if (typeof sid !== 'string' || !sid || sid.length > 64) return false;
-    const s = this.map.get(sha256(sid));
+    const s = this.map.get(this.hashOf(sid));
     if (!s) return false;
     if (now - s.created >= TOKEN_SESSION_MS) { this.map.delete(s.h); this.save(); return false; }
     return true;
   }
 
-  destroy(sid) { if (typeof sid === 'string' && this.map.delete(sha256(sid))) { this.minted.delete(sha256(sid)); this.save(); } }
+  destroy(sid) { if (typeof sid === 'string' && this.map.delete(this.hashOf(sid))) { this.minted.delete(this.hashOf(sid)); this.save({ twice: true }); } }
 }
 
 module.exports = {
-  Accounts, Sessions, TokenSessions, hashPassword, verifyPassword, parseHash, passwordProblem, temporaryPassword, sha256, cleanKeys, VIEWS, isView,
+  Accounts, Sessions, TokenSessions, validAccount, hashPassword, verifyPassword, parseHash, passwordProblem, temporaryPassword, sha256, cleanKeys, VIEWS, isView,
   SCRYPT, USERNAME, MIN_PW, IDLE_MS, MAX_AGE_MS, TOUCH_MS, MAX_SESSIONS, MAX_PER_ACCOUNT, TOKEN_SESSION_MS, NO_MATCH, LANES,
 };

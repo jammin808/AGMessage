@@ -46,11 +46,15 @@
       $('ctxWhy').hidden = !s.contextTokenWhy;
       renderTls(s.tls, s.stagewatchFingerprint);
       $('remoteAdmin').checked = !!s.remoteAdmin;
-      $('acctCount').textContent = s.accounts ? s.accounts + ' account' + (s.accounts === 1 ? '' : 's') : 'No accounts yet — make the first admin on the start page, with the token';
+      // Accounts held aside or waiting for the token: their words and where to go, never "No accounts yet".
+      const held = s.held && s.held.state !== 'left' ? s.held : null;
+      $('acctCount').textContent = held ? heldMark(held.state) + ' ' + held.words + (HELD_ASIDE.has(held.state) || held.state === 'first' ? ' Admin → Accounts held aside, with the token at the AGMessage laptop.' : '')
+        : s.accounts ? s.accounts + ' account' + (s.accounts === 1 ? '' : 's') : 'No accounts yet — make the first admin on the start page, with the token';
       $('buildLine').textContent = s.build ? 'This is AGMessage ' + s.build + '.' : '';
       AGM.reconnect.build.heard(s.build);
       drawBuild();
       renderHealth(s.health);
+      renderSignins(s.health);
       renderAudit(s.health);
       renderLaptop(s.laptop);
       renderPeers(s.peers || []);
@@ -181,7 +185,11 @@
   let canExport = false;   // an account holding audit.export (with audit.read): Export, never Accept
   let theAdmin = false;    // the laptop's token, or an account whose role is admin: Split the audit log…
   let lastHealth = null;
-  fetch('/api/admin/me').then((r) => r.json()).then((me) => { tokenHere = !!(me && me.token); theAdmin = !!(me && me.admin); if (lastHealth) renderAudit(lastHealth); }).catch(() => { /* no Accept or Split offered */ });
+  fetch('/api/admin/me').then((r) => r.json()).then((me) => {
+    tokenHere = !!(me && me.token); theAdmin = !!(me && me.admin);
+    if (lastHealth) renderAudit(lastHealth);
+    heldSeen(me && me.held ? me.held : null);
+  }).catch(() => { /* no Accept or Split offered, and the panel not drawn */ });
   fetch('/api/auth/me').then((r) => r.json()).then((me) => {
     const caps = me && me.account && me.account.rights ? me.account.rights.caps : [];
     canExport = caps.includes('audit.export') && caps.includes('audit.read');
@@ -231,6 +239,192 @@
     $('auditExportRow').hidden = !(a.signKey && (tokenHere || canExport));
     $('auditSplitRow').hidden = !(theAdmin && !a.keyless);
   }
+
+  // ---------------------------------------------------------------- accounts held aside (the token at the laptop)
+  // The states a store can be in, by the mark each draws (AGM.MARKS by name): △ waits or loads, ✕ held aside, ended or
+  // missing. Health's lines name each store that is not ok; the panel is the token's at the laptop.
+  const STATE_MARK = Object.freeze({ keyless: 'couldNot', unread: 'couldNot', behind: 'couldNot', unrecorded: 'couldNot', first: 'couldNot', failing: 'couldNot',
+    changed: 'fault', older: 'fault', other: 'fault', elsewhere: 'fault', plain: 'fault', missing: 'fault', ended: 'fault', left: 'couldNot' });
+  const HELD_ASIDE = new Set(['changed', 'older', 'other', 'elsewhere', 'plain']);
+  const heldMark = (state) => AGM.mark(STATE_MARK[state] || 'couldNot');
+  // The server's words are clauses (the console's lines); a sentence follows them on the page.
+  const sentence = (w) => (/[.!?]$/.test(w) ? w : w + '.');
+  const AUDIT_TONE = { couldNot: 'unvouched', fault: 'broken' };
+  const STORE_NAMES = Object.freeze({ accounts: 'Accounts', sessions: 'Account sign-ins', adminSessions: 'Token sign-ins', record: 'The record of the saves' });
+  /** Health's lines of the accounts and sign-ins: each whose words say something, with its mark. */
+  function renderSignins(h) {
+    const si = h && h.signins;
+    if (!si) return;
+    const ul = $('signinLines');
+    ul.textContent = '';
+    for (const k of ['accounts', 'sessions', 'adminSessions', 'record']) {
+      const x = si[k];
+      if (!x || !x.words) continue;
+      const li = document.createElement('li');
+      const name = STATE_MARK[k === 'accounts' && x.held && x.state === 'ok' ? 'left' : x.state] || 'couldNot';
+      li.dataset.mark = AUDIT_TONE[name] || '';
+      li.textContent = AGM.mark(name) + ' ' + STORE_NAMES[k] + ': ' + x.words;
+      ul.appendChild(li);
+    }
+  }
+  let heldFacts = null;     // /api/admin/me's `held`
+  let heldNow = null;       // the copy held aside as GET /api/accounts/held answered it
+  let heldListed = false;   // the list is drawn (at once for a hold, after Adopt more… for those left out)
+  const heldTicks = new Map();   // ref -> {adopt, reset, confirm, keep}
+  const MARK_WORDS = Object.freeze({ saved: 'as this laptop last saved it', changed: 'changed since', new: 'new to this laptop' });
+  /** /api/admin/me's `held`: anyone else the page admits is told where to go; the token at this laptop gets the panel. */
+  function heldSeen(h) {
+    heldFacts = h;
+    const where = $('heldWhere');
+    const opens = !!h && (HELD_ASIDE.has(h.state) || h.state === 'first' || h.state === 'left');
+    where.hidden = !opens || tokenHere;
+    if (opens && !tokenHere) {
+      where.dataset.mark = AUDIT_TONE[STATE_MARK[h.state]] || '';
+      putText(where, heldMark(h.state) + ' ' + sentence(h.words) + ' Open them at the AGMessage laptop: sign in there with its token (Admin login in the AGMessage window; installed: Start → AGMessage → Show the admin token), then Admin → Accounts held aside.');
+    }
+    $('heldSection').hidden = !(opens && tokenHere);
+    if (!(opens && tokenHere)) return;
+    heldListed = h.state !== 'left';
+    if (heldListed) loadHeld(); else drawHeld();
+  }
+  async function loadHeld() {
+    const r = await AGM.api('GET', '/api/accounts/held');
+    heldNow = r && r.ok ? r : null;
+    heldTicks.clear();
+    if (heldNow) for (const a of heldNow.accounts) heldTicks.set(a.ref, { adopt: !!a.adopt, reset: !!a.reset, confirm: false, keep: false });
+    if (!heldNow) putText($('heldWhy'), AGM.mark('fault') + ' ' + ((r && r.error) || 'The copy held aside could not be read.'));
+    drawHeld();
+  }
+  const rowOf = (ref) => (heldNow ? heldNow.accounts.find((a) => a.ref === ref) || null : null);
+  const tickOf = (ref) => heldTicks.get(ref) || { adopt: false, reset: false, confirm: false, keep: false };
+  /** The panel as the catalogue reads it (kind accounts). */
+  function heldObject() {
+    const rows = heldNow ? heldNow.accounts : [];
+    const ticked = rows.filter((a) => tickOf(a.ref).adopt);
+    const resets = ticked.filter((a) => tickOf(a.ref).reset);
+    const mode = heldNow ? heldNow.mode : heldFacts && heldFacts.state === 'left' ? 'left' : heldFacts && heldFacts.state === 'first' ? 'first' : 'aside';
+    return {
+      mode, listed: heldListed && !!heldNow, ticked: ticked.length, file: heldNow ? heldNow.file : 'the copy held aside',
+      unusable: heldNow ? !!heldNow.unusable : !!(heldFacts && heldFacts.unusable),
+      tickedWords: ticked.length ? 'Adopt ' + ticked.map((a) => a.username).join(', ') + (resets.length ? ', with a one-time password for ' + resets.map((a) => a.username).join(', ') : '') + '.' : '',
+    };
+  }
+  /** One account of the copy as the catalogue reads it (kind heldAccount). */
+  function heldRowObject(ref) {
+    const a = rowOf(ref);
+    if (!a) return null;
+    const t = tickOf(ref);
+    return { ref, username: a.username, adopt: t.adopt, reset: t.reset };
+  }
+  /** A tick changed, by its box or by the account's menu: the row's lines drawn again in step. */
+  function setTick(ref, change) {
+    heldTicks.set(ref, { ...tickOf(ref), ...change });
+    drawHeld();
+  }
+  function heldLine(text, box, onChange) {
+    const label = document.createElement('label'); label.className = 'check confirm-line';
+    const input = document.createElement('input'); input.type = 'checkbox'; input.checked = box;
+    input.addEventListener('change', () => onChange(input.checked));
+    const words = document.createElement('span'); words.textContent = text;
+    label.append(input, words);
+    return label;
+  }
+  function drawHeld() {
+    if ($('heldSection').hidden) return;
+    const h = heldNow;
+    const mode = heldObject().mode;
+    const why = $('heldWhy');
+    if (h && h.unusable) {
+      // A copy no account can be adopted from: why, and only the way to leave its accounts out.
+      why.dataset.mark = AUDIT_TONE.fault;
+      putText(why, AGM.mark('fault') + ' ' + sentence(h.words) + ' Leave its accounts out, or put the copy back and start AGMessage again.');
+      putText($('heldCopy'), 'The copy held aside: ' + h.file + ' (digest as held ' + h.digest.slice(0, 16) + '…).');
+    } else if (h) {
+      why.dataset.mark = AUDIT_TONE[STATE_MARK[h.state]] || '';
+      putText(why, heldMark(h.state) + ' ' + sentence(h.words) + (HELD_ASIDE.has(h.state) ? ' Someone may have changed this file: an account you adopt with its own password keeps the password the copy claims.' : ''));
+      putText($('heldCopy'), 'The copy held aside: ' + h.file + ' (digest ' + h.digest.slice(0, 16) + '…).');
+    } else if (heldFacts && mode === 'left') { why.dataset.mark = AUDIT_TONE.couldNot; putText(why, heldMark('left') + ' ' + sentence(heldFacts.words)); }
+    const open = $('heldOpen');
+    open.hidden = !(h && h.open && h.open.length);
+    if (h && h.open && h.open.length) putText(open, 'Open, keyed as found: ' + h.open.join(', ') + '.');
+    const ul = $('heldList');
+    ul.textContent = '';
+    if (h && heldListed) {
+      for (const a of h.accounts) {
+        const t = tickOf(a.ref);
+        const li = document.createElement('li'); li.dataset.key = a.ref; li.tabIndex = 0;
+        const who = document.createElement('div'); who.className = 'adopt-who';
+        const label = document.createElement('label'); label.className = 'check';
+        const box = document.createElement('input'); box.type = 'checkbox'; box.checked = t.adopt; box.dataset.adopt = a.ref;
+        box.addEventListener('change', () => setTick(a.ref, { adopt: box.checked, confirm: box.checked ? t.confirm : false }));
+        const name = document.createElement('strong'); name.textContent = 'Adopt ' + a.username;
+        label.append(box, name);
+        const what = document.createElement('span'); what.className = 'adopt-what';
+        const rights = a.rights || {};
+        const halls = a.allHalls || rights.allHalls ? 'every hall' : (rights.halls || a.halls || []).join(' ') || 'no hall';
+        what.textContent = [a.name, rights.roleLabel || a.role, halls, a.disabled ? 'turned off' : '', a.mustChange ? 'must change its password' : '', MARK_WORDS[a.mark] || '', a.repeated ? 'repeated' : ''].filter(Boolean).join(' · ');
+        // What it may do, read from the copy (rbac.rightsView), and when it was made, last signed in and set its password.
+        const facts = document.createElement('span'); facts.className = 'adopt-what';
+        const when = (at) => (at ? new Date(at).toLocaleDateString() : 'never');
+        facts.textContent = 'Rights: ' + ((rights.caps || []).join(', ') || 'none') + ' · made ' + when(a.createdAt) + ' · last sign-in ' + when(a.lastLoginAt) + ' · password set ' + when(a.pwSetAt);
+        const bar = document.createElement('span'); bar.className = 'obj-bar';
+        who.append(label, what, facts, bar);
+        li.appendChild(who);
+        if (a.repeated) { const p = document.createElement('p'); p.className = 'hint'; p.textContent = a.username + ' is in this copy twice, or open already: leave out all but one.'; li.appendChild(p); }
+        if (a.confirm && t.adopt) li.appendChild(heldLine(a.username + ' can manage AGMessage. Adopt ' + a.username + ' only if this folder has been in your hands since ' + a.username + ' was given that.', t.confirm, (v) => setTick(a.ref, { confirm: v })));
+        const reset = heldLine('With a one-time password', t.reset, (v) => setTick(a.ref, { reset: v, keep: false }));
+        reset.classList.remove('confirm-line');
+        li.appendChild(reset);
+        if (a.reset && !t.reset) li.appendChild(heldLine('The password in this copy is the copy\'s own claim; whoever wrote the folder may know it.', t.keep, (v) => setTick(a.ref, { keep: v })));
+        ul.appendChild(li);
+        ADMIN.draw(bar, 'heldAccount', heldRowObject(a.ref), { more: 'Actions for ' + a.username, keysOn: li });
+      }
+    }
+    ADMIN.draw($('heldActs'), 'accounts', heldObject(), { more: 'Accounts held aside', words: true, cls: 'btn ghost small' });
+  }
+  /** An adoption (or none: Start with no accounts, Leave these out, Leave the rest out), with the token typed. */
+  async function adoptNow(rows, c) {
+    const body = {
+      token: (c && c.values && c.values.token) || '', digest: heldNow ? heldNow.digest : '',
+      adopt: rows.map((a) => ({ id: a.ref, reset: tickOf(a.ref).reset })),
+      confirm: rows.filter((a) => tickOf(a.ref).confirm).map((a) => a.ref),
+      keep: rows.filter((a) => tickOf(a.ref).keep).map((a) => a.ref),
+    };
+    if (!heldNow) { const r0 = await AGM.api('GET', '/api/accounts/held'); if (r0 && r0.ok) body.digest = r0.digest; }
+    const r = await AGM.api('POST', '/api/accounts/adopt', body);
+    if (!r.ok) { say(r.error || 'Not adopted.', true); return; }
+    const box = $('heldPasswords');
+    box.textContent = '';
+    if (r.passwords.length) {
+      const head = document.createElement('p'); head.textContent = 'One-time passwords, shown once: give each to its person, who chooses their own at the first sign-in.';
+      box.appendChild(head);
+      for (const p of r.passwords) { const line = document.createElement('p'); const code = document.createElement('code'); code.textContent = p.password; line.append(p.username + ': ', code); box.appendChild(line); }
+    }
+    box.hidden = !r.passwords.length;
+    const notTaken = Array.isArray(r.notTaken) && r.notTaken.length ? ' Not adopted, as an account of its name was made meanwhile: ' + r.notTaken.join(', ') + '.' : '';
+    say((r.adopted.length ? 'Adopted: ' + r.adopted.join(', ') + (r.left ? '; ' + r.left + ' left out.' : '.') : r.left ? 'No account adopted: ' + r.left + ' kept aside.' : 'No account adopted.') + notTaken, !!notTaken);
+    const me = await AGM.api('GET', '/api/admin/me');
+    const held = me && me.held ? me.held : null;
+    heldNow = null;
+    heldSeen(held);
+    if (!held) $('heldSection').hidden = !r.passwords.length;
+    loadSettings();
+  }
+  const tickedRows = () => (heldNow ? heldNow.accounts.filter((a) => tickOf(a.ref).adopt) : []);
+  Object.assign(ADMIN_RUN, {
+    'accounts.adopt': (o, c) => adoptNow(tickedRows(), c),
+    'accounts.fresh': (o, c) => adoptNow([], c),
+    'accounts.leave': (o, c) => adoptNow([], c),
+    'accounts.more': () => { heldListed = true; loadHeld(); },
+    'heldAccount.adopt': (o) => setTick(o.ref, { adopt: true }),
+    'heldAccount.leave': (o) => setTick(o.ref, { adopt: false, confirm: false }),
+    'heldAccount.reset': (o) => setTick(o.ref, { reset: !o.reset, keep: false }),
+  });
+  ADMIN.bind($('heldHead'), { kind: 'accounts', find: (el) => el.closest('#heldHead'), get: heldObject, label: 'Accounts held aside', header: () => 'Accounts held aside' });
+  ADMIN.bind($('heldList'), { kind: 'heldAccount', find: (el) => el.closest('li[data-key]'), get: (key) => heldRowObject(key), label: (o) => 'Actions for ' + o.username, header: (o) => o.username });
+  ADMIN_DRAWERS.push(drawHeld);
+  ADMIN_OBJECTS.accounts = heldObject;
+  ADMIN_OBJECTS.heldAccount = heldRowObject;
 
   // ---------------------------------------------------------------- the split (the admin)
   // The archive points in the live log, newest first, each with what a split there would move or why it would not; a

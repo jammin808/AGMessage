@@ -433,7 +433,10 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     const health = async () => (await fetch(base + '/api/health')).json();
     const ask = (s, ev) => new Promise((resolve) => { s.emit(ev, resolve); });
     const h = await health();
-    assert.deepEqual(Object.keys(h).slice(-17), ['elu', 'rssMb', 'maxSocketsPerAddress', 'tunnelSockets', 'largestHall', 'latest', 'peaks', 'showDay', 'tunnel', 'refused', 'acceptErrors', 'format', 'sleeps', 'power', 'lastStop', 'event', 'sideRooms'], 'appended at the end of the detail');
+    assert.deepEqual(Object.keys(h).slice(-18), ['elu', 'rssMb', 'maxSocketsPerAddress', 'tunnelSockets', 'largestHall', 'latest', 'peaks', 'showDay', 'tunnel', 'refused', 'acceptErrors', 'format', 'sleeps', 'power', 'lastStop', 'event', 'signins', 'sideRooms'], 'appended at the end of the detail');
+    // The accounts and the sign-ins as the start opened them (lib/keyedstore.js): no secret, no hash.
+    assert.deepEqual(Object.keys(h.signins), ['accounts', 'sessions', 'adminSessions', 'record', 'set', 'gens', 'changed']);
+    assert.deepEqual([h.signins.accounts.state, h.signins.record.state], [h.signins.accounts.state === 'none' ? 'none' : 'ok', 'ok']);
     // The current event: a folder's first, not named and never archived.
     assert.deepEqual([Object.keys(h.event), h.event.name, h.event.kind, h.event.from, h.event.archives], [['id', 'name', 'began', 'kind', 'from', 'archives'], '', 'first', '', 0]);
     assert.match(h.event.id, /^e[0-9a-z]{8,24}$/);
@@ -1110,7 +1113,7 @@ test('a push can carry one line to the speaker\'s screen, through the operator o
     throw new Error(ev + ' was refused for the rate twenty times');
   };
   const PASSWORD = 'lines for the lectern';
-  const admin = (await helpers.api(srv.base, 'POST', '/api/setup', { token: helpers.TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await helpers.setupAdmin(srv.base)).cookie;
   const hall = (await helpers.api(srv.base, 'POST', '/api/rooms', { name: 'Hall 7' }, { cookie: admin })).body.code;
   const account = async (username, name, role, extra = {}) => {
     assert.equal((await helpers.api(srv.base, 'POST', '/api/users', { username, name, role, password: PASSWORD, halls: [hall], ...extra }, { cookie: admin })).status, 200);

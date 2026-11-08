@@ -17,7 +17,7 @@ const { StageRecord, entryOf, storedEntry, confidentialOf, whoSaid, didSaid, see
 const { WriteLane } = require('../lib/resilience');
 const { uploadRef } = require('../lib/pages');
 const ai = require('../lib/ai');
-const { startServer, restartServer, stopServer, api, connect, emit, wait, until, pngOf, inviteOf, fakeStagewatch, TOKEN } = require('./helpers');
+const { startServer, restartServer, stopServer, api, connect, emit, wait, until, pngOf, inviteOf, fakeStagewatch, setupAdmin } = require('./helpers');
 
 const HALL = 'HALLA1';
 const LEGAL = 'LEGALKEY';
@@ -314,7 +314,7 @@ test('end to end: each take recorded with its words and its seat, a take-down to
     assert.equal(r.ok, true, JSON.stringify(r));
     return r;
   };
-  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await setupAdmin(srv.base)).cookie;
   const hall = (await api(srv.base, 'POST', '/api/rooms', { name: 'Hall 9' }, { cookie: admin })).body.code;
   const ctl = await open(admin);
   await joined(ctl, { roomCode: hall, as: 'account' });
@@ -481,7 +481,7 @@ test('end to end: each take recorded with its words and its seat, a take-down to
 test('a hall whose files could not be read at a start keeps its stage record: the boot sweep removes only the record of a hall whose files are gone, and the hall\'s transcript shows it once it loads again', { timeout: 60_000 }, async (t) => {
   let srv = await startServer();
   t.after(() => stopServer(srv.child));
-  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await setupAdmin(srv.base)).cookie;
   const make = async (name) => (await api(srv.base, 'POST', '/api/rooms', { name }, { cookie: admin })).body.code;
   const away = await make('Hall away');
   const here = await make('Hall here');

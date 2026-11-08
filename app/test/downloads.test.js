@@ -7,7 +7,7 @@ const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { startServer, restartServer, stopServer, api, connect, emit, wait, until, inviteOf, TOKEN } = require('./helpers');
+const { startServer, restartServer, stopServer, api, connect, emit, wait, until, inviteOf, TOKEN, setupAdmin } = require('./helpers');
 const guard = require('../lib/guard');
 const pagesLib = require('../lib/pages');
 const ops = require('../lib/ops');
@@ -242,7 +242,7 @@ test('a file shared is a download: the server\'s name and size on the message, a
     const r = await fetch(srv.base + '/api/upload', { method: 'POST', headers: { 'X-AGM-Upload': token }, body: f });
     return { status: r.status, ...(await r.json()) };
   };
-  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ada', name: 'Ada Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await setupAdmin(srv.base, { username: 'ada', name: 'Ada Admin', password: 'the green room kettle' })).cookie;
   const hall = (await api(srv.base, 'POST', '/api/rooms', { name: 'Hall 5' }, { cookie: admin })).body.code;
   const other = (await api(srv.base, 'POST', '/api/rooms', { name: 'Hall 6' }, { cookie: admin })).body.code;
   const account = async (username, name, role, extra) => {

@@ -54,7 +54,9 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   read the room, and for the hall's crew without its words ("Hall 2 › Legal · Sound"), who answer it from there. The asker's Help button says what happened ("■ Help asked", "▶ Ana is on
   the way", "✓ Resolved"), and a tap on it marks the request sorted or cancels it.
 - **Accounts and codes.** Crew, project managers and admins sign in as themselves (a signed-in browser opens its halls,
-  never a guest's seat); presenters and guests join with a room's 6-character code, typed first: the join page names the
+  never a guest's seat), their accounts and sign-ins keyed to the laptop: a sign-in or an account written into the data
+  folder is dropped and said, a restart keeps the genuine ones, and a folder from another computer waits for the admin
+  at the laptop to adopt its accounts with the token (`docs/ACCOUNTS.md`, Keyed to this laptop); presenters and guests join with a room's 6-character code, typed first: the join page names the
   room it opens ("Legal · Hall 2") and offers that room's seats only — On stage only from an On stage invite link,
   Backstage and Observer in a hall's Main room, Member and Observer in its other rooms. **On stage seats come from an
   invite link, an account or the admin, in open halls too**: a hall's code alone seats nobody On stage. The admin's

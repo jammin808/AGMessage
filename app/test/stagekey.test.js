@@ -10,7 +10,7 @@ const path = require('path');
 const nodes = require('../lib/nodes');
 const tlsmod = require('../lib/tls');
 const { buildContext, showBrief } = require('../lib/context');
-const { startServer, stopServer, api, connect, emit, until, wait, fakeStagewatch, TOKEN } = require('./helpers');
+const { startServer, stopServer, api, connect, emit, until, wait, fakeStagewatch, setupAdmin } = require('./helpers');
 
 const KEY = 'swk_right_node_key_0001';     // secret-scan: fixture — the node key the fake Stagewatch lists
 const WRONG = 'swk_wrong_node_key_0002';   // secret-scan: fixture — a key it does not list
@@ -251,7 +251,7 @@ test('end to end: a wrong key reads "key refused" on every page, sends nothing, 
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); await sw.close(); });
   const { base } = srv;
-  const admin = (await api(base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await setupAdmin(base)).cookie;
   const hall = (await api(base, 'POST', '/api/rooms', { name: 'Main hall' }, { cookie: admin })).body.code;
   const ctl = await connect(base, admin); sockets.push(ctl);
   const crew = await connect(base); sockets.push(crew);
@@ -528,7 +528,7 @@ test('end to end: a changed certificate reads as itself on the board and the hal
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); await sw.close(); });
   const { base } = srv;
-  const admin = (await api(base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await setupAdmin(base)).cookie;
   const hall = (await api(base, 'POST', '/api/rooms', { name: 'Main hall' }, { cookie: admin })).body.code;
   const ctl = await connect(base, admin); sockets.push(ctl);
   assert.ok((await emit(ctl, 'admin:settings', { stagewatchUrl: sw.url, stagewatchKey: KEY })).ok);

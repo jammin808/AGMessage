@@ -22,9 +22,11 @@ const path = require('path');
 const { writeFileAtomic } = require('./resilience');
 
 const PREFIX = 'enc1:';
-// The labels a key may be derived for, each for one use: any other label throws.
+// The labels a key may be derived for, each for one use: any other label throws. The audit log's three, then the five of
+// the keyed stores (lib/keyedstore.js): a sign-in's keyed hash, each store's file, and their records outside the data folder.
 const SIGN = 'agmessage audit sign v1';
-const LABELS = new Set(['agmessage audit entry v1', 'agmessage audit head v1', SIGN]);
+const LABELS = new Set(['agmessage audit entry v1', 'agmessage audit head v1', SIGN,
+  'agmessage sign-in id v1', 'agmessage accounts file v1', 'agmessage sessions file v1', 'agmessage token sign-ins file v1', 'agmessage stores record v1']);
 // The PKCS#8 wrapping of a 32-byte Ed25519 seed (RFC 8410 §7): the same 16 bytes generateKeyPairSync('ed25519') exports.
 const ED25519_PKCS8 = Buffer.from('302e020100300506032b657004220420', 'hex');
 
@@ -37,6 +39,7 @@ function keyDir() {
 let cached = null;    // the machine key, once read or made
 let problem = null;   // why this run has none: {code, words}
 let making = true;    // a missing key may be made now (a server defers it until it holds its data folder)
+let madeNow = false;  // this run made the machine key (none was there): a record that fails under it was the replaced key's
 const derived = new Map();
 
 const noKey = (p) => Object.assign(new Error(p.words), { code: p.code, noKey: true });
@@ -66,6 +69,7 @@ function machineKey() {
   try {
     fs.linkSync(fresh, file);
     cached = k;
+    madeNow = true;
   } catch (e) {
     if (e.code !== 'EEXIST') fail(e.code || 'EIO', 'the key folder ' + dir + ' cannot publish the machine key (' + (e.code || e.message) + '): it needs an NTFS drive');
   } finally {
@@ -81,6 +85,8 @@ function machineKey() {
 
 /** Whether this run has its machine key; the first call reads (or makes) it. */
 function hasKey() { try { machineKey(); return true; } catch { return false; } }
+/** Whether this run made the machine key, there being none: what was keyed under the key before it says so in its words. */
+function madeHere() { return hasKey() && madeNow; }
 /** Why this run has no machine key, as {code, words}, or null when it has one. */
 function keyProblem() {
   if (hasKey()) return null;
@@ -163,6 +169,6 @@ function signingKeyFrom(seed) {
 function signingKey() { return signingKeyFrom(deriveFrom(machineKey(), SIGN)); }
 
 /** For tests: forget the machine key, why there was none and every key derived from it (after pointing AGM_KEY_DIR elsewhere). */
-function _reset() { cached = null; problem = null; making = true; derived.clear(); }
+function _reset() { cached = null; problem = null; making = true; madeNow = false; derived.clear(); }
 
-module.exports = { seal, open, openWith, keyFrom: keyOf, isSealed, keyDir, hasKey, keyProblem, keyState, deferMaking, allowMaking, derive, deriveFrom, signingKey, signingKeyFrom, _reset };
+module.exports = { seal, open, openWith, keyFrom: keyOf, isSealed, keyDir, hasKey, madeHere, keyProblem, keyState, deferMaking, allowMaking, derive, deriveFrom, signingKey, signingKeyFrom, _reset };

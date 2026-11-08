@@ -11,7 +11,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
-const { startServer, restartServer, stopServer, api, connect, emit, wait, until, pngOf, inviteOf, fakeStagewatch, TOKEN } = require('./helpers');
+const { startServer, restartServer, stopServer, api, connect, emit, wait, until, pngOf, inviteOf, fakeStagewatch, setupAdmin } = require('./helpers');
 
 const PASSWORD = 'clipboard and coffee';
 /** The `page.push` rows as the tests read them: the hall, the words, who (an account by its user name). */
@@ -71,7 +71,7 @@ test('a take on the Board\'s pages or one person\'s, numbered and confirmed page
   const signals = (s) => heard.get(s).filter(([ev]) => ev === 'pages:changed');
   const joined = async (s, args) => { const r = await emit(s, 'join', invited(srv.dataDir, args)); assert.equal(r.ok, true, s.who + ': ' + JSON.stringify(r)); return r; };
 
-  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await setupAdmin(srv.base)).cookie;
   const hall = (await api(srv.base, 'POST', '/api/rooms', { name: 'Hall 2' }, { cookie: admin })).body.code;
   const ctl = await page(admin, 'the admin page');
   const LEGAL = (await act(ctl, 'room:create', { hall, name: 'Legal' })).key;
@@ -409,7 +409,7 @@ test('the person\'s acts on a take: Show it again within 10 s of Back to chat br
   const answerOf = (s) => { const x = takes(s).at(-1); return x ? [x.seq, x.answer] : null; };
   const joined = async (s, args) => { const r = await emit(s, 'join', invited(srv.dataDir, args)); assert.equal(r.ok, true, JSON.stringify(r)); return r; };
 
-  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await setupAdmin(srv.base)).cookie;
   const hall = (await api(srv.base, 'POST', '/api/rooms', { name: 'Hall 2' }, { cookie: admin })).body.code;
   const ctl = await page(admin);
   const LEGAL = (await act(ctl, 'room:create', { hall, name: 'Legal' })).key;
@@ -553,7 +553,7 @@ test('a web page: a right of its own (stage.web); its address told only to the p
   const NO_WEB = 'Web pages on the stage need their own right — ask an admin.';
   const GUESTS_OFF = 'Web pages from backstage guests are off in this hall — ask the admin.';
 
-  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await setupAdmin(srv.base)).cookie;
   const hall = (await api(srv.base, 'POST', '/api/rooms', { name: 'Hall 5' }, { cookie: admin })).body.code;
   const other = (await api(srv.base, 'POST', '/api/rooms', { name: 'Hall 6' }, { cookie: admin })).body.code;
   const ctl = await page(admin, 'the admin page');
@@ -784,7 +784,7 @@ test('a person\'s chat view: the join\'s view by the seat, the admin\'s choice f
   const rows = (action) => fs.readFileSync(path.join(srv.dataDir, 'audit.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((e) => e.action === action).map((e) => [e.target, e.words]);
   const kept = () => { try { return JSON.parse(fs.readFileSync(path.join(srv.dataDir, 'pages.json'), 'utf8')).views; } catch { return null; } };
 
-  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await setupAdmin(srv.base)).cookie;
   const hall = (await api(srv.base, 'POST', '/api/rooms', { name: 'Hall 2' }, { cookie: admin })).body.code;
   const account = async (username, name, role, extra) => {
     const made = await api(srv.base, 'POST', '/api/users', { username, name, role, password: PASSWORD, ...extra }, { cookie: admin });
@@ -922,7 +922,7 @@ test('the clock or countdown: the admin\'s choice and lock for a guest or an acc
   const NONE = { show: null, locked: false };
   const ADMIN_LOCK = 'Only an admin may lock the clock or countdown.';
 
-  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await setupAdmin(srv.base)).cookie;
   const hall = (await api(srv.base, 'POST', '/api/rooms', { name: 'Hall 2' }, { cookie: admin })).body.code;
   const account = async (username, name, role, extra) => {
     const made = await api(srv.base, 'POST', '/api/users', { username, name, role, password: PASSWORD, ...extra }, { cookie: admin });
@@ -1120,7 +1120,7 @@ test('information over the show: a researcher\'s web page over the Board\'s cloc
   const OFF_LIST = 'This room may not send to the Main room\'s Board — ask an admin.';
   const NO_SHOW = 'Showing files, pages and quotes on the stage needs its own right — ask an admin.';
 
-  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await setupAdmin(srv.base)).cookie;
   const hall = (await api(srv.base, 'POST', '/api/rooms', { name: 'Hall 7' }, { cookie: admin })).body.code;
   const ctl = await page(admin, 'the admin page');
   const LEGAL = (await act(ctl, 'room:create', { hall, name: 'Legal' })).key;
@@ -1324,7 +1324,7 @@ test('a document and a picture on the stage: by where the file may come from, it
   /** A JPEG's header alone, its frame `w` × `h` (lib/imagesize.js reads its size from it; nothing decodes it here). */
   const jpeg = (w, h) => Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, h >> 8, h & 255, w >> 8, w & 255, 0x03, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1, 0xff, 0xd9]);
 
-  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await setupAdmin(srv.base)).cookie;
   const hall = (await api(srv.base, 'POST', '/api/rooms', { name: 'Hall 4' }, { cookie: admin })).body.code;
   const ctl = await page(admin, 'the admin page');
   await joined(ctl, { roomCode: hall, as: 'account' });
@@ -1517,7 +1517,7 @@ test('a quote on the stage: words or cells picked from a file of the hall, carri
   };
   const info = (s) => heard.get(s).filter(([ev, v]) => ev === 'page:take' && v.layer === 'info').map(([, v]) => v);
   const joined = async (s, args) => { const r = await emit(s, 'join', invited(srv.dataDir, args)); assert.equal(r.ok, true, s.who + ': ' + JSON.stringify(r)); return r; };
-  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await setupAdmin(srv.base)).cookie;
   const hall = (await api(srv.base, 'POST', '/api/rooms', { name: 'Hall 5' }, { cookie: admin })).body.code;
   const ctl = await page(admin, 'the admin page');
   await joined(ctl, { roomCode: hall, as: 'account' });
@@ -1653,7 +1653,7 @@ test('the Board\'s devices: a page joins with `docs` only when it says true; pag
   const AS = 'As a picture of p. 2: this device cannot page through the document';
   const DEVICE = 'this device cannot open documents — ask for a picture';
 
-  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await setupAdmin(srv.base)).cookie;
   const hall = (await api(srv.base, 'POST', '/api/rooms', { name: 'Hall 5' }, { cookie: admin })).body.code;
   const ctl = await page(admin, 'the admin page');
   const ctlJoin = await joined(ctl, { roomCode: hall, as: 'account', docs: true });

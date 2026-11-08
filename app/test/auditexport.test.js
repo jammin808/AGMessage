@@ -894,7 +894,7 @@ test('end to end: who may export — the token at the laptop and an admin at the
   t.after(async () => { await h.stopServer(srv.child); });
   const { base } = srv;
   const tok = (await h.api(base, 'POST', '/api/admin/login', { token: h.TOKEN })).cookie;
-  const ana = (await h.api(base, 'POST', '/api/setup', { token: h.TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const ana = (await h.setupAdmin(base)).cookie;
   const make = async (username, role, grant = []) => {
     const r = await h.api(base, 'POST', '/api/users', { username, name: username, role, grant, password: 'a long pass phrase here' }, { cookie: ana });
     assert.equal(r.status, 200, JSON.stringify(r.body));
@@ -988,7 +988,7 @@ test('speed: an export of the 56,000-entry log digests at most 1 MiB and walks a
   const meter = h.auditMeter(dataDir);
   const srv = await h.startServer({ AGM_DATA_DIR: dataDir, ...meter.env });
   t.after(async () => { await h.stopServer(srv.child); meter.remove(); });
-  const admin = (await h.api(srv.base, 'POST', '/api/setup', { token: h.TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await h.setupAdmin(srv.base)).cookie;
   await h.api(srv.base, 'POST', '/api/users', { username: 'bob', name: 'Bob', role: 'staff', password: 'clipboard and coffee' }, { cookie: admin });
   assert.equal((await h.api(srv.base, 'GET', '/api/audit/verify', undefined, { cookie: admin })).status, 200, 'the check at start, or one after it, answered: no walk runs now');
   const exporting = (async () => {
@@ -1020,7 +1020,7 @@ test('the screen rows\' voice: a message\'s words and a file\'s name taken to a 
   const srv = await h.startServer();
   t.after(async () => { await h.stopServer(srv.child); });
   const tok = (await h.api(srv.base, 'POST', '/api/admin/login', { token: h.TOKEN })).cookie;
-  const ana = (await h.api(srv.base, 'POST', '/api/setup', { token: h.TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const ana = (await h.setupAdmin(srv.base)).cookie;
   const device = await asDevice(srv.base, 'POST', '/api/audit/export', { cookie: ana });
   assert.deepEqual([device.status, device.json.error], [403, 'Export at the AGMessage laptop: HTTPS is off on this AGMessage, and from another device an export goes only over HTTPS.']);
   const code = (await h.api(srv.base, 'POST', '/api/rooms', { name: 'Hall 2' }, { cookie: tok })).body.code;

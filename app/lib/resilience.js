@@ -170,10 +170,11 @@ function asleepWords(s) {
  * makes, with an access list of its own, is never made here, and the write then throws ENOENT. A reader sees the old file
  * or the new one whole, never one cut short or empty. With `freshBak` (and `keepBak`) the `.bak` kept is a copy of what
  * this write wrote, never the file before it: what a clear took out is then in neither file, and a backup whole is still
- * there for the write after it; a `.bak` that cannot be made so fails the write once the file itself is written. Returns
- * the number of bytes written.
+ * there for the write after it; a `.bak` that cannot be made so fails the write once the file itself is written. An old
+ * file `worthKeeping` refuses is handed to `onUnkept(oldText)`, which keeps it elsewhere when it should be kept: it is
+ * never the `.bak`, and the write goes on over it. Returns the number of bytes written.
  */
-function writeFileAtomic(file, data, { keepBak = false, knownWhole = false, worthKeeping = isJson, mode, makeDir = true, freshBak = false } = {}) {
+function writeFileAtomic(file, data, { keepBak = false, knownWhole = false, worthKeeping = isJson, onUnkept = null, mode, makeDir = true, freshBak = false } = {}) {
   if (makeDir) fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = file + '.' + process.pid + '.tmp';
   const bytes = Buffer.from(data);
@@ -193,8 +194,10 @@ function writeFileAtomic(file, data, { keepBak = false, knownWhole = false, wort
     let bakLeft = null;
     if (keepBak) {
       try {
-        if (freshBak || knownWhole || worthKeeping(fs.readFileSync(file, 'utf8'))) fs.copyFileSync(freshBak ? tmp : file, file + '.bak');
-      } catch (e) { if (freshBak) bakLeft = e; /* else no old file yet */ }
+        const old = freshBak || knownWhole ? null : fs.readFileSync(file, 'utf8');
+        if (old === null || worthKeeping(old)) fs.copyFileSync(freshBak ? tmp : file, file + '.bak');
+        else if (onUnkept) onUnkept(old);
+      } catch (e) { if (freshBak) bakLeft = e; /* else no old file yet, or the old one not kept: its reader said why */ }
     }
     fs.renameSync(tmp, file);
     if (bakLeft) throw new Error('written, but its .bak still holds what was cleared (' + (bakLeft.code || bakLeft.message) + ')');
@@ -281,6 +284,10 @@ function readJsonWithBak(file) { return readJsonWhole(file).data; }
  * whole, or found none). While it is, the file is kept as `.bak` unread (writeFileAtomic's `knownWhole`), and it is once
  * a write of the lane's has landed; a lane that says nothing (`null`) reads the file before it may replace the `.bak`.
  *
+ * `worthKeeping` (the file's own check: whole JSON by default) and `onUnkept` are the atomic writer's: a file on disk that
+ * fails the check is never made the `.bak`. `onWritten()` is told after each write that landed, in the same turn, and
+ * never for one that failed.
+ *
  * `WriteLane.built` counts every lane this process has made and not closed, wherever it was made: health carries it
  * beside the distinct lanes the server flushes at a stop or a crash, and a test holds the two equal, so no store has a
  * lane nothing flushes.
@@ -289,8 +296,10 @@ class WriteLane {
   static #built = 0;
   static #closed = 0;
 
-  constructor(file, { delayMs = 200, keepBak = true, mode, files = false, whole = null } = {}) {
+  constructor(file, { delayMs = 200, keepBak = true, mode, files = false, whole = null, worthKeeping = isJson, onUnkept = null, onWritten = null } = {}) {
     this.file = file; this.delayMs = delayMs; this.keepBak = keepBak; this.mode = mode; this.files = files;
+    this.worthKeeping = worthKeeping; this.onUnkept = onUnkept;
+    this.onWritten = onWritten;   // told after each write that landed, never after one that failed
     this.whole = typeof whole === 'boolean' ? whole : null;   // the one writer's word that its file is whole (null: none)
     this.pending = null;      // () => string, the latest content
     this.timer = null;
@@ -331,9 +340,10 @@ class WriteLane {
     const produce = this.pending;
     this.pending = null;
     if (!produce) return;
+    let landed = false;
     try {
       const content = produce();
-      const o = { keepBak: this.keepBak, mode: this.mode, freshBak: this.freshBak, knownWhole: this.whole === true };
+      const o = { keepBak: this.keepBak, mode: this.mode, freshBak: this.freshBak, knownWhole: this.whole === true, worthKeeping: this.worthKeeping, onUnkept: this.onUnkept };
       if (this.files) for (const [file, text] of content) writeFileAtomic(file, text, o);
       else writeFileAtomic(this.file, content, o);
       this.freshBak = false;
@@ -342,6 +352,7 @@ class WriteLane {
       this.lastError = null;
       this.failures = 0;
       if (this.onSaved) this.onSaved();
+      landed = true;
     } catch (e) {
       this.lastError = e.message;
       this.failures++;
@@ -353,6 +364,9 @@ class WriteLane {
         this.timer.unref();
       }
     }
+    // Told outside the write's own try: what it does (another save asked, a record written) never makes the write that
+    // landed count as one that failed.
+    if (landed && this.onWritten) this.onWritten();
   }
 
   /** Write whatever is pending now, trying three times. Returns true when nothing is left unwritten. */

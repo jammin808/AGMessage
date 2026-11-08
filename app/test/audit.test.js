@@ -936,7 +936,7 @@ test('end to end: the first start asks in the black window and in health, the to
   assert.match(health.saves.stores.audit.kid, /^[0-9a-f]{16}$/);
   assert.equal(health.saves.stores.auditHead.error, null, 'the head\'s lane is in health');
 
-  const admin = (await h.api(srv.base, 'POST', '/api/setup', { token: h.TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await h.setupAdmin(srv.base)).cookie;
   // A page cached from 0.5.1 reads only `ok`: never ✓ for △.
   const v = (await h.api(srv.base, 'GET', '/api/audit/verify', undefined, { cookie: admin })).body;
   assert.deepEqual([v.ok, v.mark, v.error === v.words], [false, 'unvouched', true]);
@@ -982,15 +982,17 @@ test('end to end: the first start asks in the black window and in health, the to
   fs.writeFileSync(file, JSON.stringify(sessions));
   srv = await h.startServer({ AGM_DATA_DIR: dataDir });
   const planted = 'agm_admin=' + sid;
-  assert.equal((await h.api(srv.base, 'GET', '/api/admin/me', undefined, { cookie: planted })).body.ok, true, 'the planted sign-in holds the dashboard (unit K closes that)');
-  assert.equal((await h.api(srv.base, 'GET', '/api/admin/me', undefined, { cookie: planted })).body.token, false, 'but it was not made by this run');
+  assert.equal((await h.api(srv.base, 'GET', '/api/admin/me', undefined, { cookie: planted })).body.ok, false, 'the planted sign-in is nobody: its file no longer checks (lib/keyedstore.js)');
+  assert.equal((await h.api(srv.base, 'GET', '/api/admin/me', undefined, { cookie: planted })).body.token, false, 'nor was it made by this run');
   x = await accept({ digest: now.digest, ids: ['s1-5'] }, { cookie: planted });
   assert.equal(x.status, 401, 'and without the typed token there is no Accept');
   // Wrong tokens at Accept count toward the token sign-in's own lockout: the fifth locks both, the right token included.
   for (let i = 0; i < 4; i++) assert.equal((await accept({ token: 'wrong ' + i, digest: now.digest, ids: ['s1-5'] })).status, 401);
   x = await accept({ token: h.TOKEN, digest: now.digest, ids: ['s1-5'] });
   assert.deepEqual([x.status, x.body.error], [429, 'Too many wrong tokens — wait a minute.']);
-  assert.equal((await h.api(srv.base, 'POST', '/api/admin/login', { token: h.TOKEN })).status, 429, 'the token sign-in waits too');
+  // The token sign-in judges the typed token first (unit K): a wrong one waits for the lock, the right one is taken.
+  assert.equal((await h.api(srv.base, 'POST', '/api/admin/login', { token: 'wrong 5' })).status, 429, 'a wrong one at the token sign-in waits too');
+  assert.equal((await h.api(srv.base, 'POST', '/api/admin/login', { token: h.TOKEN })).status, 200, 'the right one is taken while the lock holds');
 });
 
 test('end to end: a run with no machine key still starts and signs in, opens with `audit.keyless`, marks the run and says so; nothing is sealed', async (t) => {
@@ -1013,10 +1015,14 @@ test('end to end: a run with no machine key still starts and signs in, opens wit
   assert.deepEqual(marker, ['keyless-' + es[0].l + '.json']);
   const auditFacts = (await h.api(srv.base, 'GET', '/api/health')).body.saves.stores.audit;
   assert.deepEqual([auditFacts.signKey, auditFacts.lastExport], ['', null]);
-  // The audit list names no key: this run's key id is of a key made for it alone, which nothing after it can check.
-  const admin = (await h.api(srv.base, 'POST', '/api/setup', { token: h.TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
-  const list = await h.api(srv.base, 'GET', '/api/audit', undefined, { cookie: admin });
-  assert.deepEqual([list.status, list.body.key], [200, { kid: '', fingerprint: '' }]);
+  // Account sign-ins wait for a start that has the key (lib/keyedstore.js): no first admin account is made this run, and
+  // the sign-in page is told why; the token signs in.
+  const setup = await h.setupAdmin(srv.base);
+  assert.deepEqual([setup.status, setup.body.error], [409, 'Accounts could not be read on this start: start AGMessage again.']);
+  const me = (await h.api(srv.base, 'GET', '/api/auth/me')).body;
+  assert.deepEqual([me.setup, me.held.state], [false, 'keyless']);
+  assert.equal((await h.api(srv.base, 'GET', '/api/health')).body.signins.accounts.state, 'keyless');
+  assert.equal((await h.api(srv.base, 'GET', '/api/audit', undefined, { cookie: tok })).status, 401, 'the list is an account\'s to read');
   const attention = auditFacts.attention;
   assert.deepEqual(attention.map((f) => [f.kind, f.mark]), [['keyless', 'unvouched']]);
   assert.match(attention[0].words, /the machine key at .+ could not be read \(EISDIR\)/);
@@ -1076,7 +1082,7 @@ test('end to end: no secret in any audit file, record, health, the rows, /api/ad
   t.after(async () => { await h.stopServer(srv.child); });
   const base = srv.base;
   const tok = (await h.api(base, 'POST', '/api/admin/login', { token: h.TOKEN })).cookie;
-  const setup = await h.api(base, 'POST', '/api/setup', { token: h.TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' });
+  const setup = await h.setupAdmin(base);
   const admin = setup.cookie;
   const code = (await h.api(base, 'POST', '/api/rooms', { name: 'Hall 2' }, { cookie: admin })).body.code;
   const socket = await h.connect(base, tok);

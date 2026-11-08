@@ -8,7 +8,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const deskresults = require('../lib/deskresults');
-const { startServer, stopServer, restartServer, api, connect, emit, until, wait, fakeStagewatch, TOKEN } = require('./helpers');
+const { startServer, stopServer, restartServer, api, connect, emit, until, wait, fakeStagewatch, setupAdmin } = require('./helpers');
 
 const KEY = 'swk_desk_results_key_0001';   // secret-scan: fixture — the node key the fake Stagewatch is given
 
@@ -17,7 +17,7 @@ async function deskSetup(t, { sw: swOptions = {}, env = {}, hallLink = false } =
   const sw = await fakeStagewatch({ name: 'Desk', ...swOptions });
   const ctx = { sw, srv: await startServer(env), sockets: [] };
   t.after(async () => { ctx.sockets.forEach((s) => s.close()); await stopServer(ctx.srv.child); await sw.close(); });
-  ctx.admin = (await api(ctx.srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  ctx.admin = (await setupAdmin(ctx.srv.base)).cookie;
   ctx.hall = (await api(ctx.srv.base, 'POST', '/api/rooms', { name: 'Main hall' }, { cookie: ctx.admin })).body.code;
   ctx.ctl = await connect(ctx.srv.base, ctx.admin); ctx.sockets.push(ctx.ctl);
   ctx.nodeId = (await emit(ctx.ctl, 'admin:settings')).nodeId;

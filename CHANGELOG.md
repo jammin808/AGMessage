@@ -6919,6 +6919,101 @@ and immutable releases are the repository's own setting, which its owner turned 
   item for immutable releases in §0.2, and U16's and §0.8 C2's notes as built). `docs/NODES.md` is unchanged: nothing of
   it reaches the wire, the context or the AI's brief.
 
+**The sign-ins and the accounts are keyed to the machine key** (the plan's Part 3, unit K, 3-K; the owner's answer of
+2026-10-31, "Add it", and the plan's extension to account sessions and accounts: the code, its tests and the browser
+smoke; the Windows legs are CI's)
+- **Each store is a file keyed whole** (`lib/keyedstore.js`, new): `accounts.json`, `sessions.json` and
+  `admin-sessions.json` are the store's JSON with the save's fields first (`v: 2`, the store, the folder's set, the save's
+  number, the key's id, the time) and an HMAC-SHA256 of every byte before it last, under a key of its own; five keys
+  derived from the machine key (`lib/secretbox.js` `derive`'s allow-list gains their labels), never stored. A sign-in is
+  kept by its keyed hash, the token's sign-ins by the token's keyed tag; a sign-in stamped more than 5 minutes ahead is
+  dropped at load. A sign-in file that fails its check ends all its sign-ins, said (`signins.ended`) and kept aside as
+  `<name>.changed-<time>.json`; an accounts file that fails, or names another machine key, another folder's set, an older
+  save, or is 0.5.1's on a laptop that has keyed, is **held aside** whole, its copy kept byte for byte
+  (`accounts.held-<time>.json`, `accounts.held`). Only ENOENT means a store is absent: one that cannot be read is
+  `unread`, loads nothing and is never written over.
+- **The record outside the data folder** (`<keyDir>\stores\`): each store's newest save, the one before it and the
+  floor of the newest save that took a right away; which set of saves this folder holds; the set this laptop saved last
+  (`latest.json`); that this laptop has keyed (`keyed.json`); each account's keyed digest; an event archive's pins and the
+  archive under way. One save behind loads, said (`accounts.behind`); a save that takes a right away or ends a sign-in is
+  written twice and its record at once, so the copy before it reads as older. A folder moved from the copy this laptop
+  saved last keeps its accounts and sign-ins, and its set forks; another folder's saves read `other`. A record that fails
+  its check is kept aside and said (`stores.record`); one that cannot be read opens no store this run. A store's file
+  changed while AGMessage runs is never made its `.bak` (`stores.changed`). Its lane, `storesHead`, is in `saveLanes()`
+  after the stores; health gains `signins` (each store's state and words, the record's, the set, each store's newest save),
+  and `/api/admin/me`, the admin page's settings answer and `/api/auth/me` gain `held`.
+- **The first start of 0.6.0 on this laptop** keys 0.5.1's accounts as found (`accounts.keyed`) and ends 0.5.1's sign-ins;
+  those that can manage AGMessage or reach past their halls, and any account a folder holds twice, wait once for the token,
+  refused at sign-in as an unknown name is. The black window says it under the token block. Its writes go the accounts
+  first: the sign-in files are saved keyed only once the accounts' keyed save has landed, and no record outside the data
+  folder is written until every store it saves has landed (health's record `waiting`, and Archive this event… waits), so
+  a stop part way, or an accounts file another program holds, leaves a first start again, never a plain `accounts.json`
+  beside `keyed.json`. The copy of the waiting accounts is kept only where some wait.
+- **Accounts held aside are adopted by the token at the laptop** (Admin → Accounts held aside, drawn for the token's
+  sign-in made by this run; `GET /api/accounts/held`, `POST /api/accounts/adopt`): each account of the copy marked as this
+  laptop last saved it, changed since, new to this laptop, or repeated; admin-level ones unticked with a confirmation of
+  their own; one-time passwords ticked by the copy's state (every admin-level account; under `elsewhere` also every one that
+  reaches past its halls; under a copy that may have been changed, every one; never one this laptop last saved, nor at the
+  first start), unticking one asking its own confirmation. The token typed is judged first, so the lockout never keeps the
+  person at the laptop out; the one-time passwords are shown once, on the page (`accounts.adopted`); Start with no accounts…
+  (Leave these out… at the first start), Adopt more… and Leave the rest out… (`accounts.fresh`), and the Accounts page tells
+  an admin account of those kept aside. Each row shows the account's rights, when it was made, its last sign-in and when
+  its password was set, read from the copy. A copy changed since it was held, or one that cannot be read, offers no account
+  (said on the console, in health and as `stores.changed`): the panel offers only Leave these out… or Leave the rest out…,
+  which end the hold (`accounts.fresh`, with why). An adoption is saved before it answers, its record naming the hold
+  ended once that save has landed, and it reports and audits only the accounts it took: one whose name an account made
+  meanwhile holds is said (`notTaken`) and stays for Adopt more…. While accounts are held aside every account sign-in
+  answers 503 with why (`login.refused`, never the typed name), and no first admin account is made; the sign-in page says
+  it in place of its tabs, or with one line at the first start. The opener opens `/admin` while accounts wait.
+  `/api/admin/me` gives the admin page's own facts of a hold (those left out of an adoption among them) only to a page
+  its gate admits; anyone else is told what `/api/auth/me` tells.
+- **The token's sign-in counts only at the laptop**: a cookie through the tunnel or under another host name is nobody,
+  over HTTP and on a socket. **The token sign-in judges the typed token first**, as the first admin account and an
+  adoption do: the right one is taken while wrong ones hold the lockout, and a wrong one is written only while it does
+  not (Accept keeps its order). The first admin account is made only with the token, in both channels, and never beside
+  accounts held aside or where the accounts could not be read.
+- **Events** (unit 76): Archive this event… waits while accounts are held aside or the stores were not opened; before its
+  step 3 the record claims the archive under way and pins the accounts file it takes, by the save and the set it was made
+  in (so an event archived before the folder moved continues after it); a continue or a copy opens an archive's accounts
+  against its pin, and a continue a stop cut short also its own save made after its claim (the newest the record names,
+  or one save behind it), anything else held aside (an older save of the set put in its place reads `older`); an
+  archive's accounts file that cannot be read waits, nothing opened or written over it; one whose contents were deleted is
+  continued with no accounts, said as `missing` until the first admin account is made; step 7 saves the next event's
+  stores at once and the claim clears. Only ENOENT means an archive under way is gone (`lib/events.js` `archiveState`): one
+  whose record cannot be read at a start keeps its claim and its pin, said, for a start that can read it. At a start a
+  `.partial` the claim does not name is set aside as `.<time>.unclaimed` (`event.unclaimed`, health's `event.unclaimed`),
+  and an archive whose next never began begins only when the claim names it.
+- **The import** (unit 75) carries `stores\` with the keys, so the installed node's first start is a move; its verify adds
+  `stores` (no account held aside, no account's sign-in ended there, read by `lib/importfacts.js` with the copied keys),
+  and `forget-keys` removes `stores\` with the rest of the profile's `%LOCALAPPDATA%\AGMessage`.
+- **Not kept, the fifth**: going back to 0.5.1 and forward again holds the accounts aside until the token adopts them (each
+  one 0.5.1 left as this laptop last saved it marked so, ticked, with no one-time password), and signs everyone out. The
+  admin page's rollback line says it too.
+- Held by `test/keyedstore.test.js` (new: the seal and its domain separation, the first start, unrecorded, changed and its
+  panel, behind, older, the floor, a power cut, relabelled, elsewhere, other, a move, a file changed while running, unread
+  and keyless byte for byte, missing, repeated, rollback, the claim and its pins, the read-only judge, speed against the
+  plan's bounds, and its requires; a continue resumed at a start with an older save in its place, a move then a continue,
+  an archive or its accounts file that cannot be read, an archive's accounts deleted, a held copy changed or gone and
+  Leave these out…, and a first start whose accounts' write is refused), `test/keyedsignins.test.js` (new: a token
+  sign-in planted three ways, an account's sign-in planted and retargeted, a restart keeping the genuine ones, a new
+  token, the token only at the laptop, an accounts file written into and its adoption with one-time passwords, another
+  machine's folder and Start with no accounts, the lock at the token sign-in and the adoption, the first start on 0.5.1
+  files and the opener, no secret in any store, record, answer or row, the events' claim, pin, continue and unclaimed
+  `.partial`, an adoption on disk before its answer and its facts only to the admin page, and an event continued after
+  the folder moved), `test/events.test.js` (an archive's state as the claim asks it), the browser smoke (a folder
+  started under another laptop's key: the sign-in page's words in place of its tabs and Join with a code, the panel's ticks
+  and each row's doors, an admin adopted with its confirmation and a one-time password shown once, the Accounts page's
+  line of those left out, each row's rights and dates; 0.5.1's files at the first start: the tabs with one line, the admin
+  who waits; the admin page's rollback line), and the tests
+  these moved (`test/helpers.js` gains the stores' fixture keys, `openStores`, `resealStore`, `sealStore`, `signInHash` and
+  `setupAdmin`, which every test's first admin account is now made with; a test that wrote a store by hand reseals it as a
+  key holder could). What only a Windows run proves: the
+  import's `stores\` carried and verified on a real profile (CI's `lifecycle`), and `keys\stores\` under the installed
+  node's access list.
+- The papers: `docs/ACCOUNTS.md` (Keyed to this laptop), `SECURITY.md`, `README.md`, `README.txt` (Upgrading, Moving
+  AGMessage to another laptop, the rollback note), `docs/DESIGN.md`, `docs/ANALYSIS.md`, `docs/INSTALL.md` and
+  `CLAUDE.md`. `docs/NODES.md` is unchanged: nothing of it reaches the wire's hello, the context or the AI's brief.
+
 **Fixed**
 - The portable import names a part of its bundle by the part's own name when it refuses one ("0000021.part is not a
   part the export wrote (a link, or not a file)"). It named the part by its whole path under the account's inbox, and the

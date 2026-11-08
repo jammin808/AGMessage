@@ -36,6 +36,7 @@
  *                     uploads copied, counted and sized alike, then removed, where they are on another), then renamed whole
  *   moveBack          a continue: an archive's files moved back into the data folder (the sign-ins stay: they ended)
  *   partials / names  the archives being made, and the archives made
+ *   setAside          an archive being made that no archive under way claims, set aside as .<time>.unclaimed
  *   readArchived / markArchived   an archive's event.json read, and written again with a field added
  *   copyPlan          the files a move takes from a folder: their names and bytes, whether it is a rename, the room left
  *   list              the archives, newest first (asynchronous)
@@ -336,12 +337,37 @@ function moveBack(dataDir, uploadDir, name, { beat = null } = {}) {
 function partials(dataDir) { return foldersOf(archiveDir(dataDir)).map((n) => (PARTIAL.exec(n) || [])[1]).filter(Boolean); }
 /** The names of every archive made, oldest first. */
 function names(dataDir) { return foldersOf(archiveDir(dataDir)).filter((n) => NAME.test(n)); }
+/**
+ * An archive being made that no archive under way claims (lib/keyedstore.js), set aside whole as .<time>.unclaimed and
+ * never finished: its name. A rename refused throws.
+ */
+function setAside(dataDir, name) {
+  const to = '.' + name + '.unclaimed';
+  fs.renameSync(partialOf(dataDir, name), path.join(archiveDir(dataDir), to));
+  return to;
+}
 
 /** An archive's record (an archive made, or `partial: true` one being made), or null. */
 function readArchived(dataDir, name, { partial = false } = {}) {
   if (!NAME.test(String(name))) return null;
   const dir = partial ? partialOf(dataDir, name) : path.join(archiveDir(dataDir), name);
   return cleanArchived(readJsonWhole(path.join(dir, LIVE)).data);
+}
+/**
+ * An archive as the keyed stores' claim asks of it at a start (lib/keyedstore.js): {exists, begun, unread}. It exists while
+ * one is being made of its time or its record reads; only ENOENT (its record and that record's .bak both absent, and none
+ * being made) is no archive. One whose archives cannot be listed, or whose record cannot be read, exists with `unread`
+ * saying why, so its claim and pin are kept for a start that can read it.
+ */
+function archiveState(dataDir, name) {
+  let partial;
+  try { partial = partials(dataDir).includes(name); } catch (e) { return { exists: true, begun: false, unread: e.code || 'EIO' }; }
+  if (!NAME.test(String(name))) return { exists: partial, begun: false };
+  const read = readJsonWhole(path.join(archiveDir(dataDir), name, LIVE));
+  const rec = cleanArchived(read.data);
+  if (partial || rec) return { exists: true, begun: !!(rec && rec.next && rec.next.began) };
+  if (read.codes.every((c) => c === 'ENOENT')) return { exists: false, begun: false };
+  return { exists: true, begun: false, unread: read.codes.find((c) => c && c !== 'ENOENT') || 'not whole' };
 }
 /**
  * An archive's record written again with `fields` added (its point, its next event begun, its continue), or the fields
@@ -417,6 +443,6 @@ async function holdsAny(dataDir, name) {
 
 module.exports = {
   ARCHIVE, LIVE, NAME, NEXT, BEGAN, ID, FOLDERS, FILES, SIGN_INS, UPLOADS, ASIDE, NAME_MAX, COUNTS,
-  nameAt, timeOf, firstOf, cleanLive, cleanArchived, liveOf, readLive, writeLive, copyPlan, uploadsPlan, begin, moveIn, moveBack, partials, names,
-  readArchived, markArchived, folderOf, list, purge, holdsAny, archiveDir,
+  nameAt, timeOf, firstOf, cleanLive, cleanArchived, liveOf, readLive, writeLive, copyPlan, uploadsPlan, begin, moveIn, moveBack, partials, names, setAside,
+  readArchived, archiveState, markArchived, folderOf, list, purge, holdsAny, archiveDir,
 };

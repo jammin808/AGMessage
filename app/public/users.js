@@ -86,6 +86,9 @@
     const r = await AGM.api('GET', '/api/users');
     if (!r.ok) { $('tabPeople').hidden = true; if (canAudit) tab('audit'); else $('peoplePane').hidden = true; AGM.toast(r.error, true); return; }
     data = r;
+    // To an admin: the accounts an adoption left out, kept aside for the token at the laptop (the server's words).
+    $('leftOut').hidden = !r.leftOut;
+    $('leftOut').textContent = r.leftOut ? AGM.mark('couldNot') + ' ' + r.leftOut : '';
     renderUsers();
   }
 

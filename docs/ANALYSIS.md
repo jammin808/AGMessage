@@ -500,6 +500,21 @@ killed 20 times in a row, each start 0.5 s later finding both free. It is skippe
 `.bat` files' tests are; the step is set back to 2 s if it fails there, and no release is built before that job is
 green.
 
+The keyed stores (the plan's 3-K, unit K) move one cap. `lib/keyedstore.js` (new, a store module) is at 0: every read is
+`readText`, every write a `WriteLane` or `writeFileAtomic`, and it requires Node's `crypto`, `path` and
+`lib/resilience.js` alone, never `lib/secretbox.js` (its five keys are given, derived by the composition root;
+`test/keyedstore.test.js` holds both). `lib/resilience.js` stays at 13: a `WriteLane` gains `worthKeeping` (the store's
+own check of the file it keeps as `.bak`), `onUnkept` (told the old text it did not keep) and `onWritten` (told after a
+write landed, outside the write's own try), all through the atomic writer's one read of the old file. `lib/accounts.js`
+stays at 0, `lib/secretbox.js` at 3 (its five labels are data) and `server.js` at 15. `lib/events.js` goes to 12: at a
+start, an archive being made that no archive under way claims (the record outside the data folder) is set aside by one
+rename, `.<time>.unclaimed`, never finished. The record's lane, `storesHead`, is in `saveLanes()` after the three stores,
+so `flushLanes()` writes the stores first and their record last, and `saves.built` equals the lanes named with it. The
+"no secret" search (`test/keyedsignins.test.js`) reads every store file, `.bak`, held and changed copy, record outside the
+data folder, health, `/api/auth/me`, `/api/admin/me`, `/api/accounts/held` and audit row for the five keys (hex and
+base64), the token, a session's token and a token sign-in's id and their SHA-256, and the one-time passwords an adoption
+gave.
+
 ### 3.5 The module fence (`test/modules.test.js`)
 
 The server's layers and the wire's words, read from the source by regex as the input fuzz reads event names: every

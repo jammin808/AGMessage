@@ -10,7 +10,7 @@ const sl = require('../lib/stagelines');
 const pl = require('../lib/peerlinks');
 const nodes = require('../lib/nodes');
 const { hallBrief } = require('../lib/context');
-const { startServer, stopServer, api, connect, emit, answer, wait, until, fakeStagewatch, fakeNode, TOKEN } = require('./helpers');
+const { startServer, stopServer, api, connect, emit, answer, wait, until, fakeStagewatch, fakeNode, setupAdmin } = require('./helpers');
 
 const PATTERNS_TOKEN = 'K7QM-3XWD-P9RA';   // secret-scan: fixture — a fake pairing token for the fake Patterns
 const PLAYMAP_TOKEN = 'pm-fake-pairing-token';   // secret-scan: fixture
@@ -511,7 +511,7 @@ test('show bus end to end: destinations through the desk; Patterns and PlayMap l
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); await sw.close(); await pat.close(); await pm.close(); });
 
-  const admin = (await api(base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await setupAdmin(base)).cookie;
   const hall = (await api(base, 'POST', '/api/rooms', { name: 'Hall 1' }, { cookie: admin })).body.code;
   await api(base, 'POST', '/api/users', { username: 'sam', name: 'Sam Tech', role: 'tech', halls: [hall], password: 'mixing desk on stage left' }, { cookie: admin });
   await api(base, 'POST', '/api/users', { username: 'sol', name: 'Sol Senior', role: 'senior', password: 'radio check one two' }, { cookie: admin });
@@ -809,7 +809,7 @@ test('show network rights: a one-hall driver sees only its halls and nodes, a no
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); for (const x of [swA, swB, swA2, venue, nodeA, nodeB, model]) await x.close(); });
 
-  const admin = (await api(base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await setupAdmin(base)).cookie;
   const hallA = (await api(base, 'POST', '/api/rooms', { name: 'Hall A' }, { cookie: admin })).body.code;
   const hallB = (await api(base, 'POST', '/api/rooms', { name: 'Hall B' }, { cookie: admin })).body.code;
   const hallC = (await api(base, 'POST', '/api/rooms', { name: 'Hall C (board only)' }, { cookie: admin })).body.code;

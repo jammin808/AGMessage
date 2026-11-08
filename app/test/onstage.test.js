@@ -5,7 +5,7 @@
 // account), on that page alone. The seat's limit itself is pure (rbac.seatAllows, in test/accounts.test.js).
 const test = require('node:test');
 const assert = require('node:assert');
-const { startServer, stopServer, api, connect, emit, answer, until, wait, fakeStagewatch, pngOf, inviteOf, TOKEN } = require('./helpers');
+const { startServer, stopServer, api, connect, emit, answer, until, wait, fakeStagewatch, pngOf, inviteOf, TOKEN, setupAdmin } = require('./helpers');
 
 const STAYS = 'Messages from On stage stay in this room.';
 const BACKSTAGE = 'Do that from a backstage page.';
@@ -21,7 +21,7 @@ test('an On stage seat chats, answers and asks for help; it shares no file, asks
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });
   const open = async (cookie) => { const s = await connect(base, cookie); sockets.push(s); return s; };
 
-  const admin = (await api(base, 'POST', '/api/setup', { token: TOKEN, username: 'root', name: 'Root Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await setupAdmin(base, { username: 'root', name: 'Root Admin', password: 'the green room kettle' })).cookie;
   const hall = async (name) => (await api(base, 'POST', '/api/rooms', { name }, { cookie: admin })).body.code;
   const [hallA, hallB, hallC, hallD] = [await hall('Hall A'), await hall('Hall B'), await hall('Hall C'), await hall('Hall D')];
   const ctl = await open(admin);
@@ -266,7 +266,7 @@ test('a Board account is held to the On stage seat on its On stage page alone: i
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); await sw.close(); });
   const open = async (cookie) => { const s = await connect(base, cookie); sockets.push(s); return s; };
   const PW = 'clipboard and coffee';
-  const admin = (await api(base, 'POST', '/api/setup', { token: TOKEN, username: 'root', name: 'Root Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await setupAdmin(base, { username: 'root', name: 'Root Admin', password: 'the green room kettle' })).cookie;
   const hall = async (name) => (await api(base, 'POST', '/api/rooms', { name }, { cookie: admin })).body.code;
   const [hall2, hall3] = [await hall('Hall 2'), await hall('Hall 3')];
   const ctl = await open(admin);

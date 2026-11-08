@@ -29,6 +29,19 @@
     if (me.account && me.account.mustChange) { onlyPane('changePane'); $('changeUser').value = me.account.username; return; }
     if (params.get('code')) { if (me.account) signedIn(me.account); show('code'); return; }
     if (me.account) { location.replace('/halls.html'); return; }
+    // Accounts held aside, or not opened at this start: the server's words in place of the tabs, and a code still joins.
+    // At the first start of 0.6.0 some wait for the token: the tabs stay, with one line.
+    const held = me.held;
+    if (held && held.state === 'first') { const w = $('waitingLine'); w.textContent = AGM.mark('couldNot') + ' ' + held.words; w.hidden = false; return; }
+    if (held && params.get('tab') === 'code') { show('code'); return; }
+    if (held) {
+      onlyPane('heldPane');
+      const t = $('heldText');
+      const fault = held.state !== 'keyless' && held.state !== 'unread';
+      t.dataset.mark = fault ? 'broken' : 'unvouched';
+      t.textContent = AGM.mark(fault ? 'fault' : 'couldNot') + ' ' + held.words;
+      return;
+    }
     if (me.setup) onlyPane('setupPane');
   })();
 

@@ -859,8 +859,11 @@ its keys leave the account's profile, which every portable folder of that accoun
   where the account may add files and write them, never a folder or a junction): each file's bytes as a part named by its
   place, then a manifest naming each part's place, size and SHA-256 with the folder's facts. It carries the data folder
   (but its backups, its console, the watchdog's own files and temporary files), the uploads, and from the profile's
-  `%LOCALAPPDATA%\AGMessage` the machine key, `tls.json` and the audit records, so every sealed value, the certificate's
-  fingerprint and the chain carry over; `secret.key` travels in the data folder. Nothing is rotated (answer 42). Then
+  `%LOCALAPPDATA%\AGMessage` the machine key, `tls.json`, the audit records and the keyed stores' records (`stores\`,
+  `latest.json` among them), so every sealed value, the certificate's fingerprint and the chain carry over, and the
+  installed node's first start is a move of the set this laptop saved last: its accounts and their sign-ins go on there
+  (the token's end, under the node's new token); `secret.key` travels in the data folder. The records land in
+  `keys\stores\`, made by the server inside `keys\` and taking its access list (no new grant). Nothing is rotated (answer 42). Then
   `machine.js import --step take`, elevated, copies each part by its bytes into a new file of the data, uploads or keys
   folder, never over a file there and never with an access list of its own (each takes its folder's), each part read only
   when it is a file of its own (no link, no hard link, the file `lstat` saw, by its whole file id) of the size its
@@ -870,8 +873,9 @@ its keys leave the account's profile, which every portable folder of that accoun
   fingerprint unchanged; the audit chain checking to its end as it did there, the archives in `data\audit-archive\` it
   names included. Then what the installed node's own start refuses, read from the copy itself and never from what the
   export said of its source: the copy last run by this build in the format it writes (`format`), a machine key,
-  certificate and secret it starts on (`usable`), no copy running on its data folder (`held`) and no import's mark there
-  (`moved`). Each side is read by `lib/importfacts.js` with the server's own readers, writing nothing: the portable
+  certificate and secret it starts on (`usable`), no copy running on its data folder (`held`), no import's mark there
+  (`moved`), and its keyed stores as its first start would open them (`stores`: no account held aside, no account's
+  sign-in ended; `lib/keyedstore.js` read with the copied keys and records, nothing written). Each side is read by `lib/importfacts.js` with the server's own readers, writing nothing: the portable
   folder's by the export, as the account; the copy's by the import, elevated, in an environment of Windows' own folders
   (it loads only `app\lib`, `app\verify` and Node's built-ins, which `test/loads.test.js` holds). A check that does not
   pass is said by its name, and everything the copy laid is taken out again, so the import can be run again.

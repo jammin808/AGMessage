@@ -803,6 +803,24 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   stopped are found at the next start. Entries this laptop cannot check (0.5.1's, another key's) read △ until the
   person at the laptop accepts them by typing the admin token into the dialog: never a sign-in, which is a record in
   the data folder anyone who can write it could add.
+- The accounts, their sign-ins and the token's sign-ins are keyed to the machine key (`app/lib/keyedstore.js`): each
+  file keyed whole (an HMAC-SHA256 of its bytes under a key of its own, derived from the machine key), each sign-in kept by
+  its keyed hash, every save recorded beside the machine key outside the data folder. So someone who can write the data
+  folder but not read the key folder can no longer plant a sign-in, mint or change an account, or put an older save back
+  unseen: a sign-in file that fails ends its sign-ins, an accounts file that fails (or one from another computer, another
+  folder, an older save, or 0.5.1's on a laptop that has keyed) is held aside whole until the person at the laptop adopts
+  its accounts with the token typed, admin-level ones given one-time passwords by default. A store or record that cannot
+  be read is never written over, and only ENOENT means one is absent. The first admin account is made only with the token,
+  in both channels; the token's sign-in counts only at the laptop, never through the tunnel or under another host name.
+  **Its limits, the key holders first:** whoever holds `machine.key` (this Windows account; installed, the server task's
+  account, SYSTEM and Administrators; anyone with a copy of it) writes files and records that check; in the portable
+  layout whoever can write the AGMessage folder can change the code; a whole machine put back is its own newest save; one
+  save put back undoes at most a sign-in's stamp, a rehash, a touch or a new sign-in, and is said; the first start of
+  0.6.0 trusts 0.5.1's accounts that reach only their halls, as they are (those that can manage AGMessage or reach past
+  their halls wait for the token); a copy from another computer cannot be checked, its passwords its own claim; keying is
+  integrity, not secrecy (the stores still hold scrypt hashes, names and addresses); removing the stores ends sign-ins
+  and leaves the accounts missing. `secret.key`, `settings.json`, the room files and `pages.json` are not keyed
+  (`docs/ACCOUNTS.md`, Keyed to this laptop).
 - The audit log is exported signed, to be checked on another computer: the files byte for byte, the laptop's own check
   of them, `SHA256SUMS` and its Ed25519 signature. The signing key is derived from the machine key when an export signs
   and is never stored; its fingerprint is printed in the black window and on Admin → Health, and an auditor checks an

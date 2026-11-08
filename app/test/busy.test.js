@@ -516,7 +516,7 @@ test('the stop: refused while busy without a typed reason, then saved and ended 
   assert.deepEqual(fails.map((e) => [e.actor.id, e.target, e.words]), Array(5).fill(['host', 'host', 'a wrong proof of the admin token (at /api/machine/busy)']));
   let r = await raw(port, 'GET', wire.PATHS.busy, { headers: await signed(port, 'GET', wire.PATHS.busy) });
   assert.equal(r.status, 429, 'counted toward the token\'s lockout');
-  assert.equal((await h.api(srv.base, 'POST', '/api/admin/login', { token: h.TOKEN })).status, 429, 'the same lockout the token sign-in reads');
+  assert.equal((await h.api(srv.base, 'POST', '/api/admin/login', { token: 'not-the-token' })).status, 429, 'the same lockout the token sign-in reads: a wrong token there waits');
   await srv.setClock(61_000);
   r = await raw(port, 'GET', wire.PATHS.busy, { headers: await signed(port, 'GET', wire.PATHS.busy) });
   assert.equal(r.status, 200, 'a minute on, a right proof is answered');

@@ -147,12 +147,28 @@
           <ul id="earlierLinks" class="peer-list" aria-labelledby="earlierTitle" hidden></ul>
           <h3>👥 Accounts and access</h3>
           <p class="hint"><span id="acctCount">—</span> · <a href="/users.html">Manage people, roles and halls</a> · <a href="/users.html#audit">Audit log</a></p>
+          <!-- Accounts held aside (lib/keyedstore.js): the copy the token at this laptop opens. Its acts are the catalogue's
+               (kinds accounts and heldAccount): Adopt the ticked…, Start with no accounts… (or Leave these out…), Adopt more…
+               and Leave the rest out…; each account's ticks are in step with its menu. Anyone else is told where to go. -->
+          <p id="heldWhere" class="hint keyed-line" data-mark="" hidden></p>
+          <section class="admin-laptop-section admin-held-section" id="heldSection" aria-labelledby="heldTitle" hidden>
+            <header class="admin-laptop-header" data-key="held" id="heldHead">
+              <h4 id="heldTitle">🔐 Accounts held aside</h4>
+              <span class="obj-bar" id="heldActs"></span>
+            </header>
+            <p id="heldWhy" class="hint keyed-line" data-mark="" role="status"></p>
+            <p id="heldCopy" class="hint"></p>
+            <ul id="heldList" class="accept-list adopt-list" aria-labelledby="heldTitle"></ul>
+            <p id="heldOpen" class="hint" hidden></p>
+            <div id="heldPasswords" class="adopt-passwords" role="status" hidden></div>
+          </section>
           <label class="row"><input id="remoteAdmin" type="checkbox" /> Let accounts with admin rights sign in through the Cloudflare tunnel (off: admins sign in on the venue network only)</label>
           <p class="hint" id="buildLine"></p>
-          <p class="hint" id="rollbackLine">Do not go back to 0.5.1 during a show. Under 0.5.1 a hall's code switched off admits guests again, a hall's New code is lost (its address admits again, the new code does not), a hall's other rooms do not open (their files stay), its reset or removal of any hall can delete a file only one of those rooms holds, an account seated On stage in a hall sits backstage there with every right it holds, and its check reads the audit log as broken.</p>
+          <p class="hint" id="rollbackLine">Do not go back to 0.5.1 during a show. Under 0.5.1 a hall's code switched off admits guests again, a hall's New code is lost (its address admits again, the new code does not), a hall's other rooms do not open (their files stay), its reset or removal of any hall can delete a file only one of those rooms holds, an account seated On stage in a hall sits backstage there with every right it holds, and its check reads the audit log as broken. Going back to 0.5.1 and forward again holds the accounts aside until the token adopts them, and signs everyone out.</p>
           <h3>🩺 Health</h3>
           <p id="healthLine" class="hint">—</p>
           <div id="auditHealth" class="audit-health">
+            <ul id="signinLines" class="audit-findings" aria-label="Accounts and sign-ins"></ul>
             <p id="auditLine" class="hint audit-line" data-mark="">Audit log: —</p>
             <ul id="auditFindings" class="audit-findings"></ul>
             <p id="auditWhere" class="hint" hidden>Accept this on the AGMessage laptop: sign in there with its token (Admin login in the AGMessage window; installed: Start → AGMessage → Show the admin token).</p>

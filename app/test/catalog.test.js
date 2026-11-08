@@ -66,7 +66,8 @@ const RESERVED_ICONS = { '↩': ['reply'], '↗': ['send', 'sendBack', 'sendTo']
 // 📄 Show them a document… on a person and The document at this place on a pick are one act: a document shown whole.
 const ONE_ACT = [['pin', 'pinMine'], ['send', 'sendBack', 'sendTo'], ['delete', 'remove'], ['draft', 'minutes'], ['helpRespond', 'respond'], ['helpResolve', 'resolve'], ['setup', 'configure'], ['toggle', 'codeToggle'], ['new', 'newCode'], ['stage', 'show'], ['doc', 'document']];
 /** Acts that open a dialog of their own (Stagewatch's, the Screens console, a hall's set-up, the show network, the editor, the export, the short document bar) and so end their label with "…" as an ask does. */
-const OPENS_DIALOG = new Set(['msg.speaker', 'msg.screens', 'file.screens', 'chip.speaker', 'header.screens', 'board.screens', 'compose.attach', 'hall.setup', 'hall.network', 'room.setup', 'account.edit', 'audit.export', 'adminRoom.members', 'adminRoom.sendFrom', 'person.doc']);
+// Adopt more… draws the copy held aside's list to tick, as a dialog would, before anything is sent.
+const OPENS_DIALOG = new Set(['msg.speaker', 'msg.screens', 'file.screens', 'chip.speaker', 'header.screens', 'board.screens', 'compose.attach', 'hall.setup', 'hall.network', 'room.setup', 'account.edit', 'audit.export', 'adminRoom.members', 'adminRoom.sendFrom', 'person.doc', 'accounts.more']);
 /** The keys a single key may be: a letter or a digit that needs no Shift (shown upper case), or one of these named keys. */
 const NAMED_KEYS = ['Enter', 'Delete', 'Escape'];
 
@@ -271,6 +272,8 @@ const PAGE = {
   adminHere: C.adminFacts({ ok: true, admin: true, ai: true, halls: HALLS, connected: true, local: true }),
   // The admin page of an admin account, which manages accounts too: a room's Members….
   adminUsers: C.adminFacts({ ok: true, admin: true, manageUsers: true, ai: true, halls: HALLS, connected: true }),
+  // The laptop's token, signed in by this run, at the laptop (/api/admin/me's `token`): the accounts held aside are its.
+  adminToken: C.adminFacts({ ok: true, admin: true, ai: true, halls: HALLS, connected: true, local: true, token: true }),
   // The halls board: a manager who sets halls up and drives the show network, and a hall's crew; an admin account's
   // (the admin, who manages accounts too: Set up's codes, removal and Members…), and one who manages accounts alone.
   board: C.boardFacts({ canManageHalls: true, canDrive: true, connected: true }),
@@ -347,6 +350,22 @@ const PAGE_OBJECTS = {
     // A deletion that could not remove every part: what is left is deleted by the next ask.
     partlyPurged: { name: '2026-10-30T09-00-00-000Z', title: 'Gala Dinner', contents: true, continued: false, purged: true, current: { name: 'Spring Summit', busy: false, busyWords: '' } },
   },
+  // Accounts held aside (Admin → Accounts held aside): the whole copy held, the first start's waiting ones, and some left
+  // out of an adoption, before and after Adopt more… draws them; one of the copy's accounts, ticked or not.
+  accounts: {
+    aside: { mode: 'aside', listed: true, ticked: 2, tickedWords: 'Adopt ana, sam.', file: 'accounts.held-2026-10-31T14-02-00-000Z.json' },
+    none: { mode: 'aside', listed: true, ticked: 0, tickedWords: '', file: 'accounts.held-2026-10-31T14-02-00-000Z.json' },
+    first: { mode: 'first', listed: true, ticked: 1, tickedWords: 'Adopt ben.', file: 'accounts.held-2026-10-31T14-02-00-000Z.json' },
+    left: { mode: 'left', listed: false, ticked: 0, tickedWords: '', file: 'accounts.held-2026-10-31T14-02-00-000Z.json' },
+    leftListed: { mode: 'left', listed: true, ticked: 1, tickedWords: 'Adopt ben.', file: 'accounts.held-2026-10-31T14-02-00-000Z.json' },
+    // A copy no account can be adopted from (changed since it was held, or unreadable): only leaving them out is offered.
+    firstUnusable: { mode: 'first', listed: true, ticked: 0, tickedWords: '', file: 'accounts.held-2026-10-31T14-02-00-000Z.json', unusable: true },
+    leftUnusable: { mode: 'left', listed: false, ticked: 0, tickedWords: '', file: 'accounts.held-2026-10-31T14-02-00-000Z.json', unusable: true },
+  },
+  heldAccount: {
+    ticked: { ref: 'aben0000001', username: 'ben', adopt: true, reset: true },
+    unticked: { ref: 'aeve0000001', username: 'eve', adopt: false, reset: false },
+  },
   // "This laptop": its addresses as devices open them, and whether Windows is read now.
   laptop: {
     two: { addresses: ['http://192.168.1.20:3023', 'http://10.0.4.7:3023'], reading: false },
@@ -399,6 +418,7 @@ const KIND_SEATS = {
   take: [SEATS.board, SEATS.boardSimple, SEATS.boardFull, SEATS.research], card: [SEATS.board, SEATS.boardSimple, SEATS.observer], past: [SEATS.board, SEATS.boardSimple, SEATS.observer], sheet: [SEATS.boardSimple, SEATS.boardSimpleFull, SEATS.supportBoard], board: [SEATS.adminPush, SEATS.pushNoStagewatch, SEATS.adminWeb, SEATS.staffShow],
   earlier: [SEATS.research, SEATS.boardSimple, SEATS.observer], cleared: [SEATS.boardSimpleClears, SEATS.boardSimple], pick: [SEATS.adminPush, SEATS.staffShow],
   adminRoom: [PAGE.admin, PAGE.adminNoAi, PAGE.adminUsers, PAGE.boardAdmin], person: [PAGE.admin, SEATS.research, SEATS.board, SEATS.techPush, SEATS.guestWeb], adminMsg: [PAGE.admin], link: [PAGE.admin], tunnel: [PAGE.admin], laptop: [PAGE.admin], event: [PAGE.admin, PAGE.manager], archive: [PAGE.admin, PAGE.adminHere],
+  accounts: [PAGE.adminToken, PAGE.admin], heldAccount: [PAGE.adminToken, PAGE.admin],
   hall: [PAGE.board], room: [PAGE.board, SEATS.research], help: [PAGE.board], account: [PAGE.accountsAdmin], audit: [PAGE.accountsAdmin, PAGE.filtered],
 };
 /** Every seat of a kind with every object of it ([f, o] pairs): messages, a file where it is listed and where it is open, a screen, and the other pages' objects. */
@@ -432,7 +452,7 @@ test('the file types: the pages\' one copy of the types the stage shows and of t
 });
 
 test('the entries: kind.verb ids, known groups in order with danger last, labels, keys, icons that are no marks', () => {
-  assert.deepEqual(KINDS, ['msg', 'file', 'screen', 'compose', 'chip', 'header', 'take', 'card', 'past', 'sheet', 'board', 'earlier', 'cleared', 'pick', 'adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop', 'event', 'archive', 'hall', 'room', 'help', 'account', 'audit'], 'the kinds landed so far');
+  assert.deepEqual(KINDS, ['msg', 'file', 'screen', 'compose', 'chip', 'header', 'take', 'card', 'past', 'sheet', 'board', 'earlier', 'cleared', 'pick', 'adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop', 'event', 'archive', 'accounts', 'heldAccount', 'hall', 'room', 'help', 'account', 'audit'], 'the kinds landed so far');
   const seen = new Set();
   for (const kind of KINDS) {
     const list = C.KINDS[kind];
@@ -1264,8 +1284,10 @@ test('the marks: one table, each mark one name, one meaning and a colour role of
 // ---------------------------------------------------------------- the admin page, the halls board, the Accounts page
 test('the other pages\' facts: read from the server\'s answers, and nothing a page could name for itself', () => {
   assert.deepEqual(plain(C.adminFacts({ ok: 1, admin: 0, ai: 'yes', halls: [{ code: 'K7P2QX', name: 'Hall 2', extra: 1 }, { name: 'no code' }, null], connected: true, role: 'admin' })),
-    { page: 'admin', admin: true, theAdmin: false, manageUsers: false, canDrive: true, ai: true, halls: [{ code: 'K7P2QX', name: 'Hall 2' }], connected: true, support: '', local: false }, 'the gate\'s answer, "the admin", the drive right it carries, AI, the halls by code and name');
-  assert.deepEqual(plain(C.adminFacts({})), { page: 'admin', admin: false, theAdmin: false, manageUsers: false, canDrive: false, ai: false, halls: [], connected: false, support: '', local: false }, 'nothing told: no right');
+    { page: 'admin', admin: true, theAdmin: false, manageUsers: false, canDrive: true, ai: true, halls: [{ code: 'K7P2QX', name: 'Hall 2' }], connected: true, support: '', local: false, token: false }, 'the gate\'s answer, "the admin", the drive right it carries, AI, the halls by code and name');
+  assert.deepEqual(plain(C.adminFacts({})), { page: 'admin', admin: false, theAdmin: false, manageUsers: false, canDrive: false, ai: false, halls: [], connected: false, support: '', local: false, token: false }, 'nothing told: no right');
+  // The token at the laptop, signed in by this run, only on the server's word (/api/admin/me's `token`): a true and nothing like it.
+  assert.deepEqual([C.adminFacts({ ok: true, token: true }).token, C.adminFacts({ ok: true, token: 'yes' }).token, C.adminFacts({ ok: true, token: 1 }).token], [true, false, false]);
   // At the laptop only on the server's word (/api/admin/me's `local`), a true and nothing like it.
   assert.deepEqual([C.adminFacts({ ok: true, local: true }).local, C.adminFacts({ ok: true, local: 'yes' }).local, C.adminFacts({ ok: true, local: 1 }).local], [true, false, false]);
   // Members… is offered on the server's word that this account may manage accounts, a true and nothing like it.
@@ -1353,6 +1375,17 @@ test('the other pages\' matrix: what each seat is shown on each object of the ad
     ['archive', 'admin', O.archive.purged, ['archive.continue']],
     ['archive', 'admin', O.archive.partlyPurged, ['archive.continue', 'archive.delete']],
     ['archive', 'notAdmin', O.archive.whole, []],
+    // Accounts held aside: the token at the laptop's alone (signed in by this run), never another admin page's.
+    ['accounts', 'adminToken', O.accounts.aside, ['accounts.adopt', 'accounts.fresh']],
+    ['accounts', 'adminToken', O.accounts.first, ['accounts.adopt', 'accounts.fresh']],
+    ['accounts', 'adminToken', O.accounts.left, ['accounts.more', 'accounts.leave']],
+    ['accounts', 'adminToken', O.accounts.leftListed, ['accounts.adopt', 'accounts.leave']],
+    ['accounts', 'adminToken', O.accounts.firstUnusable, ['accounts.fresh']],
+    ['accounts', 'adminToken', O.accounts.leftUnusable, ['accounts.leave']],
+    ['accounts', 'admin', O.accounts.aside, []],
+    ['accounts', 'notAdmin', O.accounts.aside, []],
+    ['heldAccount', 'adminToken', O.heldAccount.ticked, ['heldAccount.adopt', 'heldAccount.leave', 'heldAccount.reset']],
+    ['heldAccount', 'admin', O.heldAccount.ticked, []],
     // A hall's row: opened (here or in a tab) by everyone it is listed for, its guest code copied where the server told it;
     // set up and the show network by right.
     ['hall', 'board', O.hall.row, ['hall.open', 'hall.tab', 'hall.copy', 'hall.code', 'hall.setup', 'hall.network']],
@@ -1424,11 +1457,17 @@ test('the other pages\' matrix: what each seat is shown on each object of the ad
   const facts = (seat) => PAGE[seat] || SEATS[seat];
   for (const [kind, seat, o, want] of M) assert.deepEqual(ids(kind, facts(seat), o), want, kind + ' · ' + seat + ' on ' + JSON.stringify(o).slice(0, 60));
   // Every act of these kinds is shown to some seat: none passes the matrix by its absence.
-  const kinds = ['adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop', 'event', 'archive', 'hall', 'room', 'help', 'account', 'audit'];
+  const kinds = ['adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop', 'event', 'archive', 'accounts', 'heldAccount', 'hall', 'room', 'help', 'account', 'audit'];
   const shownSomewhere = new Set(M.flatMap((r) => r[3]));
   for (const k of kinds) for (const e of C.KINDS[k]) assert.ok(shownSomewhere.has(e.id), e.id + ' is shown to some seat in the matrix');
   // Every act a seat is shown is one its rights allow: the admin page's acts need its gate, the split "the admin".
-  for (const k of ['adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop', 'event', 'archive']) for (const o of Object.values(PAGE_OBJECTS[k])) assert.deepEqual(ids(k, PAGE.notAdmin, o), [], k + ': nothing to a page the admin page\'s gate does not admit');
+  for (const k of ['adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop', 'event', 'archive', 'accounts', 'heldAccount']) for (const o of Object.values(PAGE_OBJECTS[k])) assert.deepEqual(ids(k, PAGE.notAdmin, o), [], k + ': nothing to a page the admin page\'s gate does not admit');
+  // The panel's labels and asks: Leave these out… at the first start, each with the token typed.
+  assert.deepEqual(plain(C.items('accounts', PAGE.adminToken, O.accounts.first)).filter((i) => !i.sep).map((i) => i.label), ['Adopt the ticked…', 'Leave these out…']);
+  for (const [o, id] of [[O.accounts.aside, 'accounts.adopt'], [O.accounts.aside, 'accounts.fresh'], [O.accounts.left, 'accounts.leave']]) assert.deepEqual(plain(C.entry('accounts', id).confirm(PAGE.adminToken, o)).fields.map((x) => [x.name, x.type]), [['token', 'password']], id + ' takes the token typed');
+  assert.equal(plain(C.entry('accounts', 'accounts.fresh').confirm(PAGE.adminToken, O.accounts.aside)).danger, true, 'Start with no accounts… is a danger');
+  assert.deepEqual(plain(C.items('accounts', PAGE.adminToken, O.accounts.none)).filter((i) => !i.sep).map((i) => [i.id, i.disabled]), [['accounts.adopt', C.WORDS.heldNone], ['accounts.fresh', '']], 'Adopt the ticked… waits for a tick');
+  assert.deepEqual(plain(C.items('heldAccount', PAGE.adminToken, O.heldAccount.unticked)).filter((i) => !i.sep).map((i) => [i.id, !!i.checked]), [['heldAccount.adopt', false], ['heldAccount.leave', true], ['heldAccount.reset', false]], 'each item in step with its ticks');
   // The admin page's own acts are never drawn in Set up, whoever looks: their runners are the admin page's.
   for (const seat of ['board', 'boardCrew', 'boardAdmin', 'boardUsers']) for (const o of Object.values(PAGE_OBJECTS.adminRoom)) {
     assert.deepEqual(ids('adminRoom', PAGE[seat], o).filter((id) => /\.(watch|transcript|minutes|invites|clear)$/.test(id)), [], seat);

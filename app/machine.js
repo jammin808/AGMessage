@@ -3284,11 +3284,14 @@ function importCarries(area, rel) {
   const parts = String(rel).split('/');
   if (/\.tmp$/i.test(parts[parts.length - 1]) || parts.some((p) => p.startsWith('.partial-'))) return false;
   if (area === 'data') return !IMPORT_DATA_LEFT.has(parts[0]);
-  if (area === 'keys') return parts.length === 1 ? parts[0] === 'machine.key' || parts[0] === 'tls.json' : parts[0] === 'audit';
+  if (area === 'keys') return parts.length === 1 ? parts[0] === 'machine.key' || parts[0] === 'tls.json' : parts[0] === 'audit' || parts[0] === 'stores';
   return area === 'uploads';
 }
 const HEX64 = /^[0-9a-f]{64}$/;
 const IMPORT_ID = /^[0-9a-f]{24}$/;
+/** The states of the keyed stores at the installed node's first start in which its accounts open, and its sign-ins are kept. */
+const IMPORT_OPEN = Object.freeze(['ok', 'move', 'behind', 'unrecorded', 'none']);
+const IMPORT_KEPT = Object.freeze(['ok', 'move', 'behind', 'unrecorded', 'none']);
 /** A folder's halls, messages, accounts and screens in words (pure): "1 hall, 2 messages, 1 account and 1 screen". */
 const countsWords = (f) => [plural(f.halls, 'hall'), plural(f.messages, 'message'), plural(f.accounts, 'account')].join(', ') + ' and ' + plural(f.screens, 'screen');
 
@@ -3381,7 +3384,8 @@ const servedWords = (served) => 'This PC\'s AGMessage has served already: it hol
  * unchanged; the audit chain checking to its end, as it read there, archives included. Then what the installed node's own
  * start refuses, read from the copy itself and never from what the export said of its source: a folder not last run by
  * this build in the format it writes (`format`), a machine key, certificate or server secret it would not start on
- * (`usable`), a copy running on its data folder (`held`), and an import's mark there (`moved`). [{check, words}] for each
+ * (`usable`), a copy running on its data folder (`held`), an import's mark there (`moved`), and its keyed stores as its
+ * first start would open them (`stores`: no account held aside, no account's sign-in ended). [{check, words}] for each
  * that did not pass; none when every one did.
  */
 function verifyChecks(s, t) {
@@ -3425,6 +3429,16 @@ function verifyChecks(s, t) {
   if (unusable.length) out.push({ check: 'usable', words: 'the installed AGMessage would not start on ' + unusable.join(', ') + ' laid here' });
   if (!t || t.held !== false) out.push({ check: 'held', words: 'a copy of AGMessage runs on this PC\'s AGMessage data folder' + (t && typeof t.busy === 'string' && t.busy ? ' (it says it is ' + said(t.busy, 200) + ')' : '') + ': stop it, then import again' });
   if (!t || t.moved !== 'none') out.push({ check: 'moved', words: 'this PC\'s AGMessage data folder holds an import\'s mark (data\\moved.json), on which it does not start' });
+  // The keyed stores as the installed node's first start would find them (lib/keyedstore.js): a move of the set this
+  // laptop saved last, so no account is held aside and no account's sign-in ends.
+  const stOf = (o) => (o && o.stores && typeof o.stores === 'object' ? o.stores : {});
+  const ks = stOf(t);
+  const held = !IMPORT_OPEN.includes(ks.accounts);
+  const ended = !IMPORT_KEPT.includes(ks.sessions);
+  if (held || ended) {
+    const there = !IMPORT_OPEN.includes(stOf(s).accounts) ? ': its accounts are held aside in the portable folder too; open them there first (Admin → Accounts held aside), then import again' : ': the keyed stores\' records did not come with the keys';
+    out.push({ check: 'stores', words: (held ? 'the accounts would be held aside at its first start (' + said(String(ks.accounts || 'not read'), 20) + ')' : '') + (held && ended ? ', and ' : '') + (ended ? 'the accounts\' sign-ins would end (' + said(String(ks.sessions || 'not read'), 20) + ')' : '') + there });
+  }
   return out;
 }
 

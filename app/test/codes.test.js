@@ -10,7 +10,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
-const { startServer, restartServer, stopServer, api, connect, emit, once, wait, until, inviteOf, TOKEN } = require('./helpers');
+const { startServer, restartServer, stopServer, api, connect, emit, once, wait, until, inviteOf, TOKEN, setupAdmin } = require('./helpers');
 
 /** An audit row as the tests read it: its target, its words, who. */
 const rowsOf = (dataDir, action) => fs.readFileSync(path.join(dataDir, 'audit.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
@@ -44,7 +44,7 @@ async function showOf(srv, t) {
     return s;
   };
   t.after(() => sockets.forEach((s) => s.close()));
-  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await setupAdmin(srv.base)).cookie;
   const account = async (username, role, extra = {}) => {
     const made = await api(srv.base, 'POST', '/api/users', { username, name: username, role, password: 'clipboard and coffee', ...extra }, { cookie: admin });
     assert.equal(made.status, 200, JSON.stringify(made.body));
