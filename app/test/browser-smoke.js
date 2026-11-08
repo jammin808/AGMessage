@@ -6165,17 +6165,88 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
         && refusedSaid === JSON.stringify({ status: 503, ok: false, error: keyedstore.HELD_WORDS, held: true }),
         `accounts saved under another laptop's key: the sign-in page says so in place of its tabs, a sign-in is refused in the same words, and Join with a code still joins (${heldPage}; ${refusedSaid})`);
 
-      const admin6 = await edge.tab(`${base6}/admin.html`);
+      // The admin page's first fill, held and watched. Asked as a page loads (`sessionStorage.agmHoldFill`), its socket's
+      // answers and pushes are held from its start, while its reads over HTTP answer: `pending` counts those not yet
+      // answered and handled, `urls` names each. Each answer is kept by the event it answers (`acks`, its ids as the socket
+      // numbered the asks), so `__fill.let(event)` lets that read's answers through alone and `__fill.release()` the rest,
+      // in their order, by the page's own handlers. On every load it notes where the first account's ⋯ was first drawn and
+      // whether the fill was held then, and what the panel said as the one-time passwords were first drawn.
+      const FILL = `(() => {
+        const F = window.__fill = { holding: false, held: [], socket: null, own: {}, acks: {}, urls: [], asked: 0, pending: 0, first: null, passwords: null };
+        try { F.holding = sessionStorage.getItem('agmHoldFill') === '1'; sessionStorage.removeItem('agmHoldFill'); } catch (e) { F.holding = false; /* no storage: nothing held */ }
+        let real = null; let wrapped = null;
+        Object.defineProperty(window, 'io', { configurable: true, get() { return wrapped; }, set(v) {
+          real = v;
+          wrapped = function () {
+            const s = real.apply(this, arguments);
+            F.socket = s;
+            for (const m of ['onevent', 'onack']) { const own = F.own[m] = s[m]; s[m] = function (p) { if (F.holding) { F.held.push([m, p]); return undefined; } return own.call(this, p); }; }
+            const emit0 = s.emit;
+            s.emit = function (ev) { if (typeof arguments[arguments.length - 1] === 'function') (F.acks[ev] = F.acks[ev] || []).push(s.ids); return emit0.apply(this, arguments); };
+            return s;
+          };
+          Object.assign(wrapped, v);
+        } });
+        const isFor = (ev) => (x) => x[0] === 'onack' && (F.acks[ev] || []).includes(x[1].id);
+        F.heldFor = (ev) => F.held.filter(isFor(ev)).length;
+        F.let = (ev) => { const q = F.held.filter(isFor(ev)); F.held = F.held.filter((x) => !q.includes(x)); for (const [m, p] of q) F.own[m].call(F.socket, p); return q.length; };
+        F.release = () => { F.holding = false; const q = F.held.splice(0); for (const [m, p] of q) F.socket[m](p); return q.length; };
+        const fetch0 = window.fetch;
+        window.fetch = function (u) {
+          F.asked++; F.pending++; F.urls.push(String(u && u.url ? u.url : u));
+          let out = false;
+          const done = () => { if (!out) { out = true; setTimeout(() => { F.pending--; }, 0); } };
+          return fetch0.apply(this, arguments).then((r) => { for (const k of ['json', 'text']) { const read = r[k].bind(r); r[k] = () => read().finally(done); } return r; }, (e) => { done(); throw e; });
+        };
+        const at = (el) => { const q = el.getBoundingClientRect(); return { x: Math.round(q.left + scrollX), y: Math.round(q.top + scrollY) }; };
+        new MutationObserver(() => {
+          const sec = document.getElementById('heldSection');
+          const more = sec && !sec.hidden && document.querySelector('#heldList > li[data-key] .obj-more');
+          if (!F.first && more && more.getClientRects().length) F.first = Object.assign(at(more), { key: more.closest('li').dataset.key, held: F.holding });
+          const box = document.getElementById('heldPasswords');
+          if (!F.passwords && box && !box.hidden && box.querySelector('code')) F.passwords = { why: document.getElementById('heldWhy').textContent, acts: [...document.querySelectorAll('#heldActs [data-action]')].map((b) => b.dataset.action) };
+        }).observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
+      })();`;
+      const admin6 = await edge.tab(`${base6}/admin.html`, { init: FILL });
       await admin6.until('document.readyState === "complete"');
-      await admin6.eval(`fetch('/api/admin/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: '${TOKEN}' }) }).then(() => location.reload())`);
       const HELD_ROWS = `[...document.querySelectorAll('#heldList > li[data-key]')]`;
       const HELD_ROW = (ref) => `document.querySelector('#heldList > li[data-key="${ref}"]')`;
       // Each tick line with its tick first (☑ ticked, ☐ not), so the words printed carry no "=" a CI log's masking reads.
       const LINES = (li) => `[...${li}.querySelectorAll(':scope > label')].map((l) => (l.querySelector('input').checked ? '☑ ' : '☐ ') + l.querySelector('span').textContent)`;
       const READ_HELD = `${HELD_ROWS}.map((li) => ({ who: li.querySelector('.adopt-who strong').textContent, adopt: li.querySelector('input[data-adopt]').checked, lines: ${LINES('li')} }))`;
+      // The reads drawn above the panel: the halls, the links and the settings over the socket, the event over HTTP.
+      const FILL_READS = ['admin:listRooms', 'nodes:list', 'admin:settings'];
+      const PANEL_NOW = `JSON.stringify({ section: !document.getElementById('heldSection').hidden, rows: ${HELD_ROWS}.length })`;
+      const NOT_DRAWN = JSON.stringify({ section: false, rows: 0 });
+      // A load with its first fill held, read once each socket read above the panel has been asked and its answer held,
+      // and every read over HTTP (the event's among them) has answered and been handled.
+      const fillHeld = (page) => page.until(`(() => { const f = window.__fill; return !!f && f.holding && document.readyState === 'complete' && !document.getElementById('dashboard').hidden && ${JSON.stringify(FILL_READS)}.every((ev) => f.heldFor(ev) > 0) && f.urls.some((u) => u.includes('/api/event')) && f.pending === 0 && ${PANEL_NOW}; })()`, 20000);
+      // Those reads' answers let through one at a time, in `order`, what the panel shows read after each (its handlers run
+      // as an answer is let through, so a panel that waits for no more is shown by then); then the rest, in their order.
+      // A load fences the part it lets through last: the panel shown before it would be a panel that does not wait for it.
+      // Three loads, each with another part last (the settings, the halls, the links), fence all three.
+      const fillInTurn = (page, order) => page.eval(`(() => { const f = window.__fill; const said = ${JSON.stringify(order)}.map((ev) => f.let(ev) && ${PANEL_NOW}); return JSON.stringify({ said, rest: f.release() }); })()`);
+      const inTurnOk = (r, order) => { const t = r && JSON.parse(r); return !!t && t.said.length === order.length && t.said.slice(0, -1).every((x) => x === NOT_DRAWN) && !!t.said[order.length - 1] && JSON.parse(t.said[order.length - 1]).section === true; };
+      // Signed in with the token, the page loaded again with its first fill held: Accounts held aside is not drawn while
+      // it is, nor once the halls and then the links are let through; it is shown as the settings land, the last of them.
+      // Its ⋯ is where it was first drawn once the links' and the settings' lines are in.
+      await admin6.eval(`(sessionStorage.setItem('agmHoldFill', '1'), fetch('/api/admin/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: '${TOKEN}' }) }).then(() => location.reload()))`);
+      const whileHeld = await fillHeld(admin6);
+      const firstOrder = ['admin:listRooms', 'nodes:list', 'admin:settings'];
+      const letThrough = await fillInTurn(admin6, firstOrder);
       const listed6 = await admin6.until(`!document.getElementById('dashboard').hidden && !document.getElementById('heldSection').hidden && ${HELD_ROWS}.length === 2 && JSON.stringify({ why: document.getElementById('heldWhy').textContent, copy: /^The copy held aside: accounts\\.held-[^ ]+\\.json \\(digest [0-9a-f]{16}…\\)\\.$/.test(document.getElementById('heldCopy').textContent), rows: ${READ_HELD}, acts: [...document.querySelectorAll('#heldActs [data-action]')].map((b) => b.dataset.action) })`, 20000);
       const seen6 = listed6 && JSON.parse(listed6);
       const [anaRef, samRef] = await admin6.eval(`${HELD_ROWS}.map((li) => li.dataset.key)`);
+      const filled6 = await admin6.until(`(() => { const b = ${HELD_ROW(anaRef)}.querySelector('.obj-more'); const q = b.getBoundingClientRect(); return !!document.querySelector('#nodeLinks > li') && document.getElementById('aiModel').textContent !== '—' && JSON.stringify({ first: window.__fill.first, now: { x: Math.round(q.left + scrollX), y: Math.round(q.top + scrollY) } }); })()`, 10000);
+      const fill6 = filled6 && JSON.parse(filled6);
+      const fillParts = {
+        notYet: whileHeld === NOT_DRAWN,
+        inTurn: inTurnOk(letThrough, firstOrder),
+        withIt: !!fill6 && !!fill6.first && fill6.first.key === anaRef && fill6.first.held === false,
+        still: !!fill6 && !!fill6.first && fill6.first.x === fill6.now.x && fill6.first.y === fill6.now.y,
+      };
+      const fillMissed = Object.keys(fillParts).filter((k) => !fillParts[k]);
+      report(fillMissed.length === 0, `Accounts held aside is drawn with the admin page's first fill, never before it: not drawn while the halls, the links and the settings are held and every read over HTTP has answered, nor as the halls and then the links land, but as the settings do; and ana's ⋯ stays where it was first drawn as the lines above it land (missed: ${fillMissed.join(', ') || 'none'}; while held ${whileHeld}; let through in turn ${letThrough}; ${filled6})`);
       // Each row says what the account may do, read from the copy, and when it was made, last signed in and set its password.
       const rowFacts = await admin6.eval(`JSON.stringify(${HELD_ROWS}.map((li) => li.querySelectorAll('.adopt-who .adopt-what')[1].textContent))`);
       const facts6 = JSON.parse(rowFacts || '[]');
@@ -6210,14 +6281,30 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       await admin6.eval(`(() => { document.querySelector('.agm-ask input[name="token"]').value = '${TOKEN}'; document.querySelector('.agm-ask [data-answer=yes]').click(); })()`);
       const shown6 = await admin6.until(`(() => { const box = document.getElementById('heldPasswords'); const c = box.querySelector('code'); return !box.hidden && c && JSON.stringify({ lines: [...box.querySelectorAll('p')].map((p) => p.textContent.replace(c.textContent, '<password>')), password: c.textContent, why: document.getElementById('heldWhy').textContent, acts: [...document.querySelectorAll('#heldActs [data-action]')].map((b) => b.dataset.action) }); })()`, 20000);
       const adopted6 = shown6 && JSON.parse(shown6);
+      // What the panel said as the passwords were first drawn: the same, drawn in the same turn.
+      const pwFirst = await admin6.eval(`JSON.stringify(window.__fill.passwords)`);
+      const pwWith = pwFirst && JSON.parse(pwFirst);
       await admin6.shot(path.join(OUT, 'accounts-adopted.png'));
       report(anaLines === JSON.stringify(['☐ ana can manage AGMessage. Adopt ana only if this folder has been in your hands since ana was given that.', '☑ With a one-time password']) && !!samOut && /Adopt the ticked accounts\?.*Adopt ana, with a one-time password for ana\./.test(asked6 || '')
         && !!adopted6 && JSON.stringify(adopted6.lines) === JSON.stringify(['One-time passwords, shown once: give each to its person, who chooses their own at the first sign-in.', 'ana: <password>'])
-        && /^△ 1 account was left out on \d+ \w{3} and is kept aside: the token at the laptop may adopt them\.$/.test(adopted6.why) && adopted6.acts.includes('accounts.more'),
-        `ticked, confirmed and adopted with the token typed: ana's one-time password is shown, and the panel says who was left out (${anaLines}; ${shown6 && shown6.replace(/"password":"[^"]+"/, '"password":"…"')})`);
-      await admin6.eval('location.reload()');
+        && /^△ 1 account was left out on \d+ \w{3} and is kept aside: the token at the laptop may adopt them\.$/.test(adopted6.why) && adopted6.acts.includes('accounts.more')
+        && !!pwWith && pwWith.why === adopted6.why && JSON.stringify(pwWith.acts) === JSON.stringify(adopted6.acts),
+        `ticked, confirmed and adopted with the token typed: ana's one-time password is shown, drawn with the panel saying who was left out (${anaLines}; ${shown6 && shown6.replace(/"password":"[^"]+"/, '"password":"…"')}; as the passwords were first drawn ${pwFirst})`);
+      // Loaded again with its first fill held, let through in another order: the links, the settings, then the halls, as
+      // the panel is shown.
+      await admin6.eval(`(sessionStorage.setItem('agmHoldFill', '1'), location.reload())`);
+      const heldAgain = await fillHeld(admin6);
+      const lastOrder = ['nodes:list', 'admin:settings', 'admin:listRooms'];
+      const againInTurn = await fillInTurn(admin6, lastOrder);
+      report(heldAgain === NOT_DRAWN && inTurnOk(againInTurn, lastOrder), `loaded again, Accounts held aside waits for the halls too: not drawn while the fill is held, nor as the links and then the settings land, but as the halls do (while held ${heldAgain}; let through in turn ${againInTurn})`);
       const onceOnly = await admin6.until(`!document.getElementById('dashboard').hidden && !document.getElementById('heldSection').hidden && document.getElementById('heldPasswords').hidden && !document.body.textContent.includes(${codeLiteral(adopted6 ? adopted6.password : '-')})`, 20000);
       report(!!onceOnly && !!adopted6, 'the one-time passwords are shown once: the page loaded again holds none');
+      // And a third time: the settings, the halls, then the links, as the panel is shown.
+      await admin6.eval(`(sessionStorage.setItem('agmHoldFill', '1'), location.reload())`);
+      const heldThird = await fillHeld(admin6);
+      const linksLast = ['admin:settings', 'admin:listRooms', 'nodes:list'];
+      const thirdInTurn = await fillInTurn(admin6, linksLast);
+      report(heldThird === NOT_DRAWN && inTurnOk(thirdInTurn, linksLast), `loaded a third time, Accounts held aside waits for the links too: not drawn while the fill is held, nor as the settings and then the halls land, but as the links do (while held ${heldThird}; let through in turn ${thirdInTurn})`);
       // Ana signs in with her one-time password, chooses her own, and the Accounts page says who was left out.
       await signin6.eval(`fetch('/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'ana', password: ${codeLiteral(adopted6 ? adopted6.password : '')} }) })
         .then(() => fetch('/api/auth/password', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ current: ${codeLiteral(adopted6 ? adopted6.password : '')}, next: 'a fresh kettle backstage' }) })).then(() => { location.href = '/users.html'; })`);

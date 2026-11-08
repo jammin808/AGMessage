@@ -7190,6 +7190,29 @@ laptop and no Board device walked)
   beside them and do no work of AGMessage's, each saying it is alive every minute for an hour: one with Defender turned
   back on first, the other on the image as it is (only the first lost: Defender's scanning; both: the hosted runners;
   neither: the two jobs' own work). They are removed once they have answered, and the release waits for neither.
+- The admin page draws Accounts held aside with its first fill, never before it, and an adoption's one-time passwords
+  with the panel's new state, from one answer. CI's browser smoke on Windows (run 106) missed twice on the held list: the
+  first left click on ana's ⋯ opened no menu (the click meant to close it then opened one, left open with the focus in
+  it), and the passwords were read beside the panel's old words and acts. Proved with the smoke's own steps, the page's
+  first fill held and let through: the panel was drawn from its two HTTP reads some 300 ms before the lines above it (the
+  links, the settings' AI drafts, fingerprint and accounts lines), whose landing moved ana's ⋯ down 108 px between the
+  moment the smoke read where it was and its click, which met the section or ticked ana's Adopt box instead; and an
+  adoption drew the passwords before a second read said what is held now. A person's click meets the same move. Now the
+  panel waits for the first answer of each part drawn above it, whatever it says (the halls, the links, the settings and
+  the event: `ADMIN_FILL` in `public/admin.js`); the links are read again at each connection, as the settings are, so the
+  panel waits for no answer a dropped connection lost; and the adoption's answer says what is held now (`held`, last, as
+  `/api/admin/me` tells the admin), so the passwords, the toast and the panel are drawn from it in one turn and no read
+  after the adoption holds back passwords that exist only in that page. The smoke clicks as it did (doorsOf); its
+  held-aside leg now loads the page three times with the halls', the links' and the settings' answers held while every
+  read over HTTP (the event's among them) answers, finds the panel not drawn, then lets them through one at a time and
+  finds it shown only with the last (the settings, the halls and the links last on one load each: a load fences only the
+  part it lets through last), finds ana's ⋯
+  where it was first drawn once the fill lands, and reads what the panel said as the passwords were first drawn;
+  `test/keyedsignins.test.js` holds the adoption's `held` to what `/api/admin/me` says next. On the pages before this
+  change both checks fail every time, and with any one part taken out of the wait the first-fill checks fail. The wait
+  covers the first fill: a line above the panel that changes height later in a show (a peer heard, a linked node's line,
+  Stagewatch's context) still moves what is below it, and none was measured to. The admin page that ships changed
+  (`public/admin.js`, `public/admin-plus.js`), and so did the adoption's answer (`lib/http-accounts.js`).
 - The installer's build accepts the installer it built. `installer/build-installer.ps1` reads the version back from the
   file it compiled and compares it with the build's, and read its strings with the padding Windows' version resource
   keeps after them, so CI's first build of it (run 96) refused "0.6.0.96" padded with blanks as not "0.6.0.96". The

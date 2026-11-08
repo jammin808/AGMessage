@@ -246,6 +246,7 @@ test('accounts.json written into: held aside as changed until the token at the l
   assert.ok(!read(path.join(srv.dataDir, 'audit.jsonl')).includes(once), 'no one-time password in a row');
   assert.equal(read(path.join(srv.dataDir, copyName)), planted, 'the held copy is unchanged');
   assert.equal((await adminMe(base, tok)).held.state, 'left');
+  assert.deepEqual(r.body.held, (await adminMe(base, tok)).held, 'the answer carries what is held now, as the admin page is told it next');
   assert.equal((await adminMe(base)).held, null, 'those left out are the admin page\'s, never told to a page its gate does not admit');
   assert.equal((await adminMe(base, ana)).held.state, 'left', 'an admin account is told');
   const users = (await h.api(base, 'GET', '/api/users', undefined, { cookie: ana })).body;
@@ -259,7 +260,8 @@ test('accounts.json written into: held aside as changed until the token at the l
   const tok2 = await tokenLogin(srv.base);
   const left = (await h.api(srv.base, 'GET', '/api/accounts/held', undefined, { cookie: tok2 })).body;
   assert.deepEqual([left.mode, left.accounts.map((a) => a.username)], ['left', ['eve']], 'Adopt more… offers the one left out, from the same copy');
-  assert.equal((await h.api(srv.base, 'POST', '/api/accounts/adopt', { token: h.TOKEN, digest: left.digest, adopt: [] }, { cookie: tok2 })).status, 200);
+  const rest = await h.api(srv.base, 'POST', '/api/accounts/adopt', { token: h.TOKEN, digest: left.digest, adopt: [] }, { cookie: tok2 });
+  assert.deepEqual([rest.status, rest.body.held], [200, null], 'the hold ended, said in the answer');
   assert.equal((await adminMe(srv.base, tok2)).held, null);
   assert.ok(rowsOf(srv.dataDir).some((e) => e.action === 'accounts.fresh' && /^left the rest out; 1 kept aside in accounts\.held-/.test(e.words)));
 });

@@ -1,7 +1,7 @@
 // The admin page's other parts: AI minutes, role invites, the AI key, the show network's links, HTTPS, Health and the
 // audit log there, and "This laptop". Shares admin.js's globals (socket, currentRoom, the page's acts ADMIN and their runners ADMIN_RUN) —
 // loaded after it. A link's acts are the catalogue's (kind link); nothing here opens a native dialog.
-/* global socket, currentRoom, ADMIN, ADMIN_RUN, ADMIN_DRAWERS, ADMIN_OBJECTS, ADMIN_EVENT, KEPT_READ_MS, adminFactsChanged, say, watchRoom */
+/* global socket, currentRoom, ADMIN, ADMIN_RUN, ADMIN_DRAWERS, ADMIN_OBJECTS, ADMIN_EVENT, ADMIN_FILL, KEPT_READ_MS, adminFactsChanged, say, watchRoom */
 (function () {
   'use strict';
   if (document.documentElement.dataset.floor === 'old') return;   // below the page floor (theme-init.js): nothing asked, nothing polled
@@ -25,7 +25,7 @@
    * `saved(s)` told when the server took it.
    */
   function loadSettings(patch, saved) {
-    const answered = (s) => {
+    const answered = ADMIN_FILL.of('settings', (s) => {
       if (!s || !s.ok) return;
       $('aiModel').textContent = s.model;
       $('aiStatus').textContent = s.aiKeySet ? (s.aiFromEnv ? 'on (key from ANTHROPIC_API_KEY)' : 'on') : 'off — no key';
@@ -59,7 +59,7 @@
       renderLaptop(s.laptop);
       renderPeers(s.peers || []);
       drawLinks();
-    };
+    });
     if (patch) AGM.outbox.now('admin:settings', patch, (s) => { if (s && !s.ok && s.error) say(s.error, true); if (s && s.ok && saved) saved(s); answered(s); });
     else socket.emit('admin:settings', null, answered);
   }
@@ -188,7 +188,9 @@
   fetch('/api/admin/me').then((r) => r.json()).then((me) => {
     tokenHere = !!(me && me.token); theAdmin = !!(me && me.admin);
     if (lastHealth) renderAudit(lastHealth);
-    heldSeen(me && me.held ? me.held : null);
+    // Drawn with the page's first fill, never before it: the lines above it have their height by then, so nothing under
+    // a pointer moves when they land.
+    ADMIN_FILL.after(() => heldSeen(me && me.held ? me.held : null));
   }).catch(() => { /* no Accept or Split offered, and the panel not drawn */ });
   fetch('/api/auth/me').then((r) => r.json()).then((me) => {
     const caps = me && me.account && me.account.rights ? me.account.rights.caps : [];
@@ -426,6 +428,10 @@
     if (!heldNow) { const r0 = await AGM.api('GET', '/api/accounts/held'); if (r0 && r0.ok) body.digest = r0.digest; }
     const r = await AGM.api('POST', '/api/accounts/adopt', body);
     if (!r.ok) { say(r.error || 'Not adopted.', true); return; }
+    // The answer says what is held now (`held`, as /api/admin/me would): the passwords, the toast and the panel's new state
+    // are drawn from it in one turn, so the passwords are never shown beside a panel that still offers the copy they came
+    // from, and no read after the adoption holds them back.
+    const held = r.held || null;
     const box = $('heldPasswords');
     box.textContent = '';
     if (r.passwords.length) {
@@ -436,8 +442,6 @@
     box.hidden = !r.passwords.length;
     const notTaken = Array.isArray(r.notTaken) && r.notTaken.length ? ' Not adopted, as an account of its name was made meanwhile: ' + r.notTaken.join(', ') + '.' : '';
     say((r.adopted.length ? 'Adopted: ' + r.adopted.join(', ') + (r.left ? '; ' + r.left + ' left out.' : '.') : r.left ? 'No account adopted: ' + r.left + ' kept aside.' : 'No account adopted.') + notTaken, !!notTaken);
-    const me = await AGM.api('GET', '/api/admin/me');
-    const held = me && me.held ? me.held : null;
     heldNow = null;
     heldSeen(held);
     if (!held) $('heldSection').hidden = !r.passwords.length;
@@ -623,7 +627,7 @@
 
   // ---------------------------------------------------------------- Patterns and PlayMap links
   function loadNodes() {
-    socket.emit('nodes:list', {}, (r) => {
+    socket.emit('nodes:list', {}, ADMIN_FILL.of('links', (r) => {
       if (!r || !r.ok) return;
       linked = r.linked;
       const ul = $('nodeLinks');
@@ -635,7 +639,7 @@
           + (l.certificateWaits ? ' · ' + (l.certificateChanged ? 'its certificate changed: confirm it' : 'its certificate waits to be confirmed') : ''));
       }
       renderPeers(heard);
-    });
+    }));
   }
   const linkSaid = (words) => (r) => { if (!r || !r.ok) say((r && r.error) || words, true); loadNodes(); };
   Object.assign(ADMIN_RUN, {
@@ -781,8 +785,7 @@
     }
   }
   async function loadEvent() {
-    const r = await AGM.api('GET', '/api/event');
-    if (r && r.ok) renderEvent(r);
+    ADMIN_FILL.of('event', renderEvent)(await AGM.api('GET', '/api/event'));
   }
   /** Health's event moved (a name, an archive made, one under way): the Event section is read again. */
   function eventMoved(e) {
@@ -946,13 +949,14 @@
   function wire() {
     if (wired || typeof socket === 'undefined' || !socket) return;
     wired = true;
-    socket.on('connect', () => loadSettings());
+    // The settings and the links read at each connection (now, when connected already): an answer a dropped connection
+    // lost is asked again, and the page's first fill (ADMIN_FILL) waits for none that will never come.
+    socket.on('connect', () => { loadSettings(); loadNodes(); });
     socket.on('nodes', (list) => { renderPeers(list); });
     socket.on('nodes:changed', loadNodes);
     socket.on('laptop:facts', renderLaptop);
-    loadNodes();
     loadEvent();
-    if (socket.connected) loadSettings();
+    if (socket.connected) { loadSettings(); loadNodes(); }
 
     setInterval(() => { if (socket.connected) loadSettings(); }, 5000);   // health, clock and peers stay current
     $('auditAcceptBtn').onclick = () => { openAccept(); };

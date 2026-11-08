@@ -433,7 +433,9 @@ function mountAccounts(app, o) {
         const some = reset.length > 5 ? reset.slice(0, 5).join(', ') + ' and ' + (reset.length - 5) + ' more' : reset.join(', ');
         audit.write(o.hostActor, 'accounts.adopted', 'accounts', 'adopted ' + names.length + (reset.length ? ' (one-time passwords: ' + some + ')' : '') + '; ' + after.left + ' left out' + (notTaken.length ? '; not adopted, an account of its name made meanwhile: ' + notTaken.slice(0, 5).join(', ') : ''), ip);
       }
-      return res.json({ ok: true, adopted: names, passwords, left: after.left, notTaken });
+      // `held`, last: what is held aside now, as /api/admin/me tells the admin (stores.heldFacts), so the page draws the
+      // one-time passwords and the panel's new state from this one answer, and no read after it holds them back.
+      return res.json({ ok: true, adopted: names, passwords, left: after.left, notTaken, held: stores.heldFacts() });
     } finally { adopting = false; }
   });
 

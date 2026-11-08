@@ -62,6 +62,23 @@ function drawAdminBars() {
 }
 /** The page's other parts that draw bars of their own (the links, the internet link), drawn again with the rest. */
 const ADMIN_DRAWERS = [];
+/**
+ * The page's first fill: the parts drawn in its flow above Accounts held aside (the halls, above everything at a narrow
+ * width; the links, the settings' lines and the event's earlier links), each said once its first answer has landed,
+ * whatever that answer is. What waits for them is drawn once every one has (`after`): drawn before, it would move as
+ * they land, from under a pointer already on it.
+ */
+const ADMIN_FILL = (() => {
+  const waiting = new Set(['halls', 'links', 'settings', 'event']);
+  const then = [];
+  const filled = (part) => { if (waiting.delete(part) && !waiting.size) for (const fn of then.splice(0)) fn(); };
+  return {
+    /** An answer's handler, and its part said filled once it has drawn (or returned early, or thrown). */
+    of: (part, fn) => (...a) => { try { return fn(...a); } finally { filled(part); } },
+    /** `fn` run once the first fill has landed: now, when it has. */
+    after: (fn) => { if (waiting.size) then.push(fn); else fn(); },
+  };
+})();
 
 (async function init() {
   if (document.documentElement.dataset.floor === 'old') return;   // below the page floor (theme-init.js): its words, and nothing asked
@@ -206,12 +223,12 @@ function showDashboard() {
 }
 
 function refreshRooms() {
-  socket.emit('admin:listRooms', (res) => {
+  socket.emit('admin:listRooms', ADMIN_FILL.of('halls', (res) => {
     if (!res?.ok) return;
     allRooms = res.rooms;
     renderRoomList(res.rooms);
     adminFactsChanged({ halls: res.rooms.map((r) => ({ code: r.code, name: r.name })) });
-  });
+  }));
 }
 
 // ---------------- The halls and their rooms: the list, and the watched room's header (kind adminRoom) ----------------
