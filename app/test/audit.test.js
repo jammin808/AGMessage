@@ -1051,7 +1051,10 @@ test('end to end: a run with no machine key still starts and signs in, opens wit
   } finally { socket.close(); }
   assert.ok(fs.statSync(path.join(keyDir, 'machine.key')).isDirectory(), 'nothing was made in its place');
   assert.deepEqual(fs.readdirSync(path.join(keyDir, 'machine.key')), []);
-  assert.ok(!/contextTokenSealed|aiKeySealed/.test(fs.readFileSync(path.join(dataDir, 'settings.json'), 'utf8')), 'nothing sealed');
+  // The settings as the patch's save wrote them (its lane writes a moment after it is asked), never read before it lands.
+  const settingsFile = path.join(dataDir, 'settings.json');
+  await h.until(() => fs.existsSync(settingsFile), 6000, 'the settings the patch saved');
+  assert.ok(!/contextTokenSealed|aiKeySealed/.test(fs.readFileSync(settingsFile, 'utf8')), 'nothing sealed');
 });
 
 test('end to end: a later start says again what is still open, and a line changed while it was stopped, in the black window and in health', async (t) => {

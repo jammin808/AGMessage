@@ -7076,8 +7076,8 @@ laptop and no Board device walked)
   below). Run 103 (`1f7f2dc`) failed one test on Linux (Node 24) and one on Windows, each passed by the run before it:
   `test/audit.test.js`'s run with no machine key read `settings.json` before its first save had landed, and
   `test/resilience.test.js`'s second start read the audit records' folder while the running server's atomic write
-  had its `.tmp` there. The release is made only once a run's life cycle passes (`release` needs `lifecycle`), so
-  `v0.6.0` waits for a run that passes whole as well as for the walk.
+  had its `.tmp` there; both now wait for what they read (Fixed, below). The release is made only once a run's life
+  cycle passes (`release` needs `lifecycle`), so `v0.6.0` waits for a run that passes whole as well as for the walk.
 - **Deferred to 0.6.x: an acknowledged message on disk (the group commit, the plan's #79).** It lands only when reading
   3 (`peaks.auditPutMs`, p99 ≤ 2 ms and max ≤ 100 ms on the show laptop's disk) calls for it, and that reading has not
   been taken. What lands it: the owner reads `peaks.auditPutMs` from Admin → Health after a rehearsal on a 0.6.0 build
@@ -7125,6 +7125,12 @@ laptop and no Board device walked)
   and a save of the sessions and a set record each make one MAC, as the audit log's work is counted and never timed
   (`test/audit-preload.js`). A MAC a record put into the sessions' load fails it; how long each took is said beside it,
   a record and not a pass mark. Nothing that ships changed.
+- Two tests read a file before the server had finished writing it, each found once on CI's run 103 and passed by the
+  run before. The run with no machine key read `settings.json` straight after the patch that saves it, whose lane writes
+  a moment later, and on a fresh folder found none: it now waits for the save the patch asked for. The second start's
+  test read the records beside the key 400 ms after the running server's last write, and on Windows met the head lane's
+  write still in progress (its `.tmp`, renamed away as it was read): it now reads them once no write is in progress and
+  two reads 250 ms apart agree, before the second start and after it. Nothing that ships changed.
 - The installer's build accepts the installer it built. `installer/build-installer.ps1` reads the version back from the
   file it compiled and compares it with the build's, and read its strings with the padding Windows' version resource
   keeps after them, so CI's first build of it (run 96) refused "0.6.0.96" padded with blanks as not "0.6.0.96". The

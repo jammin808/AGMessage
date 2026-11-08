@@ -1215,8 +1215,21 @@ test('a second start on the same data folder changes nothing and goes away; ever
   // The audit log's records, outside the data folder: a second start reads none of them and writes none.
   const recordsDir = path.join(a.dataDir + '-keys', 'audit');
   const records = () => Object.fromEntries(fs.readdirSync(recordsDir).sort().map((f) => [f, fs.readFileSync(path.join(recordsDir, f), 'utf8')]));
-  await new Promise((resolve) => { setTimeout(resolve, 400); });   // the head's lane has saved what the running server wrote
-  const before = { rooms: roomFiles(), audit: auditFile(), records: records() };
+  // The records once the running server's head lane has saved what it wrote: no atomic write in progress in the folder
+  // (none of its .tmp files) and two reads 250 ms apart alike, however long the lane's write takes on this machine.
+  const settledRecords = async () => {
+    let last = null;
+    for (let i = 0; i < 40; i++) {
+      let now = null;
+      try { now = records(); } catch (e) { if (e.code !== 'ENOENT') throw e; /* a file renamed as it was read: a write in progress */ }
+      if (now && Object.keys(now).some((f) => f.endsWith('.tmp'))) now = null;
+      if (now && last && JSON.stringify(now) === JSON.stringify(last)) return now;
+      last = now;
+      await new Promise((resolve) => { setTimeout(resolve, 250); });
+    }
+    throw new Error('the records beside the key were still being written after 10 s');
+  };
+  const before = { rooms: roomFiles(), audit: auditFile(), records: await settledRecords() };
 
   const samePort = await second({ PORT: String(a.port), AGM_DATA_DIR: a.dataDir });
   assert.equal(samePort.code, 3, 'the port is taken: "cannot run as configured", which the watchdog does not restart:\n' + samePort.out);
@@ -1225,7 +1238,7 @@ test('a second start on the same data folder changes nothing and goes away; ever
   assert.match(otherPort.out, /already running on this data folder/);
   assert.deepEqual(roomFiles(), before.rooms, 'the running server\'s room files are untouched');
   assert.equal(auditFile(), before.audit, 'and so is its audit log');
-  assert.deepEqual(records(), before.records, 'and the records beside its key');
+  assert.deepEqual(await settledRecords(), before.records, 'and the records beside its key');
 
   assert.ok((await h.emit(guest, 'message', { type: 'text', text: 'after the second start' })).ok, 'acknowledged by the running server');
   guest.close(); guest = null;
