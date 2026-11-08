@@ -7131,6 +7131,14 @@ laptop and no Board device walked)
   test read the records beside the key 400 ms after the running server's last write, and on Windows met the head lane's
   write still in progress (its `.tmp`, renamed away as it was read): it now reads them once no write is in progress and
   two reads 250 ms apart agree, before the second start and after it. Nothing that ships changed.
+- The admin page's Accounts held aside keeps each account's row as it draws its bars again (at every answer of the
+  settings, every 5 s, and at each tick), as its rooms, links and event rows already were: the row, its box, its lines
+  and its ⋯ are kept by the account's key and drawn again in place. It threw them away and made them again, so a
+  keyboard user in the list lost the focus to the page every 5 s, a ⋯ menu open across a redraw opened again when its
+  button was pressed instead of closing, and Escape left the focus nowhere. CI's browser smoke (run 104) met it once as
+  the held row's doors out of step; the step now draws every bar again with the focus in the row and holds the row, its
+  ⋯ and the focus kept, and its line names each part and each door check that missed, with what the page held then, and
+  writes each tick as ☑ or ☐ before its words (it printed it as `=true` after them, which the CI log masked).
 - The installer's build accepts the installer it built. `installer/build-installer.ps1` reads the version back from the
   file it compiled and compares it with the build's, and read its strings with the padding Windows' version resource
   keeps after them, so CI's first build of it (run 96) refused "0.6.0.96" padded with blanks as not "0.6.0.96". The

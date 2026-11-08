@@ -329,6 +329,61 @@
     label.append(input, words);
     return label;
   }
+  /** An account's row by its key, made once: its box, its name, its two lines of words and its bar. */
+  function heldRowOf(ul, ref) {
+    const had = [...ul.children].find((li) => li.dataset.key === ref);
+    if (had) return had;
+    const li = document.createElement('li'); li.dataset.key = ref; li.tabIndex = 0;
+    const who = document.createElement('div'); who.className = 'adopt-who';
+    const label = document.createElement('label'); label.className = 'check';
+    const box = document.createElement('input'); box.type = 'checkbox'; box.dataset.adopt = ref;
+    box.addEventListener('change', () => setTick(ref, { adopt: box.checked, confirm: box.checked ? tickOf(ref).confirm : false }));
+    label.append(box, document.createElement('strong'));
+    const what = document.createElement('span'); what.className = 'adopt-what';
+    const facts = document.createElement('span'); facts.className = 'adopt-what';
+    const bar = document.createElement('span'); bar.className = 'obj-bar';
+    who.append(label, what, facts, bar);
+    li.appendChild(who);
+    return li;
+  }
+  /** A row's part by its name (`repeated`, `confirm`, `reset`, `keep`), made once by `make`: its words drawn again in place. */
+  function heldPart(li, name, make, text) {
+    const el = [...li.children].find((x) => x.dataset.line === name) || make();
+    el.dataset.line = name;
+    putText(el.matches('label') ? el.querySelector('span') : el, text);
+    return el;
+  }
+  /** A row's tick line by its name: made once, its words and its tick drawn again in place. */
+  function heldTick(li, name, text, ticked, onChange) {
+    const label = heldPart(li, name, () => { const l = heldLine(text, ticked, onChange); if (name === 'reset') l.classList.remove('confirm-line'); return l; }, text);
+    const input = label.querySelector('input');
+    if (input.checked !== ticked) input.checked = ticked;
+    return label;
+  }
+  /** An account's row drawn again in place: its words, its box, and the lines it has now, in their order; then its bar. */
+  function drawHeldRow(li, a, t) {
+    const who = li.querySelector(':scope > .adopt-who');
+    const box = who.querySelector('input[data-adopt]');
+    if (box.checked !== t.adopt) box.checked = t.adopt;
+    putText(who.querySelector('strong'), 'Adopt ' + a.username);
+    const [what, facts] = who.querySelectorAll(':scope > .adopt-what');
+    const rights = a.rights || {};
+    const halls = a.allHalls || rights.allHalls ? 'every hall' : (rights.halls || a.halls || []).join(' ') || 'no hall';
+    putText(what, [a.name, rights.roleLabel || a.role, halls, a.disabled ? 'turned off' : '', a.mustChange ? 'must change its password' : '', MARK_WORDS[a.mark] || '', a.repeated ? 'repeated' : ''].filter(Boolean).join(' · '));
+    // What it may do, read from the copy (rbac.rightsView), and when it was made, last signed in and set its password.
+    const when = (at) => (at ? new Date(at).toLocaleDateString() : 'never');
+    putText(facts, 'Rights: ' + ((rights.caps || []).join(', ') || 'none') + ' · made ' + when(a.createdAt) + ' · last sign-in ' + when(a.lastLoginAt) + ' · password set ' + when(a.pwSetAt));
+    const ref = a.ref;
+    const parts = [who,
+      a.repeated ? heldPart(li, 'repeated', () => { const p = document.createElement('p'); p.className = 'hint'; return p; }, a.username + ' is in this copy twice, or open already: leave out all but one.') : null,
+      a.confirm && t.adopt ? heldTick(li, 'confirm', a.username + ' can manage AGMessage. Adopt ' + a.username + ' only if this folder has been in your hands since ' + a.username + ' was given that.', t.confirm, (v) => setTick(ref, { confirm: v })) : null,
+      heldTick(li, 'reset', 'With a one-time password', t.reset, (v) => setTick(ref, { reset: v, keep: false })),
+      a.reset && !t.reset ? heldTick(li, 'keep', 'The password in this copy is the copy\'s own claim; whoever wrote the folder may know it.', t.keep, (v) => setTick(ref, { keep: v })) : null,
+    ].filter(Boolean);
+    for (const el of [...li.children]) if (!parts.includes(el)) el.remove();
+    parts.forEach((el, i) => { if (li.children[i] !== el) li.insertBefore(el, li.children[i] || null); });
+    ADMIN.draw(who.querySelector(':scope > .obj-bar'), 'heldAccount', heldRowObject(ref), { more: 'Actions for ' + a.username, keysOn: li });
+  }
   function drawHeld() {
     if ($('heldSection').hidden) return;
     const h = heldNow;
@@ -348,38 +403,16 @@
     open.hidden = !(h && h.open && h.open.length);
     if (h && h.open && h.open.length) putText(open, 'Open, keyed as found: ' + h.open.join(', ') + '.');
     const ul = $('heldList');
-    ul.textContent = '';
-    if (h && heldListed) {
-      for (const a of h.accounts) {
-        const t = tickOf(a.ref);
-        const li = document.createElement('li'); li.dataset.key = a.ref; li.tabIndex = 0;
-        const who = document.createElement('div'); who.className = 'adopt-who';
-        const label = document.createElement('label'); label.className = 'check';
-        const box = document.createElement('input'); box.type = 'checkbox'; box.checked = t.adopt; box.dataset.adopt = a.ref;
-        box.addEventListener('change', () => setTick(a.ref, { adopt: box.checked, confirm: box.checked ? t.confirm : false }));
-        const name = document.createElement('strong'); name.textContent = 'Adopt ' + a.username;
-        label.append(box, name);
-        const what = document.createElement('span'); what.className = 'adopt-what';
-        const rights = a.rights || {};
-        const halls = a.allHalls || rights.allHalls ? 'every hall' : (rights.halls || a.halls || []).join(' ') || 'no hall';
-        what.textContent = [a.name, rights.roleLabel || a.role, halls, a.disabled ? 'turned off' : '', a.mustChange ? 'must change its password' : '', MARK_WORDS[a.mark] || '', a.repeated ? 'repeated' : ''].filter(Boolean).join(' · ');
-        // What it may do, read from the copy (rbac.rightsView), and when it was made, last signed in and set its password.
-        const facts = document.createElement('span'); facts.className = 'adopt-what';
-        const when = (at) => (at ? new Date(at).toLocaleDateString() : 'never');
-        facts.textContent = 'Rights: ' + ((rights.caps || []).join(', ') || 'none') + ' · made ' + when(a.createdAt) + ' · last sign-in ' + when(a.lastLoginAt) + ' · password set ' + when(a.pwSetAt);
-        const bar = document.createElement('span'); bar.className = 'obj-bar';
-        who.append(label, what, facts, bar);
-        li.appendChild(who);
-        if (a.repeated) { const p = document.createElement('p'); p.className = 'hint'; p.textContent = a.username + ' is in this copy twice, or open already: leave out all but one.'; li.appendChild(p); }
-        if (a.confirm && t.adopt) li.appendChild(heldLine(a.username + ' can manage AGMessage. Adopt ' + a.username + ' only if this folder has been in your hands since ' + a.username + ' was given that.', t.confirm, (v) => setTick(a.ref, { confirm: v })));
-        const reset = heldLine('With a one-time password', t.reset, (v) => setTick(a.ref, { reset: v, keep: false }));
-        reset.classList.remove('confirm-line');
-        li.appendChild(reset);
-        if (a.reset && !t.reset) li.appendChild(heldLine('The password in this copy is the copy\'s own claim; whoever wrote the folder may know it.', t.keep, (v) => setTick(a.ref, { keep: v })));
-        ul.appendChild(li);
-        ADMIN.draw(bar, 'heldAccount', heldRowObject(a.ref), { more: 'Actions for ' + a.username, keysOn: li });
-      }
-    }
+    const rows = h && heldListed ? h.accounts : [];
+    // Each account's row is kept by its key and drawn again in place, so a redraw (every bar's, at each answer of the
+    // settings) never takes the focus, a box or an open menu's opener away.
+    const refs = new Set(rows.map((a) => a.ref));
+    for (const li of [...ul.children]) if (!refs.has(li.dataset.key)) li.remove();
+    rows.forEach((a, i) => {
+      const li = heldRowOf(ul, a.ref);
+      if (ul.children[i] !== li) ul.insertBefore(li, ul.children[i] || null);
+      drawHeldRow(li, a, tickOf(a.ref));
+    });
     ADMIN.draw($('heldActs'), 'accounts', heldObject(), { more: 'Accounts held aside', words: true, cls: 'btn ghost small' });
   }
   /** An adoption (or none: Start with no accounts, Leave these out, Leave the rest out), with the token typed. */

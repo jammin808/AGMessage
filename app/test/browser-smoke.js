@@ -577,6 +577,11 @@ const NO_MENU = `!document.querySelector('.agm-menu')`;
 /** The hall page's console, opened as a person opens it: the header's ⋯, then Screens & pages…. False where it is not offered. */
 const OPEN_SCREENS = `(() => { document.getElementById('headerMore').click(); const b = document.querySelector('.agm-menu [data-action="header.screens"]'); if (b) b.click(); else AGM.menu.close(); return !!b; })()`;
 /**
+ * What the page held when a focus check of doorsOf missed: whether a menu is open, where the focus is, and whether the
+ * element the check opened from (kept on `window[held]` as it was pressed) was replaced by a redraw since.
+ */
+const DOORS_SAW = (held) => `JSON.stringify({ menu: !!document.querySelector('.agm-menu'), focus: document.activeElement.tagName + '.' + document.activeElement.className, replaced: !window.${held}.isConnected })`;
+/**
  * An object's doors on a page, each opened and read: right-click (at its name), its ⋯, and Shift+F10 on the focused
  * object each open the ids of the catalogue's shown set for it; the ⋯ clicked again closes its menu, the focus on it;
  * the key's menu has the focus on its first enabled item, and Escape gives the focus back; each inline act is in the
@@ -613,14 +618,18 @@ async function doorsOf(tab, kind, sel, obj, { facts = 'F', bar = '.msg-acts > .m
   // Where the ⋯ is now (the page may have moved under the open menu), and what a click there meets.
   const dotsNow = await tab.eval(`(() => { const q = ${sel}.querySelector('.obj-more').getBoundingClientRect(); return { x: Math.round(q.left + q.width / 2), y: Math.round(q.top + q.height / 2) }; })()`);
   out.dotsHit = await tab.eval(`(() => { const h = document.elementFromPoint(${dotsNow.x}, ${dotsNow.y}); return h ? h.tagName + '.' + h.className : 'nothing'; })()`);
+  await tab.eval(`(window.__doorsMore = ${sel}.querySelector('.obj-more'), true)`);
   await leftClick(tab, dotsNow);
   out.dotsBack = !!(await tab.until(`${NO_MENU} && document.activeElement === ${sel}.querySelector('.obj-more')`, 3000));
+  if (!out.dotsBack) out.dotsBackSaw = await tab.eval(DOORS_SAW('__doorsMore'));
   await tab.eval(`${focus}.focus()`);
+  await tab.eval(`(window.__doorsKeyOn = ${focus}, true)`);
   await press(tab, 'F10', { shift: true });
   out.key = await tab.until(MENU_IDS, 3000);
   out.keyFirst = await tab.eval(`(() => { const first = [...document.querySelectorAll('.agm-menu:not(.agm-sub) > .agm-mi')].find((b) => b.getAttribute('aria-disabled') !== 'true'); return !!first && document.activeElement === first; })()`);
   await press(tab, 'Escape');
   out.keyBack = !!(await tab.until(`${NO_MENU} && document.activeElement === ${focus}`, 3000));
+  if (!out.keyBack) out.keyBackSaw = await tab.eval(DOORS_SAW('__doorsKeyOn'));
   return out;
 }
 /** The doors of the objects on the pages that list them (the admin page, the halls board, the Accounts page): their facts and objects from AGM.page, their bars `.obj-bar`. */
@@ -715,6 +724,15 @@ const linkInStep = (d) => !!d.want && d.want !== '[]' && d.size >= 24 && d.right
 /** Whether an object's doors are in step: every door the catalogue's set, focus where it belongs, the bar in the menu. */
 const doorsInStep = (d) => !!d.want && d.want !== '[]' && d.right === d.want && d.dots === d.want && d.key === d.want && d.rightClosed && d.dotsStill && d.dotsBack && d.keyFirst && d.keyBack &&
   JSON.parse(d.inline).every(([, same]) => same);
+/**
+ * An object's door checks that missed, each by its name ('' when none): a door that opened another set than the
+ * catalogue's, a focus check with what the page held when it missed (`…Saw`, DOORS_SAW), an inline act not in the menu.
+ */
+const doorsMissed = (d) => [
+  ...['right', 'dots', 'key'].filter((k) => d[k] !== d.want).map((k) => k + ' opened ' + (d[k] || 'nothing')),
+  ...['rightClosed', 'dotsStill', 'dotsBack', 'keyFirst', 'keyBack'].filter((k) => !d[k]).map((k) => k + (d[k + 'Saw'] ? ' ' + d[k + 'Saw'] : '')),
+  ...(d.inline ? JSON.parse(d.inline).filter(([, same]) => !same).map(([id]) => 'inline ' + id + ' not in the menu') : ['inline not read']),
+].join(', ');
 
 // An old TV browser: it knows no time zone but its own, and throws on any other (as some do on a zone they lack).
 const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
@@ -6152,7 +6170,8 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       await admin6.eval(`fetch('/api/admin/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: '${TOKEN}' }) }).then(() => location.reload())`);
       const HELD_ROWS = `[...document.querySelectorAll('#heldList > li[data-key]')]`;
       const HELD_ROW = (ref) => `document.querySelector('#heldList > li[data-key="${ref}"]')`;
-      const LINES = (li) => `[...${li}.querySelectorAll(':scope > label')].map((l) => l.querySelector('span').textContent + '=' + l.querySelector('input').checked)`;
+      // Each tick line with its tick first (☑ ticked, ☐ not), so the words printed carry no "=" a CI log's masking reads.
+      const LINES = (li) => `[...${li}.querySelectorAll(':scope > label')].map((l) => (l.querySelector('input').checked ? '☑ ' : '☐ ') + l.querySelector('span').textContent)`;
       const READ_HELD = `${HELD_ROWS}.map((li) => ({ who: li.querySelector('.adopt-who strong').textContent, adopt: li.querySelector('input[data-adopt]').checked, lines: ${LINES('li')} }))`;
       const listed6 = await admin6.until(`!document.getElementById('dashboard').hidden && !document.getElementById('heldSection').hidden && ${HELD_ROWS}.length === 2 && JSON.stringify({ why: document.getElementById('heldWhy').textContent, copy: /^The copy held aside: accounts\\.held-[^ ]+\\.json \\(digest [0-9a-f]{16}…\\)\\.$/.test(document.getElementById('heldCopy').textContent), rows: ${READ_HELD}, acts: [...document.querySelectorAll('#heldActs [data-action]')].map((b) => b.dataset.action) })`, 20000);
       const seen6 = listed6 && JSON.parse(listed6);
@@ -6163,10 +6182,20 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       report(facts6.length === 2 && /^Rights: (?=.*users\.manage)(?=.*settings\.manage).* · made \S+ · last sign-in \S+ · password set \S+$/.test(facts6[0]) && /^Rights: (?!.*users\.manage).+ · made \S+ · last sign-in \S+ · password set \S+$/.test(facts6[1]),
         `each account held aside shows its rights, when it was made, its last sign-in and when its password was set (${rowFacts})`);
       const heldDoors = await doorsOf(admin6, 'heldAccount', HELD_ROW(anaRef), `AGM.page.object('heldAccount', '${anaRef}')`, { ...PAGE_DOORS_HALLS, hit: 'strong' });
-      report(!!seen6 && /^✕ accounts\.json was saved under another machine key \([0-9a-f]{4}…, its own claim\): .* This laptop cannot check them \(kept aside as accounts\.held-[^ ]+\.json\)\. Someone may have changed this file: /.test(seen6.why) && seen6.copy
-        && JSON.stringify(seen6.rows) === JSON.stringify([{ who: 'Adopt ana', adopt: false, lines: ['With a one-time password=true'] }, { who: 'Adopt sam', adopt: true, lines: ['With a one-time password=false'] }])
-        && seen6.acts.includes('accounts.adopt') && doorsInStep(heldDoors) && heldDoors.want === JSON.stringify(['heldAccount.adopt', 'heldAccount.leave', 'heldAccount.reset']),
-        `the token at the laptop is given the copy held aside: the admin unticked with a one-time password ticked, the Staff account ticked, each row's doors the catalogue's (${listed6}; ${heldDoors.want}; ${heldDoors.right} / ${heldDoors.dots} / ${heldDoors.key})`);
+      // A redraw of every bar (each answer of the settings, every 5 s, and a tick) keeps the row, its ⋯ and the focus in it.
+      const heldKept = await admin6.eval(`(() => { const li = ${HELD_ROW(anaRef)}; const more = li.querySelector('.obj-more'); const box = li.querySelector('input[data-adopt]'); box.focus(); drawAdminBars(); return JSON.stringify({ row: li.isConnected, more: more.isConnected, focus: document.activeElement === box }); })()`);
+      // Each part of the step by its name, so a miss says which.
+      const heldParts = {
+        why: !!seen6 && /^✕ accounts\.json was saved under another machine key \([0-9a-f]{4}…, its own claim\): .* This laptop cannot check them \(kept aside as accounts\.held-[^ ]+\.json\)\. Someone may have changed this file: /.test(seen6.why),
+        copy: !!seen6 && seen6.copy,
+        rows: !!seen6 && JSON.stringify(seen6.rows) === JSON.stringify([{ who: 'Adopt ana', adopt: false, lines: ['☑ With a one-time password'] }, { who: 'Adopt sam', adopt: true, lines: ['☐ With a one-time password'] }]),
+        acts: !!seen6 && seen6.acts.includes('accounts.adopt'),
+        set: heldDoors.want === JSON.stringify(['heldAccount.adopt', 'heldAccount.leave', 'heldAccount.reset']),
+        doors: doorsInStep(heldDoors),
+        kept: heldKept === JSON.stringify({ row: true, more: true, focus: true }),
+      };
+      const heldMissed = Object.keys(heldParts).filter((k) => !heldParts[k]);
+      report(heldMissed.length === 0, `the token at the laptop is given the copy held aside: the admin unticked with a one-time password ticked, the Staff account ticked, each row's doors the catalogue's, kept through a redraw (missed: ${heldMissed.join(', ') || 'none'}; ${listed6}; ${heldDoors.want}; doors missed: ${doorsMissed(heldDoors) || 'none'}; hit ${heldDoors.hit}; the ⋯ meets ${heldDoors.dotsHit}; a redraw kept ${heldKept})`);
       // Ana ticked by her box, which asks for the confirmation an admin needs; Sam left out from his menu.
       await admin6.eval(`(() => { const b = ${HELD_ROW(anaRef)}.querySelector('input[data-adopt]'); b.checked = true; b.dispatchEvent(new Event('change')); })()`);
       const anaLines = await admin6.until(`(() => { const l = ${LINES(HELD_ROW(anaRef))}; return l.length === 2 && JSON.stringify(l); })()`, 3000);
@@ -6182,7 +6211,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       const shown6 = await admin6.until(`(() => { const box = document.getElementById('heldPasswords'); const c = box.querySelector('code'); return !box.hidden && c && JSON.stringify({ lines: [...box.querySelectorAll('p')].map((p) => p.textContent.replace(c.textContent, '<password>')), password: c.textContent, why: document.getElementById('heldWhy').textContent, acts: [...document.querySelectorAll('#heldActs [data-action]')].map((b) => b.dataset.action) }); })()`, 20000);
       const adopted6 = shown6 && JSON.parse(shown6);
       await admin6.shot(path.join(OUT, 'accounts-adopted.png'));
-      report(anaLines === JSON.stringify(['ana can manage AGMessage. Adopt ana only if this folder has been in your hands since ana was given that.=false', 'With a one-time password=true']) && !!samOut && /Adopt the ticked accounts\?.*Adopt ana, with a one-time password for ana\./.test(asked6 || '')
+      report(anaLines === JSON.stringify(['☐ ana can manage AGMessage. Adopt ana only if this folder has been in your hands since ana was given that.', '☑ With a one-time password']) && !!samOut && /Adopt the ticked accounts\?.*Adopt ana, with a one-time password for ana\./.test(asked6 || '')
         && !!adopted6 && JSON.stringify(adopted6.lines) === JSON.stringify(['One-time passwords, shown once: give each to its person, who chooses their own at the first sign-in.', 'ana: <password>'])
         && /^△ 1 account was left out on \d+ \w{3} and is kept aside: the token at the laptop may adopt them\.$/.test(adopted6.why) && adopted6.acts.includes('accounts.more'),
         `ticked, confirmed and adopted with the token typed: ana's one-time password is shown, and the panel says who was left out (${anaLines}; ${shown6 && shown6.replace(/"password":"[^"]+"/, '"password":"…"')})`);
@@ -6217,7 +6246,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       await admin7.eval(`fetch('/api/admin/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: '${TOKEN}' }) }).then(() => location.reload())`);
       const waiting7 = await admin7.until(`!document.getElementById('dashboard').hidden && !document.getElementById('heldSection').hidden && ${HELD_ROWS}.length === 1 && JSON.stringify({ rows: ${READ_HELD}, open: document.getElementById('heldOpen').textContent, acts: [...document.querySelectorAll('#heldActs [data-action]')].map((b) => b.dataset.action + ':' + b.textContent.trim()) })`, 20000);
       report(JSON.stringify(at) === '[200,401]' && firstPage === JSON.stringify({ tabs: true, panes: ['signInPane'], mark: 'unvouched', words: '△ ' + keyedstore.FIRST_WORDS })
-        && !!waiting7 && JSON.parse(waiting7).open === 'Open, keyed as found: sam.' && JSON.stringify(JSON.parse(waiting7).rows) === JSON.stringify([{ who: 'Adopt ana', adopt: false, lines: ['With a one-time password=false'] }])
+        && !!waiting7 && JSON.parse(waiting7).open === 'Open, keyed as found: sam.' && JSON.stringify(JSON.parse(waiting7).rows) === JSON.stringify([{ who: 'Adopt ana', adopt: false, lines: ['☐ With a one-time password'] }])
         && JSON.parse(waiting7).acts.some((a) => /^accounts\.fresh:.*Leave these out…$/.test(a)),
         `the first start on 0.5.1's files: the Staff account signs in at once, the admin waits (${at}); the sign-in page keeps its tabs with one line, and the token at the laptop is given the admin who waits (${firstPage}; ${waiting7})`);
       const problems7 = [...first7.problems, ...admin7.problems];
