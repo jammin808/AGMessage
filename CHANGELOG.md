@@ -1,9 +1,15 @@
 # Changelog
 
-## 0.6.0 — 2026-10-31 — rooms within halls, people's screens and the Board's view (in progress)
+## 0.6.0 — 2026-11-08 — rooms within halls, people's screens and the Board's view
 
-Built from `docs/plan/0.6.0/PLAN.md`, one commit per unit in its global build order. This entry grows with each unit
-and is dated again when 0.6.0 closes.
+Built from `docs/plan/0.6.0/PLAN.md`, one commit per unit in its global build order, opened on 2026-10-31 and closed on
+2026-11-08 by its last unit (#81, "0.6.0 closes", below). 80 of its 81 units are in it; the group commit (#79) is
+0.6.x's, since the reading it waits for has not been taken. Its evidence: the owner's answers
+(`docs/plan/0.6.0/DECISIONS.md`); the code with its tests and the browser smoke, run on Linux before each unit's
+commit; CI's runs on Linux and Windows at each push, the last three before the close not whole (below); and CI's
+Windows readings of run 101. Nothing in it is measured on the show laptop or walked on a Board device yet
+(`docs/DESIGN.md`, `docs/DEVICES.md`). The tag `v0.6.0` and its release are the owner's, and wait for that walk and
+for a CI run that passes whole, the installer's life cycle among it.
 
 **The audit log**
 - The admin's room controls are audited, one row for each change, written before the admin page is answered: a hall made
@@ -7013,6 +7019,88 @@ smoke; the Windows legs are CI's)
 - The papers: `docs/ACCOUNTS.md` (Keyed to this laptop), `SECURITY.md`, `README.md`, `README.txt` (Upgrading, Moving
   AGMessage to another laptop, the rollback note), `docs/DESIGN.md`, `docs/ANALYSIS.md`, `docs/INSTALL.md` and
   `CLAUDE.md`. `docs/NODES.md` is unchanged: nothing of it reaches the wire's hello, the context or the AI's brief.
+
+**0.6.0 closes** (the plan's #81: Part 1's unit 22, Part 4's unit 32 and Part 5's unit 34, as one unit; the code, its
+tests and the browser smoke on Linux, CI's runs 101 to 103 as their logs and artifacts say; nothing measured on the show
+laptop and no Board device walked)
+- **This entry is dated** 2026-11-08, the day 0.6.0 closed, and is no longer in progress. `test/version.test.js` holds
+  it: only the newest entry may say "(in progress)", each entry under it is dated no later than the one above, and
+  0.6.0's header is the closed one.
+- **The build count starts again at 1:** `agmessage.runBase` (`app/package.json`) is 103, CI's last run when the close
+  was committed, so the next run, the close's push, is 0.6's build 1 and the build is the run less 103 from then on
+  (`tools/stamp-build.js`; CI's header says so too). A 0.6.0 development build made before then carries its run's
+  number (`0.6.0-dev.103` and lower, install version 0.6.103 and lower), so it counts above v0.6.0's release builds and
+  the development builds after the close, and one of the same number is another commit at the same install version.
+  Where one is installed it is uninstalled, keeping the data, before the release is installed (its installer refuses
+  it as newer or as the same build again); where one ran portable, the release opens its folder and This laptop's Data
+  folder line says, at the release's first start only, that a newer build wrote it (`docs/INSTALL.md`, `README.txt`
+  Upgrading).
+- **The coverage gate is raised** from 95 / 84 / 91 to **97 / 88 / 94** (lines, branches, functions), re-measured at
+  99.19 / 90.45 / 96.57 over 1,250 tests on Linux (11 of them Windows-only, skipped there). `test/version.test.js` holds
+  the gate at or above that and `docs/ANALYSIS.md`'s row to the numbers the run holds.
+- **The catalogue's required verbs are complete** (`test/catalog.test.js`): the list is exactly the verbs the acts send,
+  none left out and none named that no act sends, and every other verb a handler file registers and route the server
+  mounts is named, with why no act sends it (a page's own join, sync or read, a screen's report, the sign-in, a page or
+  file served, the machine's own half of the wire, or a control inside the panel or dialog an act opens), never both.
+  A route is read at a literal path or at one of the machine's paths (`machinewire.PATHS`, read from the module, so its
+  four routes, `/api/machine/hello`, `busy`, `stop` and `events`, are named too), and one mounted at any other
+  expression fails the fence. Every 0.6.0 verb of the plan's §16.7 and its amendments (23, each with where the plan
+  names it) is held to be an act's and a required verb in a list of its own, so an act dropped with its required entry
+  still fails. Ten verbs the acts already sent joined the list: `room:withdraw`, `admin:setView` (both §16.7's new
+  verbs), `display:list`, `page:withdraw`, `pin:mine`, `file:mark`, `admin:setClock`, `admin:setOnStage`, and the held
+  accounts' `POST /api/accounts/adopt` and `GET /api/accounts/held`.
+- **The show laptop's readings in the release's notes:** `tools/readings.js laptop` reads `docs/DESIGN.md`'s table
+  (Measured on the show laptop, readings 0-9 of the plan's Part 5 §13.4) as it stands when a tag is built, and the
+  release job puts it beside the Windows readings: each reading that triggered its change, named with that change (a
+  0.6.x unit, never the release's), each recorded within its threshold, each recorded without a verdict, and those not
+  measured, of which nothing is claimed. A filled row reads `<day>, build <build>: <what was read> — triggers` (or
+  `within its threshold`, or `recorded` for reading 0); a paper that cannot be read says so, and the release is never
+  held. When 0.6.0 closed every row read not measured, so none had triggered.
+- **The Windows readings, as they stand:** CI's run 101 (`0.6.0-dev.101+ba76491`, 2026-11-08, Defender on) is recorded
+  in `docs/INSTALL.md`: R1 (the default page back at the largest hall in 2.02 s at the slowest, over 1.5 s), R2 (11.8 s
+  to lay this build over v0.5.1's payload, over 6 s), R3′ (7 of 10 stops at loopback saved) and R12 (a non-zero exit
+  not started again) missed their marks; R4 and R5 met them; R7 to R10 and R13 recorded. R6 and R11 were not taken, by
+  a fault of the lane's own (below). R8's words for the control task are judged again from that run's own record: the
+  descriptor Windows read back names the runner's account `LA` (the machine's own Administrator, RID 500), which
+  `tools/readings.js` read as no account it knew, so the paper said the account a control task is for may not read
+  and run it; it reads LA and LG as that machine's accounts now (`test/readings.test.js` holds both), and the paper
+  says that account may. The release's own notes name each reading its tag's run finds missing its mark, with the
+  fallback its unit names (`tools/readings.js notes`); none holds the release.
+- **What CI showed when 0.6.0 closed, and what the release waits for.** Run 101 (`ba76491`) passed every job but the
+  installer's life cycle, which failed at its first test, and took neither R6 nor R11, on one cause: the lane's step
+  that makes their standard accounts (`tools/readings-take.js`'s `users`, which the life cycle uses too) gave
+  `New-LocalUser` a description of 49 characters, and Windows takes 48. It is 45 now ("AGMessage test account: removed
+  after its use"), and `test/readings.test.js` holds every account the lane and the life cycle make to Windows' bounds
+  (a description of 48 characters, a name of 20). Run 102 (`6fba155`) failed the Windows tests on the keyed stores'
+  timed speed test, so no zip, installer, life cycle or readings were made; that fence counts the work now (Fixed,
+  below). Run 103 (`1f7f2dc`) failed one test on Linux (Node 24) and one on Windows, each passed by the run before it:
+  `test/audit.test.js`'s run with no machine key read `settings.json` before its first save had landed, and
+  `test/resilience.test.js`'s second start read the audit records' folder while the running server's atomic write
+  had its `.tmp` there. The release is made only once a run's life cycle passes (`release` needs `lifecycle`), so
+  `v0.6.0` waits for a run that passes whole as well as for the walk.
+- **Deferred to 0.6.x: an acknowledged message on disk (the group commit, the plan's #79).** It lands only when reading
+  3 (`peaks.auditPutMs`, p99 ≤ 2 ms and max ≤ 100 ms on the show laptop's disk) calls for it, and that reading has not
+  been taken. What lands it: the owner reads `peaks.auditPutMs` from Admin → Health after a rehearsal on a 0.6.0 build
+  and writes it into `docs/DESIGN.md`; where it triggers, the group commit is built as a 0.6.x unit. Until then the
+  papers still say what a power cut can lose (the last few seconds of answered changes, in the system's file cache).
+  Unread dots on the room switcher (#56), which could also have slipped, are in 0.6.0 (above).
+- **The walk on the Board's devices holds the tag.** `docs/DEVICES.md` is written for the owner to fill: a record for
+  each of D1-D7 (the model, the OS and browser versions, the date, who walked it, its viewport and pixel ratio, the
+  reading distance and Text size), and every feature of the hall page, the Board's chat view and the stage with what to
+  look for, the clock or countdown, Pin for me and Also on among them, each "not walked". `v0.6.0` is tagged only once
+  each device the owner has is walked with no ✕ standing; a row with no device stays "not walked", a fact and never a
+  pass, and a Board device below the page floor is a ✕ until it is retired from the Board or replaced. The browser
+  smoke's floor leg gains the menus without the popover API: a message's right-click, ⋯ and Shift+F10 open its menu
+  fixed at the menus' layer, and a screen's menu opens inside Screens & pages, opened through `AGM.openDialog`'s own,
+  where Escape closes it and keeps the dialog.
+- The tag `v0.6.0` and its release are the owner's acts, after the walk and a CI run that passes whole; the version
+  stays 0.6.0, and immutable releases are on (since 2026-11-07).
+- The papers: `README.md` (the build count, the release's notes, the walk), `README.txt` (What's new in 0.6, and
+  Upgrading's line on a development build from before the close), `docs/INSTALL.md` (the build count and what to do
+  with such a build, the notes, run 101's readings, why it took neither R6 nor R11, and R8 judged again),
+  `docs/DESIGN.md` (how a reading of the show laptop is written, and read for the notes), `docs/DEVICES.md`,
+  `docs/ANALYSIS.md` (the coverage, the required verbs), CI's header (the build is the run less `runBase`),
+  `CLAUDE.md`, and the plan's as-built notes (§0.2, Part 5's unit 33).
 
 **Fixed**
 - The portable import names a part of its bundle by the part's own name when it refuses one ("0000021.part is not a

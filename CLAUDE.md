@@ -173,7 +173,8 @@ Defender turned back on first, then the readings of that zip, judged against the
 first step, one release job at a time), `release` with the zip, the installer and a build-provenance attestation of the zips, the
 installer and `SHA256SUMS.payload`, each verified before it publishes and the release read back for `immutable` once it
 has (immutable releases are the repository's setting, on since 2026-11-07), once the life cycle passed, waiting for
-the lane and never held by it, its notes saying each reading that missed its mark.
+the lane and never held by it, its notes saying each reading that missed its mark and each of the show laptop's readings
+that triggered its change (`docs/DESIGN.md`).
 `.github/workflows/security.yml`: CodeQL `security-extended`, the dependency audit (npm's packages and the vendored libraries), dependency review on pull requests.
 
 ## Where things live
@@ -237,7 +238,7 @@ A sentence and the files; the detail is the code's and the CHANGELOG's. A test n
 | The data folder's format marker, its upgrade copy, and an import's mark on a folder moved into the installed node | `app/lib/dataformat.js`; tests `dataformat`, `import` |
 | The pages | `app/public/` (`index` sign-in and codes, `halls` the board, `users` accounts and audit, `app` a hall, `admin`, `display`) |
 | The browser libraries the pages load, byte for byte as published, their list, licences and notices; the SBOM's vendored part | `app/public/vendor/`, `VENDOR.json`, `THIRD-PARTY-NOTICES.md`, `licenses/`, `tools/vendor-sbom.js`, `tools/vendor-audit.js`; test `vendor` |
-| The page floor (Safari 14.1, Chrome 84): its probe, the helpers for what a browser may lack, every page's one toast | `app/public/theme-init.js`, `app/public/common.js`, `docs/DEVICES.md`; test `pagefloor` |
+| The page floor (Safari 14.1, Chrome 84): its probe, the helpers for what a browser may lack, every page's one toast; the walk on the owner's Board devices, which holds the tag | `app/public/theme-init.js`, `app/public/common.js`, `docs/DEVICES.md`; test `pagefloor` |
 | The document floor (Safari 16.4, Chrome 103): the hall page's probe at its join, a document's stand-in for a device below it, made by the pusher's page and drawn in the document's place, and Show them a picture | `app/public/app.js` (`DOCS`, `Show`), `app/public/pagelayer.mjs`, `app/lib/pages.js`, `docs/DEVICES.md`; tests `pages`, `takes`, the browser smoke |
 | Every status's mark: one table, each mark one meaning and one colour, drawn by name as one status chip or a status line; the server's marks named from it | `app/public/common.js` (`AGM.MARKS`), `app/lib/pages.js`, `app/lib/displays.js`, `eslint.config.mjs`; tests `modules`, `catalog`, `lint-rules` |
 | The hall page's header: the room's name, its status, Help and a ⋯ at every width, the switcher under it | `app/public/app.html`, `app/public/app.js`, `app/public/catalog.js` (kind `header`) |
@@ -248,7 +249,7 @@ A sentence and the files; the detail is the code's and the CHANGELOG's. A test n
 | The module fence: the server's layers, the handler modules held narrow, no new verb in `server.js` | `app/test/modules.test.js` |
 | The one gate, and the contexts a handler module is given | `app/lib/gate.js`, `app/lib/handlers/` |
 | The portable build: `AGMessage-Portable-<version>.zip` holding one folder, `AGMessage`; every path it makes held under MAX_PATH | `tools/fetch-runtime.ps1`, `tools/build-portable.ps1`, `tools/zip-paths.js`, `start-agmessage.bat`, `make-shareable-copy.bat`; test `zippaths` |
-| The Windows evidence lane: the readings and the lab lines, judged against their marks | `tools/readings.js`, `tools/readings-take.js`, `tools/defender-on.ps1`, `docs/INSTALL.md`; test `readings` |
+| The Windows evidence lane: the readings and the lab lines, judged against their marks; the release's notes on them and on the show laptop's readings as `docs/DESIGN.md` records them | `tools/readings.js`, `tools/readings-take.js`, `tools/defender-on.ps1`, `docs/INSTALL.md`, `docs/DESIGN.md`; test `readings` |
 | Test helpers: a server on a throwaway folder, `readSource`, `freePort` / `freeUdpPort`, the files the fences read, Office files built from XML and the document worker run as a browser runs it | `app/test/helpers.js` |
 | Papers | `README.md`, `README.txt`, `CHANGELOG.md`, `SECURITY.md`, `docs/` (`ACCOUNTS`, `DISPLAYS`, `NODES`, `SHOWBUS`, `DESIGN`, `ANALYSIS`, `DEVICES`, `INSTALL`) |
 | The 0.6.0 plan: what to build, in which order, and the owner's answers it rests on | `docs/plan/0.6.0/PLAN.md`, `docs/plan/0.6.0/DECISIONS.md`, `docs/plan/0.6.0/board-view/` |

@@ -1,9 +1,10 @@
 # AGMessage CI. Every push (any branch) and pull request runs the analyzers, the secret scan, every test suite with its
 # coverage gate on Linux (Node 24 LTS, and Node 26 beside it), the suites again on a checkout with Windows' line ends
 # (CR LF) on Linux, the tests and the browser smoke on Windows with Edge and on Linux with Chrome, then builds the
-# portable Windows zip, numbered by this run (tools/stamp-build.js): a development build 0.6.0-dev.<run>+<sha> on a
-# branch, a release 0.6.0+<run>.<sha> on the tag v0.6.0. The zip is extracted and started once, and must answer with that
-# build. The zip is also an artifact of its own, the zip itself (archive: false). The installer is built from that zip on
+# portable Windows zip, numbered by this run (tools/stamp-build.js): its build is the run less app/package.json's
+# agmessage.runBase, a development build 0.6.0-dev.<build>+<sha> on a branch, a release 0.6.0+<build>.<sha> on the tag
+# v0.6.0. The zip is extracted and started once, and must answer with that build. The zip is also an artifact of its own,
+# the zip itself (archive: false). The installer is built from that zip on
 # windows-2025 (Inno Setup 7.1.0, pinned), without its two .bat files, and its life cycle run for real there, elevated:
 # installed, upgraded from the build before it, refused, rolled back, gone back from and uninstalled, every test it declares
 # run and passed. A tag publishes a GitHub Release with the zip, the installer and its payload's sums, the SBOM, SHA256SUMS
@@ -678,6 +679,7 @@ jobs:
             app/lib/version.js
             app/package.json
             docs/INSTALL.md
+            docs/DESIGN.md
           sparse-checkout-cone-mode: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -748,6 +750,8 @@ jobs:
             echo "The zips, the installer and SHA256SUMS.payload carry a build-provenance attestation, made and checked by this release's own run: check a download with gh attestation verify <file> -R $GITHUB_REPOSITORY. The installer was installed, upgraded from the build before it, refused, rolled back, gone back from and uninstalled on windows-2025 before this release was published."
             echo
             node tools/readings.js notes readings/readings.json --install docs/INSTALL.md || printf '### The Windows readings\n\nThe Windows readings for this build could not be read: nothing is claimed for them. They inform the release and never hold it.\n'
+            echo
+            node tools/readings.js laptop --design docs/DESIGN.md || printf '%s\n\n%s\n' "### The show laptop's readings" "The show laptop's readings could not be read: nothing is claimed for them. They inform the release and never hold it."
           } > "$RUNNER_TEMP/notes.md"
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "AGMessage ${GITHUB_REF_NAME#v}" \
             --notes-file "$RUNNER_TEMP/notes.md" \

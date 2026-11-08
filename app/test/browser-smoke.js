@@ -2056,6 +2056,29 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     report(padHelp === shownWith('helpTitle') && padHelpClosed === closedTo('helpBtn') && padAsk === JSON.stringify({ focused: 'Keep it open', fixed: true }) && padAskGone === 'kept' && floorPad.problems.length === 0,
       `the hall page at the floor: Help opens through AGM.openDialog's own (${padHelp}), a category sends it and closes it (${padHelpClosed}), and the chip's ask opens in place, Keep it open focused, Escape keeping the request (${padAsk}; ${padAskGone})`);
     floorPad.close();
+    // A message's menu at the floor, with no popover API (the top layer): right-click, ⋯ and Shift+F10 open the
+    // catalogue's set, fixed in the page at the menus' layer and never a popover; and inside Screens & pages, opened
+    // through AGM.openDialog's own, a screen's menu opens in the dialog and its Escape closes the menu and keeps the dialog.
+    const floorDesk = await edge.tab(`${base}/app.html?code=${floorHall}&as=account&role=research`, { init: FLOOR });
+    await floorDesk.until(`typeof joined !== "undefined" && joined && F.canScreens && typeof HTMLElement.prototype.showPopover === 'undefined' && allMessages.some((m) => m.text === 'Sent at the floor by Return')`, 8000);
+    const floorMsg = await floorDesk.eval(`allMessages.find((m) => m.text === 'Sent at the floor by Return').id`);
+    const floorDoors = await doorsOf(floorDesk, 'msg', `messagesById.get(${codeLiteral(floorMsg)})`, `findMessage(${codeLiteral(floorMsg)})`, { hit: 'time' });
+    await floorDesk.eval(`messagesById.get(${codeLiteral(floorMsg)}).querySelector('.obj-more').click()`);
+    const floorMenu = await floorDesk.until(`(() => { const m = document.querySelector('.agm-menu:not(.agm-sub)'); return m && JSON.stringify({ fixed: getComputedStyle(m).position === 'fixed', popover: m.hasAttribute('popover') || m.matches(':popover-open'), layer: getComputedStyle(m).zIndex === getComputedStyle(document.documentElement).getPropertyValue('--z-menu').trim() }); })()`, 3000);
+    await press(floorDesk, 'Escape');
+    const floorMenuShut = await floorDesk.until(`${NO_MENU} && document.activeElement === messagesById.get(${codeLiteral(floorMsg)}).querySelector('.obj-more')`, 3000);
+    const floorScreen = await floorDesk.eval(`new Promise((r) => socket.emit('display:create', { code: ROOM, name: 'Floor spare' }, (x) => r(x && x.ok ? x.display.id : '')))`);
+    await floorDesk.eval(OPEN_SCREENS);
+    const floorRow = `[...document.querySelectorAll('#screenList .screen-item')].find((li) => li.dataset.screenId === ${codeLiteral(floorScreen)})`;
+    const floorScreens = await floorDesk.until(`(() => { const d = document.getElementById('screensDialog'); return d.hasAttribute('open') && !d.matches(':modal') && !!${floorRow} && 'fallback'; })()`, 5000);
+    await floorDesk.eval(`${floorRow}.querySelector('.obj-more').click()`);
+    const floorInDialog = await floorDesk.until(`(() => { const m = document.querySelector('.agm-menu'); return !!m && m.closest('dialog') === document.getElementById('screensDialog') && !m.matches(':popover-open') && 'in the dialog'; })()`, 3000);
+    await press(floorDesk, 'Escape');
+    const floorDialogStays = await floorDesk.until(`${NO_MENU} && document.getElementById('screensDialog').hasAttribute('open') && 'kept'`, 3000);
+    await floorDesk.eval(`document.getElementById('screensClose').click()`);
+    report(doorsInStep(floorDoors) && floorMenu === JSON.stringify({ fixed: true, popover: false, layer: true }) && !!floorMenuShut && !!floorScreen && floorScreens === 'fallback' && floorInDialog === 'in the dialog' && floorDialogStays === 'kept' && floorDesk.problems.length === 0,
+      `the hall page at the floor, with no popover API: a message's right-click, ⋯ and Shift+F10 open the catalogue's set (${floorDoors.key}), fixed at the menus' layer and no popover (${floorMenu}), Escape giving the focus back; in Screens & pages, opened through AGM.openDialog's own (${floorScreens}), a screen's menu opens in the dialog (${floorInDialog}) and Escape closes it, the dialog kept open (${floorDialogStays})${floorDesk.problems.length ? ' — ' + floorDesk.problems.slice(0, 3).join(' | ') : ''}`);
+    floorDesk.close();
     // A first open is bounded (unit 32): a hall of a long day opens with its newest 200 messages, the newest 60 drawn at
     // once and the rest above them through AGM.idle; Show earlier draws the ones before above, the reader's place kept; a
     // change to a message the page does not hold changes nothing drawn and is in it once it comes; a reply whose quoted

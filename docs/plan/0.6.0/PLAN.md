@@ -75,6 +75,11 @@ AGMessage 0.6.0 is one release, made of the 81 units of §0.6 in that order. The
 
 - **No 0.5.2** (answer 29, "wrap into 0.6.0"). Every unit of §0.6 is a 0.6.0 unit. Only #56 and #79 may move to 0.6.x,
   and only as §0.6 says: #56 may slip, and #79 lands only when reading 3 triggers it before the close.
+  - *As built (#81, 2026-11-08): #56 landed in 0.6.0 (its commit `ddea81a`). #79 did not: reading 3 (`peaks.auditPutMs`
+    on the show laptop, its mark p99 ≤ 2 ms and max ≤ 100 ms) was not measured before the close, so the group commit is
+    0.6.x's. What lands it: the owner reads `peaks.auditPutMs` from Admin → Health after a rehearsal on a 0.6.0 build,
+    writes it into `docs/DESIGN.md` (Measured on the show laptop) with its verdict, and, where it triggers, #79 is built
+    as a 0.6.x unit. No other reading of 5-§13.4 was measured either, so none triggered.*
   - #69 and #71 must land. They build what the owner asked for by name: the clock or countdown, with its "local and
     admin option" and its lock, and B2's "An admin can choose" and B4's "Clearing the message is an admin option".
   - The other changes a reading of 5-§13.4 triggers have no unit of §0.6: the burst of reading 2, the quiet-moment
@@ -105,6 +110,21 @@ AGMessage 0.6.0 is one release, made of the 81 units of §0.6 in that order. The
     immutability). **Done: the owner turned them on on 2026-11-07.** It is the owner's setting alone, which no workflow's token reads or changes, and it applies only to
     releases published after it is on: #78's release job reads each release back once it is published and fails one that
     is not immutable, and U18 takes no other (§0.8 C2, #78 as built).
+  - *As built (#81, 2026-11-08), which the CHANGELOG's 0.6.0 entry ("0.6.0 closes") governs: the entry dated 2026-11-08
+    and no longer in progress, held by `test/version.test.js`; `agmessage.runBase` 103, CI's last run when the close was
+    committed, so the next run, the close's push, is build 1 of 0.6; the coverage gate re-measured (lines 99.19 %,
+    branches 90.45 %, functions 96.57 %) and raised from 95/84/91 to 97/88/94; the catalogue's required verbs held
+    complete both ways, with every other verb and route the server takes (the machine's routes read at
+    `machinewire.PATHS`) named as no act with its reason, and every 0.6.0 verb of §16.7 as amended held in a list of its
+    own (`test/catalog.test.js`); 5-§13.4's table read as it stands (every row not measured, so none triggered) and put
+    in the release's notes from `docs/DESIGN.md` at the tag (`tools/readings.js laptop`), beside U7's readings, whose
+    misses the release's own lane names (CI's run 101 recorded in `docs/INSTALL.md`: R1, R2, R3′ and R12 missed their
+    marks; R6 and R11 not taken, and the installer's life cycle failed, because the lane's step that makes their
+    standard accounts gave `New-LocalUser` a 49-character description where Windows takes 48, now 45 and held by
+    `test/readings.test.js`; R8 judged again with `LA` read as the runner's own account); and `docs/DEVICES.md`'s walk
+    written for the owner to fill, every row "not walked" with what to look for. CI's last three runs before the close
+    (101 to 103) did not pass whole (the CHANGELOG's "0.6.0 closes" says each failure), and the release needs a run whose
+    life cycle passes. The walk holds the tag too: `v0.6.0` waits for both, and the tag and the release are the owner's.*
 - **The order of authority where the parts disagree:**
   1. the owner's answers (§0.4);
   2. Part 7, the Board addendum (the newest);
@@ -10057,6 +10077,8 @@ is no 0.5.2: every one ships in 0.6.0 (owner answer 29).
     quote and updates to messages not loaded.
 33. **[#79]** **unit 33 (lands when reading 3 triggers): an acknowledged message is on disk.** Group commit: one async
     `fs.fdatasync` per 20 ms batch, the answers after it; the papers' words then say "on disk".
+    - *As built (#81): deferred to 0.6.x. Reading 3 was not measured before unit 34, so this unit is not in 0.6.0 (Part 0
+      §0.2's as-built note says what lands it), and the papers still say what a power cut can lose.*
 34. **[#81: the close]** **unit 34: 0.6.0 closes.** As the design's unit 22 was: the papers not yet moved, the CHANGELOG dated, `runBase`
     set, the coverage gate re-measured and raised, the catalogue's required-verbs list asserted complete, §13.4's table
     read as it stands, and `docs/DEVICES.md` read with §15.10's rows walked or "not walked", and no ✕ left standing.

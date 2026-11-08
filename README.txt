@@ -387,6 +387,15 @@ run the show on the build you rehearsed.
   0.6.1+40 than 0.6.0+39. Admin -> This laptop's "Data folder" line
   names the build that wrote the folder before this start; "a newer
   build than this one" there means an older build was started on it.
+- 0.6.0's builds were counted again from 1 when 0.6.0 closed
+  (2026-11-08). A 0.6.0 development build from before then (0.6.0-dev.103
+  and lower) counts above every 0.6.0 release. On a laptop that installed one, uninstall AGMessage keeping
+  its data, then install the release: the release's installer refuses
+  it as newer, or as the same build again, and Upgrade AGMessage... finds
+  nothing newer. On a laptop that ran one portable, the release opens
+  its folder, and This laptop's "Data folder" line says the folder was
+  last written by a newer build: that is expected there, at the
+  release's first start and not after it.
 - Going back: an older build of the same format opens the folder and
   says so. A build of an older format refuses it and changes nothing:
   "AGMessage cannot start: this data folder (...) was last written by
@@ -1507,6 +1516,42 @@ Troubleshooting
   messages kept —", once; Admin -> This laptop says which it was under
   Last stop. A file ending .tmp that a stop cut short leaves in app\data
   is removed by the next start.
+
+What's new in 0.6
+-----------------
+Rooms, people's pages and the Board
+  - A hall is its Main room and, where it is set up, rooms of its own
+    (Legal, Media), each with its own code, switched on or off and renewed.
+    A message or a file is sent into another room with a copy kept here,
+    and a mis-sent one is withdrawn.
+  - The Board's pages, or one person's, show what the backstage team puts
+    on them (a document at a page, a picture, a quote, a web page, the
+    clock or Stagewatch's countdown), each page confirming what it drew.
+  - The Board's chat view: the chat first, Got it, Reply, Priority and
+    Help; the clock or the countdown beside the hall's name; pins for the
+    room or for me; dark first.
+  - A file shared is a download for the backstage team, by a single-use
+    ticket, and never opens by itself; a confidential file goes only where
+    it is in use or sent.
+
+Reliability and security
+  - A send is never lost and never made twice; a page comes back by itself
+    after a drop or a restart; a hall opens on its newest 200 messages.
+  - The audit log is keyed, exported signed, checked on another computer
+    and carried on from one event to the next; accounts and sign-ins are
+    keyed to this laptop.
+  - Remote phones through the internet link are bounded per network, and
+    every refusal says what it refused.
+
+Your own show laptop
+  - An installer for it (venue laptops keep this portable folder); an
+    upgrade checked against its release that needs no administrator; this
+    folder imported into it once; an event archived and the next begun.
+
+Checked before release
+  - Each build's Windows readings, taken on CI with Defender on; each
+    release's notes say the ones that missed their mark. The Board's own
+    devices are walked before 0.6.0 is released.
 
 What's new in 0.5
 -----------------

@@ -13,6 +13,11 @@
  *       what was not run and why, and the lab lines as docs/INSTALL.md records them. Exit 0 whatever the file holds: a
  *       file missing says the readings were not taken, and one that is not the lane's verdicts says they could not be
  *       read, so nothing in it can stop the release (64 only for a word it does not know).
+ *   node tools/readings.js laptop [--design <docs/DESIGN.md>]
+ *       prints the release notes' words on the show laptop's readings (the plan's Part 5 §13.4, readings 0-9) as
+ *       docs/DESIGN.md's table "Measured on the show laptop" records them: each that triggered its change, named with that
+ *       change (a 0.6.x unit), each recorded within its threshold, and those not measured. Exit 0 whatever the paper
+ *       holds: one that cannot be read says so, and claims nothing (64 only for a word it does not know).
  *   node tools/readings.js record <readings.json> [--install <docs/INSTALL.md>]
  *       writes a run's verdicts into docs/INSTALL.md's Measured column (the day, the build, the verdict and its words), for
  *       each reading the run took; one it did not take keeps what the column said. Exit 0 once written, 2 for a file that
@@ -24,6 +29,8 @@
  *     met. A measurement over its mark is a miss even without Defender, which only adds to it.
  *   - The lab lines are the show laptop's and never a runner's: the lane reports each "not run"; only docs/INSTALL.md,
  *     where a person writes what the laptop showed, records one taken.
+ *   - The show laptop's readings are a person's: only docs/DESIGN.md, where a person writes what the laptop's health
+ *     showed with its verdict, records one; the notes read it as it stands when the tag is built, and never judge one.
  *   - Nothing here fails the build because of a reading. Built-ins only, and app/lib/version.js for a stamp's build.
  */
 const fs = require('fs');
@@ -160,6 +167,14 @@ const SID_NAMES = {
   'S-1-3-0': 'CREATOR OWNER', 'S-1-3-1': 'CREATOR GROUP', 'S-1-3-4': 'OWNER RIGHTS', 'S-1-5-12': 'RESTRICTED',
   'S-1-5-33': 'WRITE RESTRICTED', 'S-1-15-2-1': 'ALL APPLICATION PACKAGES', 'S-1-5-32-547': 'Power Users',
 };
+/**
+ * SDDL's names for the built-in Administrator and Guest of the machine whose descriptor it is, by their RID in its own
+ * domain: Windows writes LA or LG, never the whole SID, for that account of that machine. The lane runs on a GitHub-hosted
+ * runner only, which is joined to no domain, so a machine domain's SID it records there with that RID
+ * (S-1-5-21-a-b-c-500) is that account.
+ */
+const MACHINE_ALIASES = { LA: { rid: 500, name: 'LA, this machine\'s Administrator' }, LG: { rid: 501, name: 'LG, this machine\'s Guest' } };
+const MACHINE_SID = /^S-1-5-21-\d+-\d+-\d+-(\d+)$/;
 /** The groups every standard account signed in at the laptop holds. */
 const STANDARD_ACCOUNT = ['S-1-1-0', 'S-1-5-11', 'S-1-5-32-545', 'S-1-5-4'];
 /** SDDL's two-letter access rights. The generic ones are mapped to a file's (FILE_GENERIC_*) where an ACE is judged. */
@@ -208,17 +223,28 @@ function daclOf(sddl) {
     if (parts.length < 6) { aces.push({ raw: m[1], mask: Number.NaN }); continue; }
     const [type, flagText, rights, , , who] = parts;
     const flags = (flagText.match(/.{2}/g) || []).map((f) => f.toUpperCase());
-    const sid = SID_ALIASES[who.toUpperCase()] || who;
+    const machine = Object.hasOwn(MACHINE_ALIASES, who.toUpperCase()) ? MACHINE_ALIASES[who.toUpperCase()] : null;
+    const sid = machine ? who.toUpperCase() : SID_ALIASES[who.toUpperCase()] || who;
     aces.push({
       type: type === 'A' ? 'allow' : type === 'D' ? 'deny' : type,
       flags,
       inheritOnly: flags.includes('IO'),
       mask: rightsMask(rights),
       sid,
-      name: SID_NAMES[sid] || sid,
+      name: machine ? machine.name : SID_NAMES[sid] || sid,
+      ...(machine ? { machineRid: machine.rid } : {}),
     });
   }
   return aces;
+}
+
+/**
+ * Whether an ACE is for one of `sids`: by its SID, or, for LA or LG (MACHINE_ALIASES), a machine domain's SID with that
+ * account's RID, which on the machine that wrote the descriptor is that account.
+ */
+function aceFor(a, sids) {
+  if (a.machineRid === undefined) return sids.includes(a.sid);
+  return sids.some((s) => { const m = MACHINE_SID.exec(String(s)); return !!m && Number(m[1]) === a.machineRid; });
 }
 
 /**
@@ -228,7 +254,7 @@ function daclOf(sddl) {
 function holds(aces, sids, right) {
   for (const a of aces) {
     if (a.raw !== undefined || Number.isNaN(a.mask)) return { answer: 'yes', by: 'an entry this does not read' };
-    if (a.inheritOnly || !sids.includes(a.sid) || !(a.mask & right)) continue;
+    if (a.inheritOnly || !aceFor(a, sids) || !(a.mask & right)) continue;
     if (a.type === 'deny') return { answer: 'refused', by: a.name };
     if (a.type === 'allow') return { answer: 'yes', by: a.name };
   }
@@ -509,8 +535,10 @@ function judgeR8(r) {
     const other = holds(aces, STANDARD_ACCOUNT, READ_DATA);
     const own = holds(aces, [ctl.sid], READ_DATA);
     const runs = holds(aces, [ctl.sid], EXECUTE);
-    facts.controlTask = { sddl: String(ctl.sddl).slice(0, 400), sid: ctl.sid, read: other.answer, by: other.by, itsAccount: own.answer, itsAccountRuns: runs.answer, secret: ctl.secret === true };
-    found.push('a control task\'s definition: the account it is for ' + (own.answer === 'yes' && runs.answer === 'yes' ? 'may read and run it' : 'may not read and run it') + ', another standard account ' + (other.answer === 'yes' ? 'may read it (' + other.by + ')' : 'may not') + (ctl.secret === true ? ', and a secret is in it' : ', and no secret is in it'));
+    facts.controlTask = { sddl: String(ctl.sddl).slice(0, 400), sid: ctl.sid, read: other.answer, by: other.by, itsAccount: own.answer, itsAccountRuns: runs.answer, itsAccountBy: own.by, secret: ctl.secret === true };
+    // The account by the name its descriptor gives it, where that is not its SID (LA: the runner's own account).
+    const named = own.answer === 'yes' && own.by && own.by !== ctl.sid ? ' (' + own.by + ', in its descriptor)' : '';
+    found.push('a control task\'s definition: the account it is for' + named + ' ' + (own.answer === 'yes' && runs.answer === 'yes' ? 'may read and run it' : 'may not read and run it') + ', another standard account ' + (other.answer === 'yes' ? 'may read it (' + other.by + ')' : 'may not') + (ctl.secret === true ? ', and a secret is in it' : ', and no secret is in it'));
   } else {
     facts.controlTask = { error: ctl.error ? String(ctl.error).slice(0, 300) : 'not read' };
     found.push('a control task\'s definition was not read (' + facts.controlTask.error + ')');
@@ -775,6 +803,73 @@ function notes(judged, installText = '') {
   return out.join('\n') + '\n';
 }
 
+// ---------------------------------------------------------------- the show laptop's readings (the plan's Part 5 §13.4)
+
+/** The ids of the show laptop's readings, as docs/DESIGN.md's table "Measured on the show laptop" numbers them. */
+const LAPTOP_IDS = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+/**
+ * What a Measured cell of that table says, as the paper's own words define them: "not measured", or a person's record of
+ * a day and a build ending in its verdict: "— triggers" (its Then is a 0.6.x unit), "— within its threshold", or
+ * "— recorded" (reading 0, which has no threshold). Anything else is a record whose verdict is not written.
+ */
+const LAPTOP_RECORD = /^\d{4}-\d{2}-\d{2}, build \S+: .+ — (triggers|within its threshold|recorded)\.?$/;
+function laptopState(measured) {
+  if (/^not measured$/i.test(measured)) return 'not measured';
+  const m = LAPTOP_RECORD.exec(measured);
+  if (!m) return 'unjudged';
+  return m[1] === 'triggers' ? 'triggered' : m[1] === 'recorded' ? 'recorded' : 'within';
+}
+
+/**
+ * The rows of docs/DESIGN.md's "Measured on the show laptop" table, each {id, reading, threshold, then, measured, state},
+ * in the paper's order; null when the section or its table cannot be found (pure). A row's cells split at each pipe a
+ * cell does not escape.
+ */
+function laptopReadings(designText) {
+  const lines = String(designText || '').split(/\r?\n/);
+  const start = lines.findIndex((l) => /^## Measured on the show laptop\s*$/.test(l));
+  if (start < 0) return null;
+  const rows = [];
+  for (let i = start + 1; i < lines.length && !/^## /.test(lines[i]); i++) {
+    const cells = lines[i].split(/(?<!\\)\|/);
+    if (cells.length !== 8 || cells[0] !== '' || cells[7].trim() !== '') continue;
+    const [id, reading, , threshold, then, measured] = cells.slice(1, 7).map((c) => c.trim().replace(/\\\|/g, '|'));
+    if (!LAPTOP_IDS.includes(id)) continue;
+    rows.push({ id, reading, threshold, then, measured, state: laptopState(measured) });
+  }
+  return rows.length ? rows : null;
+}
+
+/**
+ * The release notes' words on the show laptop's readings, as docs/DESIGN.md records them when the tag is built: each that
+ * triggered its change, named with that change (a 0.6.x unit, never this release's); each recorded within its threshold;
+ * each recorded with no verdict written; and those not measured, of which nothing is claimed. A paper that cannot be read
+ * is said, and nothing is claimed for any of them (pure).
+ */
+function laptopNotes(designText) {
+  const out = ['### The show laptop\'s readings', ''];
+  const rows = laptopReadings(designText);
+  if (!rows) {
+    out.push('The show laptop\'s readings could not be read from `docs/DESIGN.md` (Measured on the show laptop): nothing is claimed for them. They inform the release and never hold it.');
+    return out.join('\n') + '\n';
+  }
+  out.push('Readings 0-9 of the 0.6.0 plan (Part 5 §13.4), as `docs/DESIGN.md` (Measured on the show laptop) records them: each is read on the show laptop after a show or a rehearsal, and only a recorded number is written there. They inform the release and never hold it.');
+  out.push('');
+  const by = (state) => rows.filter((x) => x.state === state);
+  const named = (x) => x.id + ' (' + x.reading + ')';
+  const triggered = by('triggered');
+  const none = rows.every((x) => x.state === 'not measured');
+  out.push(triggered.length ? '**Triggered their change** (each change a 0.6.x unit, not in this release):' : none ? '**No reading is measured yet, so none has triggered its change.**' : '**No reading recorded has triggered its change.**');
+  for (const x of triggered) out.push('- ' + named(x) + ': ' + x.measured + '. Threshold: ' + x.threshold + '. So: ' + x.then + '.');
+  const kept = [...by('within'), ...by('recorded')];
+  if (kept.length) out.push('', '**Recorded, within its threshold or with none:** ' + kept.map((x) => named(x) + ': ' + x.measured).join('; ') + '.');
+  const unjudged = by('unjudged');
+  if (unjudged.length) out.push('', '**Recorded, its verdict not written:** ' + unjudged.map((x) => named(x) + ': ' + x.measured).join('; ') + '.');
+  const notMeasured = by('not measured');
+  if (notMeasured.length) out.push('', '**Not measured:** ' + notMeasured.map(named).join('; ') + ': nothing is claimed for ' + (notMeasured.length === 1 ? 'it' : 'them') + ', and nothing ' + (notMeasured.length === 1 ? 'it' : 'they') + ' would trigger is in this release.');
+  return out.join('\n') + '\n';
+}
+
 /** The verdicts a run's record writes into docs/INSTALL.md: the ones it took (met, missed, recorded, open). */
 const RECORDED = ['met', 'missed', 'recorded', 'open'];
 
@@ -859,6 +954,14 @@ function main(argv) {
     process.stdout.write(words);
     return 0;
   }
+  if (verb === 'laptop') {
+    if (positional.length) { console.error('readings: laptop [--design <docs/DESIGN.md>]'); return 64; }
+    // Whatever the paper holds, the notes are written and this exits 0: the readings inform the release, never hold it.
+    let design = '';
+    try { design = fs.readFileSync(flag('--design') || path.join(ROOT, 'docs', 'DESIGN.md'), 'utf8'); } catch { /* no paper: the notes say the readings could not be read */ }
+    process.stdout.write(laptopNotes(design));
+    return 0;
+  }
   if (verb === 'record') {
     if (positional.length !== 1) { console.error('readings: record <readings.json> [--install <docs/INSTALL.md>]'); return 64; }
     const judged = readVerdicts(positional[0]);
@@ -870,7 +973,7 @@ function main(argv) {
     console.log('readings: ' + (r.changed.length ? r.changed.join(', ') + ' recorded in ' + installFile : 'no reading taken in this run, so ' + installFile + ' is as it was'));
     return 0;
   }
-  console.error('readings: judge <raw.json> --out <readings.json> [--summary <file.md>] | notes [<readings.json>] [--install <file>] | record <readings.json> [--install <file>]');
+  console.error('readings: judge <raw.json> --out <readings.json> [--summary <file.md>] | notes [<readings.json>] [--install <file>] | laptop [--design <file>] | record <readings.json> [--install <file>]');
   return 64;
 }
 
@@ -880,4 +983,5 @@ module.exports = {
   READINGS, LABS, STATES, MARKS, SID_NAMES, STANDARD_ACCOUNT,
   rightsMask, daclOf, holds, csvRows, privilegesOf, sidsOf, taskSidOf, ruleFields,
   defenderOf, defenderGaps, stampFull, judge, summary, notes, labRecord, isJudged, recordInstall, main,
+  LAPTOP_IDS, LAPTOP_RECORD, laptopReadings, laptopNotes,
 };

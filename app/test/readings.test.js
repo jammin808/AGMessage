@@ -28,6 +28,8 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
 const NOT_WINDOWS = process.platform === 'win32' ? false : 'the PowerShell the lane asks runs on Windows: CI\'s Windows job runs it at every push, and the lane on windows-2025';
 
 const byId = (judged, id) => judged.readings.find((x) => x.id === id);
+/** FILE_READ_DATA: what lets an account read a task's definition (tools/readings.js READ_DATA). */
+const READ_DATA_RIGHT = 0x1;
 const ON = { realtime: true, onAccess: true, mode: 'Normal', exclusions: [] };
 const DEFENDER_ON = { defender: { v: 1, after: ON, took: true, errors: [] }, defenderEnd: ON };
 // The bundle's stamp, as tools/stamp-build.js writes it: health names it 0.6.0-dev.40+abc1234.
@@ -291,6 +293,19 @@ test('R7 and R8: an access list read from its SDDL by SID: who may read and writ
   assert.match(x.words, /a control task's definition: the account it is for may read and run it, another standard account may not, and no secret is in it$/);
   x = byId(R.judge(raw({ R8: { places: { 'C:\\': { sddl: ROOT_SDDL } }, controlTask: { sid: BEN, sddl: 'D:(A;;FR;;;' + BEN + ')(A;;FR;;;BU)', secret: false } } })), 'R8');
   assert.match(x.words, /the account it is for may not read and run it, another standard account may read it \(Users\)/, 'read without execute does not run it');
+  // Windows writes LA for the machine's own Administrator (RID 500 in its domain), as CI's run 101 read back for the
+  // runner's account: that account, read by its RID, and never a group every standard account holds.
+  const RUNNER = 'S-1-5-21-3289802278-1561746829-1498425070-500';
+  const AS_READ = 'D:(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;LA)(A;;FR;;;SY)';
+  x = byId(R.judge(raw({ R8: { places: { 'C:\\': { sddl: ROOT_SDDL } }, controlTask: { sid: RUNNER, sddl: AS_READ, bytes: 1556, secret: false } } })), 'R8');
+  assert.deepEqual([x.facts.controlTask.itsAccount, x.facts.controlTask.itsAccountRuns, x.facts.controlTask.itsAccountBy, x.facts.controlTask.read], ['yes', 'yes', 'LA, this machine\'s Administrator', 'no']);
+  assert.match(x.words, /a control task's definition: the account it is for \(LA, this machine's Administrator, in its descriptor\) may read and run it, another standard account may not, and no secret is in it$/);
+  assert.deepEqual(R.daclOf(AS_READ).map((a) => [a.sid, a.name, a.machineRid]), [['S-1-5-18', 'SYSTEM', undefined], ['S-1-5-32-544', 'Administrators', undefined], ['LA', 'LA, this machine\'s Administrator', 500], ['S-1-5-18', 'SYSTEM', undefined]]);
+  assert.equal(R.holds(R.daclOf(AS_READ), [BEN], READ_DATA_RIGHT).answer, 'no', 'LA is the account of RID 500, not another of the machine\'s');
+  assert.equal(R.holds(R.daclOf(AS_READ), R.STANDARD_ACCOUNT, READ_DATA_RIGHT).answer, 'no', 'nor a group a standard account holds');
+  assert.equal(R.holds(R.daclOf('D:(A;;FR;;;LG)'), ['S-1-5-21-1-2-3-501'], READ_DATA_RIGHT).answer, 'yes', 'LG: the machine\'s Guest, RID 501');
+  assert.equal(R.holds(R.daclOf('D:(A;;FR;;;LA)'), ['S-1-5-32-500', 'S-1-5-21-1-2-500'], READ_DATA_RIGHT).answer, 'no', 'only a machine domain\'s SID, whole, with that RID');
+  assert.deepEqual(R.holds(R.daclOf('D:(D;;FR;;;LA)(A;;FR;;;' + RUNNER + ')'), [RUNNER], READ_DATA_RIGHT), { answer: 'refused', by: 'LA, this machine\'s Administrator' }, 'a deny for LA comes first');
   x = byId(R.judge(raw({ R8: { places: { 'C:\\': { sddl: ROOT_SDDL } }, serverTask: { sddl: 'D:(A;;FRFX;;;AU)', secret: true } } })), 'R8');
   assert.match(x.words, /a standard account may read it \(Authenticated Users\), and a secret is in it/);
   // Inherit-only entries are not the folder's own; a deny first refuses; an entry not read assumes the worst.
@@ -611,6 +626,67 @@ test('the command line: judge writes every verdict and exits 0 on a miss, 2 on a
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
+/** docs/DESIGN.md's "Measured on the show laptop" with the Measured cell of each reading named replaced (a line at a time). */
+function measuredOnLaptop(doc, cells) {
+  return doc.split('\n').map((line) => {
+    const c = line.split(/(?<!\\)\|/);
+    if (c.length !== 8 || !(c[1].trim() in cells)) return line;
+    c[6] = ' ' + cells[c[1].trim()] + ' ';
+    return c.join('|');
+  }).join('\n');
+}
+
+test('the show laptop\'s readings in the release notes: each that triggered named with its change, each within its threshold, each not measured said so, as docs/DESIGN.md records them', () => {
+  const doc = read('docs/DESIGN.md');
+  const rows = R.laptopReadings(doc);
+  assert.deepEqual(rows.map((x) => x.id), R.LAPTOP_IDS, 'one row for each of readings 0-9, in order');
+  // The paper's cells are "not measured" or a person's record with its verdict, so the notes never guess one.
+  for (const x of rows) assert.ok(x.state === 'not measured' || (x.state !== 'unjudged' && R.LAPTOP_RECORD.test(x.measured)), x.id + ': "not measured", or a record of a day and a build with its verdict: ' + x.measured);
+  assert.deepEqual(rows.filter((x) => x.id === '3').map((x) => [x.reading, x.threshold]), [['An fsync on the laptop\'s disk', 'p99 ≤ 2 ms and max ≤ 100 ms']]);
+  // As the paper stood when 0.6.0 closed: nothing measured, so nothing triggered, and nothing is claimed.
+  const none = R.laptopNotes(measuredOnLaptop(doc, Object.fromEntries(R.LAPTOP_IDS.map((id) => [id, 'not measured']))));
+  assert.match(none, /^### The show laptop's readings\n\nReadings 0-9 of the 0\.6\.0 plan \(Part 5 §13\.4\)/);
+  assert.match(none, /\*\*No reading is measured yet, so none has triggered its change\.\*\*/);
+  assert.match(none, /\*\*Not measured:\*\* 0 \(.+\); 1 \(.+; 9 \(The glance test \(a walk\)\): nothing is claimed for them, and nothing they would trigger is in this release\.\n$/);
+  assert.ok(!/Triggered|Recorded/.test(none));
+  // Filled: reading 3 triggered (group commit, a 0.6.x unit), 4 within its threshold, 0 recorded, 6 written without a verdict.
+  const filled = measuredOnLaptop(doc, {
+    0: '2026-11-20, build 0.6.0+3.abc1234: 400 pages, frames to the last — recorded',
+    3: '2026-11-20, build 0.6.0+3.abc1234: p99 1.2 ms, max 41 ms — triggers',
+    4: '2026-11-20, build 0.6.0+3.abc1234: 12 ms at 4,100 messages — within its threshold',
+    6: '2026-11-20, build 0.6.0+3.abc1234: p99 8 ms',
+  });
+  const states = Object.fromEntries(R.laptopReadings(filled).map((x) => [x.id, x.state]));
+  assert.deepEqual([states[0], states[3], states[4], states[6], states[1]], ['recorded', 'triggered', 'within', 'unjudged', 'not measured']);
+  const n = R.laptopNotes(filled);
+  assert.match(n, /\*\*Triggered their change\*\* \(each change a 0\.6\.x unit, not in this release\):\n- 3 \(An fsync on the laptop's disk\): 2026-11-20, build 0\.6\.0\+3\.abc1234: p99 1\.2 ms, max 41 ms — triggers\. Threshold: p99 ≤ 2 ms and max ≤ 100 ms\. So: group commit: an acknowledged message is on disk, and the papers say so\.\n/);
+  assert.match(n, /\*\*Recorded, within its threshold or with none:\*\* 4 \(The snapshot stall at the largest hall's size\): 2026-11-20, .+ — within its threshold; 0 \(.+\): .+ — recorded\./);
+  assert.match(n, /\*\*Recorded, its verdict not written:\*\* 6 \(The loop on a show day\): 2026-11-20, build 0\.6\.0\+3\.abc1234: p99 8 ms\./);
+  assert.match(n, /\*\*Not measured:\*\* 1 \(.+\); 2 \(.+; 9 \(.+\): nothing is claimed for them/);
+  assert.ok(!/^- [0-9] /m.test(n.replace(/^- 3 .*$/m, '')), 'only the triggered reading is a line of its own');
+  // A paper without the table, or none: said, and nothing claimed.
+  for (const bad of ['', '# How AGMessage is built\n\n## Measured on the show laptop\n\nNothing yet.\n', doc.replace('## Measured on the show laptop', '## Measured elsewhere')]) {
+    assert.equal(R.laptopReadings(bad), null);
+    assert.match(R.laptopNotes(bad), /^### The show laptop's readings\n\nThe show laptop's readings could not be read from `docs\/DESIGN\.md` \(Measured on the show laptop\): nothing is claimed for them\./);
+  }
+  // The command line: always exit 0 (the release's step runs it under bash -e), 64 for a word it does not know.
+  const dir = tmp('agm-laptop-');
+  try {
+    const node = (...a) => spawnSync(process.execPath, [READINGS_JS, ...a], { encoding: 'utf8' });
+    let r = node('laptop');
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stdout, R.laptopNotes(h.readSource(path.join(ROOT, 'docs', 'DESIGN.md'))), 'the tree\'s docs/DESIGN.md by default');
+    fs.writeFileSync(path.join(dir, 'design.md'), filled);
+    r = node('laptop', '--design', path.join(dir, 'design.md'));
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /- 3 \(An fsync on the laptop's disk\)/);
+    r = node('laptop', '--design', path.join(dir, 'none.md'));
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /could not be read from `docs\/DESIGN\.md`/);
+    assert.equal(node('laptop', 'docs/DESIGN.md').status, 64, 'a file named without --design: a word it does not know');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('record: a run\'s verdicts written into docs/INSTALL.md\'s Measured column, each with its day and build; what the run did not take is kept, and the paper still holds', () => {
   const dir = tmp('agm-record-');
   try {
@@ -784,6 +860,16 @@ test('R13 runs as U17\'s control task does: the lane\'s principal and settings a
   assert.match(as, /<UserId>S-1-5-21-1-2-3-1002<\/UserId>\r\n {6}<LogonType>Password<\/LogonType>\r\n {6}<RunLevel>LeastPrivilege<\/RunLevel>/);
   assert.deepEqual(T.R11_USERS, { own: 'agmr11own', other: 'agmr11other' });
   assert.ok(Object.values(T.R11_USERS).every((n) => n.length <= 20), 'a local account\'s name is 20 characters at most');
+});
+
+test('the standard accounts the lane and the installer\'s life cycle make: each within what Windows takes, a description of 48 characters at most and a name of 20', () => {
+  const said = [...T.SCRIPTS.users.matchAll(/-Description '([^']*)'/g)].map((m) => m[1]);
+  assert.equal(said.length, 1, 'the account made has one description, written in the script');
+  for (const d of said) assert.ok(d.length > 0 && d.length <= 48, 'New-LocalUser refuses a description over 48 characters: "' + d + '" is ' + d.length);
+  assert.doesNotMatch(T.SCRIPTS.users, /-(?:FullName|Description) \$/, 'nothing Windows bounds is read from the environment');
+  const life = read('installer/test/lifecycle.test.js').match(/const STD_NAME = '([^']+)';/);
+  assert.ok(life, 'the life cycle names its account');
+  for (const n of [...Object.values(T.R11_USERS), T.R6_USER, life[1]]) assert.ok(/^[a-z0-9]{1,20}$/.test(n), n + ': a local account\'s name, 20 characters at most');
 });
 
 test('probe-run: as R11\'s task runs it, schtasks /run of the control task its plan names, by its absolute path, and its exit code written', { skip: process.platform === 'win32' ? false : 'it runs schtasks.exe: the Windows readings lane runs it' }, () => {
@@ -1110,7 +1196,7 @@ test('the release waits for the lane and never is held by it: its notes carry th
   assert.match(release, /\n {4}if: \$\{\{ !cancelled\(\) && startsWith\(github\.ref, 'refs\/tags\/v'\) && needs\.package\.result == 'success' && needs\.installer\.result == 'success' && needs\.lifecycle\.result == 'success' \}\}\n {4}needs: \[package, installer, lifecycle, readings\]\n/);
   assert.ok(!/needs\.readings\.result/.test(release), 'whatever the lane found and however it ended');
   const sparse = release.slice(release.indexOf('sparse-checkout: |'), release.indexOf('sparse-checkout-cone-mode'));
-  for (const f of ['tools/readings.js', 'docs/INSTALL.md']) assert.ok(sparse.split('\n').some((l) => l.trim() === f), f + ' is checked out: the notes\' tool and the lab lines\' record');
+  for (const f of ['tools/readings.js', 'docs/INSTALL.md', 'docs/DESIGN.md']) assert.ok(sparse.split('\n').some((l) => l.trim() === f), f + ' is checked out: the notes\' tool, the lab lines\' record and the show laptop\'s readings');
   const dl = release.indexOf('name: agmessage-readings-$' + '{{ github.sha }}');
   const notes = release.indexOf('node tools/readings.js notes readings/readings.json --install docs/INSTALL.md');
   const create = release.indexOf('gh release create');
@@ -1118,6 +1204,10 @@ test('the release waits for the lane and never is held by it: its notes carry th
   assert.match(release.slice(release.lastIndexOf('- uses: actions/download-artifact@', dl), dl), /@[0-9a-f]{40} # v\d+\.\d+\.\d+\n\s+continue-on-error: true\n/, 'a lane that wrote nothing does not stop it');
   assert.match(release.slice(create), /--notes-file "\$RUNNER_TEMP\/notes\.md"/);
   assert.match(release.slice(notes, create), /^node tools\/readings\.js notes readings\/readings\.json --install docs\/INSTALL\.md \|\| printf '### The Windows readings\\n\\nThe Windows readings for this build could not be read: nothing is claimed for them\./, 'a notes step that fails anyway leaves words, never a held release');
+  // The show laptop's readings as docs/DESIGN.md records them at the tag, after the Windows readings and before the release.
+  const laptop = release.indexOf('node tools/readings.js laptop --design docs/DESIGN.md || printf ');
+  assert.ok(laptop > notes && create > laptop, 'the show laptop\'s readings in the notes, before the release is made');
+  assert.match(release.slice(laptop, create), /^node tools\/readings\.js laptop --design docs\/DESIGN\.md \|\| printf '%s\\n\\n%s\\n' "### The show laptop's readings" "The show laptop's readings could not be read: nothing is claimed for them\./, 'a step that fails anyway leaves words, never a held release');
   assert.ok(release.indexOf('node tools/stamp-build.js --check-tag') < dl, 'the release order is asked first');
 });
 

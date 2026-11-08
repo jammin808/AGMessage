@@ -110,7 +110,10 @@ Each fallback is the same on every device. "Today" is the tree as 0.6.0 is built
   The hall page in that hall sends by Return, taken once, with no script error; its Help opens through
   `AGM.openDialog`'s own with its heading focused, its Close (the form's own) and Help again in one task leave one
   opening and one backdrop, a category sends it and closes it with the focus back on Help, and
-  the chip's ask opens in place (no popover API) with Keep it open focused. A long day's hall opens at the floor with
+  the chip's ask opens in place (no popover API) with Keep it open focused. On the account's page of that hall, with no
+  popover API, a message's right-click, ⋯ and Shift+F10 open the catalogue's set, fixed at the menus' layer and never a
+  popover, Escape giving the focus back; in Screens & pages, opened through `AGM.openDialog`'s own, a screen's menu opens
+  inside the dialog and its Escape closes the menu and keeps the dialog open. A long day's hall opens at the floor with
   its newest 200 messages, the rest after the newest 60 drawn through `AGM.idle`'s timer, in the room's order, Show
   earlier above them, and no script error. With no `<dialog>` at all beside that,
   the Accounts page's Add a person opens, its Cancel closes it on the page and saves nothing, Escape closes it, Enter in
@@ -129,24 +132,53 @@ Each fallback is the same on every device. "Today" is the tree as 0.6.0 is built
   outside the lint, which is why pdf.js sets the document floor.
 - **Not in CI:** Safari, Samsung Internet and WebView. Playwright's WebKit is refused: it would be a new dev dependency,
   and it is not the older iPadOS Safari this answer is about. The legs take features away in Chromium; the walk runs
-  the real browsers. The floor leg's menu steps come with the units that build what they test.
+  the real browsers.
 
 ## 5. The walk (before 0.6.0 is tagged)
 
-On every row, each feature ✓, its fallback named, or ✕:
+A person's walk on the owner's own Board devices, in the real browsers, with this paper in hand: nothing here is
+measured by CI, and nothing in it is filled until someone has done it on the device. **The walk holds the tag:** `v0.6.0`
+is tagged only once every row the owner has a device for is walked, each feature ✓ or its fallback named, and no ✕ is
+left standing (the 0.6.0 plan's §0.2, the owner's answer 22). A row the owner has no device for stays "not walked",
+which is a fact in this paper and never a pass. A Board device of the owner's below the page floor (an iPad on an
+iPadOS before 14.5, a Chrome before 84) is a ✕ that holds the tag until the owner retires it from the Board or replaces
+it; the floor is not lowered for it ("Keep these as mim", 2026-10-31). When 0.6.0 closed (2026-11-08) no row had been
+walked.
 
-| Feature | D1 | D2 | D3 | D4 | D5 | D6 | D7 |
-|---|---|---|---|---|---|---|---|
-| The device: model, OS and browser versions, the date | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
-| The screen kept on for 10 minutes untouched, or the words naming why not | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
-| Help opened, sent and closed | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
-| ⋯ and a long press on a message in the full view; on a take in the simple view nothing opens and nothing saves | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
-| A dialog's buttons reached with the on-screen keyboard up | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
-| Every mark of `AGM.MARKS` drawn (✓ ◐ ◇ ▭ ○ ⊘ ◷ △ ✕ ■ ▶ ● ▲); the hall page's header on one row with its ⋯ | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
-| Back by itself after the device slept | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
-| A send written offline lands once | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
-| The same through the internet link on mobile data | — | — | — | — | — | not walked | not walked |
-| The Board's chat view: its rows are §6's walk | §6 | §6 | §6 | §6 | §6 | §6 | §6 |
+**How to walk a row.** On a 0.6.0 build serving on the venue's network (over HTTPS for the wake lock, the certificate
+trusted once on the device, `/tls`), open a hall as a Board member (an On stage invite or a Board account) and, beside
+it, a backstage page on a laptop that pushes, sends and answers. Walk each table below (§5, §6, §8) upright and sideways
+where it says so. Write in each cell ✓, the fallback the device showed in its own words (as "fallback: the sheet says
+'This device may sleep: open AGMessage over HTTPS.'"), or ✕ with what went wrong; a ✕ is a defect fixed before the tag,
+or a fallback the row then names. Then fill the row's record:
+
+| Row | Model | OS and version | Browser and version | Date | Walked by | `innerWidth` × `innerHeight`, `devicePixelRatio` (upright; sideways) | Reading distance and Text size (reading 9) | Result |
+|---|---|---|---|---|---|---|---|---|
+| D1 | not walked | | | | | | | not walked |
+| D2 | not walked | | | | | | | not walked |
+| D3 | not walked | | | | | | | not walked |
+| D4 | not walked | | | | | | | not walked |
+| D5 | not walked | | | | | | | not walked |
+| D6 | not walked | | | | | | | not walked |
+| D7 | not walked | | | | | | | not walked |
+
+The Result is ✓ (every feature ✓ or its fallback named), ✕ (one standing: the tag waits), or "not walked" (no such
+device). The matrix's Walked column (§1) takes the Result and the date.
+
+**The hall page, its menus and its dialogs** (the plan's Part 5 §15.10), on every row:
+
+| Feature | What to look for | D1 | D2 | D3 | D4 | D5 | D6 | D7 |
+|---|---|---|---|---|---|---|---|---|
+| The device: model, OS and browser versions, the date | written in the row's record above | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| The screen kept on for 10 minutes untouched, or the words naming why not | the screen still lit after 10 minutes with nothing touched; or the ⋯ sheet's row says why, in one of §3's three sentences, and the cause is true of the device | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| Help opened, sent and closed | Help opens with its heading read first; a category's tap sends it and closes the dialog; the chip then reads "■ Help asked", and Escape on its ask keeps the request | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| ⋯ and a long press on a message in the full view; on a take in the simple view nothing opens and nothing saves | in the full view ⋯ opens the message's menu, and a long press opens the same menu where the browser fires one (D4, D5, D7) or nothing of AGMessage's (D1-D3, D6); in the simple view a long press on a take opens nothing and offers no save | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| A dialog's buttons reached with the on-screen keyboard up | in Help with the keyboard up, every button and the dialog's Close can be scrolled to and tapped | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| Every mark of `AGM.MARKS` drawn (✓ ◐ ◇ ▭ ○ ⊘ ◷ △ ✕ ■ ▶ ● ▲); the hall page's header on one row with its ⋯ | each mark a glyph, never a box or a blank, its word beside it; the header's room name, status, Help and ⋯ on one row | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| Back by itself after the device slept | the device locked for 2 minutes and woken: the page is back with the messages sent meanwhile, nothing tapped | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| A send written offline lands once | Wi-Fi off, a message written and sent (◷ on it), Wi-Fi on: it lands once in the hall, never twice and never lost | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| The same through the internet link on mobile data | Wi-Fi off, the hall opened through the link's address: the newest message drawn within 5 s (reading 7's walk, its time written down), and the rows above on mobile data | — | — | — | — | — | not walked | not walked |
+| The Board's chat view: its rows are §6's walk | — | §6 | §6 | §6 | §6 | §6 | §6 | §6 |
 
 ## 6. The Board's chat view on every row
 
@@ -208,22 +240,22 @@ the viewport's size and each feature by a probe, never by the device's name: the
   Lock gone, the settings words; with `isSecureContext` false, the HTTPS words; with the lock refused (`NotAllowedError`),
   the battery words.
 
-**The walk** (on every row, upright and sideways; ✓, a fallback named, or ✕):
+**The walk** (on every row, upright and sideways; ✓, a fallback named, or ✕), as §5 says:
 
-| Feature | D1 | D2 | D3 | D4 | D5 | D6 | D7 |
-|---|---|---|---|---|---|---|---|
-| `innerWidth` × `innerHeight` and `devicePixelRatio`, upright and sideways | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
-| The layout the rules draw, and the feed's height, upright and sideways | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
-| A tap on an older message brings its row; a long press on a message opens nothing of AGMessage's; on a take and a card's thumbnail it offers no save | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
-| Got it, Reply and Answer in words… with the on-screen keyboard up: the replying line and Send stay in view | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
-| 🔥 Priority sent, and the strip while its message is out of view | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
-| The sheet: Text size, Theme, Full screen where offered (none on D6), Leave; the wake lock held 10 minutes untouched, or its words | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
-| Dark before the first frame, on a device last used in the simple view | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
-| The placeholder whole, or the short words | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
-| The reading distance and the Text size chosen (reading 9) | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
-
-The clock or countdown's rows (🕐 HH:MM in the hall's zone; the countdown's words, mark and edge) join this table with
-the clock's unit.
+| Feature | What to look for | D1 | D2 | D3 | D4 | D5 | D6 | D7 |
+|---|---|---|---|---|---|---|---|---|
+| `innerWidth` × `innerHeight` and `devicePixelRatio`, upright and sideways | read on the device itself, upright and sideways (no AGMessage page shows them), and written in the row's record (§5); checked against §6's rules by size | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| The layout the rules draw, and the feed's height, upright and sideways | the column at 900 px wide or more while something is shown, the two tabs below that; 22 px text where the smaller side is 600 px or more, 20 px otherwise; no sideways scroll; the feed's height written down | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| 🕐 HH:MM in the hall's zone; the countdown's words, mark and edge | with nothing chosen the clock reads the hall's time of day (B3); with Countdown chosen, ⏱ and "left" with the title and the line, the readout's edge in Stagewatch's colour; overtime ▲ and "over"; with the link down `--:--` "Stagewatch offline" | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| A tap on an older message brings its row; a long press on a message opens nothing of AGMessage's; on a take and a card's thumbnail it offers no save | a tap on an older waiting message shows its own Got it and Reply; a long press there opens only the browser's own text selection; on a take and a thumbnail no "Save to Photos" or "Download image" | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| Got it, Reply and Answer in words… with the on-screen keyboard up: the replying line and Send stay in view | with the keyboard up the line "Replying to …" and Send are above it; Got it reads "👍 You: got it" and the backstage page "👍 … got it" | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| 🔥 Priority sent, and the strip while its message is out of view | 🔥 Priority pressed and sent: the message 🔥 on the backstage page; a 🔥 message scrolled out of view brings its strip, which goes once it is back in view or got | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| The sheet: Text size, Clock or countdown, Theme, Full screen where offered (none on D6), Leave; the wake lock held 10 minutes untouched, or its words | each row acts (Text size scales the words; Clock or countdown changes the readout, or reads the admin's lock as words; Theme turns light and stays); no Full screen row on an iPhone; Leave asks in place; the sheet's last row reached with the device sideways | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| 📌 Pin for me, and the pinned bar | a tapped message's 📌 Pin for me, then Unpin for me; the bar reads "📌 For everyone" first where the room pinned one, "1 of 2" with two, and a pinned question answered from the bar | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| Also on, where the admin turned it on for this person | the composer's ⏱ and 👥 chips, one per switch the admin turned on; a message sent with them says where it went as each screen and page confirms; with Got it clears on, a got message folds to "👍 Got and cleared" with Show | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| Dark before the first frame, on a device last used in the simple view | the page opens dark with no light flash, the device's own theme notwithstanding | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| The placeholder whole, or the short words | "Message everyone here…" whole in the field, or "Message everyone…" where it does not fit; never cut | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| The reading distance and the Text size chosen (reading 9) | a Board member at their seat says within 5 s what is new and what is urgent; the distance and the Text size they chose written in the row's record (§5) | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
 
 ## 7. The benches
 
@@ -329,7 +361,7 @@ pdf.js versions would double what is vendored and tested. A picture of the place
   Not on the legs: a pinch and a double-tap (touch gestures the legs do not make; the walk's), the first page of a 25 MB
   pack timed (the bench's, §7), Word's page numbers (the panel's steps, the same reader), Open in a new tab (the take's ⋯
   in the full view only: the legs are On stage in the simple view; the quote hall's smoke opens it in the full view), and
-  a device asleep and back (the walk's). The Board-side checks of the stage units still to land join the legs with them.
+  a device asleep and back (the walk's).
 - **The floor leg**: a Board page with `DecompressionStream`, `requestIdleCallback` and `Promise.withResolvers` taken away
   before its scripts run joins without `docs`; a document shown before it joined says it cannot open documents and fails,
   and the pusher's console offers Show them a picture of p. 1, which reaches that page alone; the pusher's bar then says
@@ -352,20 +384,20 @@ pdf.js versions would double what is vendored and tested. A picture of the place
   file to its pusher, an operator and the admin, never to a seat that may only show; a person's picture take reaches
   their pages alone. Show them a picture itself is the page's act: the floor leg drives it.
 
-**The walk** (on every row; ✓, a fallback named, or ✕):
+**The walk** (on every row; ✓, a fallback named, or ✕), as §5 says. The backstage page pushes each take to the Board:
 
-| Feature | D1 | D2 | D3 | D4 | D5 | D6 | D7 |
-|---|---|---|---|---|---|---|---|
-| A quote: a word, a paragraph, a cell with its labels and a 25 × 10 table, drawn, fitted, ✓ | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
-| A picture: a page picture and a region, drawn; pinch, double-tap and + / − zoom with pan; ✓ | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
-| A web page: the frame, its "Look for" strip, Open in a new tab | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
-| A PDF: the page box, paging, zoom, find; a JPEG 2000 page; the first page of a 25 MB pack, timed (D1: its stand-in, with its words) | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
-| A DOCX, XLSX, PPTX, CSV, Markdown or text document, without hidden parts; Word's page numbers (D1: CSV, Markdown and text drawn, the others as their stand-in) | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
-| Earlier and Look: an Earlier entry, and a Look at a picture (D1: a document's entry draws its stand-in; a Look at one without reads the device's words) | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
-| ⬇ Download on a take shown with Download ticked: the file in the device's downloads under its name, the page staying | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
-| No save: a long press on a picture offers no save, a drag leaves it, AGMessage's menu where `contextmenu` fires | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
-| Many takes: 20 in a row, then Back to chat; the tab still draws, nothing reloads it | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
-| Asleep, then back: a take sent while the device slept drawn at its next join, current or under Earlier | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| Feature | What to look for | D1 | D2 | D3 | D4 | D5 | D6 | D7 |
+|---|---|---|---|---|---|---|---|---|
+| A quote: a word, a paragraph, a cell with its labels and a 25 × 10 table, drawn, fitted, ✓ | each drawn in 28 px or more on a tablet, 20 px or more on a phone; the table scrolls sideways inside its card, never the page; the console reads ✓ for the device | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| A picture: a page picture and a region, drawn; pinch, double-tap and + / − zoom with pan; ✓ | both drawn whole; a pinch and a double-tap zoom, + and − zoom, a drag pans; the console reads ✓ | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| A web page: the frame, its "Look for" strip, Open in a new tab | the page in its frame with "Look for: ❝ …" over it; Open in a new tab opens it in the browser's own tab; the console reads ◇ opened | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| A PDF: the page box, paging, zoom, find; a JPEG 2000 page; the first page of a 25 MB pack, timed (D1: its stand-in, with its words) | the page shown is the one pushed, the box pages on and back, zoom and find work, a JPEG 2000 page draws; the 25 MB pack's first page's seconds written down. D1: a picture of the page under "As a picture of p. N: this device cannot page through the document" | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| A DOCX, XLSX, PPTX, CSV, Markdown or text document, without hidden parts; Word's page numbers (D1: CSV, Markdown and text drawn, the others as their stand-in) | each drawn without its hidden text, rows, columns, sheets, slides or comments; a Word file's page numbers; D1: the zipped ones as a quote of what is at their place | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| Earlier and Look: an Earlier entry, and a Look at a picture (D1: a document's entry draws its stand-in; a Look at one without reads the device's words) | a take taken down is under Earlier, and Look draws it again on this device alone | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| ⬇ Download on a take shown with Download ticked: the file in the device's downloads under its name, the page staying | the file saved whole under its own name in the device's downloads, the hall page still open behind it | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| No save: a long press on a picture offers no save, a drag leaves it, AGMessage's menu where `contextmenu` fires | no "Save to Photos" or "Download image"; a drag leaves the picture where it is; on D4, D5 and D7 the long press opens AGMessage's menu in place of the browser's | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| Many takes: 20 in a row, then Back to chat; the tab still draws, nothing reloads it | 20 takes pushed one after another, then Back to chat: the chat is back, the tab answers taps, and it never reloaded | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| Asleep, then back: a take sent while the device slept drawn at its next join, current or under Earlier | a take pushed while the device was locked is drawn when it is woken, or under Earlier if it was taken down meanwhile | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
 
 A model or browser version that appears after the walk is not proven until its row is walked again. The benches that
 named "a Board iPad" run on the rows §7 names: D1 and D2 for the image decode limit, D2 and D4 for parse times, D2 and D6

@@ -335,7 +335,8 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   Board pages will get it before it goes, the console reads "✓ 6/6 (2 as a picture)", and a page that joined later is
   sent a picture with **Show them a picture of p. 12**. Every page script parses as ES2020, which Safari reads from 14
   (the lint holds it). [docs/DEVICES.md](docs/DEVICES.md) holds the matrix of devices, each fallback, and the walk on
-  the owner's devices before the release.
+  the owner's devices, row by row with what to look for: the walk holds the tag, so `v0.6.0` is tagged only once each
+  device the owner has is walked with no ✕ standing (none was walked when 0.6.0 closed, 2026-11-08).
 - **The show network (Show Bus 1.2).** Send to Stagewatch — straight to the speaker's screen, or to the operator to
   approve and pass on to the confidence monitor, a moderator, backstage or interpreter screen, a department, or keep.
   A line reads as it was typed: cut on a whole character where Stagewatch cuts, its braces as parentheses so Stagewatch
@@ -390,6 +391,9 @@ zip is named by it. Each open page names the build that served it (`/build.js`),
 any page or screen on another. "Newer" is MAJOR.MINOR.BUILD (the stamp's `installVersion`, `0.6.41`; a local copy has
 none). A tag `vX.Y.Z` publishes a release only when it names `app/package.json`'s version and that version is above
 every release already published and every other version tagged, so among releases SemVer and MAJOR.MINOR.BUILD agree.
+Each MAJOR.MINOR counts its builds from 1: the build is the run number less `agmessage.runBase` in `app/package.json`,
+the last run before that count began (103 for 0.6, set when 0.6.0 closed). A 0.6.0 development build from before
+that counts above 0.6.0's releases: README.txt (Upgrading) says what to do with one.
 The data folder says which build and format last wrote it (`data/format.json`): a folder of a higher format is refused,
 a 0.5 folder is copied into `data/backups/` before it is moved, and a newer build before this one is said on the admin
 page (README.txt, Upgrading). Changes: [CHANGELOG.md](CHANGELOG.md).
@@ -426,7 +430,8 @@ uninstalled, the build before and a build that does not start made from the same
 run and pass, `tools/lifecycle.js`), and a `v*` tag publishes a release, once that life cycle passed, with the zip, the
 installer and a build-provenance attestation of the zips, the installer and its payload's sums, each verified with
 `gh attestation verify` before it publishes, the release read back for its immutability once it has (`tools/provenance.js`),
-its notes saying each reading that missed its mark. For every push, a tag and a run asked for by hand
+its notes saying each reading that missed its mark and, from [docs/DESIGN.md](docs/DESIGN.md) (Measured on the show
+laptop), each of the show laptop's readings that triggered its change and those not measured. For every push, a tag and a run asked for by hand
 (Actions, CI, Run workflow), it takes the Windows readings of that zip on `windows-2025` with Defender's real-time
 monitoring turned back on first (the evidence lane, its actions pinned by commit: what each reading is, its mark and
 what a miss means are in [docs/INSTALL.md](docs/INSTALL.md)), one lane at a time per branch, never cancelled once it

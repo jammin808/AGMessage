@@ -204,4 +204,21 @@ test('changelog: the newest entry is the version package.json names, every heade
     const [a, b] = [order[i - 1], order[i]];
     assert.ok(a[0] > b[0] || (a[0] === b[0] && (a[1] > b[1] || (a[1] === b[1] && a[2] > b[2]))), 'newest first: ' + versions[i - 1] + ' before ' + versions[i]);
   }
+  // Only the newest entry may be in progress: every entry under it is closed, dated the day it closed, and the days go
+  // back as the versions do. 0.6.0 closed on 2026-11-08 (the plan's #81), and stays closed.
+  const dates = headers.map((h) => /^## \S+ — (\d{4}-\d{2}-\d{2}) — /.exec(h)[1]);
+  for (let i = 1; i < headers.length; i++) {
+    assert.ok(!/\(in progress\)$/.test(headers[i]), headers[i] + ': an entry under the newest is closed');
+    assert.ok(dates[i - 1] >= dates[i], 'newest first by day too: ' + versions[i - 1] + ' (' + dates[i - 1] + ') before ' + versions[i] + ' (' + dates[i] + ')');
+  }
+  assert.ok(headers.includes('## 0.6.0 — 2026-11-08 — rooms within halls, people\'s screens and the Board\'s view'), '0.6.0\'s entry is dated the day it closed, and is no longer in progress');
+});
+
+test('the coverage gate: the thresholds docs/ANALYSIS.md names, never under where 0.6.0 closed them (97 / 88 / 94)', () => {
+  const coverage = JSON.parse(readSource(path.join(ROOT, 'app', 'package.json'))).scripts.coverage;
+  const gate = Object.fromEntries([...coverage.matchAll(/--test-coverage-(lines|branches|functions)=(\d+)\b/g)].map((m) => [m[1], Number(m[2])]));
+  assert.deepEqual(Object.keys(gate).sort(), ['branches', 'functions', 'lines'], 'the coverage run gates lines, branches and functions');
+  for (const [k, floor] of Object.entries({ lines: 97, branches: 88, functions: 94 })) assert.ok(gate[k] >= floor, k + ' ' + gate[k] + ' is raised, never lowered (' + floor + ' at the close of 0.6.0)');
+  const row = readSource(path.join(ROOT, 'docs', 'ANALYSIS.md')).split('\n').find((l) => l.startsWith('| Coverage gate |'));
+  assert.ok(row && row.includes('lines < ' + gate.lines + ' %, branches < ' + gate.branches + ' %, functions < ' + gate.functions + ' %'), 'docs/ANALYSIS.md says the gate the run holds: ' + JSON.stringify(gate));
 });

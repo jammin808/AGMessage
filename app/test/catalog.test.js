@@ -10,6 +10,7 @@ const path = require('path');
 const vm = require('vm');
 const { ROOT, handlerFiles, readSource } = require('./helpers');
 const ops = require('../lib/ops');
+const machinewire = require('../lib/machinewire');
 
 /** catalog.js as a page loads it: a classic script that extends window.AGM, after common.js (the marks' table). */
 function loadCatalog() {
@@ -27,21 +28,36 @@ const all = () => KINDS.flatMap((k) => C.KINDS[k].map((e) => ({ kind: k, e })));
 
 /** The socket verbs the server registers (the fuzz's own read) and the HTTP routes it mounts, as `METHOD /path`. */
 const SOCKET_VERBS = new Set(handlerFiles().flatMap((f) => [...readSource(path.join(ROOT, f)).matchAll(/socket\.on\('([^']+)'/g)].map((m) => m[1])));
-const ROUTES = new Set(['server.js', 'lib/http-accounts.js'].flatMap((f) => [...readSource(path.join(ROOT, f)).matchAll(/\bapp\.(get|post|put|patch|delete)\(\s*'([^']+)'/g)].map((m) => m[1].toUpperCase() + ' ' + m[2])));
-/** The verbs §16.7 names for the kinds landed so far: each must be some entry's. A unit that adds an act adds its verb. */
+/**
+ * Every `app.<method>(` the server and the accounts' routes write, with the path it mounts: a string literal, or one of
+ * the machine's own paths (`machinewire.PATHS.<name>`, read from the module). Any other first argument is no path the
+ * fence can read, so `path` is '' and the verbs' test refuses it: a route is never mounted where the fence cannot see it.
+ */
+const MOUNTS = ['server.js', 'lib/http-accounts.js'].flatMap((f) => [...readSource(path.join(ROOT, f)).matchAll(/\bapp\.(get|post|put|patch|delete|all)\(\s*(?:'([^']+)'\s*,|machinewire\.PATHS\.(\w+)\s*,|[^,)]*)/g)]
+  .map((m) => ({ file: f, method: m[1].toUpperCase(), path: m[2] !== undefined ? m[2] : (m[3] !== undefined && Object.hasOwn(machinewire.PATHS, m[3]) ? machinewire.PATHS[m[3]] : ''), written: m[0] })));
+const ROUTES = new Set(MOUNTS.filter((m) => m.path).map((m) => m.method + ' ' + m.path));
+/**
+ * The verbs the acts send (§16.7, every 0.6.0 verb among them): exactly the verbs the catalogue's entries send, local
+ * aside, so an act's verb is never left out and none is named that no act sends. A unit that adds an act adds its verb.
+ */
 const REQUIRED = ['react', 'actionResponse', 'help:respond', 'ai:draft', 'stage:propose', 'stage:send', 'display:take', 'forward', 'pin', 'delete', 'display:identify', 'display:update', 'display:rotate', 'display:remove',
-  // the rest of the hall page (compose, chip, code, person's hall half)
-  'message',
-  // a message or a file sent into another room (msg.sendBack, compose.sendTo; msg.send's runner too)
-  'room:send',
-  // people's pages: a take pushed (the Board chip, a person's Show them ▸) and a page's report on its own (the layer, a card)
-  'page:push', 'page:report',
+  // the rest of the hall page (compose, chip, code, person's hall half); the header's and the Board chip's Screens & pages…
+  'message', 'display:list',
+  // a message or a file sent into another room (msg.sendBack, compose.sendTo; msg.send's runner too), and withdrawn from it
+  'room:send', 'room:withdraw',
+  // people's pages: a take pushed (the Board chip, a person's Show them ▸), a page's report on its own (the layer, a card),
+  // and a take withdrawn (board.withdraw, person.withdraw)
+  'page:push', 'page:report', 'page:withdraw',
+  // a pin for me (msg.pinMine, file.pinMine) and a file's confidential mark (msg, file and adminMsg's confidential)
+  'pin:mine', 'file:mark',
   // a download, by a ticket (msg.download, file.download, take.download, card.download, adminMsg.download)
   'file:download',
   // a room's earlier messages (earlier: Show earlier, and a reply's Show it)
   'history:before',
   // the admin page, the halls board and the Accounts page (adminRoom, person, adminMsg, link, tunnel, hall, help, account, audit)
   'admin:watchRoom', 'admin:summary', 'admin:invites', 'admin:resetRoom', 'admin:deleteRoom', 'admin:setRole', 'admin:linkRoom', 'admin:unlinkRoom', 'admin:kick', 'admin:deleteMessage',
+  // a person's chat view, clock or countdown and On stage switches, set by the admin (person)
+  'admin:setView', 'admin:setClock', 'admin:setOnStage',
   // a hall's rooms made and renamed (adminRoom)
   'room:create', 'room:update',
   'admin:settings', 'nodes:link', 'nodes:unlink', 'nodes:acceptCertificate', 'nodes:command', 'admin:acceptCertificate', 'admin:tunnelStart', 'admin:tunnelStop', 'admin:tunnelStatus', 'admin:tunnelUntil',
@@ -49,8 +65,90 @@ const REQUIRED = ['react', 'actionResponse', 'help:respond', 'ai:draft', 'stage:
   'admin:laptop',
   // The event (event, archive): archived, continued or copied, and an archive's contents deleted
   'http:POST /api/event/archive', 'http:POST /api/event/purge',
+  // the accounts held aside (accounts): adopted, left out, and the rest of the list read to tick
+  'http:POST /api/accounts/adopt', 'http:GET /api/accounts/held',
   'hall:settings', 'nodes:list', 'http:PATCH /api/users/:id', 'http:POST /api/users/:id/password', 'http:POST /api/users/:id/signout', 'http:DELETE /api/users/:id',
   'http:GET /api/audit/verify', 'http:POST /api/audit/export', 'http:POST /api/audit/split'];
+/**
+ * Every other verb the server registers and route it mounts, each with why no act of the catalogue sends it: a page's own
+ * join, sync or read (what fills an act's list or its dialog), a screen's own report, the sign-in, a page or a file
+ * served, or a control inside the panel or dialog an act opens (named). With REQUIRED, every verb and route is one or the
+ * other, so a new one is placed when it lands: an act's, with its catalogue row, or here with its reason.
+ */
+const NOT_ACTS = {
+  join: 'a page\'s own join',
+  disconnect: 'the connection ending',
+  seen: 'a page\'s own read receipt',
+  'userState:push': 'a person\'s own devices kept in step (and the support view\'s mirror)',
+  'userState:requestPeers': 'a person\'s own devices kept in step',
+  myRooms: 'a read: where Send to ▸ can go (msg.send\'s submenu) and whether a page may forward at all',
+  'room:sendTargets': 'a read: the rooms Send to ▸ and To ▸ list',
+  'stage:targets': 'a read: the speaker\'s screens Speaker\'s screen ▸ lists',
+  'history:message': 'a read: a message pinned that the page does not hold, by its id',
+  'ai:options': 'a control of the question composer: ✨ suggests the question\'s answers',
+  'page:status': 'a read: where the pages stand, for the console Screens & pages… opens',
+  'board:watch': 'the halls board\'s own frames',
+  'room:settings': 'a read: a hall\'s settings, for the Set up… and May send in… an act opens',
+  'admin:listRooms': 'a read: the admin page\'s list of halls and rooms',
+  'display:shown': 'a screen\'s report of its own take (a screen\'s page draws no menu)',
+  'display:create': 'a control of Screens & pages… (header.screens): New screen',
+  'display:hallHolding': 'a control of Screens & pages… (header.screens): the hall\'s holding image',
+  'hall:configure': 'a control of a hall\'s Set up… (hall.setup): its Stagewatch saved',
+  'hall:acceptCertificate': 'a control of a hall\'s Set up… (hall.setup): its Stagewatch\'s new certificate accepted',
+  'admin:createRoom': 'the admin page\'s New hall, asked in place on the list of halls',
+  'admin:lockRoles': 'a control of Roles & invites (adminRoom.invites): roles locked',
+  'admin:newInvite': 'a control of Roles & invites (adminRoom.invites): New On stage link',
+  'admin:guestWeb': 'a control of Roles & invites (adminRoom.invites): backstage guests may show web pages',
+  'admin:postSummary': 'a control of ✨ Minutes (adminRoom.minutes): the minutes posted',
+  'admin:renewCertificate': 'a control of the admin page\'s Encrypted connections: New certificate',
+  'http:GET /admin': 'the admin page',
+  'http:GET /build.js': 'the build a page names as it connects',
+  'http:GET /d/:token': 'a screen\'s page',
+  'http:GET /tls': 'the certificate\'s page',
+  'http:GET /tls.cer': 'the certificate',
+  'http:GET /uploads/:name': 'a file served',
+  'http:POST /uploads/:name/download': 'a download ticket spent by the page\'s own form (file:download\'s second half)',
+  'http:POST /api/upload': 'a file sent with its upload token before the message that names it (compose.send)',
+  'http:GET /api/health': 'health',
+  'http:GET /api/context': 'the context other show systems read',
+  'http:GET /api/halls': 'a read: the halls board\'s first paint',
+  'http:GET /api/rooms/:code': 'a read: the sign-in page\'s look-up of a code',
+  'http:GET /api/auth/me': 'a read: who a page is signed in as',
+  'http:GET /api/admin/me': 'a read: whom the admin page\'s gate admits',
+  'http:GET /api/admin/transcript/:code': 'the transcript, opened by its link (adminRoom.transcript, local)',
+  'http:GET /api/event': 'a read: the admin page\'s Event',
+  'http:GET /api/users': 'a read: the Accounts page\'s list',
+  'http:GET /api/audit': 'a read: the Accounts page\'s audit rows',
+  'http:GET /api/audit/split': 'a read: the archive point Split the log here… (audit.split) asks about',
+  'http:POST /api/audit/accept': 'a control of the admin page\'s audit check: Accept, with the token typed at the laptop',
+  'http:POST /api/auth/login': 'the sign-in',
+  'http:POST /api/auth/logout': 'the sign-out',
+  'http:POST /api/auth/password': 'a person\'s own password changed',
+  'http:POST /api/admin/login': 'the admin\'s sign-in at the laptop, with the token',
+  'http:POST /api/admin/logout': 'the admin\'s sign-out',
+  'http:POST /api/setup': 'the first admin account, made with the token typed',
+  'http:POST /api/rooms': 'a control of the halls board\'s New hall dialog',
+  'http:POST /api/users': 'a control of the Accounts page\'s Add a person dialog',
+  'http:GET /api/machine/hello': 'the machine\'s own half of the wire, at loopback: its hello, the server\'s proof of the token',
+  'http:GET /api/machine/busy': 'the machine\'s own half of the wire, at loopback with a proof of the token: how busy it is',
+  'http:POST /api/machine/stop': 'the machine\'s own half of the wire, at loopback with a proof of the token: a stop that saves',
+  'http:POST /api/machine/events': 'the machine\'s own half of the wire, at loopback with a proof of the token: its events read in',
+};
+/**
+ * Every 0.6.0 verb an act sends, with where the plan names it (§16.7 and its amendments), kept apart from REQUIRED: an
+ * act dropped with its REQUIRED entry still fails here, however the two lists agree.
+ */
+const NEW_VERBS = {
+  'room:send': '5-§16.7', 'room:withdraw': '5-§16.7', 'page:push': '5-§16.7', 'page:report': '5-§16.7', 'admin:setView': '5-§16.7',
+  'http:PATCH /api/users/:id': '5-§16.7 ({view}), 7-§0.2 ({clock}, {onStage})', 'room:update': '5-§16.7', 'room:create': '5-§16.7',
+  'pin:mine': '7-§0.2 (§16.7)', 'admin:setClock': '7-§0.2 (§14.2)', 'admin:setOnStage': '7-§0.2 (§14.2)',
+  'page:withdraw': '4-§5.9.7', 'file:download': '4-§4.6.3', 'file:mark': '4-§5.14',
+  'history:before': '5-§14.2 (unit 32)',
+  'http:POST /api/audit/export': '3-H.9.1', 'http:POST /api/audit/split': '3-H.10.2',
+  'http:GET /api/accounts/held': '3-K.6, 3-K.10', 'http:POST /api/accounts/adopt': '3-K.6, 3-K.10',
+  'admin:laptop': '6-U3 (This laptop)', 'admin:tunnelUntil': '6-U10 (Tunnel until…)',
+  'http:POST /api/event/archive': '6-U15 (the event)', 'http:POST /api/event/purge': '6-U15 (the event)',
+};
 /** The status marks the pages draw (AGM.MARKS, common.js's one table): no act's icon is one, so a mark has one meaning. */
 const MARKS = Object.values(AGM.MARKS).map((m) => m.mark);
 /** The action icons kept to one act each (§15.6): ↩ is Reply, ↗ is Send to and Send back, ⤴ is Show again. */
@@ -510,6 +608,8 @@ test('one icon, one act: entries that share an icon are the same act, in any kin
 test('the verbs: each is one the server registers, a route it mounts, or local; the modes follow the verbs; every required verb is an act', () => {
   assert.ok(SOCKET_VERBS.has('join') && SOCKET_VERBS.size > 50, 'the server\'s verbs are read');
   assert.ok(ROUTES.has('POST /api/upload'), 'its routes are read');
+  assert.ok(ROUTES.has('GET /api/machine/hello') && ROUTES.has('POST /api/machine/events'), 'the machine\'s routes are read by their paths');
+  assert.deepEqual(MOUNTS.filter((m) => !m.path).map((m) => m.file + ': ' + m.written), [], 'every route is mounted at a path the fence reads: a literal, or machinewire.PATHS');
   for (const { e } of all()) {
     if (e.verb === 'local') { assert.equal(e.mode, 'local', e.id + ': a local act sends nothing'); continue; }
     if (e.verb.startsWith('http:')) { assert.ok(ROUTES.has(e.verb.slice(5)), e.id + ': ' + e.verb + ' is a route the server mounts'); continue; }
@@ -525,6 +625,23 @@ test('the verbs: each is one the server registers, a route it mounts, or local; 
   }
   const used = new Set(all().map(({ e }) => e.verb));
   for (const v of REQUIRED) assert.ok(used.has(v), v + ' is the verb of an act');
+});
+
+test('the required verbs are complete: exactly the verbs the acts send, and every other verb and route the server takes is no act, with why', () => {
+  const sent = [...new Set(all().map(({ e }) => e.verb).filter((v) => v !== 'local'))].sort();
+  assert.equal(new Set(REQUIRED).size, REQUIRED.length, 'each required verb once');
+  assert.deepEqual([...REQUIRED].sort(), sent, 'the required verbs are the verbs the acts send, none left out and none extra');
+  const taken = [...SOCKET_VERBS, ...[...ROUTES].map((r) => 'http:' + r)];
+  for (const v of taken) assert.ok(REQUIRED.includes(v) !== Object.hasOwn(NOT_ACTS, v), v + ': an act\'s verb, or no act\'s with its reason (NOT_ACTS), and never both');
+  for (const [v, why] of Object.entries(NOT_ACTS)) {
+    assert.ok(taken.includes(v), v + ': a verb the server registers or a route it mounts');
+    assert.ok(typeof why === 'string' && why.length > 3, v + ': its reason');
+  }
+  // Every 0.6.0 verb of §16.7 as amended, each an act's and a required verb.
+  for (const [v, where] of Object.entries(NEW_VERBS)) {
+    assert.ok(sent.includes(v), v + ' (' + where + ') is an act\'s verb');
+    assert.ok(REQUIRED.includes(v), v + ' (' + where + ') is a required verb');
+  }
 });
 
 test('one word for one act: "…" for an act that asks first or opens a dialog, "screen" only for a screen or the speaker\'s screen', () => {
