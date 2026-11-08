@@ -202,6 +202,8 @@ async function launchEdge() {
       // A window of its own, so its page is always the one in front (never a hidden tab behind another).
       const made = await browser.send('Target.createTarget', { url: 'about:blank', newWindow: true, width: 1400, height: 900, ...(own ? { browserContextId: own.browserContextId } : {}) });
       if (!made.result) throw new Error('no new window: ' + (made.error ? made.error.message : 'no answer'));
+      // A log entry's resource, named by its path alone (its query may carry a hall's code or an invite).
+      const at = (u) => { try { return u ? ' (' + new URL(u).pathname.slice(0, 120) + ')' : ''; } catch { return ' (an address that does not parse)'; } };
       const problems = []; const listeners = new Map(); const expected = []; const logs = []; const workers = [];
       const { ws, send: call } = await devtools(`ws://127.0.0.1:${port}/devtools/page/${made.result.targetId}`, (m) => {
         if (m.method === 'Target.attachedToTarget') { startAttached(m.params); return; }
@@ -210,7 +212,7 @@ async function launchEdge() {
         if (listeners.has(m.method)) listeners.get(m.method)(m.params);
         if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'log') logs.push(m.params.args.map((a) => a.value ?? a.description).join(' '));
         if (m.method === 'Runtime.exceptionThrown') problems.push('exception: ' + (m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text).split('\n')[0]);
-        if (m.method === 'Log.entryAdded' && m.params.entry.level === 'error' && !/favicon/.test(m.params.entry.url || m.params.entry.text) && !expected.some((r) => r.test(m.params.entry.url || ''))) problems.push('log: ' + m.params.entry.text);
+        if (m.method === 'Log.entryAdded' && m.params.entry.level === 'error' && !/favicon/.test(m.params.entry.url || m.params.entry.text) && !expected.some((r) => r.test(m.params.entry.url || ''))) problems.push('log: ' + m.params.entry.text + at(m.params.entry.url));
         if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') problems.push('console: ' + m.params.args.map((a) => a.value ?? a.description).join(' '));
         // No page opens a native alert, confirm or prompt (it pauses the page, which drops its socket): one is a problem,
         // dismissed so the run goes on.
