@@ -13,6 +13,7 @@ const net = require('net');
 const os = require('os');
 const path = require('path');
 const { PassThrough } = require('stream');
+const { performance } = require('perf_hooks');
 const { spawn, spawnSync } = require('child_process');
 const h = require('./helpers');
 const zipmod = require('../lib/zip');
@@ -434,7 +435,7 @@ test('R1 judged: the largest hall\'s slowest page back against 1.5 s, as R2 and 
   assert.equal(x.state, 'not run', 'no page back at the largest hall: the mark is not judged');
   assert.match(x.words, /at 20 halls × 10,000: no page back \(the bundle did not serve: …\).*: no page came back at the largest real hall$/);
   assert.equal(byId(R.judge(raw({ R1: { rounds: [100] } })), 'R1').state, 'not run', 'a record of another shape');
-  assert.equal(byId(R.judge(raw({ R1: { skipped: 'the lane\'s own bound of 20 min was reached before it began' } })), 'R1').words, 'the lane\'s own bound of 20 min was reached before it began');
+  assert.equal(byId(R.judge(raw({ R1: { skipped: 'not taken: the lane\'s deadline (3 min left of its 38 min, and its own bound is 10 min)' } })), 'R1').words, 'not taken: the lane\'s deadline (3 min left of its 38 min, and its own bound is 10 min)');
 });
 
 test('R1 as the lane takes it, on this machine with this checkout: halls seeded, a page seated, the stop at loopback with the proof, the next start, the page back at its own pace; no token kept', async () => {
@@ -537,6 +538,203 @@ test('R12 as the lane takes it: each exit its own task and folder, so a restart 
     for (const t of timers) clearTimeout(t);
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// ---------------------------------------------------------------- the lane bounds itself
+
+test('the lane bounds itself: a reading begins only while its own bound fits in the deadline, is written as it begins and as each round is taken, ends its waits at its bound, is cut with its rounds kept, and the lane goes on', async () => {
+  const raw = { v: 1, readings: {}, complete: false };
+  const saved = [];
+  const lines = [];
+  const late = [];
+  const plan = [
+    ['S', () => ({ never: true })],
+    ['A', () => ({ value: 1 })],
+    // Reports a round, then never ends inside its bound: cut once its settle has passed. When it wakes later, past its
+    // bound, no program of it starts, though the next reading is running under a bound of its own.
+    ['B', async (progress) => {
+      progress({ rounds: [1] });
+      await new Promise((resolve) => { setTimeout(resolve, 450); });
+      late.push(T.run(process.execPath, ['-e', '0']));
+      progress({ rounds: [1, 2] });
+      return { late: true };
+    }],
+    ['C', () => ({ never: true })],
+    // Every wait of it ends at its bound, and nothing of it is started past it: written cut, what it took kept.
+    ['D', async () => {
+      const t0 = Date.now();
+      const waited = await T.until(() => false, 60_000, 10);
+      return { waited, waitedMs: Date.now() - t0, ran: T.run(process.execPath, ['-e', '0']) };
+    }],
+    ['E', () => { throw new Error('it met something'); }],
+  ];
+  const t0 = Date.now();
+  await T.takeAll(plan, {
+    raw,
+    save: () => { saved.push(JSON.parse(JSON.stringify(raw.readings))); },
+    say: (line) => lines.push(line),
+    deadlineMs: 3000,
+    boundsMs: { S: 100, A: 300, B: 100, C: 5000, D: 1000, E: 300 },
+    skip: new Map([['S', 'not taken here: left to a take of its own']]),
+    settleMs: 50,
+  });
+  assert.ok(Date.now() - t0 < 2500, 'the lane went on past the reading that did not end: ' + (Date.now() - t0) + ' ms');
+  assert.deepEqual(raw.readings.S, { skipped: 'not taken here: left to a take of its own' });
+  assert.deepEqual(raw.readings.A, { value: 1 });
+  assert.deepEqual(raw.readings.B.rounds, [1], 'its rounds so far, as it last reported them');
+  assert.match(raw.readings.B.cut, /^its own bound of 0\.1 s: it had not ended 0\.1 s after it$/);
+  assert.equal(raw.readings.B.running, undefined, 'no longer said to be running');
+  assert.match(raw.readings.C.skipped, /^not taken: the lane's deadline \([\d.]+ s left of its 3 s, and its own bound is 5 s\)$/);
+  assert.equal(raw.readings.D.waited, null);
+  assert.ok(raw.readings.D.waitedMs >= 900 && raw.readings.D.waitedMs < 1500, 'its wait of a minute ended at its bound of a second: ' + raw.readings.D.waitedMs);
+  assert.deepEqual([raw.readings.D.ran.code, raw.readings.D.ran.err], [null, 'not started: the reading\'s own bound was reached']);
+  assert.match(raw.readings.D.cut, /^its own bound of 1 s, reached before it ended: what it took by then is kept, never judged$/);
+  assert.deepEqual(raw.readings.E, { error: 'it met something' });
+  // The record as it was written: each reading said as it began, its round written while it ran, then its end.
+  const asB = saved.filter((r) => r.B);
+  assert.match(asB[0].B.running, /^begun at \d+ s, its own bound 0\.1 s$/);
+  assert.deepEqual(asB[1].B.rounds, [1], 'the round it reported, written while it ran');
+  assert.ok(asB[1].B.running, 'and still said to be running then');
+  assert.equal(saved.length, 11, 'written as each began, as it reported and as each ended (S, A twice, B three times, C, D twice, E twice)');
+  for (const id of ['A', 'B', 'D', 'E']) assert.ok(Number.isInteger(raw.times[id].begunS) && Number.isInteger(raw.times[id].s), id + '\'s begin and length kept');
+  assert.equal(raw.times.C, undefined, 'one not begun has no time');
+  assert.ok(lines.some((l) => /^readings-take: B begun at \d+ s, its own bound 0\.1 s$/.test(l)) && lines.some((l) => /^readings-take: B cut at its own bound/.test(l)), lines.join('\n'));
+  // The reading cut at its bound woke inside the next one's: its own bound, spent, still held it, and what it reported
+  // then was not written over its record.
+  await new Promise((resolve) => { setTimeout(resolve, 600); });
+  assert.deepEqual(late.map((r) => [r.code, r.err]), [[null, 'not started: the reading\'s own bound was reached']]);
+  assert.deepEqual(raw.readings.B.rounds, [1]);
+  // Outside a reading nothing is shortened.
+  assert.equal(T.left(), Infinity);
+  assert.equal(T.within(1234), 1234);
+  assert.equal(T.run(process.execPath, ['-e', '0']).code, 0);
+});
+
+test('what the lane made is removed at its end, and at a signal its record is written at once and its tasks and rules removed before it exits 2', () => {
+  const calls = [];
+  const fake = (gone = () => true) => ({
+    remove: (name, ms) => { calls.push(['remove', name, ms]); if (gone(name)) T.held.tasks.delete(name); },
+    ruleDelete: (name, ms) => { calls.push(['rule', name, ms]); if (gone(name)) T.held.rules.delete(name); },
+    ps: (script, env, opts) => { calls.push(['ps', script === T.SCRIPTS.usersGone ? 'usersGone' : 'other', env.AGM_R11_USERS, opts.always]); },
+  });
+  const empty = () => ({ tasks: [...T.held.tasks], rules: [...T.held.rules], accounts: [...T.held.accounts], pids: [...T.held.pids] });
+  try {
+    T.held.tasks.add('\\AGMessage-Readings\\R11-As-own');
+    T.held.tasks.add('\\AGMessage\\Server');
+    T.held.rules.add('AGMessage-readings-R4');
+    T.held.accounts.add('agmr11own');
+    T.held.accounts.add('agmr11other');
+    // One task Windows will not delete stays named as left.
+    const r = T.release(fake((name) => name !== '\\AGMessage\\Server'));
+    assert.deepEqual(r, { removed: ['\\AGMessage-Readings\\R11-As-own', 'rule AGMessage-readings-R4', 'account agmr11own', 'account agmr11other'], left: ['\\AGMessage\\Server'] });
+    assert.deepEqual(calls.find((c) => c[0] === 'ps'), ['ps', 'usersGone', 'agmr11own,agmr11other', true], 'the accounts removed whatever is left of a reading\'s bound');
+    assert.deepEqual(calls.filter((c) => c[0] === 'remove').map((c) => c[2]), [15000, 15000], 'each act bounded');
+    assert.deepEqual(empty(), { tasks: ['\\AGMessage\\Server'], rules: [], accounts: [], pids: [] });
+    T.held.tasks.clear();
+    // A signal: the record written at once, not whole, then the tasks and rules removed within the runner's grace; the
+    // accounts are left to the runner, which is thrown away, and named.
+    calls.length = 0;
+    T.held.tasks.add('\\AGMessage-Readings\\Serve');
+    T.held.rules.add('AGMessage-readings-R13-offline');
+    T.held.accounts.add('agmr6export');
+    const raw = { v: 1, complete: false, readings: { R2: { files: 1 } }, takes: [{ at: 'x', ended: '' }] };
+    const writes = [];
+    let exited = null;
+    const said = [];
+    T.stopOn('SIGINT', { raw, save: () => writes.push(JSON.parse(JSON.stringify(raw))), L: fake(), began: performance.now() - 2700_000, exit: (code) => { exited = code; }, say: (l) => said.push(l) });
+    assert.equal(exited, 2);
+    assert.equal(writes.length, 2, 'written at once, then again with what was removed');
+    assert.deepEqual([writes[0].complete, writes[0].stopped, writes[0].takes[0].stopped], [false, 'SIGINT at 2700 s', 'SIGINT at 2700 s']);
+    assert.deepEqual(writes[0].readings, { R2: { files: 1 } }, 'what was taken is kept');
+    assert.deepEqual(calls.map((c) => c.slice(0, 3)), [['remove', '\\AGMessage-Readings\\Serve', 2500], ['rule', 'AGMessage-readings-R13-offline', 2500]], 'each act within 2.5 s, and no account removed in the runner\'s grace');
+    assert.deepEqual(writes[1].cleanup, { removed: ['\\AGMessage-Readings\\Serve', 'rule AGMessage-readings-R13-offline'], left: ['account agmr6export'] });
+    assert.match(said[0], /^readings-take: stopped by SIGINT at 2700 s; the record is written, not whole; still there: account agmr6export$/);
+    // The judge reads a lane stopped there: what it took judged, what it had not reached not run, saying what stopped it.
+    const judged = R.judge({ ...writes[1], build: STAMP, ...DEFENDER_ON });
+    assert.equal(judged.complete, false);
+    assert.equal(byId(judged, 'R1').words, 'not taken: the lane ended before it (stopped by SIGINT at 2700 s)');
+  } finally {
+    for (const k of ['tasks', 'rules', 'accounts', 'pids']) T.held[k].clear();
+  }
+});
+
+test('the judge reads a reading the lane began and never ended, and one cut at its own bound, as not run with why, never judging what they kept', () => {
+  const begun = R.judge(raw({ R11: { running: 'begun at 612 s, its own bound 12 min', own: [{ code: 0, answered: true, ranAs: 'S-1-5-18', for: 'S-1-5-21-1' }] } }));
+  assert.deepEqual([byId(begun, 'R11').state, byId(begun, 'R11').words], ['not run', 'not taken: begun at 612 s, its own bound 12 min, it never ended: the lane stopped in it']);
+  const stopped = R.judge(raw({ R11: { running: 'begun at 612 s, its own bound 12 min' } }, { complete: false, stopped: 'SIGBREAK at 700 s' }));
+  assert.match(byId(stopped, 'R11').words, /it never ended: the lane stopped in it \(SIGBREAK at 700 s\)$/);
+  const cut = R.judge(raw({ 'R3′': { rounds: [{ saved: true, lastResult: 0 }], savedCount: 1, cut: 'its own bound of 8 min, reached before it ended: what it took by then is kept, never judged' } }));
+  assert.deepEqual([byId(cut, 'R3′').state, byId(cut, 'R3′').words], ['not run', 'not taken: cut at its own bound of 8 min, reached before it ended: what it took by then is kept, never judged']);
+  const deadline = R.judge(raw({ R13: { skipped: 'not taken: the lane\'s deadline (3 min left of its 38 min, and its own bound is 5 min)' } }));
+  assert.deepEqual([byId(deadline, 'R13').state, byId(deadline, 'R13').words], ['not run', 'not taken: the lane\'s deadline (3 min left of its 38 min, and its own bound is 5 min)']);
+});
+
+test('the take\'s words: a deadline, the readings a take takes or leaves, the record it adds to; it exits once its record is written', async () => {
+  assert.deepEqual(T.parseArgs(['take', '--zip', 'a', '--add', '--deadline-min', '38', '--skip', 'R11,R6']).flags, { zip: 'a', add: true, 'deadline-min': '38', skip: 'R11,R6' });
+  assert.deepEqual(T.readingsOf('R11,R6'), ['R11', 'R6']);
+  assert.deepEqual(T.readingsOf('R3′'), ['R3′']);
+  assert.deepEqual(T.readingsOf(undefined), []);
+  assert.deepEqual(T.readingsOf('R11,'), ['R11'], 'an empty name between commas is no reading');
+  for (const bad of ['R99', ',', 'r11', 'R11,R99']) assert.equal(T.readingsOf(bad), null, bad);
+  const dir = tmp('agm-words-');
+  try {
+    const flags = ['take', '--zip', path.join(dir, 'x.zip'), '--defender', path.join(dir, 'd.json'), '--out', path.join(dir, 'o.json')];
+    for (const [more, words] of [[['--deadline-min', '0'], /--deadline-min is a whole number of minutes from 1 to 240/], [['--deadline-min', '2.5'], /--deadline-min is a whole number/], [['--only', 'R99'], /--only and --skip name readings the lane takes/], [['--skip', 'R1,R14'], /--only and --skip name readings the lane takes/]]) {
+      const r = spawnSync(process.execPath, [TAKE_JS, ...flags, ...more], { encoding: 'utf8' });
+      assert.equal(r.status, 64, more.join(' '));
+      assert.match(r.stderr, words);
+    }
+    // The record an earlier take wrote: added to when it is the lane's; a new one when there is none; never written over
+    // when it is not the lane's.
+    const file = path.join(dir, 'raw.json');
+    assert.deepEqual(T.recordAt(file), {});
+    fs.writeFileSync(file, 'not json');
+    assert.match(T.recordAt(file).refused, /is not the lane's record, so it is not added to or written over$/);
+    fs.writeFileSync(file, JSON.stringify({ v: 2, readings: {} }));
+    assert.ok(T.recordAt(file).refused);
+    fs.writeFileSync(file, '﻿' + JSON.stringify({ v: 1, readings: { R2: { files: 3 } }, takes: [{ at: 'x' }] }));
+    assert.deepEqual(T.recordAt(file).raw.readings, { R2: { files: 3 } });
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  // A take ends once its console is flushed, whatever handle is still open; a probe's end is its loop's, as its task expects.
+  const before = process.exitCode;
+  try {
+    const exits = [];
+    T.finish('probe-run', 0, { exit: (c) => exits.push(c) });
+    await new Promise((resolve) => { T.finish('take', 0, { exit: (c) => { exits.push(c); resolve(); } }); });
+    assert.deepEqual(exits.slice(0, 2), [0], 'only the take is ended');
+  } finally { process.exitCode = before; }
+  // Each reading the lane takes, in its order: the two as standard accounts last, after every reading taken before any
+  // account was made; each with a bound of its own.
+  assert.deepEqual(T.ORDER.slice(-2), ['R11', 'R6']);
+  assert.deepEqual([...T.ORDER].sort(), Object.keys(T.BOUNDS).sort());
+  assert.ok(T.DEADLINE_MIN + T.STOP_MIN < 45, 'a take given no deadline still ends inside the 45 minutes the step once had');
+  // The task the lane runs as a made account has a time limit of its own (its action is one schtasks /run).
+  const src = h.readSource(TAKE_JS);
+  assert.match(src, /L\.register\(asName, taskXml\(\{ description: 'AGMessage readings R11: schtasks \/run of a control task, as ' \+ u\.name, sid: u\.sid, logon: 'Password', limit: 'PT10M',/);
+  // Every account the lane makes is held before PowerShell is asked to make it, so one made before a failure is removed.
+  assert.ok(src.indexOf('for (const n of names) held.accounts.add(n);') < src.indexOf('L.ps(SCRIPTS.users, { AGM_R11_USERS: names.join(\',\')'));
+  assert.ok(src.indexOf('held.accounts.add(R6_USER);') < src.indexOf('L.ps(SCRIPTS.users, { AGM_R11_USERS: R6_USER'));
+});
+
+test('a page the lane seats waits for an answer within its bound: a server that takes the socket and answers nothing gives null, never a wait for ever', async () => {
+  const { WebSocketServer } = require('ws');
+  const port = await h.freePort();
+  const wss = new WebSocketServer({ port, host: '127.0.0.1' });
+  // Engine.IO's open, then the namespace taken; every event after that is heard and never answered.
+  wss.on('connection', (ws) => {
+    ws.send('0' + JSON.stringify({ sid: 'readings', upgrades: [], pingInterval: 25000, pingTimeout: 20000, maxPayload: 1e6 }));
+    ws.on('message', (m) => { if (String(m).startsWith('40')) ws.send('40' + JSON.stringify({ sid: 'page' })); });
+  });
+  try {
+    await new Promise((resolve) => { wss.on('listening', resolve); });
+    const page = await T.pageSocket(port, { build: 'readings', ms: 5000 });
+    assert.ok(page, 'the server took the page');
+    const t0 = Date.now();
+    assert.equal(await page.emit('join', { roomCode: 'GAP001' }, 300), null);
+    assert.ok(Date.now() - t0 < 2000, 'its answer waited for at most its bound: ' + (Date.now() - t0) + ' ms');
+    page.close();
+    await page.closed;
+  } finally { await new Promise((resolve) => { wss.close(resolve); }); }
 });
 
 // ---------------------------------------------------------------- what is written: the summary, the notes, the command line
@@ -1146,23 +1344,34 @@ test('the lane in CI: windows-2025, every action pinned by its commit, no creden
     assert.ok(job(ci, name).includes('\n    concurrency:\n      group: ci-$' + '{{ github.ref }}-' + name + extra + '-$' + "{{ github.event_name == 'workflow_dispatch' && 'by-hand' || 'auto' }}\n      cancel-in-progress: $" + "{{ github.event_name != 'workflow_dispatch' }}\n"), name + ': cancelled by a newer push or pull request of its ref, never by one asked for by hand');
   }
   const uses = [...lane.matchAll(/^\s*(?:- )?uses: (\S+)(.*)$/gm)];
-  assert.deepEqual(uses.map((u) => u[1].split('@')[0]), ['actions/checkout', 'actions/setup-node', 'actions/download-artifact', 'actions/download-artifact', 'actions/upload-artifact']);
+  assert.deepEqual(uses.map((u) => u[1].split('@')[0]), ['actions/checkout', 'actions/setup-node', 'actions/download-artifact', 'actions/download-artifact', 'actions/upload-artifact', 'actions/upload-artifact']);
   const installerStep = lane.slice(lane.indexOf('name: agmessage-installer-$' + '{{ github.sha }}') - 200, lane.indexOf('name: agmessage-installer-$' + '{{ github.sha }}'));
   assert.match(installerStep, /\n {8}continue-on-error: true\n {8}with:\n {10}$/, 'an installer job that built nothing stops no reading');
   for (const [, ref, comment] of uses) assert.match(ref + comment, /^[\w.-]+\/[\w.-]+@[0-9a-f]{40} # v\d+\.\d+\.\d+$/, ref + ' is pinned by its commit, its tag beside it');
-  const steps = lane.split(/\n {6}- /).slice(1);
+  // Each step from its "- " to the next, the comments before the next step left out.
+  const steps = lane.split(/\n {6}- /).slice(1).map((x) => x.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n'));
   assert.match(steps[0], /^uses: actions\/checkout@/);
-  assert.match(steps[0], /\n {8}with:\n {10}persist-credentials: false\n/, 'the stand-in tasks run the bundle\'s code from this workspace: no token is left in its .git');
+  assert.match(steps[0], /\n {8}with:\n {10}persist-credentials: false(\n|$)/, 'the stand-in tasks run the bundle\'s code from this workspace: no token is left in its .git');
   assert.match(steps[1], /^name: Defender's real-time monitoring back on/, 'Defender first, after the checkout that holds its script');
   assert.match(steps[1], /shell: powershell\n\s+timeout-minutes: \d+\n\s+run: \.\/tools\/defender-on\.ps1 -Out "\$env:RUNNER_TEMP\\defender\.json"/);
-  const order = ['tools/defender-on.ps1', 'actions/download-artifact', 'node tools/readings-take.js take --zip', 'node tools/readings.js judge readings/readings.raw.json --out readings/readings.json --summary $env:GITHUB_STEP_SUMMARY', 'actions/upload-artifact'].map((s) => lane.indexOf(s));
-  assert.ok(order.every((i, k) => i > 0 && (k === 0 || i > order[k - 1])), 'Defender, the zip, the readings, the verdicts, kept: ' + order);
-  assert.match(lane, /--defender "\$env:RUNNER_TEMP\\defender\.json" --out readings\/readings\.raw\.json @release @over @installer\n/, 'the tag through the environment, never pasted into the script');
+  // Defender, the zip, the readings but the two as standard accounts, what they wrote kept as the artifact, then R11 and
+  // R6 added to the same record, the verdicts, and the record kept again: a runner lost in the accounts' readings still
+  // leaves the rest on the server.
+  const at = (from, what) => lane.indexOf(what, from);
+  const order = [];
+  for (const what of ['tools/defender-on.ps1', 'actions/download-artifact', 'node tools/readings-take.js take --zip', 'actions/upload-artifact', 'node tools/readings-take.js take --zip', 'node tools/readings.js judge readings/readings.raw.json --out readings/readings.json --summary $env:GITHUB_STEP_SUMMARY', 'actions/upload-artifact']) order.push(at(order.length ? order[order.length - 1] + 1 : 0, what));
+  assert.ok(order.every((i, k) => i > 0 && (k === 0 || i > order[k - 1])), 'Defender, the zip, the readings, kept, the readings as standard accounts, the verdicts, kept: ' + order);
+  assert.match(lane, /--defender "\$env:RUNNER_TEMP\\defender\.json" --out readings\/readings\.raw\.json --deadline-min (\d+) --skip R11,R6 @release @over @installer\n/, 'the tag through the environment, never pasted into the script');
+  assert.match(lane, /--defender "\$env:RUNNER_TEMP\\defender\.json" --out readings\/readings\.raw\.json --deadline-min (\d+) --only R11,R6 --add\n/, 'R11 and R6 added to the same record');
   assert.match(lane, /\$installer = if \(\$setup\.Count -eq 1\) \{ @\('--installer', \$setup\[0\]\.FullName\) \} else \{ @\(\) \}/, 'the installer, when its job built it, for R5');
   assert.match(lane, /\$release = if \(\$env:RELEASE_TAG\) \{ @\('--repo', \$env:GITHUB_REPOSITORY, '--tag', \$env:RELEASE_TAG\) \} else \{ @\(\) \}/, 'no release named: no --tag, never an empty argument');
   assert.match(lane, /\$over = if \(\$previous\.Count -eq 1\) \{ @\('--previous', \$previous\[0\]\.FullName\) \} else \{ @\(\) \}/, 'the newest release\'s zip, when it was had, for R2');
   assert.ok(!/run: [^\n]*\$\{\{ steps\./.test(lane) && !/\n\s+node [^\n]*\$\{\{/.test(lane), 'no step output pasted into a command');
-  assert.match(lane.slice(lane.indexOf('actions/upload-artifact')), /^\s+if: always\(\)\n\s+timeout-minutes: \d+\n\s+with:\n\s+name: agmessage-readings-\$\{\{ github\.sha \}\}\n\s+path: readings\n/m);
+  for (const keep of steps.filter((x) => x.startsWith('uses: actions/upload-artifact'))) {
+    assert.match(keep, /\n\s+if: always\(\)\n\s+timeout-minutes: \d+\n\s+with:\n\s+name: agmessage-readings-\$\{\{ github\.sha \}\}\n\s+path: readings\n\s+if-no-files-found: warn\n\s+overwrite: true/, 'each keeps the record whatever it says, the later over the earlier');
+  }
+  // The readings as standard accounts are taken whatever the take before them ended with.
+  assert.match(steps.find((x) => x.startsWith('name: Take the readings as standard accounts')), /^name: Take the readings as standard accounts \(R11, R6; tools\/readings-take\.js\)\n {8}if: \$\{\{ !cancelled\(\) \}\}\n/);
   // A take step cut short still has what it wrote judged.
   assert.match(steps.find((x) => x.startsWith('name: Judge them')), /\n {8}if: \$\{\{ !cancelled\(\) \}\}\n/);
   // The token that lists the releases is that step's alone: the lane's own processes, and its tasks, hold none. A GitHub
@@ -1173,15 +1382,32 @@ test('the lane in CI: windows-2025, every action pinned by its commit, no creden
   assert.match(gh, /if \(\$LASTEXITCODE -ne 0 -or "\$tag" -notmatch '\^v\\d\+\\\.\\d\+\\\.\\d\+\$'\) \{ \$tag = '' \}/, 'a failed list reads as no release');
   assert.match(gh, /\n\s+exit 0$/, 'and the step ends 0 whatever gh said');
   // Every step bounded, and all of them together inside the job's bound: a step that runs over fails, and the job ends
-  // failed, never cancelled by its own timeout, so the release that waits for it still runs. The lane's own bound
-  // (BUDGET_MS) begins no reading late enough for the longest reading's own waits (R12's, R4's: under 20 min) to pass the
-  // take step's.
+  // failed, never cancelled by its own timeout, so the release that waits for it still runs. Each take step's limit
+  // holds the deadline it gives the take and the take's own stop after it (STOP_MIN), so the take always ends itself;
+  // every reading has a bound of its own, and each fits inside the deadline of the step that takes it, so each may begin.
   const bounds = steps.map((x) => { const m = /\n {8}timeout-minutes: (\d+)\n/.exec('\n' + x.split('\n').slice(1).join('\n') + '\n'); return m ? Number(m[1]) : null; });
   assert.ok(bounds.every((b) => Number.isInteger(b) && b > 0), 'every step has its own bound: ' + bounds);
   const jobBound = Number(/\n {4}timeout-minutes: (\d+)\n/.exec(lane)[1]);
   assert.ok(bounds.reduce((a, b) => a + b, 0) + 5 <= jobBound, 'the steps end inside the job: ' + bounds + ' within ' + jobBound);
-  const takeBound = bounds[steps.findIndex((x) => x.startsWith('name: Take the readings'))];
-  assert.ok(T.BUDGET_MS / 60000 + 20 <= takeBound, 'the lane begins no reading after ' + T.BUDGET_MS / 60000 + ' min, inside the take step\'s ' + takeBound);
+  assert.deepEqual(Object.keys(T.BOUNDS).sort(), [...T.ORDER].sort(), 'every reading the lane takes has a bound of its own, and only those');
+  const takes = steps.map((x, k) => [x, bounds[k]]).filter(([x]) => x.startsWith('name: Take the readings'));
+  assert.equal(takes.length, 2);
+  const taken = new Set();
+  for (const [x, limit] of takes) {
+    const deadline = Number(/--deadline-min (\d+) /.exec(x)[1]);
+    assert.ok(deadline + T.STOP_MIN <= limit, x.split('\n')[0] + ': its deadline of ' + deadline + ' min and the take\'s own stop after it (' + T.STOP_MIN + ' min) inside its limit of ' + limit);
+    const only = /--only (\S+)/.exec(x);
+    const skip = /--skip (\S+)/.exec(x);
+    const ids = only ? only[1].split(',') : T.ORDER.filter((id) => !(skip ? skip[1].split(',') : []).includes(id));
+    for (const id of ids) {
+      assert.ok(T.BOUNDS[id] <= deadline, id + '\'s own bound fits in its step\'s deadline');
+      taken.add(id);
+    }
+  }
+  assert.deepEqual([...taken].sort(), [...T.ORDER].sort(), 'each reading is taken by one step or the other');
+  // No step's limit is 45 minutes: a hosted runner lost to the service is failed 45 minutes after it was last heard,
+  // and a limit of that length would read as the step's own.
+  assert.ok(!bounds.includes(45), 'no step bounded at 45 minutes: ' + bounds);
   const ps = read('tools/defender-on.ps1');
   assert.match(ps, /Set-MpPreference -DisableRealtimeMonitoring \$false/);
   assert.match(ps, /foreach \(\$x in 'C:\\', 'D:\\'\) \{\n\s+try \{ Remove-MpPreference -ExclusionPath \$x \}/);

@@ -8,6 +8,7 @@
  *   node tools/readings-take.js take --zip <bundle.zip> --defender <defender.json> --out <raw.json>
  *                                    [--previous <the newest release's zip>] [--work C:\agm-readings] [--port 3124]
  *                                    [--repo <owner/name> --tag <vX.Y.Z>] [--installer <AGMessage-Setup-…-unsigned.exe>]
+ *                                    [--deadline-min <n>] [--only <R11,R6>] [--skip <R11,R6>] [--add]
  *       R2   the bundle's payload laid over the one before it (the newest release's, when its zip is given; this build's
  *            own when not, said so), round by round: each file inflated to a name of its own beside it, then renamed
  *            over the earlier one
@@ -43,10 +44,18 @@
  *            published tag; then, with no network, a copy of the bundle's node.exe that an outbound rule of the
  *            firewall blocks, run by the same kind of task, asking the bundle's own machine.js for that release as a
  *            checked upgrade asks, and the words it gives (U18's offline words); the rule and the task removed
- *     Each reading is taken on its own: one that fails is written with why, and the rest are taken. The record is
- *     written before the first reading and after each, and marked whole at the end, so a lane cut short still says what
- *     it took; a reading not begun within the lane's own bound (BUDGET_MS) is written as not run, so the job never
- *     reaches its timeout.
+ *     Each reading is taken on its own: one that fails is written with why, and the rest are taken. The take bounds
+ *     itself, so its step never needs the runner to cancel it: each reading has a bound of its own (BOUNDS), and begins
+ *     only while that bound fits in what is left of the lane's deadline (--deadline-min, DEADLINE_MIN when none is named),
+ *     else it is written "not taken: the lane's deadline"; at its bound every wait of it ends and no program of it starts
+ *     (`within`), and one not ended a minute later is written cut, its rounds so far kept. The record is written before
+ *     the first reading, as each begins (`running`), after each round a long reading reports, and as each ends; what the
+ *     lane made that outlives a reading (`held`: tasks, firewall rules, standard accounts, watchdogs) is removed at its
+ *     end, and at a Ctrl+C, Ctrl+Break or SIGTERM the record is written at once and its tasks and rules removed before it
+ *     exits 2; it exits once its record is written, whatever handle is still open. --only and --skip name the readings
+ *     a take takes or leaves to another (a skipped one written as left to it), and --add adds to the record an earlier
+ *     take of the same job wrote at --out: CI takes the readings as standard accounts (R11, R6) in a step of their own,
+ *     after the rest are kept as an artifact.
  *     It is CI's alone: it refuses a machine that is not a GitHub-hosted runner, a work folder it did not make, and a
  *     \AGMessage\Server task it did not make, before anything is made or removed. Exit 0 once the record is written, 2
  *     when it cannot be, 64 for a word it does not know, a run off Windows or a machine it refuses.
@@ -57,8 +66,9 @@
  * Invariants: every program is run by its absolute path, never a bare name, with an argument array and no shell; no
  * secret is written to the record (the admin token the stand-in server makes is taken out of any output kept, by value
  * and by its shape; a quick tunnel's address is not kept); every stand-in task and the firewall rule are removed at the
- * end, whatever failed; nothing is made or removed on a machine the lane refuses.
+ * end, whatever failed; nothing is made or removed on a machine the lane refuses; no reading's wait outlasts its bound.
  */
+const { AsyncLocalStorage } = require('node:async_hooks');
 const childProcess = require('node:child_process');
 const crypto = require('node:crypto');
 const dgram = require('node:dgram');
@@ -72,8 +82,25 @@ const zlib = require('node:zlib');
 
 const R2_ROUNDS = 3;
 const R10_ROUNDS = 5;
-/** The lane's own bound: a reading not begun within it is not run, so every reading's own waits end inside the step's. */
-const BUDGET_MS = 20 * 60 * 1000;
+/** The order the readings are taken in: those taken before any standard account is made first, then R11 and R6, which log on as accounts the lane makes. */
+const ORDER = Object.freeze(['R2', 'R10', 'R5', 'R1', 'R8', 'R4', 'R7', 'R12', 'R9', 'R3′', 'R13', 'R11', 'R6']);
+/**
+ * Each reading's own bound, in minutes: no wait of it outlasts the bound and no program of it starts past it, and it
+ * begins only while the bound fits in what is left of the lane's deadline. Each is set above what the reading takes on a
+ * healthy windows-2025 runner (the readings but R11 and R6 took under 30 minutes together in run 101; R12's waits are a
+ * fixed 150 s and 90 s), and R11's and R6's, never yet taken whole, above the sum of their rounds' usual waits, so a slow
+ * runner is cut by a reading's bound, with what it took kept, never by the step's limit.
+ */
+const BOUNDS = Object.freeze({ R2: 5, R10: 3, R5: 2, R1: 10, R8: 4, R4: 6, R7: 1, R12: 6, R9: 5, 'R3′': 8, R13: 5, R11: 12, R6: 10 });
+/** The lane's deadline, in minutes from the take's start, when the command names none (--deadline-min). */
+const DEADLINE_MIN = 38;
+/**
+ * What a take needs after its deadline to end by itself, in minutes: a cut reading's minute to settle, the cleanup's two,
+ * Defender read again and the record written. A take step's limit is its deadline and this at least (test/readings.test.js).
+ */
+const STOP_MIN = 6;
+/** How long a reading at its bound has to end (its own finally blocks: its tasks removed) before it is written cut and the lane goes on. */
+const SETTLE_MS = 60_000;
 const SERVER_TASK = '\\AGMessage\\Server';
 /** The stand-in server task's description: how the lane tells a task it made from the installed node's. */
 const STAND_IN = 'AGMessage readings: a stand-in for the server task';
@@ -102,8 +129,32 @@ const SYSTEM = 'S-1-5-18';
 const TRYCF = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/;
 const DRIVE_PATH = /^[A-Za-z]:\\/;
 
-const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 const now = () => performance.now();
+/**
+ * The bound of the reading being taken ({end}, by `now()`), kept with that reading's own calls: a reading cut at its
+ * bound keeps its spent bound in every call it still makes, and the next reading has its own. None outside a reading
+ * (the probes, the installer's life cycle's hands), where nothing is shortened.
+ */
+const bounded = new AsyncLocalStorage();
+/** What is left of the current reading's bound, in ms: Infinity outside a reading. */
+const left = () => { const b = bounded.getStore(); return b ? b.end - now() : Infinity; };
+/** `ms`, shortened to what is left of the current reading's bound: 0 once it is reached. */
+const within = (ms) => Math.max(0, Math.min(ms, left()));
+/** A wait of `ms` that ends at the current reading's bound. */
+const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, within(ms)); });
+/** A wait of `ms` no reading's bound shortens: the lane's own, while it ends and removes what it made. */
+const pause = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
+/** A time for the record's words: minutes from one, seconds below it. */
+const span = (ms) => (ms >= 60_000 ? Math.round(ms / 6000) / 10 + ' min' : Math.round(ms / 100) / 10 + ' s');
+
+/**
+ * What the lane made that outlives a reading unless it is removed: the tasks it registered (Task Scheduler runs them
+ * outside the step's process tree, where the runner's own cancel never reaches), its firewall rules, the standard accounts
+ * (each named here before PowerShell is asked to make it, so one made before a failure is still removed), and the
+ * watchdogs a reading started. Each is put here before it is made and taken out once it is removed or has ended;
+ * `release` removes what is left.
+ */
+const held = { tasks: new Set(), rules: new Set(), accounts: new Set(), pids: new Set() };
 
 // ---------------------------------------------------------------- the bundle, read as a zip (APPNOTE 4.3)
 
@@ -381,9 +432,12 @@ function udpHeard({ port = 9928, to = '255.255.255.255', ms = 3000 } = {}) {
   });
 }
 
-/** One GET of `url` within `ms`: {status, headers, body} (at most `max` bytes), or {error}. */
+/** One GET of `url` within `ms` (the current reading's bound at most): {status, headers, body} (at most `max` bytes), or {error}. */
 function get(url, { ms = 15000, max = 4 * 1024 * 1024, headers = {} } = {}) {
   return new Promise((resolve) => {
+    const room = within(ms);
+    if (room <= 0) { resolve({ error: 'not asked: the reading\'s own bound was reached' }); return; }
+    ms = room;
     const u = new URL(url);
     const lib = u.protocol === 'https:' ? https : u.protocol === 'http:' ? http : null;
     if (!lib) { resolve({ error: 'not an http or https address' }); return; }
@@ -404,10 +458,10 @@ function buildOf(body) {
   try { return String(JSON.parse(body).build || ''); } catch { return ''; /* not health's JSON: no build to name */ }
 }
 
-/** `/api/health` at loopback until it answers or `ms` passes: {ok, ms, build}. */
+/** `/api/health` at loopback until it answers or `ms` passes (or the current reading's bound): {ok, ms, build}. */
 async function waitHealth(port, { ms = 30000, every = 250 } = {}) {
   const t0 = now();
-  while (now() - t0 < ms) {
+  while (now() - t0 < ms && left() > 0) {
     const r = await get('http://127.0.0.1:' + port + '/api/health', { ms: 2000 });
     if (r.status === 200) {
       return { ok: true, ms: Math.round(now() - t0), build: buildOf(r.body) };
@@ -470,8 +524,11 @@ function sddlOfSave(bytes) {
 
 /** A client's connection to a pipe, made by a child Node of its own so a slow SMB answer never holds the lane. */
 const PIPE_REACH = String.raw`const s = require('node:net').connect(process.argv[1]); const say = (o) => { process.stdout.write(JSON.stringify(o)); s.destroy(); process.exit(0); }; s.on('connect', () => say({ connected: true, error: '' })); s.on('error', (e) => say({ connected: false, error: String(e.code || e.message) }));`;
-/** Whether a client reaches `pipePath` within `ms`: {connected, error}. */
+/** Whether a client reaches `pipePath` within `ms` (the current reading's bound at most): {connected, error}. */
 function pipeReach(pipePath, { ms = 15000 } = {}) {
+  const room = within(ms);
+  if (room < Math.min(ms, 1000)) return { connected: false, error: 'not tried: the reading\'s own bound was reached' };
+  ms = room;
   const r = childProcess.spawnSync(process.execPath, ['-e', PIPE_REACH, pipePath], { encoding: 'utf8', windowsHide: true, timeout: ms });
   if (r.error) return { connected: false, error: r.error.code === 'ETIMEDOUT' ? 'no answer within ' + ms / 1000 + ' s' : String(r.error.code || r.error.message) };
   try {
@@ -515,9 +572,15 @@ function system32() {
   if (!DRIVE_PATH.test(root)) throw new Error('SystemRoot does not name the Windows folder');
   return path.win32.join(root, 'System32');
 }
-/** A program run by its absolute path, from its own folder, within `ms`: {code, out, err}. */
-function run(file, args, { ms = 60000, env, cwd = path.dirname(file), input } = {}) {
-  const r = childProcess.spawnSync(file, args, { cwd, env, input, encoding: 'utf8', windowsHide: true, timeout: ms, maxBuffer: 16 * 1024 * 1024 });
+/**
+ * A program run by its absolute path, from its own folder, within `ms`: {code, out, err}. Inside a reading, `ms` is
+ * shortened to what is left of its bound, and with under a second left nothing is started (code null, said); `always`
+ * is the lane's own act of removing what it made, which keeps its own `ms` whatever the reading's bound.
+ */
+function run(file, args, { ms = 60000, env, cwd = path.dirname(file), input, always = false } = {}) {
+  const room = always ? ms : within(ms);
+  if (room < Math.min(ms, 1000)) return { code: null, out: '', err: 'not started: the reading\'s own bound was reached' };
+  const r = childProcess.spawnSync(file, args, { cwd, env, input, encoding: 'utf8', windowsHide: true, timeout: room, maxBuffer: 16 * 1024 * 1024 });
   return { code: r.status, out: String(r.stdout || ''), err: String(r.stderr || '') + (r.error ? String(r.error.code || r.error.message) : '') };
 }
 
@@ -641,12 +704,13 @@ async function guarded(fn) {
   try { return await fn(); } catch (e) { return { error: String((e && e.message) || e).slice(0, 500) }; }
 }
 
+/** `test()` again every `every` ms until it gives a value, `ms` has passed or the current reading's bound is reached: that value, or null. */
 async function until(test, ms, every = 500) {
   const t0 = now();
   for (;;) {
     const v = test();
     if (v) return v;
-    if (now() - t0 >= ms) return null;
+    if (now() - t0 >= ms || left() <= 0) return null;
     await sleep(every);
   }
 }
@@ -674,13 +738,17 @@ const SCRIPTS = {
   defender: String.raw`$ErrorActionPreference = 'Stop'; $s = Get-MpComputerStatus; $p = Get-MpPreference; ConvertTo-Json -InputObject @{ realtime = [bool]$s.RealTimeProtectionEnabled; onAccess = [bool]$s.OnAccessProtectionEnabled; antivirus = [bool]$s.AntivirusEnabled; service = [bool]$s.AMServiceEnabled; mode = [string]$s.AMRunningMode; exclusions = @($p.ExclusionPath | Where-Object { $_ }) } -Compress`,
 };
 
-/** The lane's hands on Windows, each program by its absolute path in `sys`: schtasks, PowerShell, a task registered and removed. */
+/**
+ * The lane's hands on Windows, each program by its absolute path in `sys`: schtasks, PowerShell, a task registered and
+ * removed, a firewall rule added and deleted. What is registered or added is `held` until it is removed; a removal is
+ * the lane's own act (`always`), made whatever is left of a reading's bound.
+ */
 function lane(work, sys) {
   const exe = (name) => path.win32.join(sys, name);
-  const schtasks = (args, ms) => run(exe('schtasks.exe'), args, { ms });
-  const ps = (script, extra = {}) => {
+  const schtasks = (args, { ms = 60000, always = false } = {}) => run(exe('schtasks.exe'), args, { ms, always });
+  const ps = (script, extra = {}, { ms = 60000, always = false } = {}) => {
     const r = run(path.win32.join(sys, 'WindowsPowerShell', 'v1.0', 'powershell.exe'), ['-NoProfile', '-NonInteractive', '-NoLogo', '-ExecutionPolicy', 'Bypass', '-Command', script],
-      { ms: 60000, env: { ...process.env, PSModulePath: path.win32.join(sys, 'WindowsPowerShell', 'v1.0', 'Modules'), ...extra } });
+      { ms, always, env: { ...process.env, PSModulePath: path.win32.join(sys, 'WindowsPowerShell', 'v1.0', 'Modules'), ...extra } });
     if (r.code !== 0) throw new Error('powershell.exe ended with ' + r.code + ': ' + r.err.trim().slice(0, 300));
     return JSON.parse(r.out.trim());
   };
@@ -689,6 +757,7 @@ function lane(work, sys) {
   const register = (name, xml, { user = '', password = '' } = {}) => {
     const file = path.join(work, name.replace(/\W+/g, '-') + '.xml');
     fs.writeFileSync(file, utf16(xml));
+    held.tasks.add(name);
     const r = schtasks(['/Create', '/TN', name, '/XML', file, ...(user ? ['/RU', user, '/RP', password] : []), '/F']);
     if (r.code !== 0) throw new Error('schtasks could not register ' + name + ': ' + withoutSecrets((r.err || r.out).trim(), password).slice(0, 300));
   };
@@ -697,10 +766,23 @@ function lane(work, sys) {
     const m = /^Last Result:\s*(-?\d+)/m.exec(r.out);
     return m ? Number(m[1]) : null;
   };
-  const remove = (name) => { schtasks(['/End', '/TN', name]); schtasks(['/Delete', '/TN', name, '/F']); };
+  // A task or a rule stays held until Windows says it is gone (deleted, or never there), so what could not be removed is
+  // tried again at the lane's end.
+  const remove = (name, ms = 15000) => {
+    schtasks(['/End', '/TN', name], { ms, always: true });
+    const d = schtasks(['/Delete', '/TN', name, '/F'], { ms, always: true });
+    if (d.code === 0 || /cannot find/i.test(d.err + d.out)) held.tasks.delete(name);
+  };
   /** A task's definition as schtasks shows it: {code, out}, code non-zero when there is no such task. */
   const query = (name) => schtasks(['/Query', '/TN', name, '/XML']);
-  return { exe, schtasks, ps, register, lastResult, remove, query };
+  /** A firewall rule added by its name and netsh's words for it: {code, out, err}. */
+  const ruleAdd = (name, words) => { held.rules.add(name); return run(exe('netsh.exe'), ['advfirewall', 'firewall', 'add', 'rule', 'name=' + name, ...words]); };
+  const ruleDelete = (name, ms = 15000) => {
+    const r = run(exe('netsh.exe'), ['advfirewall', 'firewall', 'delete', 'rule', 'name=' + name], { ms, always: true });
+    if (r.code === 0 || /no rules match/i.test(r.err + r.out)) held.rules.delete(name);
+    return r;
+  };
+  return { exe, schtasks, ps, register, lastResult, remove, query, ruleAdd, ruleDelete };
 }
 
 /**
@@ -727,9 +809,10 @@ function placeRefusal({ env = process.env, work, serverTask }) {
  * R12: RestartOnFailure as the server task sets it (3 × 1 min), asked twice, each time of a task and a folder of its own,
  * so a restart the first queued can never be counted for the second: a task whose action exits 1 is run and watched for a
  * second start, then removed (a restart it still has queued dies with it, and would land in its own folder anyway); then a
- * task whose action exits 0 is run and watched for `zeroMs`. {tasks, nonZero, zero}, each {starts, waitedMs, lastResult}.
+ * task whose action exits 0 is run and watched for `zeroMs`. {tasks, nonZero, zero}, each {starts, waitedMs, lastResult};
+ * the first phase reported (`progress`) once it is measured.
  */
-async function takeR12(L, { node, self, dir, cwd }, { nonZeroMs = 150000, zeroMs = 90000, every = 1000 } = {}) {
+async function takeR12(L, { node, self, dir, cwd }, { nonZeroMs = 150000, zeroMs = 90000, every = 1000, progress = () => {} } = {}) {
   const phase = async (name, code, waitMs) => {
     const own = path.join(dir, code === 0 ? 'zero' : 'non-zero');
     fs.mkdirSync(own, { recursive: true });
@@ -745,6 +828,7 @@ async function takeR12(L, { node, self, dir, cwd }, { nonZeroMs = 150000, zeroMs
     } finally { L.remove(name); }
   };
   const nonZero = await phase(RESTART_TASKS.nonZero, 1, nonZeroMs);
+  progress({ tasks: [RESTART_TASKS.nonZero, RESTART_TASKS.zero], nonZero });
   const zero = await phase(RESTART_TASKS.zero, 0, zeroMs);
   return { tasks: [RESTART_TASKS.nonZero, RESTART_TASKS.zero], nonZero, zero };
 }
@@ -781,20 +865,28 @@ function seedHalls(dataDir, { halls, messages, at = Date.now() - R1_QUIET_MS }) 
 
 /**
  * A page as the hall page connects: Socket.IO 4 over its WebSocket transport (Engine.IO 4), naming `build` as a page
- * names the build that served it. Resolves {emit(event, arg) → the server's answer or null, closed, close()} once the
- * server took it, or null when it did not within `ms` (refused, nothing listening, or silent).
+ * names the build that served it. Resolves {emit(event, arg, ms) → the server's answer, or null when none came within
+ * `ms` (10 s) or the socket closed; closed; close()} once the server took it, or null when it did not within `ms`
+ * (refused, nothing listening, or silent). Every wait ends by the current reading's bound.
  */
 function pageSocket(port, { build, ms = 10000 }) {
   return new Promise((resolve) => {
+    const room = within(ms);
+    if (room <= 0) { resolve(null); return; }
     let ws;
     try { ws = new WebSocket('ws://127.0.0.1:' + port + '/socket.io/?EIO=4&transport=websocket'); } catch { resolve(null); return; }
     const acks = new Map();
     let next = 0;
     let ended;
     const closed = new Promise((r) => { ended = r; });
-    const timer = setTimeout(() => { resolve(null); ws.close(); }, ms);
+    const timer = setTimeout(() => { resolve(null); ws.close(); }, room);
     const page = {
-      emit: (event, arg) => new Promise((r) => { const id = next++; acks.set(id, r); ws.send('42' + id + JSON.stringify([event, arg])); }),
+      emit: (event, arg, waitMs = 10000) => new Promise((r) => {
+        const id = next++;
+        const late = setTimeout(() => { acks.delete(id); r(null); }, within(waitMs));
+        acks.set(id, (v) => { clearTimeout(late); r(v); });
+        ws.send('42' + id + JSON.stringify([event, arg]));
+      }),
       closed,
       close: () => ws.close(),
     };
@@ -830,23 +922,39 @@ function paceMs(tries, pace = PAGE_PACE) {
   return Math.min(crypto.randomInt(2) ? base + deviation : base - deviation, pace.maxMs);
 }
 
-/** The bundle's watchdog, started as a person's window starts it: {child, exited (its code), tail()}. */
+/**
+ * A process and every process it started, ended outright: on Windows by taskkill /T /F by its absolute path (a watchdog's
+ * forked server outlives its parent's end there), elsewhere, where the lane's watchdogs are the tests', by SIGTERM.
+ */
+function endTree(pid, ms = 15000) {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return;
+  if (process.platform === 'win32') run(path.win32.join(system32(), 'taskkill.exe'), ['/PID', String(pid), '/T', '/F'], { ms, always: true });
+  else { try { process.kill(pid, 'SIGTERM'); } catch { /* it has ended already */ } }
+}
+
+/** The bundle's watchdog, started as a person's window starts it, `held` until it ends: {child, exited (its code), tail()}. */
 function startWatchdog(node, supervise, env) {
   const child = childProcess.spawn(node, [supervise], { cwd: path.dirname(path.dirname(supervise)), env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  if (child.pid) held.pids.add(child.pid);
   let tail = '';
   const keep = (c) => { tail = keepTail(tail, c.toString('utf8')); };
   child.stdout.on('data', keep);
   child.stderr.on('data', keep);
-  const exited = new Promise((resolve) => { child.once('exit', (code) => resolve(code)); child.once('error', () => resolve(null)); });
+  const exited = new Promise((resolve) => { child.once('exit', (code) => { held.pids.delete(child.pid); resolve(code); }); child.once('error', () => resolve(null)); });
   return { child, exited, tail: () => tail };
 }
-/** A watchdog ended: stopped at loopback with the proof, or ended outright when that is not answered within 10 s. */
+/**
+ * A watchdog ended: stopped at loopback with the proof, or its tree ended outright when that is not answered within
+ * 10 s; one still running 5 s later stays `held`, for the lane's end. Its waits are the lane's own, so a reading at its
+ * bound still ends what it started.
+ */
 async function endWatchdog(w, wire, port, token) {
   if (!w || w.child.exitCode !== null || w.child.signalCode !== null) return;
   await wire.stop({ port, token, reason: 'stop', by: 'the readings lane', force: 'the reading ended' });
-  if ((await Promise.race([w.exited.then(() => true), sleep(10000).then(() => false)]))) return;
-  w.child.kill();
-  await Promise.race([w.exited, sleep(5000)]);
+  if ((await Promise.race([w.exited.then(() => true), pause(10000).then(() => false)]))) return;
+  if (process.platform === 'win32') endTree(w.child.pid);
+  else w.child.kill();
+  await Promise.race([w.exited, pause(5000)]);
 }
 
 /**
@@ -875,10 +983,12 @@ async function gapRound({ node, supervise, env, port, token, wire, code, dataDir
   const next = startWatchdog(node, supervise, env);
   const t1 = now();
   const health = waitHealth(port, { ms: startMs, every: 50 }).then((h) => ({ ...h, fromStopMs: Math.round(now() - t0), fromStartMs: Math.round(now() - t1) }));
-  await page.closed;
+  // The old server's socket closes as it ends; a close that never comes is waited for 15 s, never for ever.
+  await Promise.race([page.closed, sleep(15000)]);
+  page.close();
   let tries = 0;
   let back = null;
-  while (!back && now() - t0 < startMs) {
+  while (!back && now() - t0 < startMs && left() > 0) {
     await sleep(paceMs(tries));
     tries++;
     const again = await pageSocket(port, { build: hello.build, ms: 5000 });
@@ -896,14 +1006,16 @@ async function gapRound({ node, supervise, env, port, token, wire, code, dataDir
  * (under `app`) on `port`, asked as the machine asks (app/lib/machinewire.js of this checkout, the commit the bundle was
  * built from): a start that settles the folder (not measured), then `rounds` gaps, each a page seated, the stop at
  * loopback with the proof of a token made for this reading (never kept), and the next start. Run only from the checkout,
- * never from the copy the stand-in tasks run. {port, sizes: [{name, halls, messages, firstMs, rounds: [gapRound's result]}]}.
+ * never from the copy the stand-in tasks run. {port, sizes: [{name, halls, messages, firstMs, rounds: [gapRound's result]}]},
+ * reported (`progress`) after each round; no round or size is begun once the reading's bound is reached.
  */
-async function takeR1({ node, app, work, port }, { sizes = R1_SIZES, rounds = R1_ROUNDS, startMs = 60000 } = {}) {
+async function takeR1({ node, app, work, port }, { sizes = R1_SIZES, rounds = R1_ROUNDS, startMs = 60000, progress = () => {} } = {}) {
   const wire = require('../app/lib/machinewire.js');
   const supervise = path.join(app, 'supervise.js');
   const token = crypto.randomBytes(8).toString('hex');
   const out = { port, sizes: [] };
   for (const size of sizes) {
+    if (left() <= 0) break;
     const dir = path.join(work, 'r1', size.name);
     fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     const dataDir = path.join(dir, 'data');
@@ -917,10 +1029,11 @@ async function takeR1({ node, app, work, port }, { sizes = R1_SIZES, rounds = R1
       const first = await waitHealth(port, { ms: startMs });
       if (!first.ok) { rec.error = 'the bundle did not serve: ' + withoutSecrets(w.tail(), token).slice(-600); continue; }
       rec.firstMs = first.ms;
-      for (let i = 0; i < rounds; i++) {
+      for (let i = 0; i < rounds && left() > 0; i++) {
         const r = await gapRound({ node, supervise, env, port, token, wire, code, dataDir, startMs }, w);
         w = r.watchdog;
         rec.rounds.push(r.result);
+        progress(out);
         if (r.result.error) { rec.rounds[rec.rounds.length - 1].words = withoutSecrets(w.tail(), token).slice(-600); break; }
       }
     } finally { await endWatchdog(w, wire, port, token); }
@@ -948,6 +1061,7 @@ async function takeR9({ node, app, work, port }, { sizes = R1_SIZES, startMs = 6
   const token = crypto.randomBytes(8).toString('hex');
   const out = { sizes: [] };
   for (const size of sizes) {
+    if (left() <= 0) break;
     const dir = path.join(work, 'r9', size.name);
     fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     const dataDir = path.join(dir, 'data');
@@ -984,9 +1098,10 @@ async function takeR9({ node, app, work, port }, { sizes = R1_SIZES, startMs = 6
  * it is run, serves, and is stopped at loopback with the proof of a token its own server made; each round records whether the task ended with 0, stayed stopped, and
  * last-stop.json says it saved. {rounds: [{saved, lastResult, state}], savedCount}. The give-up and configuration refusal
  * ending the task with 0 are launch.js serve's exit mapping, held on Linux (test/machine.test.js); here the task's own
- * stop-saves are counted, 10 of 10 the mark.
+ * stop-saves are counted, 10 of 10 the mark. Reported (`progress`) after each round; no round begun once the reading's
+ * bound is reached.
  */
-async function takeR3prime(L, { node, app, work, port }, { rounds = 10, startMs = 60000 } = {}) {
+async function takeR3prime(L, { node, app, work, port }, { rounds = 10, startMs = 60000, progress = () => {} } = {}) {
   const wire = require('../app/lib/machinewire.js');
   const launch = path.join(app, 'launch.js');
   const folders = serveFolders(work, 'r3');
@@ -996,7 +1111,8 @@ async function takeR3prime(L, { node, app, work, port }, { rounds = 10, startMs 
   L.register(task, require('../app/machine.js').serverTaskXml({ uri: task, node, launch, ...folders, events: path.join(work, 'r3', 'events.jsonl'), port }));
   const out = { task, rounds: [], savedCount: 0 };
   try {
-    for (let i = 0; i < rounds; i++) {
+    for (let i = 0; i < rounds && left() > 0; i++) {
+      if (i) progress(out);
       fs.rmSync(path.join(folders.data, 'last-stop.json'), { force: true });
       const ran = L.schtasks(['/Run', '/TN', task]);
       if (ran.code !== 0) { out.rounds.push({ error: 'schtasks could not run it: ' + (ran.err || ran.out).trim().slice(0, 160) }); continue; }
@@ -1026,9 +1142,10 @@ async function takeR3prime(L, { node, app, work, port }, { rounds = 10, startMs 
  * account's inbox, the task that runs as the account run, its schtasks /run's exit code read (probe-run), and the
  * control task's answer to that id waited for in its outbox (`ranAs`, `for`). The second account's rounds run its own task,
  * whose schtasks /run must be refused, and no answer must come. {sid, controlTask, own, other} (each round {code, err,
- * answered, ranAs, for}); the accounts, their tasks and profiles removed whatever happened.
+ * answered, ranAs, for}), reported (`progress`) after each round; the accounts, their tasks and profiles removed whatever
+ * happened, each account named as held before PowerShell is asked to make it.
  */
-async function takeR11(L, { node, script, self, work, sys }, { rounds = R11_ROUNDS, answerMs = 30000, quietMs = 5000 } = {}) {
+async function takeR11(L, { node, script, self, work, sys }, { rounds = R11_ROUNDS, answerMs = 30000, quietMs = 5000, progress = () => {} } = {}) {
   // The control task acts only on what the install record lets it: on a machine with one, R11 would act on that install.
   if (run(L.exe('reg.exe'), ['query', 'HKLM\\SOFTWARE\\AGMessage', '/reg:64']).code === 0) {
     return { skipped: 'this machine has an AGMessage install record: R11\'s control task would act on it' };
@@ -1039,12 +1156,11 @@ async function takeR11(L, { node, script, self, work, sys }, { rounds = R11_ROUN
   // Letters of each kind and digits, from node:crypto, for the runner's password rules; never written anywhere.
   const password = 'Aa1!' + crypto.randomBytes(18).toString('base64url');
   const names = [R11_USERS.own, R11_USERS.other];
-  const made = [];
   let controlName = '';
+  for (const n of names) held.accounts.add(n);
   try {
     const users = L.ps(SCRIPTS.users, { AGM_R11_USERS: names.join(','), AGM_R11_PASSWORD: password });
     const list = (Array.isArray(users) ? users : [users]).filter((u) => u && /^S-1-[0-9-]+$/.test(String(u.sid)));
-    made.push(...list);
     if (list.length !== 2) return { skipped: 'the two standard accounts were not made (' + list.length + ' of 2)' };
     if (list.some((u) => u.admin === true)) return { skipped: 'an account made for the reading is an administrator, so it measures nothing of a standard account' };
     const own = list.find((u) => u.name === R11_USERS.own);
@@ -1061,9 +1177,10 @@ async function takeR11(L, { node, script, self, work, sys }, { rounds = R11_ROUN
       if (granted.code !== 0) throw new Error('the ' + who + ' account was not granted its folder: ' + (granted.err || granted.out).trim().slice(0, 200));
       writeJson(path.join(probe, 'plan.json'), { task: controlName });
       const asName = R11_TASKS.as + who;
-      L.register(asName, taskXml({ description: 'AGMessage readings R11: schtasks /run of a control task, as ' + u.name, sid: u.sid, logon: 'Password', command: node, args: [self, 'probe-run', probe], cwd: path.dirname(self) }), { user: u.name, password });
+      // Its action is one schtasks /run of 30 s at most: Task Scheduler ends it at 10 minutes, whatever the lane does.
+      L.register(asName, taskXml({ description: 'AGMessage readings R11: schtasks /run of a control task, as ' + u.name, sid: u.sid, logon: 'Password', limit: 'PT10M', command: node, args: [self, 'probe-run', probe], cwd: path.dirname(self) }), { user: u.name, password });
       try {
-        for (let i = 0; i < rounds; i++) {
+        for (let i = 0; i < rounds && left() > 0; i++) {
           const id = crypto.randomBytes(12).toString('hex');
           const inbox = path.join(root, 'machine', 'inbox', own.sid, 'request.json');
           const answerFile = path.join(root, 'machine', 'outbox', own.sid, 'answer.json');
@@ -1078,15 +1195,24 @@ async function takeR11(L, { node, script, self, work, sys }, { rounds = R11_ROUN
           const answer = await until(answerOf, who === 'own' ? answerMs : quietMs);
           out[who].push({ code: ran.code, err: ran.code === 0 ? '' : ran.err, answered: !!answer, ranAs: answer ? String(answer.ranAs || '') : '', for: answer ? String(answer.for || '') : '', words: answer ? String(answer.words || '').slice(0, 200) : '' });
           fs.rmSync(inbox, { force: true });
+          progress(out);
         }
       } finally { L.remove(asName); }
     }
     return out;
   } finally {
-    // Its control task goes whatever a round threw, before the accounts it names.
+    // Its control task goes whatever a round threw, before the accounts it names; the accounts go whether or not
+    // PowerShell said it made them (one made before it failed is removed too).
     if (controlName) await guarded(() => L.remove(controlName));
-    if (made.length) await guarded(() => L.ps(SCRIPTS.usersGone, { AGM_R11_USERS: names.join(',') }));
+    await accountsGone(L, names);
   }
+}
+
+/** Standard accounts the lane named, removed with the profiles a logon made for them, and no longer held once that is said. */
+async function accountsGone(L, names) {
+  const r = await guarded(() => L.ps(SCRIPTS.usersGone, { AGM_R11_USERS: names.join(',') }, { always: true }));
+  if (!r.error) for (const n of names) held.accounts.delete(n);
+  return r;
 }
 
 /**
@@ -1098,18 +1224,18 @@ async function takeR11(L, { node, script, self, work, sys }, { rounds = R11_ROUN
  * bundle's launch.js export, run by a task with its logon, as Inno's ExecAsOriginalUser runs it) of a stand-in portable
  * folder last run by this build into that folder; the bundle's machine.js import --step take reading that bundle elevated
  * and verifying it; and this lane, elevated, reading the file the account's probe made in its %LOCALAPPDATA%\AGMessage.
- * {sid, stage, export, take, profileRead}; the account, its task and its profile removed whatever happened.
+ * {sid, stage, export, take, profileRead}, reported (`progress`) after each step; the account, its task and its
+ * profile removed whatever happened, the account named as held before PowerShell is asked to make it.
  */
-async function takeR6(L, { node, root, self, work, sys }, { exportMs = 150000 } = {}) {
+async function takeR6(L, { node, root, self, work, sys }, { exportMs = 150000, progress = () => {} } = {}) {
   const dir = path.join(work, 'r6');
   const machineRoot = path.join(dir, 'ProgramData', 'AGMessage');
   const source = path.join(dir, 'portable', 'AGMessage');
   const password = 'Aa1!' + crypto.randomBytes(18).toString('base64url');
-  let made = false;
+  held.accounts.add(R6_USER);
   try {
     const users = L.ps(SCRIPTS.users, { AGM_R11_USERS: R6_USER, AGM_R11_PASSWORD: password });
     const u = (Array.isArray(users) ? users : [users]).find((x) => x && x.name === R6_USER && /^S-1-[0-9-]+$/.test(String(x.sid)));
-    made = !!u;
     if (!u) return { skipped: 'the standard account was not made' };
     if (u.admin === true) return { skipped: 'the account made for the reading is an administrator, so it measures nothing of a standard account' };
     // The machine folder's own children and machine\'s, as prepare makes them (their grants are the import's to set).
@@ -1141,6 +1267,7 @@ async function takeR6(L, { node, root, self, work, sys }, { exportMs = 150000 } 
       return { code: r.code, words: String(rec.words || (r.err || r.out).trim()).slice(0, 400), verified: rec.verified === true };
     };
     out.stage = step('stage', ['--sys', sys]);
+    progress(out);
     if (out.stage.code !== 0) return out;
     writeJson(path.join(probe, 'plan.json'), { launch: path.join(root, 'app', 'launch.js'), source, machine: machineRoot });
     L.register(R6_TASK, taskXml({ description: 'AGMessage readings R6: launch.js export, as ' + u.name, sid: u.sid, logon: 'Password', limit: 'PT10M', command: node, args: [self, 'probe-export', probe], cwd: path.dirname(self) }), { user: u.name, password });
@@ -1152,17 +1279,168 @@ async function takeR6(L, { node, root, self, work, sys }, { exportMs = 150000 } 
       let said = {};
       try { said = readJson(path.join(machineRoot, 'machine', 'inbox', u.sid, 'import', 'export.json')); } catch (e) { said = { words: 'its answer was not read elevated (' + (e.code || e.message) + ')' }; }
       out.export = { code: ran.code, words: String(said.words || ran.out || '').slice(0, 400), user: String(ran.user || ''), made: String(ran.made || '') };
+      progress(out);
       out.take = step('take', ['--app', root, '--source', source, '--sys', sys]);
       try { fs.readFileSync(path.join(String(ran.local), 'AGMessage', 'r6-probe.txt')); out.profileRead = { ok: true }; } catch (e) { out.profileRead = { ok: false, code: String((e && e.code) || 'EIO') }; }
       return out;
     } finally { L.remove(R6_TASK); }
   } finally {
-    if (made) await guarded(() => L.ps(SCRIPTS.usersGone, { AGM_R11_USERS: R6_USER }));
+    await accountsGone(L, [R6_USER]);
   }
+}
+
+/**
+ * The readings of `plan` ([id, fn(progress)], in order) taken one after another into `raw.readings`, each on its own and
+ * within its own bound (`boundsMs[id]`) and the lane's deadline (`deadlineMs` from `began`), so the take ends by itself:
+ *   - one `skip` names is written with its words, and not taken;
+ *   - one begins only while its bound fits in what is left of the deadline, else it is written "not taken: the lane's
+ *     deadline" with the time left and the time it needs, so a reading begun is never cut by the step's limit;
+ *   - as it begins its record says so (`running`) and is written, and each round it reports (`progress`) is written beside
+ *     that, so a lane lost in it still says where it stopped and what it had taken;
+ *   - at its bound every wait of it ends and no program of it starts (`within`, by its own bound in `bounded`, which the
+ *     next reading does not share); one not ended `settleMs` after its bound is written cut, its rounds so far kept, and
+ *     the lane goes on; one that ends past its bound is written cut too, what it took kept and never judged;
+ *   - its record is written as it ends, its begin and its seconds kept in `raw.times` and said on the console.
+ * A record that cannot be written is said, and the readings go on. Resolves once each reading of the plan is written.
+ */
+async function takeAll(plan, { raw, save, say = (line) => console.log(line), began = now(), deadlineMs, boundsMs, skip = new Map(), settleMs = SETTLE_MS }) {
+  if (!raw.readings || typeof raw.readings !== 'object') raw.readings = {};
+  if (!raw.times || typeof raw.times !== 'object') raw.times = {};
+  const at = () => Math.round((now() - began) / 1000);
+  const write = (when) => { try { save(); } catch (e) { say('readings-take: the record could not be written ' + when + ' (' + e.message + ')'); } };
+  for (const [id, fn] of plan) {
+    const boundMs = boundsMs[id];
+    const leftMs = deadlineMs - (now() - began);
+    let rec = null;
+    if (skip.has(id)) rec = { skipped: skip.get(id) };
+    else if (!(boundMs > 0)) rec = { error: 'it has no bound of its own (BOUNDS)' };
+    else if (boundMs > leftMs) rec = { skipped: 'not taken: the lane\'s deadline (' + span(Math.max(0, leftMs)) + ' left of its ' + span(deadlineMs) + ', and its own bound is ' + span(boundMs) + ')' };
+    if (rec) {
+      raw.readings[id] = rec;
+      write('after ' + id);
+      say('readings-take: ' + id + ' ' + endWords(rec) + ' at ' + at() + ' s');
+      continue;
+    }
+    const running = 'begun at ' + at() + ' s, its own bound ' + span(boundMs);
+    raw.readings[id] = { running };
+    raw.times[id] = { begunS: at() };
+    write('as ' + id + ' began');
+    say('readings-take: ' + id + ' ' + running);
+    const end = now() + boundMs;
+    let open = true;
+    let sofar = {};
+    const progress = (partial) => {
+      if (!open || !partial || typeof partial !== 'object') return;
+      sofar = partial;
+      raw.readings[id] = { ...partial, running };
+      write('in ' + id);
+    };
+    const LATE = Symbol('late');
+    let timer = null;
+    const late = new Promise((resolve) => { timer = setTimeout(() => resolve(LATE), boundMs + settleMs); });
+    const r = await Promise.race([bounded.run({ end }, () => guarded(() => fn(progress))), late]);
+    clearTimeout(timer);
+    open = false;
+    if (r === LATE) rec = { ...sofar, cut: 'its own bound of ' + span(boundMs) + ': it had not ended ' + span(settleMs) + ' after it' };
+    else if (now() >= end) rec = { ...(r && typeof r === 'object' ? r : {}), cut: 'its own bound of ' + span(boundMs) + ', reached before it ended: what it took by then is kept, never judged' };
+    else rec = r;
+    raw.readings[id] = rec;
+    raw.times[id].s = at() - raw.times[id].begunS;
+    write('after ' + id);
+    say('readings-take: ' + id + ' ' + endWords(rec) + ' at ' + at() + ' s');
+  }
+}
+/** What became of a reading, for the console's line. */
+const endWords = (r) => (r && r.cut ? 'cut at ' + r.cut : r && r.error ? 'failed: ' + r.error : r && r.skipped ? 'not run: ' + r.skipped : 'taken');
+
+/**
+ * What the lane still holds (`held`), removed: each watchdog's process tree ended, each task ended and deleted, each
+ * firewall rule deleted and, with `accounts`, the standard accounts and their profiles removed; each act within `actMs`,
+ * and none begun once `ms` has passed since the first. {removed, left}, by name, for the record.
+ */
+function release(L, { ms = 120_000, actMs = 15_000, accounts = true } = {}) {
+  const t0 = now();
+  const time = () => now() - t0 < ms;
+  const removed = [];
+  for (const pid of [...held.pids]) {
+    if (!time()) break;
+    endTree(pid, actMs);
+    held.pids.delete(pid);
+    removed.push('process ' + pid);
+  }
+  for (const name of [...held.tasks]) {
+    if (!time()) break;
+    L.remove(name, actMs);
+    if (!held.tasks.has(name)) removed.push(name);
+  }
+  for (const name of [...held.rules]) {
+    if (!time()) break;
+    L.ruleDelete(name, actMs);
+    if (!held.rules.has(name)) removed.push('rule ' + name);
+  }
+  if (accounts && held.accounts.size && time()) {
+    const names = [...held.accounts];
+    try {
+      L.ps(SCRIPTS.usersGone, { AGM_R11_USERS: names.join(',') }, { always: true, ms: Math.max(actMs, Math.min(60_000, ms - (now() - t0))) });
+      for (const n of names) { held.accounts.delete(n); removed.push('account ' + n); }
+    } catch { /* still held, and said in `left` */ }
+  }
+  const stillHeld = [...[...held.pids].map((p) => 'process ' + p), ...held.tasks, ...[...held.rules].map((r) => 'rule ' + r), ...[...held.accounts].map((a) => 'account ' + a)];
+  return { removed, left: stillHeld };
+}
+
+/**
+ * A take stopped by a signal (the runner's Ctrl+C, then its Ctrl+Break, at a step's limit; a SIGTERM): the record written
+ * at once, not whole and saying what stopped it; then each watchdog, task and rule it holds ended and removed, each act
+ * within 2.5 s and all within 6 s, inside the 7.5 s the runner waits before its Ctrl+Break (the accounts are left to the
+ * runner, which is thrown away), the record written again with what was removed; then `exit(2)`.
+ */
+function stopOn(signal, { raw, save, L, began, exit = (code) => process.exit(code), say = (line) => console.error(line) }) {
+  raw.complete = false;
+  raw.stopped = signal + ' at ' + Math.round((now() - began) / 1000) + ' s';
+  const step = Array.isArray(raw.takes) ? raw.takes[raw.takes.length - 1] : null;
+  if (step && typeof step === 'object') step.stopped = raw.stopped;
+  const write = () => { try { save(); } catch (e) { say('readings-take: the record could not be written at the stop (' + e.message + ')'); } };
+  write();
+  raw.cleanup = release(L, { ms: 6000, actMs: 2500, accounts: false });
+  write();
+  say('readings-take: stopped by ' + raw.stopped + '; the record is written, not whole' + (raw.cleanup.left.length ? '; still there: ' + raw.cleanup.left.join(', ') : ''));
+  exit(2);
+}
+
+/** A record the lane begins: the runner, and nothing measured yet. */
+function newRecord(env) {
+  return {
+    v: 1,
+    at: new Date().toISOString(),
+    complete: false,
+    runner: { os: os.type() + ' ' + os.release(), image: [env.ImageOS, env.ImageVersion].filter(Boolean).join(' ') || 'unknown', arch: os.arch(), cpus: os.cpus().length, memoryGb: Math.round(os.totalmem() / 2 ** 30), node: process.version },
+    build: null,
+    defender: null,
+    defenderEnd: null,
+    readings: {},
+  };
+}
+
+/**
+ * The record an earlier take of the same job wrote at `file`, to add to (--add): {raw} when it is the lane's; {} when there
+ * is none, and a new record is begun; {refused} when a file is there that is not the lane's, which is never written over.
+ */
+function recordAt(file) {
+  let text;
+  try { text = fs.readFileSync(file, 'utf8'); } catch (e) {
+    if (e.code === 'ENOENT') return {};
+    return { refused: file + ' could not be read (' + (e.code || e.message) + '), so it is not added to or written over' };
+  }
+  let r;
+  try { r = JSON.parse(text.replace(/^\uFEFF/, '')); } catch { r = null; /* not JSON: not the lane's */ }
+  if (!r || typeof r !== 'object' || r.v !== 1 || !r.readings || typeof r.readings !== 'object') return { refused: file + ' is not the lane\'s record, so it is not added to or written over' };
+  return { raw: r };
 }
 
 async function take(o) {
   if (process.platform !== 'win32') { console.error('readings-take: the readings are Windows\'; nothing was taken'); return 64; }
+  const began = now();
   const work = path.resolve(o.work);
   const env = o.env || process.env;
   // The machine is asked first, and the bundle read, before anything is made or removed: a run refused, or handed
@@ -1174,238 +1452,246 @@ async function take(o) {
   const L = lane(work, sys);
   const refused = placeRefusal({ env, work, serverTask: L.query(SERVER_TASK) });
   if (refused) { console.error('readings-take: ' + refused + '; nothing was taken'); return 64; }
-  const t0 = now();
-  const raw = {
-    v: 1,
-    at: new Date().toISOString(),
-    complete: false,
-    runner: { os: os.type() + ' ' + os.release(), image: [env.ImageOS, env.ImageVersion].filter(Boolean).join(' ') || 'unknown', arch: os.arch(), cpus: os.cpus().length, memoryGb: Math.round(os.totalmem() / 2 ** 30), node: process.version },
-    build: null,
-    defender: null,
-    defenderEnd: null,
-    readings: {},
-  };
-  try { raw.defender = readJson(o.defender); } catch (e) { raw.defender = null; console.error('readings-take: no Defender record (' + e.message + ')'); }
   const out = path.resolve(o.out);
+  const was = o.add ? recordAt(out) : {};
+  if (was.refused) { console.error('readings-take: ' + was.refused + '; nothing was taken'); return 2; }
+  const raw = was.raw || newRecord(env);
+  raw.complete = false;
+  delete raw.stopped;
+  const deadlineMin = o.deadlineMin || DEADLINE_MIN;
+  // Each take that wrote this record, with its deadline and what it took or left: one lost part way has no `ended`.
+  const step = { at: new Date().toISOString(), deadlineMin, only: o.only || [], skip: o.skip || [], ended: '' };
+  raw.takes = [...(Array.isArray(raw.takes) ? raw.takes : []), step];
+  try { raw.defender = readJson(o.defender); } catch (e) { raw.defender = null; console.error('readings-take: no Defender record (' + e.message + ')'); }
   const save = () => { fs.mkdirSync(path.dirname(out), { recursive: true }); writeJson(out, raw); };
   fs.rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 });
   fs.mkdirSync(path.join(work, 'lane'), { recursive: true });
   fs.writeFileSync(path.join(work, WORK_MARK), 'The Windows readings lane\'s work folder: removed and made again by each run of tools/readings-take.js.\n');
   // The record is there before the first reading begins, so a lane cut short in it still has Defender's record judged.
   try { save(); } catch (e) { console.error('readings-take: the record could not be written before the readings (' + e.message + ')'); }
-  // The stand-in tasks run as LocalService: it may read the payload and this file, and write its own folders.
-  const granted = run(L.exe('icacls.exe'), [work, '/grant', '*' + LOCAL_SERVICE + ':(OI)(CI)M']);
-  if (granted.code !== 0) console.error('readings-take: LocalService was not granted the work folder: ' + granted.out + granted.err);
-  const self = path.join(work, 'lane', 'readings-take.js');
-  fs.copyFileSync(__filename, self);
-  // Every reading but R2 reads this build's payload, laid once into a folder of its own.
-  const root = path.join(work, 'payload', 'AGMessage');
-  const node = path.join(root, 'node', 'node.exe');
-  let laid = false;
-  /** One reading, on its own and within the lane's bound; the record written after it, so a lane cut short says what it took. */
-  const reading = async (id, fn) => {
-    const r = now() - t0 > BUDGET_MS ? { skipped: 'the lane\'s own bound of ' + BUDGET_MS / 60000 + ' min was reached before it began' } : await guarded(fn);
-    raw.readings[id] = r;
-    console.log('readings-take: ' + id + ' ' + (r && r.error ? 'failed: ' + r.error : r && r.skipped ? 'not run: ' + r.skipped : 'taken'));
-    try { save(); } catch (e) { console.error('readings-take: the record could not be written after ' + id + ' (' + e.message + ')'); }
-  };
-  const needsPayload = () => { if (!laid) throw new Error('the payload was not laid'); };
-
-  await reading('R2', () => {
-    const dest = path.join(work, 'r2', 'AGMessage');
-    const first = layOut(o.zip, dest, entries, { strip: 1 });
-    let previous = null;
-    let overWhy = '';
-    if (o.previous) {
-      try { previous = { entries: zipEntries(o.previous) }; topFolder(previous.entries); } catch (e) { previous = null; overWhy = 'its zip could not be read: ' + e.message; }
-    } else overWhy = 'none was given';
-    const over = previous ? releaseOf(o.previous) : '';
-    const rounds = [];
-    for (let i = 0; i < R2_ROUNDS; i++) {
-      if (previous) {
-        // The previous payload laid whole into an empty folder first (not measured), then this build over it.
-        fs.rmSync(dest, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
-        layOut(o.previous, dest, previous.entries, { strip: 1 });
-      }
-      rounds.push(Math.round(layOut(o.zip, dest, entries, { strip: 1 }).ms));
-    }
-    fs.rmSync(path.join(work, 'r2'), { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
-    return { files: first.files, bytes: first.bytes, emptyMs: Math.round(first.ms), rounds, over: previous ? (over ? 'v' + over : path.basename(o.previous)) : '', overWhy, how: 'each file inflated to a name of its own beside it, then renamed over the one before' };
-  });
+  // A signal (the runner's cancel at a step's limit) writes the record and removes what the lane holds before it exits.
+  let stopping = false;
+  const onSignal = (signal) => { if (stopping) return; stopping = true; stopOn(signal, { raw, save, L, began }); };
+  const signals = ['SIGINT', 'SIGBREAK', 'SIGTERM'];
+  for (const s of signals) process.on(s, onSignal);
   try {
-    layOut(o.zip, root, entries, { strip: 1 });
-    laid = true;
-  } catch (e) { console.error('readings-take: the payload was not laid (' + e.message + ')'); }
-  try { raw.build = readJson(path.join(root, 'app', 'build.json')); } catch { raw.build = null; /* a bundle without its stamp: the readings name no build */ }
-
-  await reading('R10', () => {
-    const rounds = [];
-    for (let i = 0; i < R10_ROUNDS; i++) {
-      const dest = path.join(os.tmpdir(), 'agm-r10-' + crypto.randomBytes(6).toString('hex'), 'node.exe');
-      const x = extractOne(o.zip, '/node/node.exe', dest, entries);
-      const t1 = now();
-      const r = run(dest, ['-e', '0'], { ms: 120000 });
-      const runMs = now() - t1;
-      rounds.push({ extractMs: Math.round(x.ms), runMs: Math.round(runMs), totalMs: Math.round(x.ms + runMs), code: r.code, ...(r.code === 0 ? {} : { err: r.err.trim().slice(0, 200) }) });
-      fs.rmSync(path.dirname(dest), { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
-    }
-    return { rounds, where: os.tmpdir() };
-  });
-
-  await reading('R5', () => {
-    needsPayload();
-    const paths = [node, path.join(root, 'bin', 'cloudflared.exe'), ...(o.installer ? [o.installer] : [])];
-    const answer = L.ps(SCRIPTS.signatures, { AGM_READ_PATHS: paths.join('|') });
-    const files = Array.isArray(answer) ? answer : [answer];
-    return { files: files.filter((f) => !(o.installer && f && f.path === o.installer)), installer: installerSignature(files, o.installer) };
-  });
-
-  await reading('R1', () => {
-    needsPayload();
-    return takeR1({ node, app: path.join(root, 'app'), work, port: o.port });
-  });
-
-  await reading('R8', () => {
-    const places = {};
-    for (const where of ['C:\\', env.ProgramData || 'C:\\ProgramData']) {
-      const file = path.join(work, 'acl-' + crypto.randomBytes(4).toString('hex') + '.txt');
-      const saved = run(L.exe('icacls.exe'), [where, '/save', file]);
-      const shown = run(L.exe('icacls.exe'), [where]);
-      let sddl = '';
-      try { sddl = sddlOfSave(fs.readFileSync(file)); } catch { /* not saved: the error below says why */ }
-      places[where] = sddl ? { sddl, icacls: shown.out.slice(0, 8192) } : { error: 'icacls /save ended with ' + saved.code + ': ' + (saved.err || saved.out).trim().slice(0, 300) };
-    }
-    // U12's server task's definition as app/machine.js writes it (registered here and never run, then removed): its
-    // descriptor, which says who may read it, and its XML, which holds no secret.
-    let serverTask;
-    const name = DEFINITION_TASK;
-    try {
-      const f = path.join(work, 'r8');
-      L.register(name, require('../app/machine.js').serverTaskXml({ uri: name, node, launch: path.join(root, 'app', 'launch.js'), data: path.join(f, 'data'), uploads: path.join(f, 'uploads'), keys: path.join(f, 'keys'), logs: path.join(f, 'logs'), token: path.join(f, 'token'), events: path.join(f, 'events.jsonl'), port: o.port }));
-      const back = L.ps(SCRIPTS.definition, { AGM_TASK_FOLDER: path.win32.dirname(name), AGM_TASK_NAME: path.win32.basename(name) });
-      serverTask = { sddl: String(back.sddl || ''), bytes: String(back.xml || '').length, secret: /ADMIN_TOKEN|ANTHROPIC|password|[0-9a-f]{32}/i.test(String(back.xml || '')) };
-    } catch (e) { serverTask = { error: e.message.slice(0, 300) }; } finally { L.remove(name); }
-    // U17's control task's definition as app/machine.js writes it, for this lane's own account (a real SID; the
-    // descriptor is what is judged): registered here and never run, then removed.
-    let controlTask;
-    const ctl = CONTROL_DEFINITION_TASK;
-    try {
-      const me = /"(S-1-[0-9-]+)"/.exec(run(L.exe('whoami.exe'), ['/user', '/fo', 'csv', '/nh']).out);
-      if (!me) throw new Error('this account\'s SID was not read');
-      L.register(ctl, require('../app/machine.js').controlTaskXml({ uri: ctl, sid: me[1], node, script: path.join(root, 'app', 'machine.js'), machine: path.join(work, 'r8', 'machine'), sys }));
-      const back = L.ps(SCRIPTS.definition, { AGM_TASK_FOLDER: path.win32.dirname(ctl), AGM_TASK_NAME: path.win32.basename(ctl) });
-      controlTask = { sid: me[1], sddl: String(back.sddl || ''), bytes: String(back.xml || '').length, secret: /ADMIN_TOKEN|ANTHROPIC|password|[0-9a-f]{32}/i.test(String(back.xml || '')) };
-    } catch (e) { controlTask = { error: e.message.slice(0, 300) }; } finally { L.remove(ctl); }
-    return { places, serverTask, controlTask };
-  });
-
-  const r4dir = path.join(work, 'r4');
-  try {
+    // The stand-in tasks run as LocalService: it may read the payload and this file, and write its own folders.
+    const granted = run(L.exe('icacls.exe'), [work, '/grant', '*' + LOCAL_SERVICE + ':(OI)(CI)M']);
+    if (granted.code !== 0) console.error('readings-take: LocalService was not granted the work folder: ' + granted.out + granted.err);
+    const self = path.join(work, 'lane', 'readings-take.js');
+    fs.copyFileSync(__filename, self);
+    // Every reading but R2 reads this build's payload, laid once into a folder of its own, after R2.
+    const root = path.join(work, 'payload', 'AGMessage');
+    const node = path.join(root, 'node', 'node.exe');
+    let laid = false;
+    const needsPayload = () => { if (!laid) throw new Error('the payload was not laid'); };
     let pipes = null;
-    await reading('R4', async () => {
-      needsPayload();
-      const folders = {};
-      for (const k of ['data', 'uploads', 'keys', 'token']) { folders[k] = path.join(work, 'task', k); fs.mkdirSync(folders[k], { recursive: true }); }
-      fs.mkdirSync(r4dir, { recursive: true });
-      writeJson(path.join(r4dir, 'plan.json'), { supervise: path.join(root, 'app', 'supervise.js'), cloudflared: path.join(root, 'bin', 'cloudflared.exe'), port: o.port, folders });
-      L.register(SERVER_TASK, taskXml({ description: STAND_IN, ...SERVER_PRINCIPAL, restart: true, command: node, args: [self, 'probe-server', r4dir], cwd: path.dirname(self) }));
-      const showsid = L.schtasks(['/ShowSid', '/TN', SERVER_TASK]).out.trim();
-      const added = run(L.exe('netsh.exe'), ['advfirewall', 'firewall', 'add', 'rule', 'name=' + RULE, 'dir=in', 'action=allow', 'program=' + node, 'protocol=TCP', 'localport=' + o.port, 'remoteip=localsubnet', 'profile=private,domain', 'enable=yes']);
-      const readback = run(L.exe('netsh.exe'), ['advfirewall', 'firewall', 'show', 'rule', 'name=' + RULE, 'verbose']).out;
-      const ran = L.schtasks(['/Run', '/TN', SERVER_TASK]);
-      if (ran.code !== 0) throw new Error('schtasks could not run the stand-in: ' + (ran.err || ran.out).trim().slice(0, 300));
-      const factsFile = path.join(r4dir, 'facts.json');
-      const factsNow = () => { try { return readJson(factsFile); } catch { return null; /* not written yet */ } };
-      if (!(await until(factsNow, 30000))) throw new Error('the stand-in task did not start its probe within 30 s (last result ' + L.lastResult(SERVER_TASK) + ')');
-      const facts = await until(() => { const f = factsNow(); return f && f.stage !== 'started' ? f : null; }, 180000);
-      if (!facts) throw new Error('the probe did not reach the server within 180 s');
-      if (facts.served && facts.served.ok) {
-        pipes = await guarded(() => {
-          const names = fs.readdirSync('\\\\.\\pipe\\').filter((n) => /^agmessage-[0-9a-f]{16}$/.test(n));
-          if (!names.length) return { pipes: [] };
-          const read = L.ps(SCRIPTS.pipes, { AGM_READ_PIPES: names.join('|') });
-          // A client through SMB at this machine's own names: a network logon, as a remote client's would be.
-          const remote = ['localhost', os.hostname()].map((via) => ({ via, ...pipeReach('\\\\' + via + '\\pipe\\' + names[0]) }));
-          return { pipes: Array.isArray(read) ? read : [read], remote };
-        });
-      }
-      fs.writeFileSync(path.join(r4dir, 'done'), '');
-      await until(() => { const f = factsNow(); return f && f.stage === 'ended'; }, 20000);
-      const { stage: _stage, pid: _pid, ...kept } = factsNow() || facts;
-      return { task: SERVER_TASK, principal: SERVER_PRINCIPAL, showsid, ...kept, rule: { made: added.code === 0, readback: readback.slice(0, 4096) } };
-    });
-    await reading('R7', () => pipes || { skipped: 'the stand-in server did not serve (R4 says why), so no pipe of its own was there to read' });
+    const readings = {
+      R2: () => {
+        const dest = path.join(work, 'r2', 'AGMessage');
+        const first = layOut(o.zip, dest, entries, { strip: 1 });
+        let previous = null;
+        let overWhy = '';
+        if (o.previous) {
+          try { previous = { entries: zipEntries(o.previous) }; topFolder(previous.entries); } catch (e) { previous = null; overWhy = 'its zip could not be read: ' + e.message; }
+        } else overWhy = 'none was given';
+        const over = previous ? releaseOf(o.previous) : '';
+        const rounds = [];
+        for (let i = 0; i < R2_ROUNDS && left() > 0; i++) {
+          if (previous) {
+            // The previous payload laid whole into an empty folder first (not measured), then this build over it.
+            fs.rmSync(dest, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+            layOut(o.previous, dest, previous.entries, { strip: 1 });
+          }
+          rounds.push(Math.round(layOut(o.zip, dest, entries, { strip: 1 }).ms));
+        }
+        fs.rmSync(path.join(work, 'r2'), { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+        return { files: first.files, bytes: first.bytes, emptyMs: Math.round(first.ms), rounds, over: previous ? (over ? 'v' + over : path.basename(o.previous)) : '', overWhy, how: 'each file inflated to a name of its own beside it, then renamed over the one before' };
+      },
+      R10: () => {
+        const rounds = [];
+        for (let i = 0; i < R10_ROUNDS && left() > 0; i++) {
+          const dest = path.join(os.tmpdir(), 'agm-r10-' + crypto.randomBytes(6).toString('hex'), 'node.exe');
+          const x = extractOne(o.zip, '/node/node.exe', dest, entries);
+          const t1 = now();
+          const r = run(dest, ['-e', '0'], { ms: 120000 });
+          const runMs = now() - t1;
+          rounds.push({ extractMs: Math.round(x.ms), runMs: Math.round(runMs), totalMs: Math.round(x.ms + runMs), code: r.code, ...(r.code === 0 ? {} : { err: r.err.trim().slice(0, 200) }) });
+          fs.rmSync(path.dirname(dest), { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+        }
+        return { rounds, where: os.tmpdir() };
+      },
+      R5: () => {
+        needsPayload();
+        const paths = [node, path.join(root, 'bin', 'cloudflared.exe'), ...(o.installer ? [o.installer] : [])];
+        const answer = L.ps(SCRIPTS.signatures, { AGM_READ_PATHS: paths.join('|') });
+        const files = Array.isArray(answer) ? answer : [answer];
+        return { files: files.filter((f) => !(o.installer && f && f.path === o.installer)), installer: installerSignature(files, o.installer) };
+      },
+      R1: (progress) => {
+        needsPayload();
+        return takeR1({ node, app: path.join(root, 'app'), work, port: o.port }, { progress });
+      },
+      R8: () => {
+        const places = {};
+        for (const where of ['C:\\', env.ProgramData || 'C:\\ProgramData']) {
+          const file = path.join(work, 'acl-' + crypto.randomBytes(4).toString('hex') + '.txt');
+          const saved = run(L.exe('icacls.exe'), [where, '/save', file]);
+          const shown = run(L.exe('icacls.exe'), [where]);
+          let sddl = '';
+          try { sddl = sddlOfSave(fs.readFileSync(file)); } catch { /* not saved: the error below says why */ }
+          places[where] = sddl ? { sddl, icacls: shown.out.slice(0, 8192) } : { error: 'icacls /save ended with ' + saved.code + ': ' + (saved.err || saved.out).trim().slice(0, 300) };
+        }
+        // U12's server task's definition as app/machine.js writes it (registered here and never run, then removed): its
+        // descriptor, which says who may read it, and its XML, which holds no secret.
+        let serverTask;
+        const name = DEFINITION_TASK;
+        try {
+          const f = path.join(work, 'r8');
+          L.register(name, require('../app/machine.js').serverTaskXml({ uri: name, node, launch: path.join(root, 'app', 'launch.js'), data: path.join(f, 'data'), uploads: path.join(f, 'uploads'), keys: path.join(f, 'keys'), logs: path.join(f, 'logs'), token: path.join(f, 'token'), events: path.join(f, 'events.jsonl'), port: o.port }));
+          const back = L.ps(SCRIPTS.definition, { AGM_TASK_FOLDER: path.win32.dirname(name), AGM_TASK_NAME: path.win32.basename(name) });
+          serverTask = { sddl: String(back.sddl || ''), bytes: String(back.xml || '').length, secret: /ADMIN_TOKEN|ANTHROPIC|password|[0-9a-f]{32}/i.test(String(back.xml || '')) };
+        } catch (e) { serverTask = { error: e.message.slice(0, 300) }; } finally { L.remove(name); }
+        // U17's control task's definition as app/machine.js writes it, for this lane's own account (a real SID; the
+        // descriptor is what is judged): registered here and never run, then removed.
+        let controlTask;
+        const ctl = CONTROL_DEFINITION_TASK;
+        try {
+          const me = /"(S-1-[0-9-]+)"/.exec(run(L.exe('whoami.exe'), ['/user', '/fo', 'csv', '/nh']).out);
+          if (!me) throw new Error('this account\'s SID was not read');
+          L.register(ctl, require('../app/machine.js').controlTaskXml({ uri: ctl, sid: me[1], node, script: path.join(root, 'app', 'machine.js'), machine: path.join(work, 'r8', 'machine'), sys }));
+          const back = L.ps(SCRIPTS.definition, { AGM_TASK_FOLDER: path.win32.dirname(ctl), AGM_TASK_NAME: path.win32.basename(ctl) });
+          controlTask = { sid: me[1], sddl: String(back.sddl || ''), bytes: String(back.xml || '').length, secret: /ADMIN_TOKEN|ANTHROPIC|password|[0-9a-f]{32}/i.test(String(back.xml || '')) };
+        } catch (e) { controlTask = { error: e.message.slice(0, 300) }; } finally { L.remove(ctl); }
+        return { places, serverTask, controlTask };
+      },
+      R4: async () => {
+        needsPayload();
+        const r4dir = path.join(work, 'r4');
+        try {
+          const folders = {};
+          for (const k of ['data', 'uploads', 'keys', 'token']) { folders[k] = path.join(work, 'task', k); fs.mkdirSync(folders[k], { recursive: true }); }
+          fs.mkdirSync(r4dir, { recursive: true });
+          writeJson(path.join(r4dir, 'plan.json'), { supervise: path.join(root, 'app', 'supervise.js'), cloudflared: path.join(root, 'bin', 'cloudflared.exe'), port: o.port, folders });
+          L.register(SERVER_TASK, taskXml({ description: STAND_IN, ...SERVER_PRINCIPAL, restart: true, command: node, args: [self, 'probe-server', r4dir], cwd: path.dirname(self) }));
+          const showsid = L.schtasks(['/ShowSid', '/TN', SERVER_TASK]).out.trim();
+          const added = L.ruleAdd(RULE, ['dir=in', 'action=allow', 'program=' + node, 'protocol=TCP', 'localport=' + o.port, 'remoteip=localsubnet', 'profile=private,domain', 'enable=yes']);
+          const readback = run(L.exe('netsh.exe'), ['advfirewall', 'firewall', 'show', 'rule', 'name=' + RULE, 'verbose']).out;
+          const ran = L.schtasks(['/Run', '/TN', SERVER_TASK]);
+          if (ran.code !== 0) throw new Error('schtasks could not run the stand-in: ' + (ran.err || ran.out).trim().slice(0, 300));
+          const factsFile = path.join(r4dir, 'facts.json');
+          const factsNow = () => { try { return readJson(factsFile); } catch { return null; /* not written yet */ } };
+          if (!(await until(factsNow, 30000))) throw new Error('the stand-in task did not start its probe within 30 s (last result ' + L.lastResult(SERVER_TASK) + ')');
+          const facts = await until(() => { const f = factsNow(); return f && f.stage !== 'started' ? f : null; }, 180000);
+          if (!facts) throw new Error('the probe did not reach the server within 180 s');
+          if (facts.served && facts.served.ok) {
+            pipes = await guarded(() => {
+              const names = fs.readdirSync('\\\\.\\pipe\\').filter((n) => /^agmessage-[0-9a-f]{16}$/.test(n));
+              if (!names.length) return { pipes: [] };
+              const read = L.ps(SCRIPTS.pipes, { AGM_READ_PIPES: names.join('|') });
+              // A client through SMB at this machine's own names: a network logon, as a remote client's would be.
+              const remote = ['localhost', os.hostname()].map((via) => ({ via, ...pipeReach('\\\\' + via + '\\pipe\\' + names[0]) }));
+              return { pipes: Array.isArray(read) ? read : [read], remote };
+            });
+          }
+          fs.writeFileSync(path.join(r4dir, 'done'), '');
+          await until(() => { const f = factsNow(); return f && f.stage === 'ended'; }, 20000);
+          const { stage: _stage, pid: _pid, ...kept } = factsNow() || facts;
+          return { task: SERVER_TASK, principal: SERVER_PRINCIPAL, showsid, ...kept, rule: { made: added.code === 0, readback: readback.slice(0, 4096) } };
+        } finally {
+          // The probe is told it may end (it may still be serving when the reading was cut), then its task and the rule go.
+          try { fs.writeFileSync(path.join(r4dir, 'done'), ''); } catch { /* no folder: the probe never began */ }
+          L.remove(SERVER_TASK);
+          L.ruleDelete(RULE);
+        }
+      },
+      R7: () => pipes || { skipped: 'the stand-in server did not serve (R4 says why), so no pipe of its own was there to read' },
+      R12: (progress) => {
+        needsPayload();
+        return takeR12(L, { node, self, dir: path.join(work, 'r12'), cwd: path.dirname(self) }, { progress });
+      },
+      // R9 and R3′ (U12 landed): the upgrade backup's time, and the server task's stop-saves. Both drive the bundle's own
+      // server and watchdog (no installer), through app/lib/machinewire.js of this checkout.
+      R9: () => {
+        needsPayload();
+        return takeR9({ node, app: path.join(root, 'app'), work, port: o.port });
+      },
+      'R3′': (progress) => {
+        needsPayload();
+        return takeR3prime(L, { node, app: path.join(root, 'app'), work, port: o.port }, { progress });
+      },
+      R13: async () => {
+        needsPayload();
+        if (!/^[\w.-]+\/[\w.-]+$/.test(o.repo || '') || !/^v\d+\.\d+\.\d+$/.test(o.tag || '')) return { skipped: 'no published release was named to read (' + (o.tag || 'none') + ')' };
+        try {
+          const dir = path.join(work, 'r13');
+          fs.mkdirSync(dir, { recursive: true });
+          writeJson(path.join(dir, 'plan.json'), { url: 'https://api.github.com/repos/' + o.repo + '/releases/tags/' + o.tag });
+          L.register(RELEASE_TASK, taskXml({ description: 'AGMessage readings: GitHub\'s release answer, read as SYSTEM', ...CONTROL_PRINCIPAL, command: node, args: [self, 'probe-release', dir], cwd: path.dirname(self) }));
+          const ran = L.schtasks(['/Run', '/TN', RELEASE_TASK]);
+          if (ran.code !== 0) throw new Error('schtasks could not run the stand-in: ' + (ran.err || ran.out).trim().slice(0, 300));
+          const answer = await until(() => { try { return readJson(path.join(dir, 'answer.json')); } catch { return null; /* not written yet */ } }, 60000);
+          if (!answer) throw new Error('the SYSTEM task wrote no answer within 60 s (last result ' + L.lastResult(RELEASE_TASK) + ')');
+          // With no network: the bundle's machine.js asked by a copy of its node.exe that an outbound rule blocks.
+          const offline = await guarded(async () => {
+            const cut = path.join(dir, 'offline');
+            fs.mkdirSync(cut, { recursive: true });
+            const blocked = path.join(cut, 'node.exe');
+            fs.copyFileSync(node, blocked);
+            fs.copyFileSync(path.join(root, 'app', 'machine.js'), path.join(path.dirname(self), 'machine.js'));
+            writeJson(path.join(dir, 'plan.json'), { url: 'https://api.github.com/repos/' + o.repo + '/releases/tags/' + o.tag, repo: o.repo, tag: o.tag });
+            const rule = L.ruleAdd(OFFLINE_RULE, ['dir=out', 'action=block', 'program=' + blocked, 'enable=yes']);
+            if (rule.code !== 0) return { error: 'the outbound rule could not be made: ' + (rule.err || rule.out).trim().slice(0, 200) };
+            L.register(OFFLINE_TASK, taskXml({ description: 'AGMessage readings: a checked upgrade\'s release check with no network, as SYSTEM', ...CONTROL_PRINCIPAL, command: blocked, args: [self, 'probe-offline', dir], cwd: path.dirname(self) }));
+            const go = L.schtasks(['/Run', '/TN', OFFLINE_TASK]);
+            if (go.code !== 0) return { error: 'schtasks could not run the offline stand-in: ' + (go.err || go.out).trim().slice(0, 200) };
+            const said = await until(() => { try { return readJson(path.join(dir, 'offline.json')); } catch { return null; /* not written yet */ } }, 90000);
+            return said || { error: 'the offline task wrote no answer within 90 s (last result ' + L.lastResult(OFFLINE_TASK) + ')' };
+          });
+          return { tag: o.tag, ...answer, offline };
+        } finally {
+          L.remove(RELEASE_TASK);
+          L.remove(OFFLINE_TASK);
+          L.ruleDelete(OFFLINE_RULE);
+        }
+      },
+      R11: (progress) => {
+        needsPayload();
+        return takeR11(L, { node, script: path.join(root, 'app', 'machine.js'), self, work, sys }, { progress });
+      },
+      R6: (progress) => {
+        needsPayload();
+        return takeR6(L, { node, root, self, work, sys }, { progress });
+      },
+    };
+    const wanted = (id) => !o.only || !o.only.length || o.only.includes(id);
+    const plan = (ids) => ids.filter(wanted).map((id) => [id, readings[id]]);
+    const opts = {
+      raw,
+      save,
+      began,
+      deadlineMs: deadlineMin * 60_000,
+      boundsMs: Object.fromEntries(Object.entries(BOUNDS).map(([id, min]) => [id, min * 60_000])),
+      skip: new Map((o.skip || []).map((id) => [id, 'not taken here: left to a take of its own (--skip), which had not taken it when this record was written'])),
+    };
+    await takeAll(plan(['R2']), opts);
+    try {
+      layOut(o.zip, root, entries, { strip: 1 });
+      laid = true;
+    } catch (e) { console.error('readings-take: the payload was not laid (' + e.message + ')'); }
+    try { raw.build = readJson(path.join(root, 'app', 'build.json')); } catch { raw.build = null; /* a bundle without its stamp: the readings name no build */ }
+    await takeAll(plan(ORDER.filter((id) => id !== 'R2')), opts);
   } finally {
-    L.remove(SERVER_TASK);
-    run(L.exe('netsh.exe'), ['advfirewall', 'firewall', 'delete', 'rule', 'name=' + RULE]);
+    // Whatever a reading left (a task its own finally could not remove, an account made before a failure, a watchdog that
+    // outlived its end) is removed here, within two minutes, before Defender is read again.
+    raw.cleanup = release(L);
   }
-
-  await reading('R12', () => {
-    needsPayload();
-    return takeR12(L, { node, self, dir: path.join(work, 'r12'), cwd: path.dirname(self) });
-  });
-
-  await reading('R11', () => {
-    needsPayload();
-    return takeR11(L, { node, script: path.join(root, 'app', 'machine.js'), self, work, sys });
-  });
-
-  await reading('R6', () => {
-    needsPayload();
-    return takeR6(L, { node, root, self, work, sys });
-  });
-
-  // R9 and R3′ (U12 landed): the upgrade backup's time, and the server task's stop-saves. Both drive the bundle's own
-  // server and watchdog (no installer), through app/lib/machinewire.js of this checkout.
-  await reading('R9', () => {
-    needsPayload();
-    return takeR9({ node, app: path.join(root, 'app'), work, port: o.port });
-  });
-  await reading('R3′', () => {
-    needsPayload();
-    return takeR3prime(L, { node, app: path.join(root, 'app'), work, port: o.port });
-  });
-
-  try {
-    await reading('R13', async () => {
-      needsPayload();
-      if (!/^[\w.-]+\/[\w.-]+$/.test(o.repo || '') || !/^v\d+\.\d+\.\d+$/.test(o.tag || '')) return { skipped: 'no published release was named to read (' + (o.tag || 'none') + ')' };
-      const dir = path.join(work, 'r13');
-      fs.mkdirSync(dir, { recursive: true });
-      writeJson(path.join(dir, 'plan.json'), { url: 'https://api.github.com/repos/' + o.repo + '/releases/tags/' + o.tag });
-      L.register(RELEASE_TASK, taskXml({ description: 'AGMessage readings: GitHub\'s release answer, read as SYSTEM', ...CONTROL_PRINCIPAL, command: node, args: [self, 'probe-release', dir], cwd: path.dirname(self) }));
-      const ran = L.schtasks(['/Run', '/TN', RELEASE_TASK]);
-      if (ran.code !== 0) throw new Error('schtasks could not run the stand-in: ' + (ran.err || ran.out).trim().slice(0, 300));
-      const answer = await until(() => { try { return readJson(path.join(dir, 'answer.json')); } catch { return null; /* not written yet */ } }, 60000);
-      if (!answer) throw new Error('the SYSTEM task wrote no answer within 60 s (last result ' + L.lastResult(RELEASE_TASK) + ')');
-      // With no network: the bundle's machine.js asked by a copy of its node.exe that an outbound rule blocks.
-      const offline = await guarded(async () => {
-        const cut = path.join(dir, 'offline');
-        fs.mkdirSync(cut, { recursive: true });
-        const blocked = path.join(cut, 'node.exe');
-        fs.copyFileSync(node, blocked);
-        fs.copyFileSync(path.join(root, 'app', 'machine.js'), path.join(path.dirname(self), 'machine.js'));
-        writeJson(path.join(dir, 'plan.json'), { url: 'https://api.github.com/repos/' + o.repo + '/releases/tags/' + o.tag, repo: o.repo, tag: o.tag });
-        const rule = run(L.exe('netsh.exe'), ['advfirewall', 'firewall', 'add', 'rule', 'name=' + OFFLINE_RULE, 'dir=out', 'action=block', 'program=' + blocked, 'enable=yes']);
-        if (rule.code !== 0) return { error: 'the outbound rule could not be made: ' + (rule.err || rule.out).trim().slice(0, 200) };
-        L.register(OFFLINE_TASK, taskXml({ description: 'AGMessage readings: a checked upgrade\'s release check with no network, as SYSTEM', ...CONTROL_PRINCIPAL, command: blocked, args: [self, 'probe-offline', dir], cwd: path.dirname(self) }));
-        const go = L.schtasks(['/Run', '/TN', OFFLINE_TASK]);
-        if (go.code !== 0) return { error: 'schtasks could not run the offline stand-in: ' + (go.err || go.out).trim().slice(0, 200) };
-        const said = await until(() => { try { return readJson(path.join(dir, 'offline.json')); } catch { return null; /* not written yet */ } }, 90000);
-        return said || { error: 'the offline task wrote no answer within 90 s (last result ' + L.lastResult(OFFLINE_TASK) + ')' };
-      });
-      return { tag: o.tag, ...answer, offline };
-    });
-  } finally {
-    L.remove(RELEASE_TASK);
-    L.remove(OFFLINE_TASK);
-    run(L.exe('netsh.exe'), ['advfirewall', 'firewall', 'delete', 'rule', 'name=' + OFFLINE_RULE]);
-  }
-
   raw.defenderEnd = await guarded(() => L.ps(SCRIPTS.defender));
+  for (const s of signals) process.removeListener(s, onSignal);
+  step.ended = new Date().toISOString();
   raw.complete = true;
   try { save(); } catch (e) { console.error('readings-take: the record could not be written (' + e.message + ')'); return 2; }
-  console.log('readings-take: written to ' + o.out + ' in ' + Math.round((now() - t0) / 1000) + ' s');
+  console.log('readings-take: written to ' + o.out + ' in ' + Math.round((now() - began) / 1000) + ' s');
   return 0;
 }
 
@@ -1420,19 +1706,28 @@ function installerSignature(files, installer) {
   return { status: String(f.status), name: path.win32.basename(installer), signer: String(f.signer || '') };
 }
 
-/** The command line read as {verb, flags, rest}; a flag this does not know refused. */
+/** The command line read as {verb, flags, rest}; a flag this does not know refused (--add alone takes no value). */
 function parseArgs(argv) {
   const [verb, ...rest] = argv;
-  const known = ['--zip', '--previous', '--defender', '--out', '--work', '--port', '--repo', '--tag', '--installer'];
+  const known = ['--zip', '--previous', '--defender', '--out', '--work', '--port', '--repo', '--tag', '--installer', '--deadline-min', '--only', '--skip'];
+  const alone = ['--add'];
   const flags = {};
   const positional = [];
   for (let i = 0; i < rest.length; i++) {
-    if (rest[i].startsWith('--')) {
+    if (alone.includes(rest[i])) flags[rest[i].slice(2)] = true;
+    else if (rest[i].startsWith('--')) {
       if (!known.includes(rest[i]) || i + 1 >= rest.length) return { error: 'readings-take: ' + rest[i] + ' is not a word it knows, or has no value' };
       flags[rest[i].slice(2)] = rest[++i];
     } else positional.push(rest[i]);
   }
   return { verb, flags, positional };
+}
+
+/** A list of readings (--only, --skip) read as their ids, each one the lane takes; null for a word it does not know. */
+function readingsOf(value) {
+  if (value === undefined) return [];
+  const ids = String(value).split(',').map((x) => x.trim()).filter(Boolean);
+  return ids.length && ids.every((id) => ORDER.includes(id)) ? ids : null;
 }
 
 async function main(argv) {
@@ -1447,14 +1742,33 @@ async function main(argv) {
   if (a.verb === 'take' && !a.positional.length && a.flags.zip && a.flags.defender && a.flags.out) {
     const port = Number(a.flags.port || 3124);
     if (!Number.isInteger(port) || port < 1024 || port > 65535) { console.error('readings-take: --port is a port from 1024 to 65535'); return 64; }
-    return take({ zip: a.flags.zip, previous: a.flags.previous || '', defender: a.flags.defender, out: a.flags.out, work: a.flags.work || 'C:\\agm-readings', port, repo: a.flags.repo || '', tag: a.flags.tag || '', installer: a.flags.installer || '' });
+    const deadlineMin = Number(a.flags['deadline-min'] || DEADLINE_MIN);
+    if (!Number.isInteger(deadlineMin) || deadlineMin < 1 || deadlineMin > 240) { console.error('readings-take: --deadline-min is a whole number of minutes from 1 to 240'); return 64; }
+    const only = readingsOf(a.flags.only);
+    const skip = readingsOf(a.flags.skip);
+    if (!only || !skip) { console.error('readings-take: --only and --skip name readings the lane takes, separated by commas (' + ORDER.join(',') + ')'); return 64; }
+    return take({ zip: a.flags.zip, previous: a.flags.previous || '', defender: a.flags.defender, out: a.flags.out, work: a.flags.work || 'C:\\agm-readings', port, repo: a.flags.repo || '', tag: a.flags.tag || '', installer: a.flags.installer || '', deadlineMin, only, skip, add: a.flags.add === true });
   }
-  console.error('readings-take: take --zip <bundle.zip> --defender <defender.json> --out <raw.json> [--previous <zip>] [--work <folder>] [--port <n>] [--repo <owner/name> --tag <vX.Y.Z>] [--installer <exe>] | probe-server <dir> | probe-exit <dir> | probe-release <dir> | probe-offline <dir> | probe-run <dir> | probe-export <dir>');
+  console.error('readings-take: take --zip <bundle.zip> --defender <defender.json> --out <raw.json> [--previous <zip>] [--work <folder>] [--port <n>] [--repo <owner/name> --tag <vX.Y.Z>] [--installer <exe>] [--deadline-min <n>] [--only <ids>] [--skip <ids>] [--add] | probe-server <dir> | probe-exit <dir> | probe-release <dir> | probe-offline <dir> | probe-run <dir> | probe-export <dir>');
   return 64;
 }
 
+/**
+ * How the command ends once `main` has answered `code`: a take exits as soon as its record is written and the console's
+ * last lines are flushed, so no handle still open (a watchdog that outlived its end, a socket) keeps its step alive; a
+ * probe, which a task runs, ends as its loop empties, as its task's own end expects.
+ */
+function finish(verb, code, { exit = (c) => process.exit(c) } = {}) {
+  process.exitCode = code;
+  if (verb !== 'take') return;
+  const end = () => exit(code);
+  process.stdout.write('', () => process.stderr.write('', end));
+  setTimeout(end, 3000).unref();
+}
+
 if (require.main === module) {
-  main(process.argv.slice(2)).then((code) => { process.exitCode = code; }, (e) => { console.error('readings-take: ' + ((e && e.stack) || e)); process.exitCode = 2; });
+  const verb = process.argv[2];
+  main(process.argv.slice(2)).then((code) => finish(verb, code), (e) => { console.error('readings-take: ' + ((e && e.stack) || e)); finish(verb, 2); });
 }
 
 module.exports = {
@@ -1462,5 +1776,6 @@ module.exports = {
   snapshot, snapshotDiff, udpHeard, waitHealth, quickTunnel, readRelease, probeOffline, probeExit, parseArgs, main, TRYCF, installerSignature,
   sddlOfSave, pipeReach, keepTail, tokenIn, withoutSecrets, placeRefusal, takeR12, take,
   seedHalls, pageSocket, paceMs, takeR1, takeR9, takeR3prime, serveFolders, R1_SIZES, R1_QUIET_MS, PAGE_PACE,
-  SERVER_TASK, STAND_IN, DEFINITION_TASK, CONTROL_DEFINITION_TASK, RESTART_TASKS, R11_TASKS, R11_USERS, R11_ROUNDS, WORK_MARK, BUDGET_MS,
+  SERVER_TASK, STAND_IN, DEFINITION_TASK, CONTROL_DEFINITION_TASK, RESTART_TASKS, R11_TASKS, R11_USERS, R11_ROUNDS, WORK_MARK,
+  ORDER, BOUNDS, DEADLINE_MIN, STOP_MIN, SETTLE_MS, takeAll, release, stopOn, recordAt, readingsOf, finish, held, within, left, until, run, endWatchdog,
 };

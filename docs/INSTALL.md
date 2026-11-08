@@ -1040,7 +1040,15 @@ reading.
 - **The job.** Defender's real-time monitoring back on first (`tools/defender-on.ps1`, as the readings lane does); Inno
   Setup 7.1.0 pinned and checked as the installer job pins it; every action pinned by its commit, every step bounded
   inside the job's bound, and the life cycle's own step holding every bound its tests and hooks declare (`test/lifecycle.test.js`
-  sums them), so a run slow inside its tests' bounds is never cut short with nothing said. Then **the release order** (`tools/lifecycle.js order`): this build's install version must be
+  sums them), so a run slow inside its tests' bounds is never cut short with nothing said. Every wait of a test ends by
+  itself: an installer is waited for 11 minutes at most and never ended from the test (Inno Setup's rollback does not run
+  on a kill), and while one still runs the next install is refused at once, naming it, so the tests after a hung
+  installer fail by their names and none runs beside it; the stand-ins it starts (a silent listener, a file held open)
+  are refused when they do not come up within a minute and ended within 20 s when asked; a portable copy that will not
+  stop at loopback has its whole tree ended; the long programs (`machine.js`, the facts reader, `launch.js`, the
+  uninstaller) run without holding the test's loop, so its own bound ends its wait; and the run gives a test or hook that
+  names no bound the longest any test declares (`--test-timeout`) and ends the file once its last test and hook have,
+  whatever a hung one left running (`--test-force-exit`), so the count and the logs' upload still run. Then **the release order** (`tools/lifecycle.js order`): this build's install version must be
   above the newest release's, read from the build its notes name on their first line ("Build 0.6.0+41.abc1234.", as the
   release job writes them), or an AGMessage installed from that release would refuse this build's installer; a list or
   notes that cannot be read stop the job. Then **three builds from one payload**: this build's installer, the installer
@@ -1114,8 +1122,8 @@ a reading: the installer's life cycle in CI is a gate, as every test is (below).
   job has built the zip, for every push, a `v*` tag and a run asked for by hand (Actions, CI, Run workflow), never for a
   pull request (its commits are pushes already). It runs one at a time per branch or tag, in a concurrency group of its
   own that never cancels a lane once it runs: a newer push's lane waits its turn, the newest waiting taking the place of
-  an older one still waiting, so every lane runs whole (up to 45 minutes) and a regression shows on the next readings
-  taken; its checkout keeps no credential (the stand-in tasks run the bundle's code from that folder).
+  an older one still waiting, so every lane runs whole (its two takes at most 38 and 24 minutes, each ending itself) and a
+  regression shows on the next readings taken; its checkout keeps no credential (the stand-in tasks run the bundle's code from that folder).
   Its first step after that checkout, `tools/defender-on.ps1`, turns Defender's real-time monitoring back on (GitHub's
   image turns it off), removes the image's exclusions of `C:\` and `D:\`, and records whether that took, read back from
   Defender itself: on means real-time monitoring and scanning on access on, in Defender's Normal mode (in passive or EDR
@@ -1130,10 +1138,31 @@ a reading: the installer's life cycle in CI is a gate, as every test is (below).
   was taken without it is never met: it reads "not run", unless it is over its mark anyway, which Defender would only
   make worse.
 - **Bounded.** Every step of the job has a bound of its own, and together they end inside the job's, so the job ends
-  passed or failed, never cancelled by its own timeout, and the release that waits for it still runs. The take step
-  begins no reading after 20 minutes (the lane's own bound); its record is written before the first reading and after
-  each, and marked whole at its end, so a lane cut short still has what it took (and Defender's record) judged, and each
-  reading it had not reached reads "not run".
+  passed or failed, never cancelled by its own timeout, and the release that waits for it still runs. The take bounds
+  itself, so its step never needs the runner to cancel it: each reading has a bound of its own (`BOUNDS` in
+  `tools/readings-take.js`: from 1 minute for R7 to 12 for R11, each above what the reading takes on a healthy runner;
+  R11's and R6's, never yet taken whole, above the sum of their rounds' usual waits) and
+  begins only while that bound fits in what is left of the deadline its step gives it (`--deadline-min`), else it reads
+  "not taken: the lane's deadline", with the time left and the time it needs. At its bound every wait of a reading ends
+  and no program of it starts, and one not ended a minute later is written cut and the lane goes on; a reading cut reads
+  "not run" with its bound, the rounds it took kept in the record and never judged. The record is written before the
+  first reading, as each begins (one the runner was lost in reads "not run: begun at … s, it never ended"), after each
+  round a long reading takes (R1, R3′, R6, R11, R12) and as each ends; the console says each reading's begin and end with
+  the seconds since the take began. What the lane made that outlives a reading (its tasks, which Task Scheduler runs
+  outside the step's processes, where the runner's own cancel never reaches; its firewall rules; the standard accounts,
+  each named before it is made; the watchdogs) is removed at its end, within two minutes, and a task the lane runs as a
+  made account is ended by Task Scheduler at 10 minutes whatever the lane does. A Ctrl+C, Ctrl+Break or SIGTERM (the
+  runner's cancel at a step's limit) writes the record at once, not whole and saying what stopped it, and removes the
+  tasks and rules before the take exits 2, inside the 7.5 s the runner waits; the accounts are the thrown-away runner's.
+  The take exits as soon as its record is written, so no handle left open keeps its step alive. **Two takes**: the
+  readings but R11 and R6 (a deadline of 38 minutes, in a step of 44), their record then kept as the artifact
+  (`agmessage-readings-<commit>`), then R11 and R6, which log on as standard accounts the lane makes, added to the same
+  record (a deadline of 24 minutes, in a step of 30, run whatever the first ended with), then the verdicts and the
+  artifact again: a runner lost in the accounts' readings still leaves everything taken before them on the server. A
+  reading left to the other take reads "not taken here: left to a take of its own" until that take writes it. A runner
+  that stops answering the service is failed by GitHub some time later with no log and no annotation, and nothing on it
+  is kept (run 105's two elevated jobs, both attempts): no step's limit is 45 minutes, the time a hosted Windows runner's
+  loss is reported to take to be failed, so a step's limit and a lost runner are not read as one.
 - **CI's alone.** `take` registers tasks as SYSTEM and LocalService, adds a firewall rule and grants LocalService its
   work folder, so it refuses, before it makes or removes anything, a machine that is not a GitHub-hosted runner, a work
   folder it did not make, and a `\AGMessage\Server` task it did not make (the installed node's). It is never run on the

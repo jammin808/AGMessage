@@ -109,11 +109,12 @@ const stopServer = (child) => new Promise((resolve, reject) => {
 /** The first admin account, made at the laptop with its token typed (the only way one is made): api's answer. */
 const setupAdmin = (base, body = {}) => api(base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle', ...body });
 
-/** fetch with JSON in and out; returns {status, body, cookie, headers}. */
-async function api(base, method, url, body, { cookie, headers = {} } = {}) {
+/** fetch with JSON in and out, its answer whole within `ms` when one is named (else fetch's own bounds); returns {status, body, cookie, headers}. */
+async function api(base, method, url, body, { cookie, headers = {}, ms } = {}) {
   const r = await fetch(base + url, {
     method, headers: { ...(body !== undefined ? { 'content-type': 'application/json' } : {}), ...(cookie ? { cookie } : {}), ...headers },
     body: body !== undefined ? JSON.stringify(body) : undefined,
+    ...(ms ? { signal: AbortSignal.timeout(ms) } : {}),
   });
   const set = r.headers.get('set-cookie');
   let json;

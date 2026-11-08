@@ -47,6 +47,20 @@ function run(file, args, { ms = 120000, env, cwd = path.dirname(file), input } =
 }
 
 /**
+ * A program by its absolute path, as `run` runs it, but without holding the loop while it runs, so the test that waits on
+ * it can still end at its own bound and fail by its name: {code, out, err} (code null for one ended at `ms`, said ETIMEDOUT).
+ */
+function runAsync(file, args, { ms = 120000, env, cwd = path.dirname(file) } = {}) {
+  return new Promise((resolve) => {
+    childProcess.execFile(file, args, { cwd, env, encoding: 'utf8', windowsHide: true, timeout: ms, maxBuffer: 32 * 1024 * 1024 }, (error, stdout, stderr) => {
+      const code = !error ? 0 : Number.isInteger(error.code) ? error.code : null;
+      const why = error && code === null ? ' ' + String(error.killed ? 'ETIMEDOUT' : error.code || error.message) : '';
+      resolve({ code, out: String(stdout || ''), err: String(stderr || '') + why });
+    });
+  });
+}
+
+/**
  * Why the life cycle refuses this machine, before anything is made; '' when it may run here: Windows, a GitHub-hosted
  * runner (thrown away after the job), elevated, no install record, no install folder and no machine folder.
  */
@@ -147,20 +161,52 @@ function hands({ work, logs }) {
   /** A file's product version, as its version resource says it (the build an installer was compiled for), its padding cut. */
   const productVersion = (file) => String(L.ps(String.raw`$ErrorActionPreference = 'Stop'; ConvertTo-Json -InputObject @{ v = [string](Get-Item -LiteralPath $env:AGM_PATH).VersionInfo.ProductVersion } -Compress`, { AGM_PATH: file }).v || '').replace(/[\0\s]+$/, '');
 
+  /** A process and every process it started, ended outright (taskkill /T /F, by its absolute path): only the life cycle's own stand-ins and portable copies, never an installer. */
+  const endTree = (pid) => run(exe('taskkill.exe'), ['/PID', String(pid), '/T', '/F'], { ms: 15000, cwd: p.sys });
+  /**
+   * A child of the life cycle's own (a stand-in it started) ended: `ask` asks it to end, and one that has not within `ms`
+   * has its tree ended outright, then is waited for 5 s more. Resolves how it ended ('by itself', 'outright', or 'not
+   * seen to end'), never rejects, so it may sit in a finally beside the error it follows.
+   */
+  const ended = (child, ms, ask) => {
+    if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve('by itself');
+    const exit = new Promise((resolve) => { child.once('exit', () => resolve(true)); });
+    ask();
+    return Promise.race([exit, sleep(ms).then(() => false)]).then(async (by) => {
+      if (by) return 'by itself';
+      endTree(child.pid);
+      return (await Promise.race([exit, sleep(5000).then(() => false)])) ? 'outright' : 'not seen to end';
+    });
+  };
+
   /** The next log's path in `logs`, its name saying what ran. */
   const logFor = (what) => path.join(logs, String(++logN).padStart(2, '0') + '-' + what.replace(/[^A-Za-z0-9.-]+/g, '-') + '.log');
   /** A log's text as Inno Setup wrote it ('' when it wrote none). */
   const logOf = (file) => { try { return expect.logText(fs.readFileSync(file)); } catch { return ''; /* none written: the run's code says why */ } };
+  /** Each installer still running, by its pid: what it was run for. */
+  const installing = new Map();
   /**
    * An installer run quietly, as an administrator runs one ({exe} /VERYSILENT /SUPPRESSMSGBOXES /NORESTART and `args`),
-   * its log written to a file of its own: resolves {code, ms, log, said} once it has ended. An installer is never ended
-   * from here: Inno Setup's own rollback does not run on a kill.
+   * its log written to a file of its own: resolves {code, ms, log, said} once it has ended, or rejects once `ms` has
+   * passed (11 minutes, under the longest test's own bound), naming what it was run for, its pid, the seconds waited and
+   * its log's last lines. An installer is never ended from here: Inno Setup's own rollback does not run on a kill. While
+   * one still runs, however its test ended, the next install is refused at once, naming it, so the tests after a hung
+   * installer fail by their names and none runs an installer beside another.
    */
-  const install = (exeFile, args, what) => new Promise((resolve) => {
+  const install = (exeFile, args, what, { ms = 11 * 60_000 } = {}) => new Promise((resolve, reject) => {
+    if (installing.size) {
+      reject(new Error('the installer run for ' + [...installing].map(([pid, was]) => was + ' (pid ' + pid + ')').join(', ') + ' still runs: ' + what + ' is not started beside it'));
+      return;
+    }
     const log = logFor(what);
     const t0 = Date.now();
     const child = childProcess.spawn(exeFile, ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', ...args, '/LOG=' + log], { cwd: path.dirname(exeFile), windowsHide: true, stdio: 'ignore' });
-    const done = (code) => { const text = logOf(log); resolve({ code, ms: Date.now() - t0, log, text, said: expect.innoLog(text) }); };
+    if (child.pid) installing.set(child.pid, what);
+    const late = setTimeout(() => {
+      const tail = expect.innoLog(logOf(log)).messages.slice(-8).join(' | ').slice(-1500);
+      reject(new Error('the installer run for ' + what + ' (pid ' + child.pid + ') had not ended ' + Math.round((Date.now() - t0) / 1000) + ' s after it started; its log ends: ' + (tail || '(nothing written)')));
+    }, ms);
+    const done = (code) => { clearTimeout(late); installing.delete(child.pid); const text = logOf(log); resolve({ code, ms: Date.now() - t0, log, text, said: expect.innoLog(text) }); };
     child.once('exit', (code) => done(code));
     child.once('error', (e) => { done(null); console.error('the installer did not run: ' + e.message); });
   });
@@ -171,7 +217,7 @@ function hands({ work, logs }) {
   const uninstall = async (args, what, { ms = 6 * 60_000 } = {}) => {
     const log = logFor(what);
     const t0 = Date.now();
-    const r = run(path.win32.join(p.app, 'unins000.exe'), ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', ...args, '/LOG=' + log], { ms, cwd: p.sys });
+    const r = await runAsync(path.win32.join(p.app, 'unins000.exe'), ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', ...args, '/LOG=' + log], { ms, cwd: p.sys });
     const gone = await until(() => !fs.existsSync(path.win32.join(p.app, 'unins000.exe')) && !(record() || {}).InstallDir, ms);
     await sleep(2000);
     const text = logOf(log);
@@ -200,10 +246,10 @@ function hands({ work, logs }) {
   /** Whether anything takes a connection on the port now. */
   const answers = () => machine.portAnswers(PORT);
 
-  /** A command of the installed machine.js (or another install folder's), elevated as this process is, with its --out: {code, said}. */
-  const machineJs = (args, { app = p.app, ms = 300000 } = {}) => {
+  /** A command of the installed machine.js (or another install folder's), elevated as this process is, with its --out: resolves {code, said}. */
+  const machineJs = async (args, { app = p.app, ms = 300000 } = {}) => {
     const out = path.join(work, 'machine-' + crypto.randomBytes(6).toString('hex') + '.json');
-    const r = run(path.win32.join(app, 'node', 'node.exe'), [path.win32.join(app, 'app', 'machine.js'), ...args, '--out', out], { ms, cwd: path.win32.join(app, 'app') });
+    const r = await runAsync(path.win32.join(app, 'node', 'node.exe'), [path.win32.join(app, 'app', 'machine.js'), ...args, '--out', out], { ms, cwd: path.win32.join(app, 'app') });
     let said;
     try { said = JSON.parse(fs.readFileSync(out, 'utf8')); } catch { said = { words: (r.err || r.out).trim().slice(-600) }; }
     fs.rmSync(out, { force: true });
@@ -211,16 +257,17 @@ function hands({ work, logs }) {
   };
   /**
    * A request of an administrator's elevated console (machine.js control --elevated), as Who may run AGMessage… run as an
-   * administrator makes one: written into machine\work\ (SYSTEM and Administrators only), its answer read from --out.
+   * administrator makes one: written into machine\work\ (SYSTEM and Administrators only), its answer read from --out:
+   * resolves {code, said}.
    */
   const control = (request) => {
     const file = path.win32.join(p.root, 'machine', 'work', 'lifecycle-' + crypto.randomBytes(6).toString('hex') + '.json');
     fs.writeFileSync(file, JSON.stringify({ id: crypto.randomBytes(12).toString('hex'), ...request }));
     return machineJs(['control', '--elevated', '--request', file, '--machine', p.root, '--sys', p.sys]);
   };
-  /** The facts of a data folder and its key folder, read by an install's own reader (lib/importfacts.js), elevated. */
-  const facts = ({ data = path.win32.join(p.root, 'data'), keys = path.win32.join(p.root, 'keys'), app = p.app } = {}) => {
-    const r = run(path.win32.join(app, 'node', 'node.exe'), [path.win32.join(app, 'app', 'lib', 'importfacts.js'), '--data', data, '--keys', keys], { ms: 300000, cwd: path.win32.join(app, 'app') });
+  /** The facts of a data folder and its key folder, read by an install's own reader (lib/importfacts.js), elevated: resolves them. */
+  const facts = async ({ data = path.win32.join(p.root, 'data'), keys = path.win32.join(p.root, 'keys'), app = p.app } = {}) => {
+    const r = await runAsync(path.win32.join(app, 'node', 'node.exe'), [path.win32.join(app, 'app', 'lib', 'importfacts.js'), '--data', data, '--keys', keys], { ms: 300000, cwd: path.win32.join(app, 'app') });
     let j;
     try { j = JSON.parse(r.out.trim().split(/\r?\n/).pop()); } catch { j = null; /* said below */ }
     if (!j || !j.facts) throw new Error('the facts of ' + data + ' were not read: ' + ((j && j.error) || (r.err || r.out).trim().slice(-400)));
@@ -256,33 +303,47 @@ function hands({ work, logs }) {
     const exited = new Promise((resolve) => { child.once('exit', (code) => resolve(code)); child.once('error', () => resolve(null)); });
     return { child, exited, tail: () => tail.split(adminToken).join('<token>'), port, token: adminToken, dir };
   };
-  /** A portable copy stopped as a stop at loopback with the proof stops it (it saves), waited for; ended outright if it will not. */
+  /**
+   * A portable copy stopped as a stop at loopback with the proof stops it (it saves), waited for 30 s; one that has not
+   * ended by then has its tree ended outright (its watchdog's forked server outlives the watchdog's own end on Windows),
+   * then its port is waited for 15 s to close, and said when it does not. Its exit code, or null when it was ended.
+   */
   const portableStop = async (w) => {
     if (w.child.exitCode !== null || w.child.signalCode !== null) return w.child.exitCode;
     await wire.stop({ port: w.port, token: w.token, reason: 'stop', by: 'the installer\'s life cycle', force: 'the life cycle stops its portable copy' });
     const code = await Promise.race([w.exited, sleep(30000).then(() => undefined)]);
     if (code !== undefined) return code;
-    w.child.kill();
-    return Promise.race([w.exited, sleep(10000).then(() => null)]);
+    endTree(w.child.pid);
+    await Promise.race([w.exited, sleep(10000)]);
+    if (!(await until(async () => !(await machine.portAnswers(w.port)), 15000, 500))) console.error('the portable copy in ' + w.dir + ' was ended outright, and port ' + w.port + ' still answers 15 s later');
+    return null;
   };
   /** Health at loopback, read as the machine reads a holder's ({version, build, runs}), or null. */
   const health = (port = PORT) => machine.healthOf(port);
 
-  /** A program that takes every connection on `port` and answers nothing (this runner's own node.exe): {pid, close()}. */
-  const silent = (port = PORT) => new Promise((resolve, reject) => {
+  /**
+   * A program that takes every connection on `port` and answers nothing (this runner's own node.exe): {pid, close()}, once
+   * it listens; refused, its tree ended, when it does not within `ms`. close() ends it within 20 s, outright after that.
+   */
+  const silent = (port = PORT, { ms = 60_000 } = {}) => new Promise((resolve, reject) => {
     const child = childProcess.spawn(process.execPath, ['-e', "const s = require('node:net').createServer(() => {}); s.listen(Number(process.argv[1]), '127.0.0.1', () => process.stdout.write('listening\\n'));", String(port)], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     let said = '';
-    child.stdout.on('data', (c) => { said += c; if (said.includes('listening')) resolve({ pid: child.pid, close: () => new Promise((r) => { child.once('exit', r); child.kill(); }) }); });
-    child.once('exit', (code) => reject(new Error('the silent listener ended with ' + code)));
+    const late = setTimeout(() => { endTree(child.pid); reject(new Error('the silent listener on port ' + port + ' (pid ' + child.pid + ') did not listen within ' + ms / 1000 + ' s')); }, ms);
+    child.stdout.on('data', (c) => { said += c; if (said.includes('listening')) { clearTimeout(late); resolve({ pid: child.pid, close: () => ended(child, 20_000, () => child.kill()) }); } });
+    child.once('exit', (code) => { clearTimeout(late); reject(new Error('the silent listener on port ' + port + ' ended with ' + code)); });
   });
-  /** A file held open with no sharing by a program outside the install folder (powershell.exe), until released. */
-  const hold = (file) => new Promise((resolve, reject) => {
+  /**
+   * A file held open with no sharing by a program outside the install folder (powershell.exe), until released: refused,
+   * its tree ended, when it is not held within `ms`; release() ends it within 20 s, outright after that.
+   */
+  const hold = (file, { ms = 60_000 } = {}) => new Promise((resolve, reject) => {
     const child = childProcess.spawn(path.win32.join(p.sys, 'WindowsPowerShell', 'v1.0', 'powershell.exe'), ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', String.raw`$f = [System.IO.File]::Open($env:AGM_PATH, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::None); [Console]::Out.WriteLine('held'); [Console]::Out.Flush(); [void][Console]::In.ReadLine(); $f.Close()`], { env: { ...process.env, AGM_PATH: file }, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     let said = '';
     let err = '';
-    child.stdout.on('data', (c) => { said += c; if (said.includes('held')) resolve({ pid: child.pid, release: () => new Promise((r) => { child.once('exit', r); child.stdin.end('\n'); }) }); });
+    const late = setTimeout(() => { endTree(child.pid); reject(new Error(file + ' was not held within ' + ms / 1000 + ' s (powershell.exe, pid ' + child.pid + '): ' + err.trim().slice(0, 300))); }, ms);
+    child.stdout.on('data', (c) => { said += c; if (said.includes('held')) { clearTimeout(late); resolve({ pid: child.pid, release: () => ended(child, 20_000, () => child.stdin.end('\n')) }); } });
     child.stderr.on('data', (c) => { err += c; });
-    child.once('exit', (code) => reject(new Error('the file was not held (' + code + '): ' + err.trim().slice(0, 300))));
+    child.once('exit', (code) => { clearTimeout(late); reject(new Error(file + ' was not held (' + code + '): ' + err.trim().slice(0, 300))); });
   });
   /** A junction at `link` to `target`, as a standard account may make one under %ProgramData% (Node's own, no shell). */
   const junction = (link, target) => { fs.symlinkSync(target, link, 'junction'); };
@@ -335,7 +396,7 @@ function hands({ work, logs }) {
 
   return {
     ...p, port: PORT, work, logs, L, run, exe, record, grants, task, agmTasks, definition, rules, sddl, programs, privileges, productVersion,
-    install, uninstall, logFor, logOf, token, proven, answers, machineJs, control, facts, copy, move, portable, portableStop, health, silent, hold,
+    install, installing, uninstall, logFor, logOf, token, proven, answers, machineJs, control, facts, copy, move, portable, portableStop, health, silent, hold, endTree,
     junction, setOwner, account, accountGone, taskAs, tree, events, tokens, passwords,
   };
 }
@@ -351,4 +412,4 @@ async function until(test, ms, every = 500) {
   }
 }
 
-module.exports = { PORT, places, run, placeRefusal, hands, until, sleep };
+module.exports = { PORT, places, run, runAsync, placeRefusal, hands, until, sleep };

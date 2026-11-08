@@ -7157,6 +7157,39 @@ laptop and no Board device walked)
   the held row's doors out of step; the step now draws every bar again with the focus in the row and holds the row, its
   ⋯ and the focus kept, and its line names each part and each door check that missed, with what the page held then, and
   writes each tick as ☑ or ☐ before its words (it printed it as `=true` after them, which the CI log masked).
+- CI's two elevated Windows jobs end by themselves, and leave what they took. In run 105 (both attempts) the installer's
+  life cycle and the Windows readings lane, each on a runner of its own, were both marked failed at the same second, 56
+  minutes after they started together, each with its running step never ended, no log kept and no artifact: run 105 was
+  the first run whose standard accounts were made (unit 81's fix), so the first to take R11, R6 and the life cycle's
+  later tests. Proved: neither step ended, and nothing of a runner lost to the service is kept; and the lane could run
+  past its step's 45 minutes by design, as its only rule was when a reading may begin (not after 20 minutes) while R11,
+  R3′ and R1 could each wait longer than the 25 minutes left (R1 had waits with no bound at all), a reading cut by the
+  runner left its tasks (some with no time limit), its firewall rules and its accounts behind, and a take that had
+  written its whole record could still be kept alive by a handle left open. Not proved: why both runners went silent in
+  the same minute, twice. Nothing GitHub does ties two jobs' fates, and the lane cannot reach the life cycle's machine,
+  so the timing fits a cause common to both (both started in the same second, both turn Defender back on first, both
+  make standard accounts and run tasks as them by password since unit 81) as well as it fits the lane's overrun; GitHub
+  is reported to fail a lost hosted Windows runner 45 minutes after it was last heard, which would put both losses near
+  11 minutes into the jobs, but that is not measured here. What now bounds them: the lane bounds itself
+  (`tools/readings-take.js`): each reading has a bound of its own and begins only while it fits in its step's deadline
+  (else "not taken: the lane's deadline"), every wait of it ends and no program of it starts past that bound, one not
+  ended a minute later is written cut and the lane goes on, its record written as each reading begins, after each round a
+  long reading takes and as each ends; what it made is removed at its end, every account named before it is made; a
+  signal writes the record at once and removes its tasks and rules before it exits 2; it exits once its record is
+  written; and the two waits with no bound (a page's join answered, the old server's socket closed) have one. The
+  readings as standard accounts (R11, R6) are a take step of their own, after the record of the rest is kept as the
+  artifact, so a runner lost in them still leaves the rest; no step's limit is 45 minutes. The life cycle
+  (`installer/test/`): an installer is waited for 11 minutes at most, never ended from a test, and the next install is
+  refused while one still runs; a seed's asks, the stand-ins it starts and ends, the upgrade's watch and a portable copy
+  that will not stop are bounded (the copy's whole tree ended); its long programs run without holding the test's loop,
+  so a test's own bound ends its wait and names it; and the run ends its file once its last test has
+  (`--test-force-exit`), giving a test with no bound of its own the longest any test declares (`--test-timeout`).
+  `test/readings.test.js` and `test/lifecycle.test.js` hold each of these, the lane's with readings that never end, run
+  past their bound and do not fit, and a signal's stop. No elevated job had yet run more than about 11 minutes past
+  `tools/defender-on.ps1` (run 101's lane took about 8), so the next run asks the question with two canaries that start
+  beside them and do no work of AGMessage's, each saying it is alive every minute for an hour: one with Defender turned
+  back on first, the other on the image as it is (only the first lost: Defender's scanning; both: the hosted runners;
+  neither: the two jobs' own work). They are removed once they have answered, and the release waits for neither.
 - The installer's build accepts the installer it built. `installer/build-installer.ps1` reads the version back from the
   file it compiled and compares it with the build's, and read its strings with the padding Windows' version resource
   keeps after them, so CI's first build of it (run 96) refused "0.6.0.96" padded with blanks as not "0.6.0.96". The

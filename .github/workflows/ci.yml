@@ -523,7 +523,9 @@ jobs:
           $plan | ConvertTo-Json -Depth 4 | Out-File -FilePath $file -Encoding utf8NoBOM
           "plan=$file" >> $env:GITHUB_OUTPUT
       # Every test of installer/test/*.test.js, one after another, its TAP report kept; then the executed count against the
-      # declared one. Either failing fails the job.
+      # declared one. Either failing fails the job. A test or hook that names no bound of its own is given the longest any
+      # test declares (--test-timeout), and the file ends once its last test and hook have, whatever a hung one left running
+      # (--test-force-exit: an installer, a listener, a held file), so the count and the logs' upload still run.
       - name: The life cycle (installer/test/*.test.js, every test it declares run and passed)
         shell: pwsh
         timeout-minutes: 215
@@ -533,7 +535,7 @@ jobs:
           $logs = Join-Path $env:RUNNER_TEMP 'lifecycle\logs'
           New-Item -ItemType Directory -Force -Path $logs | Out-Null
           $tap = Join-Path $logs 'lifecycle.tap'
-          node --test --test-concurrency=1 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=tap "--test-reporter-destination=$tap" 'installer/test/*.test.js'
+          node --test --test-concurrency=1 --test-force-exit --test-timeout=900000 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=tap "--test-reporter-destination=$tap" 'installer/test/*.test.js'
           $ran = $LASTEXITCODE
           $files = @(Get-ChildItem installer/test -Filter '*.test.js' | ForEach-Object { $_.FullName })
           node tools/lifecycle.js count --tap $tap --summary $env:GITHUB_STEP_SUMMARY @files
@@ -553,9 +555,13 @@ jobs:
   # miss means and which readings wait for a later unit's code). They inform the release and never hold it: a reading
   # that misses its mark is written in the release's notes with the fallback its unit names; only a lane that cannot
   # write its readings fails here, and the release does not wait on that. Every action here is pinned by its commit.
-  # Every step has a bound of its own, and together they end well inside the job's (the lane's own bound, BUDGET_MS in
-  # tools/readings-take.js, inside the take step's): a step that runs over fails, the job ends failed, never cancelled,
-  # and the release, which waits for it, still publishes. It runs for every push, a tag and a run asked for by hand
+  # Every step has a bound of its own, and together they end well inside the job's: a step that runs over fails, the job
+  # ends failed, never cancelled, and the release, which waits for it, still publishes. The take bounds itself, so its
+  # step's limit is never what ends it: each reading has a bound of its own (BOUNDS in tools/readings-take.js) and begins
+  # only while it fits in the deadline each take step gives it (--deadline-min), and the take ends by itself within
+  # STOP_MIN of that deadline, its record written. The readings as standard accounts (R11, R6), which log on as accounts
+  # the lane makes, are a take step of their own, after the record of the rest is kept as the artifact, so a runner lost in
+  # them still leaves what was taken before. It runs for every push, a tag and a run asked for by hand
   # (never a pull request, whose commits are pushes already), one at a time per ref: once it runs nothing cancels it,
   # and a newer push's waits, the newest waiting taking the place of an older one, so a regression shows on the next
   # readings taken, never on a run cut short.
@@ -567,7 +573,7 @@ jobs:
       group: readings-${{ github.ref }}
       cancel-in-progress: false
     runs-on: windows-2025
-    timeout-minutes: 90
+    timeout-minutes: 125
     steps:
       # No credential is left in the checkout: the stand-in tasks run the bundle's code from this workspace.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -615,9 +621,11 @@ jobs:
           }
           "tag=$tag" >> $env:GITHUB_OUTPUT
           exit 0
+      # Every reading but the two as standard accounts, within a deadline of 38 minutes: the take ends by itself inside
+      # this step's limit (the deadline and STOP_MIN), its record written, whatever a reading met.
       - name: Take the readings (tools/readings-take.js)
         shell: pwsh
-        timeout-minutes: 45
+        timeout-minutes: 44
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
         run: |
@@ -630,10 +638,29 @@ jobs:
           # The installer, when its job built it: R5 reads Windows' verdict on its signature beside the two programs'.
           $setup = @(Get-ChildItem installer-dist -Filter 'AGMessage-Setup-*-unsigned.exe' -ErrorAction SilentlyContinue)
           $installer = if ($setup.Count -eq 1) { @('--installer', $setup[0].FullName) } else { @() }
-          node tools/readings-take.js take --zip $zip[0].FullName --defender "$env:RUNNER_TEMP\defender.json" --out readings/readings.raw.json @release @over @installer
+          node tools/readings-take.js take --zip $zip[0].FullName --defender "$env:RUNNER_TEMP\defender.json" --out readings/readings.raw.json --deadline-min 38 --skip R11,R6 @release @over @installer
           if ($LASTEXITCODE -ne 0) { throw "the lane could not write its readings (exit $LASTEXITCODE)" }
-      # The record is written before the first reading and after each, so a take step cut short still has what it took
-      # judged.
+      # What was taken, kept on the server before any standard account is made: a runner lost after this still leaves it.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        timeout-minutes: 5
+        with:
+          name: agmessage-readings-${{ github.sha }}
+          path: readings
+          if-no-files-found: warn
+          overwrite: true
+      # R11 and R6, added to the same record (--add), within a deadline of 24 minutes, whatever the take before ended with.
+      - name: Take the readings as standard accounts (R11, R6; tools/readings-take.js)
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        timeout-minutes: 30
+        run: |
+          $zip = @(Get-ChildItem dist -Filter 'AGMessage-Portable-*.zip')
+          if ($zip.Count -ne 1) { throw "expected one bundle zip in dist, found $($zip.Count)" }
+          node tools/readings-take.js take --zip $zip[0].FullName --defender "$env:RUNNER_TEMP\defender.json" --out readings/readings.raw.json --deadline-min 24 --only R11,R6 --add
+          if ($LASTEXITCODE -ne 0) { throw "the lane could not write its readings as standard accounts (exit $LASTEXITCODE)" }
+      # The record is written before the first reading, as each begins and after each, so a take step that did not end
+      # still has what it took judged.
       - name: Judge them against their marks (tools/readings.js)
         if: ${{ !cancelled() }}
         shell: pwsh
@@ -648,6 +675,56 @@ jobs:
           name: agmessage-readings-${{ github.sha }}
           path: readings
           if-no-files-found: warn
+          overwrite: true
+
+  # A question for one run, removed once it is answered: the life cycle and the lane were both lost at the same second,
+  # 56 min after they started, in both attempts of run 105, with no log. These two start in the same second as they do
+  # (the same needs) and do no work of AGMessage's: one turns Defender back on as both of them do first
+  # (tools/defender-on.ps1), the other leaves the image as it is; each then says it is alive every minute for an hour.
+  # Only the first lost: Defender's scanning, back on over the runner's own files, is what loses a runner. Both lost:
+  # the hosted runners themselves. Neither lost: the cause is in the work the two jobs do. The release waits for neither.
+  canary-defender:
+    name: Canary, a runner with Defender back on (no AGMessage work)
+    needs: [package, installer]
+    if: ${{ github.event_name == 'push' }}
+    runs-on: windows-2025
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 5
+        with:
+          persist-credentials: false
+      - name: Defender's real-time monitoring back on, the image's exclusions removed (tools/defender-on.ps1)
+        shell: powershell
+        timeout-minutes: 5
+        run: ./tools/defender-on.ps1 -Out "$env:RUNNER_TEMP\defender.json"
+      - name: Alive every minute for an hour
+        shell: pwsh
+        timeout-minutes: 65
+        run: |
+          for ($i = 1; $i -le 60; $i++) {
+            Start-Sleep -Seconds 60
+            $scan = @(Get-Process MsMpEng -ErrorAction SilentlyContinue | ForEach-Object { [int]$_.CPU })
+            $free = [int]((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1024)
+            Write-Host ('alive {0} min {1:u}: Defender CPU {2} s, free memory {3} MB' -f $i, (Get-Date).ToUniversalTime(), ($scan -join '+'), $free)
+          }
+  canary-image:
+    name: Canary, a runner as the image left it (no AGMessage work)
+    needs: [package, installer]
+    if: ${{ github.event_name == 'push' }}
+    runs-on: windows-2025
+    timeout-minutes: 75
+    steps:
+      - name: Alive every minute for an hour
+        shell: pwsh
+        timeout-minutes: 65
+        run: |
+          for ($i = 1; $i -le 60; $i++) {
+            Start-Sleep -Seconds 60
+            $scan = @(Get-Process MsMpEng -ErrorAction SilentlyContinue | ForEach-Object { [int]$_.CPU })
+            $free = [int]((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1024)
+            Write-Host ('alive {0} min {1:u}: Defender CPU {2} s, free memory {3} MB' -f $i, (Get-Date).ToUniversalTime(), ($scan -join '+'), $free)
+          }
 
   release:
     name: GitHub Release

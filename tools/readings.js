@@ -350,11 +350,17 @@ function defenderOf(raw) {
 }
 
 const NOT_TAKEN = 'not taken by this lane';
-/** A reading's measurement, or why there is none: {taken, value, why}. */
+/**
+ * A reading's measurement, or why there is none: {taken, value, why}. One the lane began and never ended (`running`: it
+ * stopped in it) and one cut at its own bound (`cut`) are not taken, whatever rounds they kept, which stay in the record
+ * for a person to read and are never judged.
+ */
 function measured(raw, id) {
   const r = raw && raw.readings && typeof raw.readings === 'object' ? raw.readings[id] : undefined;
   if (r === undefined || r === null) return { taken: false, why: NOT_TAKEN };
   if (typeof r !== 'object') return { taken: false, why: 'its record is not the lane\'s' };
+  if (r.running) return { taken: false, why: 'not taken: ' + String(r.running).slice(0, 120) + ', it never ended: the lane stopped in it' + (raw.stopped ? ' (' + String(raw.stopped).slice(0, 80) + ')' : '') };
+  if (r.cut) return { taken: false, why: 'not taken: cut at ' + String(r.cut).slice(0, 300) };
   if (r.error) return { taken: false, why: 'it failed on the runner: ' + String(r.error).slice(0, 300) };
   if (r.skipped) return { taken: false, why: String(r.skipped).slice(0, 300) };
   return { taken: true, value: r };
@@ -701,7 +707,7 @@ function judge(raw) {
     const m = measured(r, reading.id);
     const judgeOne = JUDGES[reading.id];
     if (!m.taken || !judgeOne) {
-      const why = reading.needs && !judgeOne ? 'needs ' + reading.needs.join('; ') : cutShort && m.why === NOT_TAKEN ? 'not taken: the lane ended before it (cut short)' : m.why;
+      const why = reading.needs && !judgeOne ? 'needs ' + reading.needs.join('; ') : cutShort && m.why === NOT_TAKEN ? 'not taken: the lane ended before it (' + (r.stopped ? 'stopped by ' + String(r.stopped).slice(0, 80) : 'cut short') + ')' : m.why;
       return { ...base, ...verdict('not run', why) };
     }
     let v;

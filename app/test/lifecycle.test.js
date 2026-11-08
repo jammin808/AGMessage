@@ -487,6 +487,52 @@ test('what the life cycle must keep across an upgrade, an uninstall that keeps t
   ]);
 });
 
+// ---------------------------------------------------------------- the waits
+
+test('every wait of the life cycle ends by itself, named: an installer at its bound and none beside it, the watch beside the upgrade, the asks of a seed, the stand-ins it starts and ends, and the long programs run without holding the loop', () => {
+  const HANDS = h.readSource('installer/test/hands.js');
+  // An installer is waited for at most 11 minutes, under the longest test's own bound, and its wait refused at once while
+  // an earlier one still runs, so a hung installer fails its own test and the next ones by name, never beside another.
+  const longest = Math.max(...[...LIFECYCLE.matchAll(/^test\('(?:[^'\\\n]|\\.)*', \{ timeout: ([\d_ *]+) \}, /gm)].map((m) => m[1].split('*').map((x) => Number(x.trim().replace(/_/g, ''))).reduce((a, b) => a * b, 1)));
+  const installMs = /const install = \(exeFile, args, what, \{ ms = ([\d_ *]+) \} = \{\}\) => new Promise\(\(resolve, reject\) => \{\n\s+if \(installing\.size\) \{\n\s+reject\(new Error\('the installer run for '/.exec(HANDS);
+  assert.ok(installMs, 'install refuses at once while an installer still runs');
+  assert.ok(installMs[1].split('*').map((x) => Number(x.trim().replace(/_/g, ''))).reduce((a, b) => a * b, 1) < longest, 'an installer\'s wait ends under the longest test\'s bound');
+  assert.match(HANDS, /const late = setTimeout\(\(\) => \{\n\s+const tail = [^\n]+\n\s+reject\(new Error\('the installer run for ' \+ what \+ ' \(pid ' \+ child\.pid \+ '\) had not ended '/, 'the installer\'s bound names what it ran for and its pid');
+  assert.match(HANDS, /if \(child\.pid\) installing\.set\(child\.pid, what\);/);
+  assert.match(HANDS, /const done = \(code\) => \{ clearTimeout\(late\); installing\.delete\(child\.pid\);/, 'an installer leaves the list only once it has ended');
+  const installFn = HANDS.slice(HANDS.indexOf('const install = '), HANDS.indexOf('const uninstall = '));
+  assert.doesNotMatch(installFn, /endTree|\.kill\(|taskkill/, 'an installer is never ended from here: Inno Setup\'s rollback does not run on a kill');
+  assert.doesNotMatch(HANDS, /endTree\([^)]*installing/, 'nor is one still running');
+  // The stand-ins the life cycle starts are refused, and ended, when they do not come up, and ended within 20 s when asked.
+  assert.match(HANDS, /const silent = \(port = PORT, \{ ms = 60_000 \} = \{\}\) =>/);
+  assert.match(HANDS, /close: \(\) => ended\(child, 20_000, \(\) => child\.kill\(\)\)/);
+  assert.match(HANDS, /const hold = \(file, \{ ms = 60_000 \} = \{\}\) =>/);
+  assert.match(HANDS, /release: \(\) => ended\(child, 20_000, \(\) => child\.stdin\.end\('\\n'\)\)/);
+  // A portable copy that will not stop at loopback has its whole tree ended (its watchdog's server outlives the watchdog),
+  // by taskkill's absolute path in System32.
+  assert.match(HANDS, /const endTree = \(pid\) => run\(exe\('taskkill\.exe'\), \['\/PID', String\(pid\), '\/T', '\/F'\]/);
+  assert.match(HANDS, /if \(code !== undefined\) return code;\n\s+endTree\(w\.child\.pid\);/);
+  assert.doesNotMatch(HANDS, /w\.child\.kill\(\)/, 'never the watchdog alone');
+  // The long programs (machine.js, the facts reader, launch.js, the uninstaller) run without holding the loop, so a test's
+  // own bound ends its wait, and every call of them is awaited.
+  assert.match(HANDS, /const machineJs = async \([^\n]*\n[^\n]*\n\s+const r = await runAsync\(/, 'machine.js runs without holding the loop');
+  assert.match(HANDS, /const facts = async \([^\n]*\n\s+const r = await runAsync\(/, 'the facts reader runs without holding the loop');
+  assert.match(HANDS, /const r = await runAsync\(path\.win32\.join\(p\.app, 'unins000\.exe'\)/);
+  assert.match(LIFECYCLE, /const launch = \(args\) => runAsync\(/);
+  const calls = [...LIFECYCLE.matchAll(/(await )?(H\.facts\(|H\.machineJs\(|H\.control\(|launch\(\[)/g)];
+  assert.ok(calls.length >= 20, 'the calls are found: ' + calls.length);
+  assert.deepEqual(calls.filter((m) => !m[1]).map((m) => LIFECYCLE.slice(0, m.index).split('\n').length), [], 'every call of a long program is awaited (the lines that are not)');
+  // The watch beside the upgrade ends with the installer however it ended, and at its own deadline at the latest; each ask
+  // of a seed is answered within ASK_MS.
+  assert.match(LIFECYCLE, /while \(seen\.installing && !seen\.healthAt && Date\.now\(\) < watchEnds\) \{/);
+  assert.match(LIFECYCLE, /let r;\n\s+try \{ r = await H\.install\(B\.current\.exe, \[[^\n]*\], 'upgrade'\); \} finally \{\n\s+seen\.installing = false;\n\s+await watch;\n\s+\}/);
+  const seedFn = LIFECYCLE.slice(LIFECYCLE.indexOf('async function seed('), LIFECYCLE.indexOf('\ntest.before('));
+  assert.doesNotMatch(seedFn, /\bemit\(/, 'no ask of a seed waits on an answer without a bound');
+  assert.equal((seedFn.match(/await answer\(s, '(join|message)', [^\n]*, ASK_MS\)/g) || []).length, 2);
+  assert.equal((seedFn.match(/await api\([^\n]*ms: ASK_MS \}\)/g) || []).length, 2);
+  assert.match(seedFn, /await fetch\(BASE \+ '\/api\/context', \{ [^\n]*signal: AbortSignal\.timeout\(ASK_MS\) \}\)/);
+});
+
 // ---------------------------------------------------------------- the job
 
 /** A job of ci.yml, its lines from its name to the next job's. */
@@ -532,7 +578,8 @@ test('the life cycle in CI: an elevated windows-2025 job after the installer\'s,
   // The life cycle, one test after another, its TAP report counted against what its files declare; either failing fails the job.
   const run = steps.find((x) => x.startsWith('name: The life cycle (installer/test/*.test.js'));
   assert.match(run, /AGM_LIFECYCLE: \$\{\{ steps\.builds\.outputs\.plan \}\}/);
-  assert.match(run, /node --test --test-concurrency=1 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=tap "--test-reporter-destination=\$tap" 'installer\/test\/\*\.test\.js'\n\s+\$ran = \$LASTEXITCODE\n/);
+  const runLine = /node --test --test-concurrency=1 --test-force-exit --test-timeout=(\d+) --test-reporter=spec --test-reporter-destination=stdout --test-reporter=tap "--test-reporter-destination=\$tap" 'installer\/test\/\*\.test\.js'\n\s+\$ran = \$LASTEXITCODE\n/.exec(run);
+  assert.ok(runLine, 'the life cycle runs one file at a time, ends once its last test and hook have whatever a hung one left (--test-force-exit), and bounds a test that names no bound of its own: ' + run);
   assert.match(run, /node tools\/lifecycle\.js count --tap \$tap --summary \$env:GITHUB_STEP_SUMMARY @files\n\s+\$counted = \$LASTEXITCODE\n\s+if \(\$ran -ne 0\) \{ throw[^\n]*\n\s+if \(\$counted -ne 0\) \{ throw/);
   // The life cycle's step holds every bound its tests and hooks declare, with ten minutes over for loading the file and
   // the count, so a run slow inside its tests' own bounds is never cut by the step with nothing said.
@@ -542,6 +589,8 @@ test('the life cycle in CI: an elevated windows-2025 job after the installer\'s,
   const hooks = (LIFECYCLE.match(/^test\.(?:before|after)\(/gm) || []).length;
   assert.equal((LIFECYCLE.match(/^\}, \{ timeout: HOOK_MS \}\);$/gm) || []).length, hooks, 'every hook has its bound');
   const declaredMs = declared.reduce((a, d) => a + d.ms, 0) + hooks * msOf(/^const HOOK_MS = ([\d_ *]+);$/m.exec(LIFECYCLE)[1]);
+  // A test or hook added without a bound of its own is given the longest any test declares, never more.
+  assert.equal(Number(runLine[1]), Math.max(...declared.map((d) => d.ms)), '--test-timeout is the longest bound a test declares');
   const stepMs = Number(/\n {8}timeout-minutes: (\d+)\n/.exec('\n' + run.split('\n').slice(1).join('\n') + '\n')[1]) * 60_000;
   assert.ok(declaredMs + 10 * 60_000 <= stepMs, 'the life cycle\'s tests and hooks declare ' + declaredMs / 60_000 + ' minutes, and its step allows ' + stepMs / 60_000);
   // The standard account's test waits out its probe: the first line, then the probe's longest run for its two requests.

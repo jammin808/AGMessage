@@ -12,7 +12,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { hands, placeRefusal, until, sleep, PORT } = require('./hands.js');
+const { hands, placeRefusal, until, sleep, runAsync, PORT } = require('./hands.js');
 const expect = require('./expect.js');
 
 const REPO = path.join(__dirname, '..', '..');
@@ -26,7 +26,7 @@ const wire = require(path.join(REPO, 'app', 'lib', 'machinewire.js'));
 const { compareBuilds } = require(path.join(REPO, 'app', 'lib', 'version.js'));
 const { BROKEN_SERVER } = require(path.join(REPO, 'tools', 'lifecycle.js'));
 const { daclOf } = require(path.join(REPO, 'tools', 'readings.js'));
-const { api, connect, emit, freePort } = require(path.join(REPO, 'app', 'test', 'helpers.js'));
+const { api, connect, answer, freePort } = require(path.join(REPO, 'app', 'test', 'helpers.js'));
 const { WORDS } = expect;
 
 const PLAN = expect.planOf(fs.readFileSync(process.env.AGM_LIFECYCLE, 'utf8'));
@@ -91,13 +91,13 @@ function serverPid() {
 }
 /** The installed node stopped, as an administrator's elevated console stops it (it saves), and its port closed. */
 async function stopInstalled(reason) {
-  const r = H.control({ verb: 'stop', force: reason });
+  const r = await H.control({ verb: 'stop', force: reason });
   assert.equal(r.code, 0, scrub('stopped: ' + JSON.stringify(r.said)));
   assert.ok(await until(async () => !(await H.answers()), 60000), 'the port closed once AGMessage stopped');
 }
 /** The installed node started, as an administrator's elevated console starts it, and proving itself as `b`. */
 async function startInstalled(b) {
-  const r = H.control({ verb: 'start' });
+  const r = await H.control({ verb: 'start' });
   assert.equal(r.code, 0, scrub('started: ' + JSON.stringify(r.said)));
   return serving(b, 'started again');
 }
@@ -110,26 +110,29 @@ function payloadIs(b) {
   assert.deepEqual(wrong, [], 'every file of ' + b.full + '\'s payload laid with its SHA-256');
   assert.deepEqual(strays, [], 'nothing in ' + H.app + ' but the payload, Inno Setup\'s own and the kept installers');
 }
+/** How long each ask of the installed node at loopback may take before its test fails, naming the ask. */
+const ASK_MS = 15_000;
 /**
  * A first admin account made at loopback with the token (as the installer's page, or Admin login, makes one), a hall,
- * and a code guest's messages; and the context read once with a wrong token, so its own token is made and sealed.
+ * and a code guest's messages; and the context read once with a wrong token, so its own token is made and sealed. Each
+ * ask is answered within ASK_MS or fails, naming it.
  */
 async function seed(token, hallName) {
   const password = passphrase();
-  const setup = await api(BASE, 'POST', '/api/setup', { token, username: 'lifecycle', name: 'Life Cycle', password });
+  const setup = await api(BASE, 'POST', '/api/setup', { token, username: 'lifecycle', name: 'Life Cycle', password }, { ms: ASK_MS });
   assert.equal(setup.status, 200, scrub('the first admin account: ' + JSON.stringify(setup.body)));
-  const hall = await api(BASE, 'POST', '/api/rooms', { name: hallName }, { cookie: setup.cookie });
+  const hall = await api(BASE, 'POST', '/api/rooms', { name: hallName }, { cookie: setup.cookie, ms: ASK_MS });
   assert.match(String(hall.body && hall.body.code), /^[A-Z0-9]{6}$/, scrub('a hall: ' + JSON.stringify(hall.body)));
   const s = await connect(BASE, '');
   try {
-    const j = await emit(s, 'join', { roomCode: hall.body.code, name: 'Ana', role: 'research' });
+    const j = await answer(s, 'join', { roomCode: hall.body.code, name: 'Ana', role: 'research' }, ASK_MS);
     assert.equal(j.ok, true, scrub('Ana joins: ' + JSON.stringify(j)));
     for (let i = 1; i <= 3; i++) {
-      const m = await emit(s, 'message', { type: 'text', text: 'The installer\'s life cycle, message ' + i });
+      const m = await answer(s, 'message', { type: 'text', text: 'The installer\'s life cycle, message ' + i }, ASK_MS);
       assert.equal(m.ok, true, scrub('message ' + i + ': ' + JSON.stringify(m)));
     }
   } finally { s.close(); }
-  const ctx = await fetch(BASE + '/api/context', { headers: { authorization: 'Bearer not-this-nodes-context-token' } });
+  const ctx = await fetch(BASE + '/api/context', { headers: { authorization: 'Bearer not-this-nodes-context-token' }, signal: AbortSignal.timeout(ASK_MS) });
   assert.equal(ctx.status, 401, 'the context, asked with a wrong token, is refused (and its own token made, sealed)');
   return { code: hall.body.code };
 }
@@ -234,8 +237,8 @@ test('the build before this one serves at loopback: a first admin account made w
   S.seed = await seed(H.token(), 'Hall 1');
   const b = await wire.busy({ port: PORT, token: H.token() });
   assert.equal(b.busy, true, 'its messages make it busy: ' + b.words);
-  const f = await until(() => { const x = H.facts(); return x.messages >= 3 && x.accounts >= 1 && x.sealed.total >= 1 ? x : null; }, 60000, 1000);
-  assert.ok(f, 'the hall, its messages, the account and a sealed value are on disk: ' + JSON.stringify(H.facts()));
+  const f = await until(async () => { const x = await H.facts(); return x.messages >= 3 && x.accounts >= 1 && x.sealed.total >= 1 ? x : null; }, 60000, 1000);
+  assert.ok(f, 'the hall, its messages, the account and a sealed value are on disk: ' + JSON.stringify(await H.facts()));
 });
 
 test('an upgrade of a busy AGMessage with no reason typed is refused, and the earlier build serves on', { timeout: 6 * 60_000 }, async () => {
@@ -264,28 +267,32 @@ test('an upgrade while a silent program holds the port is refused, naming its pi
 });
 
 test('the upgrade to this build, its reason typed: halls, messages, accounts, every sealed value, the certificate\'s fingerprint and the audit head kept, and the stop timed to the new build\'s health', { timeout: 10 * 60_000 }, async () => {
-  const before = { record: H.record(), facts: H.facts(), head: auditHead() };
+  const before = { record: H.record(), facts: await H.facts(), head: auditHead() };
   S.upgradeAt = Date.now();
-  // The new build's first proof, watched beside the installer from its start: the stop's record says when it stopped.
+  // The new build's first proof, watched beside the installer from its start: the stop's record says when it stopped. The
+  // watch ends with the installer, however it ended, and at the test's own bound at the latest.
   const seen = { healthAt: 0, installing: true };
+  const watchEnds = Date.now() + 10 * 60_000;
   const watch = (async () => {
-    while (seen.installing && !seen.healthAt) {
+    while (seen.installing && !seen.healthAt && Date.now() < watchEnds) {
       const t = H.token();
       const h = t ? await wire.hello({ port: PORT, token: t, timeoutMs: 1000 }) : { ok: false };
       if (h.ok && h.build === B.current.full) seen.healthAt = Date.now();
       else await sleep(200);
     }
   })();
-  const r = await H.install(B.current.exe, ['/FORCE=the installer\'s life cycle upgrades a busy AGMessage'], 'upgrade');
-  seen.installing = false;
-  await watch;
+  let r;
+  try { r = await H.install(B.current.exe, ['/FORCE=the installer\'s life cycle upgrades a busy AGMessage'], 'upgrade'); } finally {
+    seen.installing = false;
+    await watch;
+  }
   let healthAt = seen.healthAt;
   assert.equal(r.code, 0, said(r));
   const rec = H.record();
   assert.deepEqual([rec.Version, rec.SemVer, rec.Previous, rec.Admin, rec.AdminName], [B.current.installVersion, B.current.semver, B.previous.installVersion, before.record.Admin, before.record.AdminName]);
   await serving(B.current, 'the upgrade');
   if (!healthAt) healthAt = Date.now();
-  const after = H.facts();
+  const after = await H.facts();
   assert.deepEqual(expect.factsKept(before.facts, after), [], 'kept across the upgrade');
   assert.ok(after.sealed.total >= 1 && after.cert.fp, 'a sealed value and a certificate to keep: ' + JSON.stringify({ sealed: after.sealed, cert: after.cert.state }));
   assert.ok(fs.readFileSync(path.win32.join(H.root, 'data', 'audit.jsonl'), 'utf8').split('\n').map((l) => l.trim()).includes(before.head), 'the audit log\'s head before the upgrade is in its chain after');
@@ -399,7 +406,7 @@ test('On an installed PC: a portable copy started first on the installed node\'s
 // ---------------------------------------------------------------- the laptop's admin's rights, the tasks, the import
 
 test('a local standard account given start and stop runs its own control task: AGMessage stopped with its reason and saved, then started, each one machine event naming it', { timeout: 15 * 60_000 }, async (t) => {
-  const g = H.control({ verb: 'grant', account: String(process.env.COMPUTERNAME) + '\\' + STD_NAME, rights: ['start', 'stop'] });
+  const g = await H.control({ verb: 'grant', account: String(process.env.COMPUTERNAME) + '\\' + STD_NAME, rights: ['start', 'stop'] });
   assert.equal(g.code, 0, scrub(JSON.stringify(g.said)));
   assert.match(g.said.words, WORDS.granted);
   assert.equal(H.grants()[S.std.sid], 'start,stop', 'the record names its rights');
@@ -475,8 +482,8 @@ test('neither the server task nor a control task holds a secret in its definitio
   }
 });
 
-test('the import is refused on a node that has served, with its words, and nothing is made ready', { timeout: 2 * 60_000 }, () => {
-  const r = H.machineJs(['import', '--step', 'stage', '--for', ME.sid, '--machine', H.root, '--sys', H.sys]);
+test('the import is refused on a node that has served, with its words, and nothing is made ready', { timeout: 2 * 60_000 }, async () => {
+  const r = await H.machineJs(['import', '--step', 'stage', '--for', ME.sid, '--machine', H.root, '--sys', H.sys]);
   assert.equal(r.code, machine.REFUSED, scrub(JSON.stringify(r.said)));
   assert.match(r.said.words, WORDS.served);
   assert.ok(!exists(path.win32.join(H.root, 'machine', 'inbox', ME.sid, 'import')), 'no import folder was made');
@@ -490,22 +497,22 @@ test('the import before a first start: the portable folder exported as its accou
   for (const sub of ['data', 'uploads', 'keys', 'logs', 'token', 'machine\\inbox', 'machine\\outbox', 'machine\\work']) fs.mkdirSync(path.win32.join(target, sub), { recursive: true });
   const src = S.portable;
   const profile = path.win32.join(String(process.env.LOCALAPPDATA), 'AGMessage');
-  const before = H.facts({ data: path.win32.join(src, 'app', 'data'), keys: profile });
+  const before = await H.facts({ data: path.win32.join(src, 'app', 'data'), keys: profile });
   assert.ok(before.halls >= 1 && before.messages >= 3 && before.accounts >= 1, 'the portable folder holds what its copy was given: ' + JSON.stringify(before));
-  const launch = (args) => H.run(path.win32.join(H.app, 'node', 'node.exe'), [path.win32.join(H.app, 'app', 'launch.js'), ...args], { cwd: path.win32.join(H.app, 'app'), ms: 300000 });
-  const stage = H.machineJs(['import', '--step', 'stage', '--for', ME.sid, '--machine', target, '--sys', H.sys]);
+  const launch = (args) => runAsync(path.win32.join(H.app, 'node', 'node.exe'), [path.win32.join(H.app, 'app', 'launch.js'), ...args], { cwd: path.win32.join(H.app, 'app'), ms: 300000 });
+  const stage = await H.machineJs(['import', '--step', 'stage', '--for', ME.sid, '--machine', target, '--sys', H.sys]);
   assert.equal(stage.code, 0, scrub(JSON.stringify(stage.said)));
-  const exported = launch(['export', '--source', src, '--machine', target, '--sys', H.sys]);
+  const exported = await launch(['export', '--source', src, '--machine', target, '--sys', H.sys]);
   const answer = JSON.parse(fs.readFileSync(path.win32.join(target, 'machine', 'inbox', ME.sid, 'import', 'export.json'), 'utf8'));
   assert.deepEqual([exported.code, answer.code], [0, 0], scrub(answer.words + ' ' + exported.out + exported.err));
-  const take = H.machineJs(['import', '--step', 'take', '--for', ME.sid, '--machine', target, '--app', H.app, '--source', src, '--sys', H.sys]);
+  const take = await H.machineJs(['import', '--step', 'take', '--for', ME.sid, '--machine', target, '--app', H.app, '--source', src, '--sys', H.sys]);
   assert.equal(take.code, 0, scrub(JSON.stringify(take.said)));
   assert.equal(take.said.verified, true);
   assert.match(take.said.words, WORDS.imported);
-  assert.deepEqual(expect.factsKept(before, H.facts({ data: path.win32.join(target, 'data'), keys: path.win32.join(target, 'keys') })), [], 'the copy is the portable folder\'s, counted alike');
-  const forget = launch(['forget-keys', '--source', src, '--machine', target, '--sys', H.sys, '--id', answer.id]);
+  assert.deepEqual(expect.factsKept(before, await H.facts({ data: path.win32.join(target, 'data'), keys: path.win32.join(target, 'keys') })), [], 'the copy is the portable folder\'s, counted alike');
+  const forget = await launch(['forget-keys', '--source', src, '--machine', target, '--sys', H.sys, '--id', answer.id]);
   assert.equal(forget.code, 0, scrub(forget.out + forget.err));
-  const finish = H.machineJs(['import', '--step', 'finish', '--for', ME.sid, '--machine', target, '--sys', H.sys, '--id', answer.id]);
+  const finish = await H.machineJs(['import', '--step', 'finish', '--for', ME.sid, '--machine', target, '--sys', H.sys, '--id', answer.id]);
   assert.equal(finish.code, 0, scrub(JSON.stringify(finish.said)));
   assert.equal(finish.said.imported, true);
   assert.ok(expect.eventsOf(fs.readFileSync(path.win32.join(target, 'machine', 'events.jsonl'), 'utf8')).some((e) => e.kind === 'machine.import' && e.for.sid === ME.sid), 'machine.import names the account');
@@ -543,14 +550,14 @@ test('a file that cannot be replaced rolls the upgrade back, and the earlier ser
 });
 
 test('a new build that will not start is replaced by the build before it, which answers', { timeout: 12 * 60_000 }, async () => {
-  const before = { record: H.record(), facts: H.facts() };
+  const before = { record: H.record(), facts: await H.facts() };
   const r = await H.install(B.broken.exe, ['/FORCE=the installer\'s life cycle installs a build that does not start'], 'upgrade-broken');
   assert.equal(r.code, 3, 'the installer says it did not install its build: ' + said(r));
   assert.ok(r.said.says(WORDS.wayBack()) && r.said.says(WORDS.keptEnded(B.current)), said(r));
   const rec = H.record();
   assert.deepEqual([rec.Version, rec.SemVer, rec.Previous, rec.Admin], [B.current.installVersion, B.current.semver, '', before.record.Admin], 'the record names the build gone back to, and no build before it');
   await serving(B.current, 'the build gone back to');
-  assert.deepEqual(expect.factsKept(before.facts, H.facts()), [], 'its data laid back as it was');
+  assert.deepEqual(expect.factsKept(before.facts, await H.facts()), [], 'its data laid back as it was');
   payloadIs(B.current);
   note('A build that does not start (' + B.broken.full + '): gone back to ' + B.current.full + ' by itself in ' + Math.round(r.ms / 1000) + ' s.');
 });
@@ -582,7 +589,7 @@ test('the watchdog\'s give-up leaves the server task stopped', { timeout: 10 * 6
 // ---------------------------------------------------------------- the uninstall
 
 test('the uninstall keeps the data, and removes the tasks, the rules and the record, taking back every account\'s right', { timeout: 10 * 60_000 }, async () => {
-  S.kept = H.facts();
+  S.kept = await H.facts();
   const r = await H.uninstall(['/FORCE=the installer\'s life cycle uninstalls AGMessage'], 'uninstall-keep');
   assert.ok(r.gone, 'uninstalled: ' + said(r));
   const rec = H.record() || {};
@@ -592,7 +599,7 @@ test('the uninstall keeps the data, and removes the tasks, the rules and the rec
   assert.deepEqual(H.rules(), { [machine.RULE_TCP]: false, [machine.RULE_UDP]: false }, 'no firewall rule');
   assert.ok(!exists(H.app) && !exists(H.menu), 'the install folder and the Start menu folder are gone');
   // The install folder is gone, so the data is read by the payload's own reader, this build's.
-  assert.deepEqual(expect.factsKept(S.kept, H.facts({ app: PLAN.portable })), [], 'the data kept as it was');
+  assert.deepEqual(expect.factsKept(S.kept, await H.facts({ app: PLAN.portable })), [], 'the data kept as it was');
   for (const name of machine.CHILDREN.map((c) => c.name)) {
     const aces = daclOf(H.sddl(path.win32.join(H.root, name)));
     assert.ok(!aces.some((a) => a.sid === ME.sid || a.sid === S.std.sid), name + ': no account keeps a right');
@@ -622,7 +629,7 @@ test('the kept machine folder set aside and a junction made in its place is refu
       assert.ok(!exists(H.app), H.app + ' was not made');
     } finally { fs.unlinkSync(H.root); }
   } finally { await H.move(kept, H.root); }
-  assert.deepEqual(expect.factsKept(S.kept, H.facts({ app: PLAN.portable })), [], 'the kept data, put back, as it was');
+  assert.deepEqual(expect.factsKept(S.kept, await H.facts({ app: PLAN.portable })), [], 'the kept data, put back, as it was');
 });
 
 test('the kept machine folder given to another account is refused at the next install, and is left as it was', { timeout: 5 * 60_000 }, async () => {
@@ -649,7 +656,7 @@ test('installed again, AGMessage takes the kept data: its halls, messages and ac
   const rec = H.record();
   assert.deepEqual([rec.Version, rec.Admin, rec.Kept], [B.current.installVersion, ME.sid, undefined]);
   await serving(B.current, 'installed again');
-  assert.deepEqual(expect.factsKept(S.kept, H.facts()), [], 'the kept data, taken');
+  assert.deepEqual(expect.factsKept(S.kept, await H.facts()), [], 'the kept data, taken');
   payloadIs(B.current);
 });
 
