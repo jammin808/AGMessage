@@ -429,23 +429,37 @@ test('a local standard account given start and stop runs its own control task: A
     requests,
   }));
   const ranNow = () => { try { return JSON.parse(fs.readFileSync(path.win32.join(probe, 'ran.json'), 'utf8')); } catch { return null; /* not written yet, or being written */ } };
-  // Lab 7 takes this only where Windows refused the account's logon, at the task's registration or as its result with
-  // no line written (expect.js logonRefused): any other failure, a probe that ran and did not finish included, fails here.
-  let lab7 = '';
-  try {
-    H.taskAs(PROBE_TASK, S.std, { node: path.win32.join(H.app, 'node', 'node.exe'), script: path.win32.join(probe, 'as-account.js'), dir: probe, limitMinutes: expect.PROBE.limitMinutes });
-  } catch (e) {
-    lab7 = expect.logonRefused({ words: e.message });
-    if (!lab7) throw new Error('the probe\'s task as ' + STD_NAME + ' was not registered, and Windows did not refuse its logon: ' + scrub(e.message), { cause: e });
+  // The account was given "Log on as a batch job", which a task that runs as it by its password needs, and it was read
+  // back (hands.js account). Lab 7 takes this only where Windows' own policy refuses the account a batch logon ("Deny log
+  // on as a batch job" on it or its groups), or refuses its logon otherwise, at the task's registration or as its result
+  // with no line written (expect.js logonRefused, the batch logon no longer counted once granted): a grant that did not
+  // hold, and any other failure, a probe that ran and did not finish included, fail here, with Task Scheduler's own why.
+  const logon = S.std.logon;
+  let lab7 = logon.deny.length ? 'Windows denies the account a batch logon by policy ("Deny log on as a batch job" held by ' + logon.deny.join(', ') + ')' : '';
+  if (!lab7) assert.ok(logon.batch && logon.enabled && !logon.mustChange, 'the standard account can be logged on by a task (Log on as a batch job granted and read back, enabled, no new password needed): ' + scrub(JSON.stringify({ ...logon, history: S.std.history })));
+  let warned = '';
+  if (!lab7) {
+    try {
+      warned = H.taskAs(PROBE_TASK, S.std, { node: path.win32.join(H.app, 'node', 'node.exe'), script: path.win32.join(probe, 'as-account.js'), dir: probe, limitMinutes: expect.PROBE.limitMinutes });
+    } catch (e) {
+      lab7 = expect.logonRefused({ words: e.message, granted: true });
+      const batch = expect.BATCH_REFUSED_WORDS.test(e.message);
+      if (!lab7) throw new Error(scrub('the probe\'s task as ' + STD_NAME + ' was not registered' + (batch ? ': Windows refused its batch logon although it was granted and read back' : ', and Windows did not refuse its logon') + ': ' + e.message + '; its logon as read: ' + JSON.stringify(logon)), { cause: e });
+    }
   }
   if (!lab7) {
+    const since = new Date(Date.now() - 2000).toISOString();
     const r = H.run(H.exe('schtasks.exe'), ['/Run', '/TN', PROBE_TASK]);
     assert.equal(r.code, 0, 'the probe\'s task runs: ' + scrub((r.err || r.out).trim().slice(0, 300)));
     // Its first line is written as the account's node.exe starts: a task that wrote none ran no probe as the account.
     if (!(await until(ranNow, expect.PROBE.startMs, 1000))) {
       const s = H.task(PROBE_TASK);
-      lab7 = expect.logonRefused({ lastResult: s.lastResult });
-      if (!lab7) assert.fail('the probe\'s task as ' + STD_NAME + ' wrote no line within ' + expect.PROBE.startMs / 1000 + ' s, and Windows did not refuse its logon (state ' + s.state + ', last result ' + expect.resultWords(s.lastResult) + '): node.exe in ' + H.app + ' did not start as that account, or could not run the probe');
+      const why = H.L.whyNot(PROBE_TASK, since);
+      lab7 = expect.logonRefused({ lastResult: s.lastResult, granted: true }) || expect.logonRefused({ lastResult: why.code, granted: true });
+      // Windows refusing a logon the life cycle granted (a batch logon, or the password it made the account with) is said as
+      // that, with the account's logon as read back; a task that started, or said nothing, did not run the probe.
+      const refusedAnyway = !why.started && (/logged its account on/.test(why.words) || (why.code !== null && Object.hasOwn(expect.LOGON_REFUSED, why.code)) || Object.hasOwn(expect.LOGON_REFUSED, Number.isSafeInteger(s.lastResult) ? s.lastResult >>> 0 : -1));
+      if (!lab7) assert.fail(scrub('the probe\'s task as ' + STD_NAME + ' wrote no line within ' + expect.PROBE.startMs / 1000 + ' s, and ' + (refusedAnyway ? 'Windows refused its logon although "Log on as a batch job" was granted and read back' : 'Windows did not refuse its logon') + ' (state ' + s.state + ', last result ' + expect.resultWords(s.lastResult) + '): ' + why.words + (warned ? '; ' + warned : '') + (refusedAnyway ? '' : '; node.exe in ' + H.app + ' did not start as that account, or could not run the probe') + '; its logon as read: ' + JSON.stringify(logon)));
     }
   }
   if (lab7) {

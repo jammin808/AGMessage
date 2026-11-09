@@ -357,7 +357,11 @@ function hands({ work, logs }) {
 
   /**
    * A standard account made for the life cycle (a member of Users and of nothing that elevates), with a password of its
-   * own that goes to PowerShell's and schtasks' environment and arguments alone: {name, sid, password}.
+   * own that goes to PowerShell's and schtasks' environment and arguments alone, given "Log on as a batch job" so a task
+   * may run as it by that password (SCRIPTS.users): {name, sid, password, logon}, `logon` the right as read back
+   * (readings-take.js logonOf). A grant that did not hold refuses nothing here: the test that runs a task as the account
+   * says so, and every other test uses the account as it is. Task Scheduler's own log is turned on beside it, so a task
+   * that does not start leaves why (`history`).
    */
   const account = (name) => {
     const password = 'Aa1!' + crypto.randomBytes(18).toString('base64url');
@@ -366,17 +370,17 @@ function hands({ work, logs }) {
     const u = (Array.isArray(users) ? users : [users]).find((x) => x && x.name === name && /^S-1-[0-9-]+$/.test(String(x.sid)));
     if (!u) throw new Error('the standard account ' + name + ' was not made');
     if (u.admin === true) throw new Error('the account ' + name + ' is an administrator: it stands for no standard account');
-    return { name, sid: u.sid, password };
+    return { name, sid: u.sid, password, logon: readings.logonOf(u), history: L.history() };
   };
   const accountGone = (name) => L.ps(readings.SCRIPTS.usersGone, { AGM_R11_USERS: name });
   /**
    * A task that runs as `who` by its password, in the life cycle's own folder of Task Scheduler (never \AGMessage\, which an
    * uninstall empties), its action `node` (a node.exe that account may run) on `script` with `dir`, ended by Task
-   * Scheduler past `limitMinutes`.
+   * Scheduler past `limitMinutes`. Its answer is '' or schtasks' warning that it may not start (lane's register).
    */
   const taskAs = (name, who, { node, script, dir, limitMinutes }) => {
     if (!Number.isSafeInteger(limitMinutes) || limitMinutes < 1 || limitMinutes > 60) throw new Error('a probe\'s task needs its time limit, 1 to 60 minutes');
-    L.register(name, readings.taskXml({ description: 'AGMessage\'s installer life cycle: a probe, as ' + who.name, sid: who.sid, logon: 'Password', limit: 'PT' + limitMinutes + 'M', command: node, args: [script, dir], cwd: dir }), { user: who.name, password: who.password });
+    return L.register(name, readings.taskXml({ description: 'AGMessage\'s installer life cycle: a probe, as ' + who.name, sid: who.sid, logon: 'Password', limit: 'PT' + limitMinutes + 'M', command: node, args: [script, dir], cwd: dir }), { user: who.name, password: who.password });
   };
 
   /** Every file under a folder, by its path inside it ('/' between folders): {size, sha}. */

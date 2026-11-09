@@ -47,15 +47,24 @@ const LOGON_REFUSED = Object.freeze({
 });
 /** schtasks.exe's words when it refuses to register a task for an account's logon (1326, 1380, 1385), as an English image says them. */
 const LOGON_REFUSED_WORDS = /user name or password is incorrect|unknown user name or bad password|not been granted the requested logon type|requested a type of logon .{0,40}that has not been granted/i;
+/** The refusals that are the batch logon not granted (1380, 1385), and schtasks' words for them. */
+const BATCH_REFUSED = Object.freeze([0x80070564, 0x80070569]);
+const BATCH_REFUSED_WORDS = /not been granted the requested logon type|requested a type of logon .{0,40}that has not been granted/i;
+/** The one refusal that stays the runner's once the life cycle made the account and granted it a batch logon: a policy that keeps no password. */
+const POLICY_REFUSED = Object.freeze([0x8004130F]);
 /**
  * Whether what Windows said of the probe's task is its refusal of the account's logon (pure): the words of a registration
- * schtasks refused, or a last result (signed or not, as schtasks prints it) of a task that wrote no line. '' when it is not.
+ * schtasks refused, or a result code (a task's last result, or the code Task Scheduler's own log gave; signed or not, as
+ * schtasks prints it) of a task that wrote no line. '' when it is not. With `granted` (the life cycle made the account with
+ * the password it gives schtasks, gave it "Log on as a batch job" and read it back), only a policy's refusal is the
+ * runner's: a batch logon or a password refused then is the life cycle's own failure, and not lab 7's.
  */
-function logonRefused({ words = '', lastResult = null } = {}) {
+function logonRefused({ words = '', lastResult = null, granted = false } = {}) {
   if (Number.isSafeInteger(lastResult)) {
     const code = lastResult >>> 0;
-    if (Object.hasOwn(LOGON_REFUSED, code)) return LOGON_REFUSED[code] + ' (0x' + code.toString(16).toUpperCase() + ')';
+    if (Object.hasOwn(LOGON_REFUSED, code) && (!granted || POLICY_REFUSED.includes(code))) return LOGON_REFUSED[code] + ' (0x' + code.toString(16).toUpperCase() + ')';
   }
+  if (granted) return '';
   const m = LOGON_REFUSED_WORDS.exec(String(words || ''));
   return m ? 'Windows refused to register the task for the account\'s logon ("' + m[0] + '")' : '';
 }
@@ -308,7 +317,7 @@ const ITEMS = Object.freeze([
 ].map(([item, test]) => Object.freeze({ item, test })));
 
 module.exports = {
-  ANSWER_S, PROBE, LOGON_REFUSED, WORDS, ITEMS, FORBIDDEN, INNO_OWN, KEPT_INSTALLER, STORED_PASSWORD, SEED_ACCOUNT,
+  ANSWER_S, PROBE, LOGON_REFUSED, BATCH_REFUSED, BATCH_REFUSED_WORDS, POLICY_REFUSED, WORDS, ITEMS, FORBIDDEN, INNO_OWN, KEPT_INSTALLER, STORED_PASSWORD, SEED_ACCOUNT,
   seedPassphrase, planOf, buildOf, named, probeWorstMs, logonRefused, resultWords, logText, innoLog, recordOf, forbiddenOn, payloadOf, againstPayload, snapshotDiff,
   secretsIn, scrubbed, eventsOf, factsKept,
 };

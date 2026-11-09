@@ -576,6 +576,62 @@ function withoutSecrets(text, token) {
   return (token ? t.split(token).join('[token]') : t).replace(TOKEN_SHAPE, '[hex]');
 }
 
+/**
+ * schtasks' warning that a task is registered but may not start, its principal holding no batch logon (pure): that line,
+ * or ''. Task Scheduler answers SCHED_S_BATCH_LOGON_PROBLEM (0x4131C), a success: schtasks ends with 0 and warns.
+ */
+function batchWarning(text) {
+  const m = /^.*(?:may fail to start|Batch logon privilege).*$/im.exec(String(text || ''));
+  return m ? m[0].trim() : '';
+}
+/** Windows' reasons a task did not log on or start, by HRESULT, as startWhy names them. */
+const START_REFUSED = Object.freeze({
+  [0x80070569]: 'its account holds no "Log on as a batch job" (ERROR_LOGON_TYPE_NOT_GRANTED)',
+  [0x80070564]: 'its account was not granted the logon type (ERROR_LOGON_NOT_GRANTED)',
+  [0x8007052E]: 'its account\'s user name or password is incorrect',
+  [0x8007052F]: 'an account restriction refused its logon',
+  [0x80070532]: 'its account\'s password has expired',
+  [0x80070533]: 'its account is disabled',
+  [0x80070773]: 'its account must change its password',
+  [0x80070520]: 'no logon session could be made for its account (no stored credentials)',
+  [0x8004130F]: 'Windows keeps no password for it (SCHED_E_ACCOUNT_INFORMATION_NOT_SET)',
+  [0x80070005]: 'access was denied',
+  [0x80070002]: 'a file it names was not found',
+  [0x8007010B]: 'its folder is not a valid one',
+});
+/** An event's result code as an unsigned HRESULT (pure): a Win32 code under 0x10000 as HRESULT_FROM_WIN32, else as given; null when none. */
+function hresultOf(values) {
+  const last = [...(Array.isArray(values) ? values : [])].reverse().map((v) => String(v).trim()).find((v) => /^-?\d{1,10}$|^0x[0-9a-f]{1,8}$/i.test(v));
+  if (last === undefined) return null;
+  const n = Number(last) >>> 0;
+  return n > 0 && n < 0x10000 ? (0x80070000 | n) >>> 0 : n;
+}
+/**
+ * Why a task started or not, from Task Scheduler's own events for it (taskEvents' answer, the newest first) (pure):
+ * {started, code, words, ids}. Started when it made its process or began its action (129, 200); else the newest refusal
+ * (101, a start that failed; 104, a logon that failed; 103 and 203, an action that did not start, which follow the
+ * instance's own start, 100), its code named; else started when an instance began (100) and nothing refused it; else the
+ * launch ignored while an instance ran (322), or not made for want of a logged-on user (332); else what the log says it
+ * saw, or that it holds nothing (a log turned on too late, or never).
+ */
+function startWhy(events) {
+  const list = (Array.isArray(events) ? events : []).filter((e) => e && Number.isSafeInteger(e.id));
+  const ids = list.map((e) => e.id);
+  if (ids.some((id) => id === 129 || id === 200)) return { started: true, code: null, words: 'Task Scheduler started it', ids };
+  const refused = list.find((e) => [101, 104, 103, 203].includes(e.id));
+  if (refused) {
+    const code = hresultOf(refused.values);
+    const hex = code === null ? 'no code' : '0x' + code.toString(16).toUpperCase().padStart(8, '0');
+    const what = refused.id === 104 ? 'logged its account on' : refused.id === 101 ? 'started it' : 'started its action';
+    return { started: false, code, words: 'Task Scheduler never ' + what + ' (event ' + refused.id + ', ' + hex + '): ' + (code !== null && Object.hasOwn(START_REFUSED, code) ? START_REFUSED[code] : 'Windows\' code ' + hex), ids };
+  }
+  if (ids.includes(100)) return { started: true, code: null, words: 'Task Scheduler started it', ids };
+  if (ids.includes(322)) return { started: false, code: null, words: 'Task Scheduler ignored the run: an instance of it was already running (event 322)', ids };
+  if (ids.includes(332)) return { started: false, code: null, words: 'Task Scheduler did not start it: its account was not logged on (event 332)', ids };
+  if (!list.length) return { started: false, code: null, words: 'Task Scheduler\'s log holds no event for it', ids };
+  return { started: false, code: null, words: 'Task Scheduler logged ' + [...new Set(ids)].join(', ') + ' for it, and never started it' + (ids.includes(110) ? ' (it was asked to run: event 110)' : ''), ids };
+}
+
 // ---------------------------------------------------------------- the probes, as a stand-in task runs them
 
 function writeJson(file, value) {
@@ -733,6 +789,38 @@ async function until(test, ms, every = 500) {
 }
 
 /**
+ * The LSA's account rights, for PowerShell's Add-Type (Windows PowerShell 5.1 compiles C# 5 with .NET Framework's own
+ * compiler): AgmLsa.Grant(sid, right), Revoke(sid, right) (false when the account held no right), Of(sid) (the rights an
+ * account holds directly) and Holders(right) (the SIDs that hold it directly). Each call opens the local policy with
+ * POLICY_VIEW_LOCAL_INFORMATION | POLICY_CREATE_ACCOUNT | POLICY_LOOKUP_NAMES (0x811) and closes it; a failure throws
+ * Win32Exception with Windows' own words. It is given in AGM_LSA, never written into a script or onto a command line.
+ */
+const LSA_SOURCE = [
+  'using System; using System.ComponentModel; using System.Runtime.InteropServices; using System.Security.Principal;',
+  'public static class AgmLsa {',
+  '[StructLayout(LayoutKind.Sequential)] private struct LsaString { public ushort Length; public ushort MaximumLength; public IntPtr Buffer; }',
+  '[StructLayout(LayoutKind.Sequential)] private struct LsaAttributes { public int Length; public IntPtr RootDirectory; public IntPtr ObjectName; public uint Attributes; public IntPtr SecurityDescriptor; public IntPtr SecurityQualityOfService; }',
+  '[DllImport("advapi32.dll")] private static extern uint LsaOpenPolicy(IntPtr system, ref LsaAttributes attributes, uint access, out IntPtr policy);',
+  '[DllImport("advapi32.dll")] private static extern uint LsaAddAccountRights(IntPtr policy, byte[] sid, LsaString[] rights, uint count);',
+  '[DllImport("advapi32.dll")] private static extern uint LsaRemoveAccountRights(IntPtr policy, byte[] sid, [MarshalAs(UnmanagedType.U1)] bool all, LsaString[] rights, uint count);',
+  '[DllImport("advapi32.dll")] private static extern uint LsaEnumerateAccountRights(IntPtr policy, byte[] sid, out IntPtr rights, out uint count);',
+  '[DllImport("advapi32.dll")] private static extern uint LsaEnumerateAccountsWithUserRight(IntPtr policy, LsaString[] right, out IntPtr buffer, out uint count);',
+  '[DllImport("advapi32.dll")] private static extern uint LsaFreeMemory(IntPtr buffer);',
+  '[DllImport("advapi32.dll")] private static extern uint LsaClose(IntPtr policy);',
+  '[DllImport("advapi32.dll")] private static extern int LsaNtStatusToWinError(uint status);',
+  'private const uint NotFound = 0xC0000034; private const uint NoMore = 0x8000001A;',
+  'private static void Check(uint status) { if (status != 0) { throw new Win32Exception(LsaNtStatusToWinError(status)); } }',
+  'private static IntPtr Open() { LsaAttributes a = new LsaAttributes(); a.Length = Marshal.SizeOf(typeof(LsaAttributes)); IntPtr h; Check(LsaOpenPolicy(IntPtr.Zero, ref a, 0x811, out h)); return h; }',
+  'private static byte[] Sid(string sid) { SecurityIdentifier s = new SecurityIdentifier(sid); byte[] b = new byte[s.BinaryLength]; s.GetBinaryForm(b, 0); return b; }',
+  'private static LsaString[] Right(string right, IntPtr text) { LsaString[] r = new LsaString[1]; r[0].Buffer = text; r[0].Length = (ushort)(right.Length * 2); r[0].MaximumLength = (ushort)(right.Length * 2 + 2); return r; }',
+  'public static void Grant(string sid, string right) { IntPtr text = Marshal.StringToHGlobalUni(right); IntPtr h = IntPtr.Zero; try { h = Open(); Check(LsaAddAccountRights(h, Sid(sid), Right(right, text), 1)); } finally { if (h != IntPtr.Zero) { LsaClose(h); } Marshal.FreeHGlobal(text); } }',
+  'public static bool Revoke(string sid, string right) { IntPtr text = Marshal.StringToHGlobalUni(right); IntPtr h = IntPtr.Zero; try { h = Open(); uint s = LsaRemoveAccountRights(h, Sid(sid), false, Right(right, text), 1); if (s == NotFound) { return false; } Check(s); return true; } finally { if (h != IntPtr.Zero) { LsaClose(h); } Marshal.FreeHGlobal(text); } }',
+  'public static string[] Of(string sid) { IntPtr h = IntPtr.Zero; IntPtr buf = IntPtr.Zero; try { h = Open(); uint n; uint s = LsaEnumerateAccountRights(h, Sid(sid), out buf, out n); if (s == NotFound) { return new string[0]; } Check(s); string[] o = new string[n]; int size = Marshal.SizeOf(typeof(LsaString)); for (int i = 0; i < o.Length; i++) { LsaString x = (LsaString)Marshal.PtrToStructure(new IntPtr(buf.ToInt64() + (long)i * size), typeof(LsaString)); o[i] = Marshal.PtrToStringUni(x.Buffer, x.Length / 2); } return o; } finally { if (buf != IntPtr.Zero) { LsaFreeMemory(buf); } if (h != IntPtr.Zero) { LsaClose(h); } } }',
+  'public static string[] Holders(string right) { IntPtr text = Marshal.StringToHGlobalUni(right); IntPtr h = IntPtr.Zero; IntPtr buf = IntPtr.Zero; try { h = Open(); uint n; uint s = LsaEnumerateAccountsWithUserRight(h, Right(right, text), out buf, out n); if (s == NoMore || s == NotFound) { return new string[0]; } Check(s); string[] o = new string[n]; for (int i = 0; i < o.Length; i++) { o[i] = new SecurityIdentifier(Marshal.ReadIntPtr(buf, i * IntPtr.Size)).Value; } return o; } finally { if (buf != IntPtr.Zero) { LsaFreeMemory(buf); } if (h != IntPtr.Zero) { LsaClose(h); } Marshal.FreeHGlobal(text); } }',
+  '}',
+].join(' ');
+
+/**
  * What PowerShell is asked, each a fixed script that answers one line of JSON; what it reads is named in its environment
  * (AGM_READ_PATHS, AGM_READ_PIPES, separated by `|`), never written into the script.
  *   signatures  Windows' verdict on each file's Authenticode signature, and its signer
@@ -743,15 +831,29 @@ async function until(test, ms, every = 500) {
  *               written anywhere), each a member of Users, with its SID and whether it is an administrator (it must not be);
  *               R6's and the installer's life cycle's account too. Windows refuses a description over 48 characters and a
  *               name over 20, so every account these scripts are given is held under both (test/readings.test.js)
- *   usersGone   those accounts removed, and the profiles a logon made for them
+ *               Each is given "Log on as a batch job" (SeBatchLogonRight), which a task that runs as an account by its
+ *               password needs before Task Scheduler can log it on, and which Windows Server gives Administrators,
+ *               Backup Operators and Performance Log Users alone: through the LSA (LSA_SOURCE, compiled by Add-Type from
+ *               AGM_LSA, never written into the script), read back (`batch`), with why when it was not (`batchWhy`), the
+ *               holders of "Deny log on as a batch job" among the account and its groups (`deny`), and whether the
+ *               account is enabled and needs no new password (`enabled`, `mustChange`). A grant that fails refuses
+ *               nothing here: the row says so, and the reading or test that needs the account says why it cannot run.
+ *               The account stays a standard one: a logon right is no privilege in its token.
+ *   usersGone   those accounts' batch logon taken back, then the accounts removed, and the profiles a logon made for them
+ *   taskHistory Task Scheduler's own log (Microsoft-Windows-TaskScheduler/Operational) turned on when it is off, so a task
+ *               that does not start leaves why: {was, on}
+ *   taskEvents  that log's events for one task (AGM_TASK_NAME) since a time (AGM_SINCE, ISO 8601), and the events that
+ *               name a task only by its GUID (104, 311) in that time: each {id, at, values}, at most 50 (startWhy reads them)
  *   defender    Defender's real-time monitoring, its scanning on access, its mode, and the paths it excludes
  */
 const SCRIPTS = {
   signatures: String.raw`$ErrorActionPreference = 'Stop'; $out = @(); foreach ($p in ($env:AGM_READ_PATHS -split '\|')) { $s = Get-AuthenticodeSignature -LiteralPath $p; $out += @{ path = $p; status = [string]$s.Status; message = [string]$s.StatusMessage; signer = $(if ($s.SignerCertificate) { [string]$s.SignerCertificate.Subject } else { '' }); timestamped = [bool]$s.TimeStamperCertificate } }; ConvertTo-Json -InputObject $out -Depth 4 -Compress`,
   pipes: String.raw`$ErrorActionPreference = 'Stop'; $out = @(); foreach ($n in ($env:AGM_READ_PIPES -split '\|')) { $why = @(); $sddl = ''; $c = $null; try { $c = New-Object System.IO.Pipes.NamedPipeClientStream('.', $n, [System.IO.Pipes.PipeDirection]::In); $c.Connect(5000); $sddl = [string]$c.GetAccessControl().GetSecurityDescriptorSddlForm('All') } catch { $why += [string]$_.Exception.Message } finally { if ($c) { $c.Dispose() } }; if (-not $sddl) { try { $sddl = [string][System.IO.Directory]::GetAccessControl('\\.\pipe\' + $n).GetSecurityDescriptorSddlForm('All') } catch { $why += [string]$_.Exception.Message } }; if ($sddl) { $out += @{ name = $n; sddl = $sddl } } else { $out += @{ name = $n; error = ($why -join '; ') } } }; ConvertTo-Json -InputObject $out -Depth 4 -Compress`,
   definition: String.raw`$ErrorActionPreference = 'Stop'; $s = New-Object -ComObject 'Schedule.Service'; $s.Connect(); $t = $s.GetFolder($env:AGM_TASK_FOLDER).GetTask($env:AGM_TASK_NAME); ConvertTo-Json -InputObject @{ sddl = [string]$t.GetSecurityDescriptor(4); xml = [string]$t.Xml } -Compress`,
-  users: String.raw`$ErrorActionPreference = 'Stop'; $p = ConvertTo-SecureString $env:AGM_R11_PASSWORD -AsPlainText -Force; $g = Get-LocalGroup -SID 'S-1-5-32-545'; $out = @(); foreach ($n in ($env:AGM_R11_USERS -split ',')) { if (Get-LocalUser -Name $n -ErrorAction SilentlyContinue) { Remove-LocalUser -Name $n }; $u = New-LocalUser -Name $n -Password $p -PasswordNeverExpires -AccountNeverExpires -Description 'AGMessage test account: removed after its use'; try { Add-LocalGroupMember -Group $g -Member $u } catch { }; $out += @{ name = $n; sid = [string]$u.SID.Value; admin = [bool](@(Get-LocalGroupMember -SID 'S-1-5-32-544' | Where-Object { [string]$_.SID.Value -eq [string]$u.SID.Value }).Count) } }; ConvertTo-Json -InputObject @($out) -Compress`,
-  usersGone: String.raw`$ErrorActionPreference = 'Continue'; $sids = @(); foreach ($n in ($env:AGM_R11_USERS -split ',')) { $u = Get-LocalUser -Name $n -ErrorAction SilentlyContinue; if ($u) { $sids += [string]$u.SID.Value; Remove-LocalUser -Name $n } }; foreach ($p in @(Get-CimInstance -ClassName Win32_UserProfile)) { if ($sids -contains [string]$p.SID) { Remove-CimInstance -InputObject $p -ErrorAction SilentlyContinue } }; ConvertTo-Json -InputObject @{ removed = $sids.Count } -Compress`,
+  users: String.raw`$ErrorActionPreference = 'Stop'; $lsa = ''; try { Add-Type -TypeDefinition $env:AGM_LSA } catch { $lsa = [string]$_.Exception.Message }; $p = ConvertTo-SecureString $env:AGM_R11_PASSWORD -AsPlainText -Force; $g = Get-LocalGroup -SID 'S-1-5-32-545'; $out = @(); foreach ($n in ($env:AGM_R11_USERS -split ',')) { $old = Get-LocalUser -Name $n -ErrorAction SilentlyContinue; if ($old) { if (-not $lsa) { try { [void][AgmLsa]::Revoke([string]$old.SID.Value, 'SeBatchLogonRight') } catch { } }; Remove-LocalUser -Name $n }; $u = New-LocalUser -Name $n -Password $p -PasswordNeverExpires -AccountNeverExpires -Description 'AGMessage test account: removed after its use'; try { Add-LocalGroupMember -Group $g -Member $u } catch { }; $sid = [string]$u.SID.Value; $batch = $false; $why = $lsa; $deny = @(); if (-not $lsa) { try { [AgmLsa]::Grant($sid, 'SeBatchLogonRight'); $batch = [bool](@([AgmLsa]::Of($sid)) -contains 'SeBatchLogonRight'); if (-not $batch) { $why = 'the right was granted, and not read back' } } catch { $why = [string]$_.Exception.Message }; try { $deny = @(@([AgmLsa]::Holders('SeDenyBatchLogonRight')) | Where-Object { @($sid, 'S-1-5-32-545', 'S-1-1-0', 'S-1-5-11', 'S-1-5-113', 'S-1-5-3') -contains $_ }) } catch { $why = ($why + ' (deny not read: ' + [string]$_.Exception.Message + ')').Trim() } }; $v = Get-LocalUser -SID $u.SID; $out += @{ name = $n; sid = $sid; admin = [bool](@(Get-LocalGroupMember -SID 'S-1-5-32-544' | Where-Object { [string]$_.SID.Value -eq $sid }).Count); batch = $batch; batchWhy = $why; deny = @($deny); enabled = [bool]$v.Enabled; mustChange = ($null -eq $v.PasswordLastSet) } }; ConvertTo-Json -InputObject @($out) -Compress`,
+  usersGone: String.raw`$ErrorActionPreference = 'Continue'; $lsa = $true; try { Add-Type -TypeDefinition $env:AGM_LSA -ErrorAction Stop } catch { $lsa = $false }; $sids = @(); $revoked = 0; foreach ($n in ($env:AGM_R11_USERS -split ',')) { $u = Get-LocalUser -Name $n -ErrorAction SilentlyContinue; if ($u) { $sids += [string]$u.SID.Value; if ($lsa) { try { if ([AgmLsa]::Revoke([string]$u.SID.Value, 'SeBatchLogonRight')) { $revoked++ } } catch { } }; Remove-LocalUser -Name $n } }; foreach ($p in @(Get-CimInstance -ClassName Win32_UserProfile)) { if ($sids -contains [string]$p.SID) { Remove-CimInstance -InputObject $p -ErrorAction SilentlyContinue } }; ConvertTo-Json -InputObject @{ removed = $sids.Count; revoked = $revoked } -Compress`,
+  taskHistory: String.raw`$ErrorActionPreference = 'Stop'; $l = Get-WinEvent -ListLog 'Microsoft-Windows-TaskScheduler/Operational'; $was = [bool]$l.IsEnabled; if (-not $was) { $l.IsEnabled = $true; $l.SaveChanges() }; ConvertTo-Json -InputObject @{ was = $was; on = [bool](Get-WinEvent -ListLog 'Microsoft-Windows-TaskScheduler/Operational').IsEnabled } -Compress`,
+  taskEvents: String.raw`$ErrorActionPreference = 'Stop'; $since = [datetime]::Parse($env:AGM_SINCE, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind); $name = [string]$env:AGM_TASK_NAME; $out = @(); foreach ($e in @(Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-TaskScheduler/Operational'; Id = 100,101,102,103,104,110,111,129,200,201,203,311,322,332; StartTime = $since } -ErrorAction SilentlyContinue)) { $values = @($e.Properties | ForEach-Object { [string]$_.Value }); if (($values -contains $name) -or $e.Id -eq 104 -or $e.Id -eq 311) { $out += @{ id = [int]$e.Id; at = $e.TimeCreated.ToUniversalTime().ToString('o'); values = $values } }; if ($out.Count -ge 50) { break } }; ConvertTo-Json -InputObject @($out) -Depth 4 -Compress`,
   defender: String.raw`$ErrorActionPreference = 'Stop'; $s = Get-MpComputerStatus; $p = Get-MpPreference; ConvertTo-Json -InputObject @{ realtime = [bool]$s.RealTimeProtectionEnabled; onAccess = [bool]$s.OnAccessProtectionEnabled; antivirus = [bool]$s.AntivirusEnabled; service = [bool]$s.AMServiceEnabled; mode = [string]$s.AMRunningMode; exclusions = @($p.ExclusionPath | Where-Object { $_ }); processes = @($p.ExclusionProcess | Where-Object { $_ }); extensions = @($p.ExclusionExtension | Where-Object { $_ }) } -Compress`,
 };
 
@@ -765,18 +867,29 @@ function lane(work, sys) {
   const schtasks = (args, { ms = 60000, always = false } = {}) => run(exe('schtasks.exe'), args, { ms, always });
   const ps = (script, extra = {}, { ms = 60000, always = false } = {}) => {
     const r = run(path.win32.join(sys, 'WindowsPowerShell', 'v1.0', 'powershell.exe'), ['-NoProfile', '-NonInteractive', '-NoLogo', '-ExecutionPolicy', 'Bypass', '-Command', script],
-      { ms, always, env: { ...process.env, PSModulePath: path.win32.join(sys, 'WindowsPowerShell', 'v1.0', 'Modules'), ...extra } });
+      { ms, always, env: { ...process.env, PSModulePath: path.win32.join(sys, 'WindowsPowerShell', 'v1.0', 'Modules'), AGM_LSA: LSA_SOURCE, ...extra } });
     if (r.code !== 0) throw new Error('powershell.exe ended with ' + r.code + ': ' + r.err.trim().slice(0, 300));
     return JSON.parse(r.out.trim());
   };
   // A task that runs as an account with its password (R11's) is registered with them (/RU, /RP): the password goes to
-  // schtasks alone, on a runner thrown away after the job, and into no file or record.
+  // schtasks alone, on a runner thrown away after the job, and into no file or record. Its answer is '' or schtasks'
+  // warning that the task is registered but may not start, its principal holding no batch logon (SCHED_S_BATCH_LOGON_PROBLEM,
+  // 0x4131C, which ends with 0 and is never the task's refusal).
   const register = (name, xml, { user = '', password = '' } = {}) => {
     const file = path.join(work, name.replace(/\W+/g, '-') + '.xml');
     fs.writeFileSync(file, utf16(xml));
     held.tasks.add(name);
     const r = schtasks(['/Create', '/TN', name, '/XML', file, ...(user ? ['/RU', user, '/RP', password] : []), '/F']);
     if (r.code !== 0) throw new Error('schtasks could not register ' + name + ': ' + withoutSecrets((r.err || r.out).trim(), password).slice(0, 300));
+    return batchWarning(r.out + '\n' + r.err) ? 'registered, but Windows warned that it may not start: its account holds no batch logon (' + withoutSecrets(batchWarning(r.out + '\n' + r.err), password).slice(0, 200) + ')' : '';
+  };
+  /** Task Scheduler's own log turned on, when it is off, so a task that does not start leaves why: {was, on}, or {error}. */
+  const history = () => { try { return ps(SCRIPTS.taskHistory, {}, { always: true }); } catch (e) { return { error: e.message.slice(0, 200) }; } };
+  /** Why the task `name` started or not since `since` (an ISO time), from Task Scheduler's log: startWhy's answer. */
+  const whyNot = (name, since) => {
+    let events;
+    try { events = ps(SCRIPTS.taskEvents, { AGM_TASK_NAME: name, AGM_SINCE: since }, { always: true, ms: 30_000 }); } catch (e) { return { started: false, code: null, words: 'Task Scheduler\'s log was not read (' + e.message.slice(0, 160) + ')' }; }
+    return startWhy(Array.isArray(events) ? events : events ? [events] : []);
   };
   const lastResult = (name) => {
     const r = schtasks(['/Query', '/TN', name, '/FO', 'LIST', '/V']);
@@ -799,7 +912,7 @@ function lane(work, sys) {
     if (r.code === 0 || /no rules match/i.test(r.err + r.out)) held.rules.delete(name);
     return r;
   };
-  return { exe, schtasks, ps, register, lastResult, remove, query, ruleAdd, ruleDelete };
+  return { exe, schtasks, ps, register, history, whyNot, lastResult, remove, query, ruleAdd, ruleDelete };
 }
 
 /**
@@ -1182,11 +1295,14 @@ async function takeR11(L, { node, script, self, work, sys }, { rounds = R11_ROUN
     if (list.some((u) => u.admin === true)) return { skipped: 'an account made for the reading is an administrator, so it measures nothing of a standard account' };
     const own = list.find((u) => u.name === R11_USERS.own);
     const other = list.find((u) => u.name === R11_USERS.other);
+    // Task Scheduler's own log on, so a task as an account that does not start leaves why; each account's batch logon as
+    // read back, kept beside the rounds.
+    const history = L.history();
     for (const box of ['inbox', 'outbox']) fs.mkdirSync(path.join(root, 'machine', box, own.sid), { recursive: true });
     fs.mkdirSync(path.join(root, 'machine', 'work'), { recursive: true });
     controlName = '\\AGMessage-Readings\\Control-' + own.sid;
     L.register(controlName, machine.controlTaskXml({ sid: own.sid, node, script, machine: root, sys, uri: controlName }));
-    const out = { sid: own.sid, controlTask: controlName, own: [], other: [] };
+    const out = { sid: own.sid, controlTask: controlName, own: [], other: [], accounts: list.map(logonOf), history };
     for (const [who, u] of [['own', own], ['other', other]]) {
       const probe = path.join(dir, who);
       fs.mkdirSync(probe, { recursive: true });
@@ -1195,7 +1311,8 @@ async function takeR11(L, { node, script, self, work, sys }, { rounds = R11_ROUN
       writeJson(path.join(probe, 'plan.json'), { task: controlName });
       const asName = R11_TASKS.as + who;
       // Its action is one schtasks /run of 30 s at most: Task Scheduler ends it at 10 minutes, whatever the lane does.
-      L.register(asName, taskXml({ description: 'AGMessage readings R11: schtasks /run of a control task, as ' + u.name, sid: u.sid, logon: 'Password', limit: 'PT10M', command: node, args: [self, 'probe-run', probe], cwd: path.dirname(self) }), { user: u.name, password });
+      const warned = L.register(asName, taskXml({ description: 'AGMessage readings R11: schtasks /run of a control task, as ' + u.name, sid: u.sid, logon: 'Password', limit: 'PT10M', command: node, args: [self, 'probe-run', probe], cwd: path.dirname(self) }), { user: u.name, password });
+      if (warned) out[who + 'Registered'] = warned;
       try {
         for (let i = 0; i < rounds && left() > 0; i++) {
           const id = crypto.randomBytes(12).toString('hex');
@@ -1203,11 +1320,12 @@ async function takeR11(L, { node, script, self, work, sys }, { rounds = R11_ROUN
           const answerFile = path.join(root, 'machine', 'outbox', own.sid, 'answer.json');
           fs.rmSync(path.join(probe, 'ran.json'), { force: true });
           fs.writeFileSync(inbox, JSON.stringify({ id, verb: 'start' }));
+          const since = new Date(Date.now() - 2000).toISOString();
           const started = L.schtasks(['/Run', '/TN', asName]);
           if (started.code !== 0) { out[who].push({ code: null, err: 'its task did not run: ' + (started.err || started.out).trim().slice(0, 200), answered: false }); fs.rmSync(inbox, { force: true }); break; }
           const ran = await until(() => { try { return readJson(path.join(probe, 'ran.json')); } catch { return null; /* not written yet */ } }, answerMs);
           // A task as the account that never ran its probe says why once: the rounds after it would wait the same.
-          if (!ran) { out[who].push({ code: null, err: 'the task as ' + u.name + ' wrote nothing within ' + answerMs / 1000 + ' s (last result ' + L.lastResult(asName) + ')', answered: false }); fs.rmSync(inbox, { force: true }); break; }
+          if (!ran) { out[who].push({ code: null, err: 'the task as ' + u.name + ' wrote nothing within ' + answerMs / 1000 + ' s (last result ' + L.lastResult(asName) + '): ' + L.whyNot(asName, since).words, answered: false }); fs.rmSync(inbox, { force: true }); break; }
           const answerOf = () => { try { const a = readJson(answerFile); return a && a.id === id ? a : null; } catch { return null; /* not written yet */ } };
           const answer = await until(answerOf, who === 'own' ? answerMs : quietMs);
           out[who].push({ code: ran.code, err: ran.code === 0 ? '' : ran.err, answered: !!answer, ranAs: answer ? String(answer.ranAs || '') : '', for: answer ? String(answer.for || '') : '', words: answer ? String(answer.words || '').slice(0, 200) : '' });
@@ -1223,6 +1341,22 @@ async function takeR11(L, { node, script, self, work, sys }, { rounds = R11_ROUN
     if (controlName) await guarded(() => L.remove(controlName));
     await accountsGone(L, names);
   }
+}
+
+/**
+ * A standard account's logon as SCRIPTS.users read it back (pure): {name, batch, batchWhy, deny, enabled, mustChange}, its
+ * password never among them. `batch` true only when the right was read back; `deny` the SIDs of it and its groups that hold
+ * "Deny log on as a batch job".
+ */
+function logonOf(u) {
+  return {
+    name: String(u && u.name || ''),
+    batch: !!u && u.batch === true,
+    batchWhy: String(u && u.batchWhy || '').slice(0, 200),
+    deny: (u && Array.isArray(u.deny) ? u.deny : u && u.deny ? [u.deny] : []).map(String).filter((x) => /^S-1-[0-9-]+$/.test(x)),
+    enabled: !!u && u.enabled === true,
+    mustChange: !!u && u.mustChange === true,
+  };
 }
 
 /** Standard accounts the lane named, removed with the profiles a logon made for them, and no longer held once that is said. */
@@ -1255,6 +1389,7 @@ async function takeR6(L, { node, root, self, work, sys }, { exportMs = 150000, p
     const u = (Array.isArray(users) ? users : [users]).find((x) => x && x.name === R6_USER && /^S-1-[0-9-]+$/.test(String(x.sid)));
     if (!u) return { skipped: 'the standard account was not made' };
     if (u.admin === true) return { skipped: 'the account made for the reading is an administrator, so it measures nothing of a standard account' };
+    const history = L.history();
     // The machine folder's own children and machine\'s, as prepare makes them (their grants are the import's to set).
     for (const sub of ['data', 'uploads', 'keys', 'logs', 'token', path.join('machine', 'inbox'), path.join('machine', 'outbox'), path.join('machine', 'work')]) fs.mkdirSync(path.join(machineRoot, sub), { recursive: true });
     // A stand-in portable folder last run by this build in the format it writes (its facts reader names both), with nothing
@@ -1275,7 +1410,7 @@ async function takeR6(L, { node, root, self, work, sys }, { exportMs = 150000, p
       const granted = run(L.exe('icacls.exe'), [f, '/grant', '*' + u.sid + ':(OI)(CI)M']);
       if (granted.code !== 0) throw new Error('the account was not granted ' + f + ': ' + (granted.err || granted.out).trim().slice(0, 200));
     }
-    const out = { sid: u.sid };
+    const out = { sid: u.sid, account: logonOf(u), history };
     const step = (name, args) => {
       const said = path.join(dir, name + '.json');
       const r = run(node, [path.join(root, 'app', 'machine.js'), 'import', '--step', name, '--for', u.sid, '--machine', machineRoot, ...args, '--out', said], { ms: 300000 });
@@ -1287,12 +1422,14 @@ async function takeR6(L, { node, root, self, work, sys }, { exportMs = 150000, p
     progress(out);
     if (out.stage.code !== 0) return out;
     writeJson(path.join(probe, 'plan.json'), { launch: path.join(root, 'app', 'launch.js'), source, machine: machineRoot });
-    L.register(R6_TASK, taskXml({ description: 'AGMessage readings R6: launch.js export, as ' + u.name, sid: u.sid, logon: 'Password', limit: 'PT10M', command: node, args: [self, 'probe-export', probe], cwd: path.dirname(self) }), { user: u.name, password });
+    const warned = L.register(R6_TASK, taskXml({ description: 'AGMessage readings R6: launch.js export, as ' + u.name, sid: u.sid, logon: 'Password', limit: 'PT10M', command: node, args: [self, 'probe-export', probe], cwd: path.dirname(self) }), { user: u.name, password });
+    if (warned) out.registered = warned;
     try {
+      const since = new Date(Date.now() - 2000).toISOString();
       const started = L.schtasks(['/Run', '/TN', R6_TASK]);
       if (started.code !== 0) { out.export = { code: null, err: 'its task did not run: ' + (started.err || started.out).trim().slice(0, 200) }; return out; }
       const ran = await until(() => { try { return readJson(path.join(probe, 'ran.json')); } catch { return null; /* not written yet */ } }, exportMs);
-      if (!ran) { out.export = { code: null, err: 'the task as ' + u.name + ' wrote nothing within ' + exportMs / 1000 + ' s (last result ' + L.lastResult(R6_TASK) + ')' }; return out; }
+      if (!ran) { out.export = { code: null, err: 'the task as ' + u.name + ' wrote nothing within ' + exportMs / 1000 + ' s (last result ' + L.lastResult(R6_TASK) + '): ' + L.whyNot(R6_TASK, since).words }; return out; }
       let said = {};
       try { said = readJson(path.join(machineRoot, 'machine', 'inbox', u.sid, 'import', 'export.json')); } catch (e) { said = { words: 'its answer was not read elevated (' + (e.code || e.message) + ')' }; }
       out.export = { code: ran.code, words: String(said.words || ran.out || '').slice(0, 400), user: String(ran.user || ''), made: String(ran.made || '') };
@@ -1820,7 +1957,8 @@ if (require.main === module) {
 }
 
 module.exports = {
-  zipEntries, memberParts, topFolder, releaseOf, layOut, extractOne, taskXml, winArg, utf16, SERVER_PRINCIPAL, CONTROL_PRINCIPAL, SCRIPTS, lane, system32, takeR11, probeRun, takeR6, probeExport, R6_USER, R6_TASK,
+  zipEntries, memberParts, topFolder, releaseOf, layOut, extractOne, taskXml, winArg, utf16, SERVER_PRINCIPAL, CONTROL_PRINCIPAL, SCRIPTS, LSA_SOURCE, lane, system32, takeR11, probeRun, takeR6, probeExport, R6_USER, R6_TASK,
+  batchWarning, START_REFUSED, hresultOf, startWhy, logonOf,
   snapshot, snapshotDiff, udpHeard, waitHealth, quickTunnel, readRelease, probeOffline, probeExit, parseArgs, main, TRYCF, installerSignature,
   sddlOfSave, pipeReach, keepTail, tokenIn, withoutSecrets, placeRefusal, takeR12, take,
   seedHalls, pageSocket, paceMs, takeR1, takeR9, takeR3prime, serveFolders, R1_SIZES, R1_QUIET_MS, PAGE_PACE,

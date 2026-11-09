@@ -1222,6 +1222,73 @@ test('the standard accounts the lane and the installer\'s life cycle make: each 
   for (const n of [...Object.values(T.R11_USERS), T.R6_USER, life[1]]) assert.ok(/^[a-z0-9]{1,20}$/.test(n), n + ': a local account\'s name, 20 characters at most');
 });
 
+test('a task as a standard account: its account given "Log on as a batch job" through the LSA, read back and taken back; schtasks\' warning kept; and why a task did not start read from Task Scheduler\'s own log', () => {
+  // Run 115: tasks as fresh standard accounts never started (last result 0x00041303): Windows Server gives the batch logon
+  // to Administrators, Backup Operators and Performance Log Users alone, and a task that runs as an account by its password
+  // needs it. SCRIPTS.users grants it through the LSA, reads it back and says why when it did not hold.
+  const users = T.SCRIPTS.users;
+  assert.match(users, /try \{ Add-Type -TypeDefinition \$env:AGM_LSA \} catch \{ \$lsa = \[string\]\$_\.Exception\.Message \}/, 'the LSA class compiled from the environment; a failure said, never thrown');
+  assert.match(users, /\[AgmLsa\]::Grant\(\$sid, 'SeBatchLogonRight'\); \$batch = \[bool\]\(@\(\[AgmLsa\]::Of\(\$sid\)\) -contains 'SeBatchLogonRight'\)/, 'granted, then read back');
+  assert.match(users, /\[AgmLsa\]::Holders\('SeDenyBatchLogonRight'\)\) \| Where-Object \{ @\(\$sid, 'S-1-5-32-545', 'S-1-1-0', 'S-1-5-11', 'S-1-5-113', 'S-1-5-3'\) -contains \$_ \}/, 'a deny on the account or any group it is in is read');
+  assert.ok(users.indexOf('[AgmLsa]::Revoke([string]$old.SID.Value') < users.indexOf('Remove-LocalUser -Name $n'), 'an account of the name left before has its right taken back first');
+  assert.match(users, /batch = \$batch; batchWhy = \$why; deny = @\(\$deny\); enabled = \[bool\]\$v\.Enabled; mustChange = \(\$null -eq \$v\.PasswordLastSet\)/);
+  const gone = T.SCRIPTS.usersGone;
+  assert.ok(gone.indexOf("[AgmLsa]::Revoke([string]$u.SID.Value, 'SeBatchLogonRight')") > 0 && gone.indexOf("[AgmLsa]::Revoke([string]$u.SID.Value, 'SeBatchLogonRight')") < gone.indexOf('Remove-LocalUser -Name $n'), 'the right taken back before the account goes, so no right is left on a SID with no account');
+  for (const k of Object.keys(T.SCRIPTS)) {
+    assert.doesNotMatch(T.SCRIPTS[k], /"/, k + ': no double quote crosses powershell.exe\'s command line');
+    assert.doesNotMatch(T.SCRIPTS[k], /AgmLsa\]::\w+\([^)]*\$env:AGM_R11_PASSWORD/, k + ': no password into the LSA');
+  }
+  // The C# Windows PowerShell 5.1 compiles (C# 5): one line, no comment, nothing newer, every call advapi32's, the
+  // policy opened with 0x811 and closed, the account's rights removed one by one (AllRights false).
+  const cs = T.LSA_SOURCE;
+  assert.doesNotMatch(cs, /\n|\/\/|\$"|\?\.|=>|nameof|\bvar\b|`|\$\{/, 'C# 5 on one line, and nothing a template or PowerShell reads');
+  for (const fn of ['LsaOpenPolicy', 'LsaAddAccountRights', 'LsaRemoveAccountRights', 'LsaEnumerateAccountRights', 'LsaEnumerateAccountsWithUserRight', 'LsaFreeMemory', 'LsaClose', 'LsaNtStatusToWinError']) assert.ok(cs.includes('[DllImport("advapi32.dll")] private static extern') && cs.includes(' ' + fn + '('), fn);
+  assert.equal((cs.match(/DllImport\("([^"]+)"\)/g) || []).filter((d) => d !== 'DllImport("advapi32.dll")').length, 0, 'advapi32 alone');
+  assert.match(cs, /Check\(LsaOpenPolicy\(IntPtr\.Zero, ref a, 0x811, out h\)\)/);
+  assert.match(cs, /LsaRemoveAccountRights\(h, Sid\(sid\), false, Right\(right, text\), 1\)/);
+  assert.match(cs, /\[MarshalAs\(UnmanagedType\.U1\)\] bool all/, 'AllRights is a BOOLEAN, one byte');
+  assert.match(cs, /throw new Win32Exception\(LsaNtStatusToWinError\(status\)\)/, 'a failure in Windows\' own words');
+  assert.equal((cs.match(/\{/g) || []).length, (cs.match(/\}/g) || []).length, 'its braces balance');
+  const src = h.readSource(TAKE_JS);
+  assert.match(src, /env: \{ \.\.\.process\.env, PSModulePath: [^}]+, AGM_LSA: LSA_SOURCE, \.\.\.extra \} \}\);/, 'every PowerShell the lane runs is given the class in its environment');
+  // schtasks' warning that a task is registered and may not start (SCHED_S_BATCH_LOGON_PROBLEM ends with 0) is kept.
+  const warning = 'WARNING: The task is registered, but may fail to start. Batch logon privilege needs to be enabled for the task principal.';
+  assert.equal(T.batchWarning('SUCCESS: The scheduled task "x" has successfully been created.\r\n' + warning + '\r\n'), warning);
+  assert.equal(T.batchWarning('SUCCESS: The scheduled task "x" has successfully been created.\r\n'), '');
+  assert.match(src, /return batchWarning\(r\.out \+ '\\n' \+ r\.err\) \? 'registered, but Windows warned that it may not start: its account holds no batch logon \(' \+ withoutSecrets\(/, 'read from both streams, its words without the password');
+  // Task Scheduler's own events: the code each refusal carries, as an HRESULT.
+  assert.deepEqual([T.hresultOf(['\\X', 'PC\\u', '2147943785']), T.hresultOf(['PC\\u', 'LogonUserExEx', '1385']), T.hresultOf(['\\X', '{g}', 'a', '-2147024894']), T.hresultOf(['\\X', 'u']), T.hresultOf(null)], [0x80070569, 0x80070569, 0x80070002, null, null]);
+  const why = (events) => T.startWhy(events);
+  assert.deepEqual(why([{ id: 110, values: ['\\X', 'u'] }, { id: 129, values: ['\\X', 'n.exe', '42'] }]).started, true, 'it made its process');
+  let w = why([{ id: 110, values: ['\\X', 'u'] }, { id: 101, values: ['\\X', 'PC\\u', '2147943785'] }]);
+  assert.deepEqual([w.started, w.code, w.words], [false, 0x80070569, 'Task Scheduler never started it (event 101, 0x80070569): its account holds no "Log on as a batch job" (ERROR_LOGON_TYPE_NOT_GRANTED)']);
+  w = why([{ id: 104, values: ['PC\\u', 'LogonUserExEx', '1326'] }]);
+  assert.deepEqual([w.code, w.words], [0x8007052E, 'Task Scheduler never logged its account on (event 104, 0x8007052E): its account\'s user name or password is incorrect']);
+  w = why([{ id: 203, values: ['\\X', '{g}', 'Action', '2147942402'] }]);
+  assert.equal(w.words, 'Task Scheduler never started its action (event 203, 0x80070002): a file it names was not found');
+  w = why([{ id: 101, values: ['\\X', 'PC\\u', '2147500037'] }]);
+  assert.equal(w.words, 'Task Scheduler never started it (event 101, 0x80004005): Windows\' code 0x80004005', 'an unnamed code still said');
+  // An action that did not launch after its instance began (100, then 203 and 103, the newest first as Get-WinEvent gives
+  // them) is its refusal, never "started"; an instance alone is started, and a process made outranks a 104 of another task.
+  w = why([{ id: 103, values: ['\\X', 'PC\\u', '{g}', '2147942405'] }, { id: 203, values: ['\\X', '{g}', 'C:\\n.exe', '2147942405'] }, { id: 100, values: ['\\X', 'PC\\u', '{g}'] }, { id: 110, values: ['\\X', 'u'] }]);
+  assert.deepEqual([w.started, w.code, w.words], [false, 0x80070005, 'Task Scheduler never started its action (event 103, 0x80070005): access was denied']);
+  assert.equal(why([{ id: 100, values: ['\\X', 'PC\\u', '{g}'] }]).started, true);
+  assert.equal(why([{ id: 104, values: ['PC\\v', 'LogonUserExEx', '1385'] }, { id: 129, values: ['\\X', 'n.exe', '42'] }]).started, true);
+  assert.equal(why([{ id: 322, values: ['\\X'] }]).words, 'Task Scheduler ignored the run: an instance of it was already running (event 322)');
+  assert.equal(why([{ id: 332, values: ['\\X'] }]).words, 'Task Scheduler did not start it: its account was not logged on (event 332)');
+  assert.equal(why([]).words, 'Task Scheduler\'s log holds no event for it');
+  assert.equal(why([{ id: 110, values: ['\\X'] }]).words, 'Task Scheduler logged 110 for it, and never started it (it was asked to run: event 110)');
+  assert.match(T.SCRIPTS.taskHistory, /if \(-not \$was\) \{ \$l\.IsEnabled = \$true; \$l\.SaveChanges\(\) \}/, 'its log turned on only when it is off');
+  assert.match(T.SCRIPTS.taskEvents, /StartTime = \$since \}/);
+  // The account's logon as kept in a record: no password, deny SIDs alone.
+  assert.deepEqual(T.logonOf({ name: 'agmr11own', sid: 'S-1-5-21-1', password: 'x', batch: true, batchWhy: '', deny: 'S-1-5-32-545', enabled: true, mustChange: false }), { name: 'agmr11own', batch: true, batchWhy: '', deny: ['S-1-5-32-545'], enabled: true, mustChange: false });
+  assert.deepEqual(T.logonOf({ name: 'a', batch: 'yes', deny: ['x', 'S-1-1-0'] }), { name: 'a', batch: false, batchWhy: '', deny: ['S-1-1-0'], enabled: false, mustChange: false }, 'only true is true');
+  // R11 and R6 keep each account's logon and Task Scheduler's log beside their rounds, and say why a task wrote nothing.
+  assert.match(src, /const out = \{ sid: own\.sid, controlTask: controlName, own: \[\], other: \[\], accounts: list\.map\(logonOf\), history \};/);
+  assert.match(src, /const out = \{ sid: u\.sid, account: logonOf\(u\), history \};/);
+  assert.equal((src.match(/'\): ' \+ L\.whyNot\((?:asName|R6_TASK), since\)\.words/g) || []).length, 2, 'both say Task Scheduler\'s why');
+});
+
 test('probe-run: as R11\'s task runs it, schtasks /run of the control task its plan names, by its absolute path, and its exit code written', { skip: process.platform === 'win32' ? false : 'it runs schtasks.exe: the Windows readings lane runs it' }, () => {
   const dir = tmp('agm-probe-run-');
   fs.writeFileSync(path.join(dir, 'plan.json'), JSON.stringify({ task: '\\AGMessage-Readings\\NoSuchTask-' + Date.now() }));

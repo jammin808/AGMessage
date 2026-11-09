@@ -7317,6 +7317,36 @@ laptop and no Board device walked)
   0x00041303, "has not yet run"), so the life cycle's probe as that account, R6 and R11 were not taken; R1 (2.56 s at
   the largest hall), R2 (20.7 s with Defender on), R3′ (5 of 10 saved) and R12 (no restart after a non-zero exit)
   missed their marks.
+- A task that runs as a standard account the life cycle or the lane made can start: each such account is given "Log on
+  as a batch job". In run 115 every task registered to run as a fresh standard account by its password (the life
+  cycle's probe, R6's export and R11's rounds) stayed "has not yet run" (0x00041303), its node.exe never started. Not
+  seen (the run kept neither Task Scheduler's log nor schtasks' output), but what fits it: Windows Server gives "Log on
+  as a batch job" to Administrators, Backup Operators and Performance Log Users alone, a task with LogonType Password
+  starts only for an account that holds it (Microsoft's "Security Contexts for Running Tasks"), schtasks registers such
+  a task with a warning and an exit code of 0 (SCHED_S_BATCH_LOGON_PROBLEM), and a launch whose logon fails leaves the
+  task's last result as it was; tasks of the same definition as LocalService and SYSTEM ran in the same run.
+  `tools/readings-take.js` `SCRIPTS.users` now grants the right through the LSA (`LsaAddAccountRights`; the class is
+  C# 5, compiled by Windows PowerShell's `Add-Type` from `AGM_LSA`, which the lane gives every PowerShell it runs, never
+  written into a script or a command line), reads it back, and says per account whether it holds it, why not, which of
+  it and its groups hold "Deny log on as a batch job", and whether it is enabled and needs no new password; a grant that
+  fails refuses nothing there. `SCRIPTS.usersGone` takes the right back before it removes the account. The account
+  stays a standard user (a logon right, not a privilege in its token). Task Scheduler's own log is turned on beside
+  each account (`SCRIPTS.taskHistory`), so a task that writes nothing is said with Windows' why
+  (`SCRIPTS.taskEvents`, `startWhy`: a start or logon refused, and its code named, events 101, 104, 103 and 203; an
+  instance that began and then could not launch its action is its refusal, never "started"), and schtasks' warning that
+  a task may not start is kept (`batchWarning`, read from both its streams, without the password). R11 and R6 keep each
+  account's logon as read back and the log's state beside their rounds. In the life cycle the account comes with its
+  logon (`hands.js` `account`), and the standard account's test checks it first: lab 7 takes the test only where
+  Windows' policy refuses the account its logon ("Deny log on as a batch job" on it or its groups, or a policy that keeps
+  no password); with the right granted and read back, a batch logon or a password refused (the account is the life
+  cycle's own, made with the password schtasks is given), and a grant that did not hold, fail the test, saying that
+  Windows refused what was granted, with its why and the account's logon as read (`installer/test/expect.js`
+  `logonRefused` with `granted`). Three readers checked the C#, the PowerShell and the flow, none able to run them: no
+  fault in the first two; the flow's three (an instance's start read as started though its action did not launch, a
+  failure that said Windows did not refuse a logon it had refused, and a password refused taken for lab 7's) are fixed.
+  `test/readings.test.js` holds the scripts, the class's shape, the warning, `startWhy`'s verdicts and the records;
+  `test/lifecycle.test.js` holds `logonRefused` with and without `granted` and the test's order. Whether the probe now
+  runs as the account is the next run's to say.
 - The admin page draws Accounts held aside with its first fill, never before it, and an adoption's one-time passwords
   with the panel's new state, from one answer. CI's browser smoke on Windows (run 106) missed twice on the held list: the
   first left click on ana's ⋯ opened no menu (the click meant to close it then opened one, left open with the focus in

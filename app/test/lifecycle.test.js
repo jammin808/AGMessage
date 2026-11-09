@@ -449,6 +449,28 @@ test('the standard account\'s probe: Windows\' refusal of its logon read from sc
   for (const w of ['ERROR: The user name or password is incorrect.', 'ERROR: Logon failure: the user has not been granted the requested logon type at this computer.', 'ERROR: Logon failure: unknown user name or bad password.']) assert.match(expect.logonRefused({ words: w }), /^Windows refused to register the task for the account's logon \("/, w);
   for (const w of ['ERROR: The task XML contains a value which is incorrectly formatted or out of range.', 'ERROR: Access is denied.', 'ERROR: No mapping between account names and security IDs was done.', '']) assert.equal(expect.logonRefused({ words: w }), '', w);
   assert.deepEqual([expect.resultWords(0x8007052E | 0), expect.resultWords(0x41303), expect.resultWords(null)], ['0x8007052E', '0x00041303', 'none']);
+  // Once the life cycle gave the account "Log on as a batch job" and read it back, a batch logon refused is its own
+  // failure, never lab 7's: only a refusal by policy, or of another kind, is the runner's.
+  // The account was made with the very password schtasks is given, so a password refused is the life cycle's own fault
+  // too: only a policy that keeps no password stays the runner's.
+  for (const code of [0x80070569, 0x80070564, 0x8007052E]) assert.equal(expect.logonRefused({ lastResult: code | 0, granted: true }), '', 'granted: 0x' + code.toString(16));
+  assert.match(expect.logonRefused({ lastResult: 0x8004130F | 0, granted: true }), /a policy forbids storing it/, 'a policy that keeps no password is still the runner\'s');
+  for (const w of ['ERROR: Logon failure: the user has not been granted the requested logon type at this computer.', 'ERROR: The user name or password is incorrect.']) assert.equal(expect.logonRefused({ words: w, granted: true }), '', w);
+  assert.deepEqual([expect.BATCH_REFUSED.map((n) => n.toString(16)), expect.POLICY_REFUSED.map((n) => n.toString(16))], [['80070564', '80070569'], ['8004130f']]);
+  assert.match(expect.BATCH_REFUSED_WORDS.exec('ERROR: Logon failure: the user has not been granted the requested logon type at this computer.')[0], /requested logon type/);
+  // The life cycle's test: the account's readback first (a deny by policy is lab 7's; a grant that did not hold fails,
+  // named), the registration's warning kept, and a task that wrote no line said with Task Scheduler's own why.
+  assert.match(LIFECYCLE, /let lab7 = logon\.deny\.length \? 'Windows denies the account a batch logon by policy/);
+  assert.match(LIFECYCLE, /if \(!lab7\) assert\.ok\(logon\.batch && logon\.enabled && !logon\.mustChange, 'the standard account can be logged on by a task/);
+  assert.match(LIFECYCLE, /lab7 = expect\.logonRefused\(\{ words: e\.message, granted: true \}\);/);
+  assert.match(LIFECYCLE, /lab7 = expect\.logonRefused\(\{ lastResult: s\.lastResult, granted: true \}\) \|\| expect\.logonRefused\(\{ lastResult: why\.code, granted: true \}\);/);
+  assert.match(LIFECYCLE, /if \(!lab7\) assert\.fail\(scrub\('the probe\\'s task as ' \+ STD_NAME \+ ' wrote no line within ' \+ expect\.PROBE\.startMs \/ 1000 \+ ' s, and ' \+ \(refusedAnyway \? 'Windows refused its logon although "Log on as a batch job" was granted and read back' : 'Windows did not refuse its logon'\) \+ ' \(state ' \+ s\.state \+ ', last result ' \+ expect\.resultWords\(s\.lastResult\) \+ '\): ' \+ why\.words/, 'a refusal of what was granted is said as that');
+  assert.match(LIFECYCLE, /'; its logon as read: ' \+ JSON\.stringify\(logon\)\)\);/, 'the account\'s logon as read back goes with the failure');
+  const reads = LIFECYCLE.match(/logonRefused\(\{[^}]*\}\)/g) || [];
+  assert.ok(reads.length >= 3 && reads.every((r) => r.includes('granted: true')), 'every reading of a refusal knows the right was granted: ' + reads.join(' | '));
+  const hands = h.readSource('installer/test/hands.js');
+  assert.match(hands, /return \{ name, sid: u\.sid, password, logon: readings\.logonOf\(u\), history: L\.history\(\) \};/, 'the account comes with its logon as read back, never its password in it');
+  assert.match(hands, /return L\.register\(name, readings\.taskXml\(/, 'the probe\'s registration answers schtasks\' warning');
   // Its bounds: its longest run for the life cycle's two requests ends inside its task's time limit.
   assert.equal(expect.probeWorstMs(2), 2 * (expect.PROBE.runMs + expect.PROBE.answerMs));
   assert.ok(expect.probeWorstMs(2) + 60_000 <= expect.PROBE.limitMinutes * 60_000, 'the probe ends inside its task\'s limit');

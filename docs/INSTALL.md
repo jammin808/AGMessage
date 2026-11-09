@@ -1103,10 +1103,23 @@ reading.
   `installer/test/expect.js`'s, which `test/lifecycle.test.js` holds to the installer's script, `machine.js`,
   `lib/startup.js`, `lib/dataformat.js` and the .bat on Linux. The life cycle refuses any machine but an elevated
   GitHub-hosted runner with no AGMessage on it, before anything is made.
+- **The standard account's logon.** A task that runs as an account by its password starts only for an account that
+  holds "Log on as a batch job", which Windows Server gives Administrators, Backup Operators and Performance Log Users
+  alone: in run 115 every task as a fresh standard account (the life cycle's probe, R6's and R11's) stayed "has not yet
+  run" (0x00041303). The account the life cycle and the lane make (`tools/readings-take.js` `SCRIPTS.users`) is given
+  that right through the LSA (`LsaAddAccountRights`, compiled by PowerShell's `Add-Type` from `AGM_LSA`), read back, and
+  taken back before the account is removed; the readback (granted, the holders of "Deny log on as a batch job" among the
+  account and its groups, enabled, no new password needed) goes with the account. The right is a logon right, not a
+  privilege: the account's token stays a standard user's. Task Scheduler's own log
+  (Microsoft-Windows-TaskScheduler/Operational) is turned on beside it, so a task that writes nothing is said with
+  Windows' own why (`startWhy`: a start or logon refused, with its code named), and schtasks' warning that a task may not
+  start is kept.
 - **Where the runner cannot.** The standard account's test is left to lab 7 on the show laptop (its grant, the record and
-  its control task still read) only where Windows refused the account's logon: schtasks' words when the probe's task is
-  registered, or the task's last result a logon refused (a bad user name or password, a logon type not granted, no
-  password kept by policy) with no line written (`installer/test/expect.js` `logonRefused`). The probe writes its first line
+  its control task still read) only where Windows' policy refuses the account its logon: "Deny log on as a batch job" on
+  it or its groups, or a policy that keeps no password (SCHED_E_ACCOUNT_INFORMATION_NOT_SET, the task's last result or
+  Task Scheduler's log, with no line written; `installer/test/expect.js` `logonRefused`). The account is the life cycle's
+  own, made with the password schtasks is given and granted its batch logon, so a batch logon or a password refused, and
+  a grant that did not hold, fail the test with Windows' words and the account's logon as read back. The probe writes its first line
   as it starts; a probe that ran is waited for as long as its own longest run (its bounds in its plan) and asserted step by
   step, and any other failure, a task that started no probe (a node.exe the account cannot run) or one that did not finish,
   fails the test. The import's verify goes into a machine folder the life cycle makes and never starts, with the installed
