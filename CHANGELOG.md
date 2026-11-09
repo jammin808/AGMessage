@@ -7305,6 +7305,33 @@ laptop and no Board device walked)
   smoke holds Set up's read of its rooms through Press's code turned off and on again in that window and finds both
   drawn from the answer and kept; on the page before this change it fails, the read held so that no timing decides it.
   The halls board that ships changed (`public/halls.js`).
+- The browser smoke reads a point of the Board's page only once the page has drawn the size it was given. CI's Windows
+  run 108 failed "a question pinned for one Board member leaves their feed alone…" with three nulls: the tap meant to
+  open the question's row pressed its Answer in words… instead. Proved: the step before measured the pinned bar at a
+  tablet's and a phone's size and gave the window its own size back, then waited only for the page to read the new
+  width, which it does before its next frame; the simple view's height is the visual viewport's, set by the page's
+  resize handler in that frame, so the smoke read the question's middle in a layout the page never paints (the page
+  still the phone's 844 px high, the feed 36 px taller), and where the frame came between that read and the press, the
+  feed kept its reader at its end and moved the question 36 px up, Answer in words… under the point. The miss was the
+  smoke's own read, not the page's. Now the smoke gives a size and waits for the page's frame for it (`viewportDrawn`:
+  the window's resize heard, a frame after the one it came in, the view's height the visual viewport's) before it
+  measures the bar or reads a point, and the step says so when that frame never came. The visual viewport's resize
+  handler alone held from that clear and let through 1.5 s on (a frame that comes late): the smoke before this change
+  fails the step 10 runs of 10 with CI's line, this one passes 10 of 10, and this one without its wait for the view's
+  height fails 10 of 10, so that wait is what the fence holds (the page's resize handlers all held, the smoke's own
+  listener among them, fail the old smoke 10 of 10 and pass this one 10 of 10 too, but do not tell the height's wait
+  apart); with nothing held and the press 20 ms after the read (a slower DevTools round trip), 3 of 40 failed before
+  and none of 40 now. Nothing that ships changed.
+- The browser smoke says which wait ran out. A tab's `until` answers null when its time runs out, and 333 of its calls
+  dropped that answer, 140 of them right before an act that then works on a page not in the state waited for, so a miss
+  in CI read only as a later step's nulls, far from its cause (run 108's above named nothing). Now each wait that runs out is kept with the
+  line that asked it (and the line that asked that line's helper), and a FAIL names the first three since the check
+  before it, each with its time and the first 72 characters of what it waited for, never a value a step wrote further
+  into it (a password shown once); an OK, and so a passing run, says nothing more, and no check's outcome, wait or
+  timing changed. In the pins leg every wait its next act stands on is now checked in its step's report, which names
+  what was not reached. With the Board page's resize held until the press, the step before names "the window's own size
+  drawn again after the bar's sizes" and its wait's line, and the tapped step its row, its pin, its answer and its door,
+  its first wait's line first. Nothing that ships changed.
 - The installer's build accepts the installer it built. `installer/build-installer.ps1` reads the version back from the
   file it compiled and compares it with the build's, and read its strings with the padding Windows' version resource
   keeps after them, so CI's first build of it (run 96) refused "0.6.0.96" padded with blanks as not "0.6.0.96". The
