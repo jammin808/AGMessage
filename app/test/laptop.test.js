@@ -681,7 +681,8 @@ test('Windows\' answer is read by type, part by part: a part refused, missing or
     sleep: ['unknown (Windows said: powercfg ended with 1)', ''], lid: ['unknown (not in Windows\' answer)', ''],
     task: ['none: AGMessage is not installed on this PC', 'off'], admin: ['none: no install record on this PC', 'off'],
   }, 'no record: no rights row');
-  assert.equal(rows[0].words, '0.6.0+31 · installed: a Windows task starts it with Windows');
+  // R12 (CI runs 101 and 115): Windows does not start the task again after its watchdog ends non-zero, so the row says so.
+  assert.equal(rows[0].words, '0.6.0+31 · installed: a Windows task starts it with Windows, and does not start it again if its watchdog crashes (Start AGMessage, or restart the PC)');
   // Strange values are read by type: a grant that is no SID goes, a name is cleaned and cut, the task's numbers checked.
   const odd = laptop.windowsFacts({ text: JSON.stringify({ v: 1, network: [{ name: 'Café\u0007', alias: 7, category: 'DomainAuthenticated' }, 'x'], rules: { error: 'PermissionDenied' }, standbyAc: 1800, lidAc: 3,
     task: { state: 'Ready', lastResult: 2147942402, lastRun: '' }, record: { admin: 'S-1-5-21-9', adminName: '', grants: [{ sid: 'Everyone', name: 'x', rights: 'all' }, { sid: 'S-1-5-21-9-1', name: 'LAPTOP\\cy', rights: 'stop' }], grantsError: 'x' } }), why: '' });

@@ -7382,6 +7382,18 @@ laptop and no Board device walked)
   machine) the first was forgotten before it was shown and its push refused as a file of no room. A local run on the
   CR LF checkout failed so; with a wait of twice the sweep before the first show the old order fails every time, and the
   new one does not wait between an upload and its show. Nothing that ships changed.
+- Windows does not start the installed node again after its watchdog crashes, and "This laptop" says so. R12 (the server
+  task's `RestartOnFailure`, 3 × 1 min) measured in CI runs 101 and 115 (Windows Server 2025, build 26100): an action that
+  ends with 1 is not started again within 150 s, and one that ends with 0 stays stopped, though Microsoft's pages say the
+  task is restarted when it "fails for any reason" or its "last run result … is not a success". `launch.js serve` ends
+  with 0 for the watchdog's stop, give-up and configuration refusal, so only a crash of the watchdog itself (rare: it
+  restarts the server on its own) is affected: AGMessage is then down until the next boot or a Start. The plan's
+  fallback for this result is taken: "This laptop"'s build row on the installed node says "installed: a Windows task
+  starts it with Windows, and does not start it again if its watchdog crashes (Start AGMessage, or restart the PC)"
+  (`lib/laptop.js`, `test/laptop.test.js`); `launch.js`'s and `machine.js`'s comments, `docs/INSTALL.md` and `README.txt`
+  say what was measured and no longer that RestartOnFailure restarts it; the plan's U.5 cost 2 carries an as-built note.
+  The task's definition is unchanged, and a launch Task Scheduler could not make (which its setting may still retry) was
+  not measured.
 - The admin page draws Accounts held aside with its first fill, never before it, and an adoption's one-time passwords
   with the panel's new state, from one answer. CI's browser smoke on Windows (run 106) missed twice on the held list: the
   first left click on ana's ⋯ opened no menu (the click meant to close it then opened one, left open with the focus in

@@ -12,9 +12,11 @@
  *                              (AGM_MACHINE_EVENTS, which the server reads into its audit log) and the port from its
  *                              arguments, nothing else of its own: no NODE_OPTIONS, no AGM_… it was not handed. The
  *                              watchdog's stop (0), its give-up and a configuration refusal (3) end this process with 0,
- *                              after the watchdog has written why (watchdog.json, server.log), so the task stays stopped
- *                              and RestartOnFailure does not loop it; only an unexpected end of the watchdog is non-zero,
- *                              which RestartOnFailure restarts.
+ *                              after the watchdog has written why (watchdog.json, server.log), so the task stays stopped;
+ *                              only an unexpected end of the watchdog is non-zero, which Task Scheduler keeps as the
+ *                              task's last result and does not start again (R12, measured on Windows Server 2025 in CI
+ *                              runs 101 and 115): a crash of the watchdog itself leaves AGMessage down until the next
+ *                              boot or a Start, and This laptop says so.
  *   token --machine <folder> [--sys <folder>]
  *                              Show the admin token: the installed node's token, read from <folder>\token\admin-token
  *                              (<folder> is the node's machine folder, %ProgramData%\AGMessage), which its watchdog
@@ -1132,8 +1134,9 @@ function taskEnv(a, inherited = process.env) {
  * serve: the server task's action. It runs the watchdog (supervise.js beside this file, by its absolute path) in a process
  * of its own, in taskEnv's environment (no machine path from its own environment).
  * Resolves the exit code: the watchdog's 0, and its give-up or configuration refusal (3), end this process with 0 so the
- * task stays stopped; any other end is non-zero, which RestartOnFailure restarts. `spawn` is childProcess.spawn unless a
- * test stands in for it.
+ * task stays stopped; any other end is non-zero, which Task Scheduler keeps as the task's last result and does not start
+ * again (R12): AGMessage is then down until the next boot or a Start. `spawn` is childProcess.spawn unless a test stands
+ * in for it.
  */
 function serve(a, { spawn = childProcess.spawn, supervise = path.join(__dirname, 'supervise.js'), execPath = process.execPath, inherited } = {}) {
   return new Promise((resolve) => {

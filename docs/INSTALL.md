@@ -163,8 +163,9 @@ watchdog and the server read it, and these rules, before either writes anything 
   (`acceptErrors`); the node serves on. A port that stops listening is saved and ended as a crash (70), which the
   watchdog starts again.
 - **Codes the task reads** (from the watchdog, which ends only with these): 0 stopped, 3 cannot start as configured or
-  gave up; anything else is a crash of the watchdog itself. What the task does with each (stays stopped on 0 and 3) is
-  the installer's units', with the log that keeps these words.
+  gave up; anything else is a crash of the watchdog itself. Under the task, `launch.js serve` ends with 0 for 0 and 3 and
+  with the crash's own code otherwise, and Task Scheduler starts it again for none of them (R12, below): a crash of the
+  watchdog itself leaves AGMessage down until the next boot or a Start, and "This laptop" says so.
 
 ## A stop, and the start after it
 
@@ -391,7 +392,8 @@ event into its audit row (The machine's events, below).
 - **The server task** `\AGMessage\Server` (`machine.js install`; `--app` is `{app}`, which holds `node\node.exe` and
   `app\launch.js`). LocalService under a SID of its own (`NT TASK\AGMessage-Server`, `ProcessTokenSidType` unrestricted),
   with `SeChangeNotifyPrivilege` alone (so `SeImpersonatePrivilege` is removed); a boot trigger; no execution time limit;
-  both battery settings false; `MultipleInstancesPolicy` `IgnoreNew`; `RestartOnFailure` 3 × 1 min; its action `node.exe`
+  both battery settings false; `MultipleInstancesPolicy` `IgnoreNew`; `RestartOnFailure` 3 × 1 min (R12 measured that
+  it does not start the task again after its action ends with a non-zero code); its action `node.exe`
   on `launch.js serve`, both by their absolute paths, from `app\`, with the five folders, the machine's events file
   (`--events`, `machine\events.jsonl`) and the port; its descriptor (`D:P(A;;FA;;;SY)(A;;FA;;;BA)`) SYSTEM and
   Administrators only, so people start it through their control tasks (below).
@@ -419,8 +421,13 @@ event into its audit row (The machine's events, below).
   like) and `AGM_RUNS=task`, the folders, the machine's events file (`AGM_MACHINE_EVENTS`) and the port from its
   arguments, and nothing else: no `NODE_OPTIONS`, no `AGM_…`
   it was not handed. The watchdog's stop (0), its give-up and a configuration refusal (3) end `serve` with 0 after the
-  watchdog has written why (`watchdog.json`, `server.log`), so the task stays stopped and `RestartOnFailure` does not loop
-  it; only an unexpected end of the watchdog is non-zero, which it restarts.
+  watchdog has written why (`watchdog.json`, `server.log`), so the task stays stopped; only an unexpected end of the
+  watchdog is non-zero. Task Scheduler keeps that code as the task's last result and does not start the task again:
+  measured on the CI runner (Windows Server 2025, build 26100, runs 101 and 115: exit 1 not started again within 150 s;
+  exit 0 left stopped), though Microsoft's pages say `RestartOnFailure` restarts a task that "fails for any reason" or
+  whose "last run result … is not a success". A crash of the watchdog itself (rare: it restarts the server itself, and
+  gives up with 0) leaves AGMessage down until the next boot or a Start, and "This laptop" says so; the elevated
+  `machine.js status` reads the task's last result (the person's AGMessage status may be refused the task).
 - **`launch.js status`** is the person's reader (Start → AGMessage → AGMessage status), run without an elevation, each
   fact read, refused or absent and never a refusal taken for a fact: the server task's state and last result (by column,
   never Windows' localised words), the record's admin and port, the tail of `server.log`; the data folder's

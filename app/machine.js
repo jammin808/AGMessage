@@ -475,7 +475,8 @@ const xmlText = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').re
 /**
  * The server task's definition (Task Scheduler's schema 1.3; pure): LocalService under its own SID (ProcessTokenSidType
  * Unrestricted, so the task's SID is derived from its path), SeChangeNotifyPrivilege alone, a boot trigger, no time limit,
- * both battery settings false, a new instance ignored while one runs, RestartOnFailure 3 × 1 min; its action node.exe on
+ * both battery settings false, a new instance ignored while one runs, RestartOnFailure 3 × 1 min (which R12 measured does
+ * not start the task again after its action ends with a non-zero code); its action node.exe on
  * launch.js serve, both by their absolute paths, from launch.js's folder, with the folders, the machine's events file
  * (machine\events.jsonl, which the server reads and never writes) and the port; its descriptor SERVER_TASK_SDDL. No token
  * or password is in it. `uri` names it (the lane registers it under its own name).

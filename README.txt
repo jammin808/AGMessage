@@ -560,6 +560,10 @@ status.
 - If AGMessage does not answer after a first install, the installer
   says why. Its server task starts it with Windows, so restart the PC
   once the cause is cleared, or uninstall it and install it again.
+- If the watchdog itself ends unexpectedly (rare: it restarts the server
+  on its own), Windows does not start AGMessage again: use Start ->
+  AGMessage -> Start AGMessage (or ask its admin), or restart the PC.
+  Admin -> This laptop says so beside the build.
 - Smart App Control. The installer is not signed. On a PC where Smart
   App Control is on (Windows Security -> App & browser control -> Smart
   App Control), Windows blocks it and it never runs: turn Smart App

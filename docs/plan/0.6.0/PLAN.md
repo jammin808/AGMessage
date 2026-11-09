@@ -10804,6 +10804,11 @@ B-task.
        unexpected end of the watchdog is non-zero (U12's host contract).
      - If R12 finds that only a failed start counts, a crash of the watchdog leaves AGMessage down until the next boot or
        a Start, and "This laptop" says so.
+     - *As built (R12 measured, CI runs 101 and 115, Windows Server 2025 build 26100): a non-zero exit of the task's action
+       is not started again within 150 s, and exit 0 leaves it stopped, against Microsoft's settings text. The fallback is
+       taken: "This laptop"'s build row says Windows does not start it again if its watchdog crashes (Start AGMessage, or
+       restart the PC); `launch.js`, `machine.js`, `docs/INSTALL.md` and `README.txt` say what was measured. A launch
+       failure (a start Task Scheduler could not make) was not measured.*
   3. **No entry in Services.** IT reads it in Task Scheduler's `\AGMessage\` folder. `status` and "This laptop" say its
      state (U3, U12).
   4. **It listens from boot on every network the laptop joins**, to the local subnet only, and on a Public network only

@@ -457,7 +457,8 @@ function tunnelRow(t) {
  */
 function facts(k, w) {
   const rows = [];
-  rows.push(row('build', 'AGMessage', k.build + ' · ' + (k.runs === 'task' ? 'installed: a Windows task starts it with Windows' : 'the portable folder'), '', 'this server'));
+  // Under the task, Windows does not start AGMessage again once its watchdog itself has crashed (R12): the row says so.
+  rows.push(row('build', 'AGMessage', k.build + ' · ' + (k.runs === 'task' ? 'installed: a Windows task starts it with Windows, and does not start it again if its watchdog crashes (Start AGMessage, or restart the PC)' : 'the portable folder'), '', 'this server'));
   if (k.format) rows.push(formatRow(k.format));
   rows.push(k.addresses.length
     ? row('addresses', 'Addresses', k.addresses.map((a) => 'http://' + a + ':' + k.port).join(' · '), '', 'this laptop\'s network adapters, read now')
