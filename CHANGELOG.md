@@ -7362,6 +7362,20 @@ laptop and no Board device walked)
   10.14.0 and eslint-plugin-security 4.2.1, the rest of #7, were already here). The lock file changes those three alone
   (socket.io's own `ws` stays 8.21.3); `npm run audit` finds no advisory and every package's registry signature
   verified. Both pull requests close themselves once 0.6.0 is on `main`.
+- R3′ asks its stop only of a server that proved it holds the token its watchdog wrote. Run 115 saved 5 of 10 stops at
+  loopback (run 101, 7 of 10), round 1 left "Running" (0x41301). The reading's own fault, not the product's: it read
+  `token\admin-token` once, as `/api/health` first answered, but the watchdog writes a run's token only after its server
+  serves (`supervise.js` `sayToken`), and each run of the task makes a new one, so the file still held the copy before's;
+  the hello was unproven, no stop was asked, the copy ran on, and the next round's run was ignored while it ran (the
+  task's IgnoreNew), the round after stopping that copy and saving: every stop that reached the server saved. Now each
+  round reads the file again every 250 ms until the server proves it holds what it read, for up to 35 s
+  (`tools/readings-take.js` `proveToken`, as `app/machine.js` proves a start), asks the stop with that token, keeps how
+  long the proof took and what the stop met (machinewire's or the server's words, which name the port, never the token),
+  reads the task before ending a copy still running, and ends it then (`endedByLane`), so a miss never carries into the
+  next round; the seed hall's code is no longer kept in the record. `tools/readings.js` names a failing round by what its
+  stop met. `test/readings.test.js` proves a token written 300 ms after the first try, a proof that never comes, no token
+  at all, the judge's words and the reading's order. Run 115's verdicts are recorded in `docs/INSTALL.md`
+  (`tools/readings.js record`; R6, R10 and R11 were not taken, by the faults fixed above, and keep their earlier cells).
 - The admin page draws Accounts held aside with its first fill, never before it, and an adoption's one-time passwords
   with the panel's new state, from one answer. CI's browser smoke on Windows (run 106) missed twice on the held list: the
   first left click on ana's ⋯ opened no menu (the click meant to close it then opened one, left open with the focus in

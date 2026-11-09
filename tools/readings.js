@@ -740,7 +740,16 @@ function judgeR3prime(r) {
   const failing = list.map((x, i) => ({ x, i })).filter(({ x }) => !(x && x.saved === true && x.lastResult === 0));
   if (saved >= 10) return verdict('recorded', saved + ' of ' + list.length + ' stopped at loopback, saved and ended the task with 0, staying stopped', facts);
   const first = failing[0];
-  const why = first ? 'round ' + (first.i + 1) + ': ' + (first.x && first.x.error ? first.x.error : 'saved ' + !!(first.x && first.x.saved) + ', last result ' + (first.x ? first.x.lastResult : '?') + ', state ' + (first.x && first.x.state || '?')) : '';
+  // A round names what its stop met: one never asked (no proof within its time) or not answered 200 says that, with
+  // machinewire's or the server's words; else what the task and last-stop.json said; and an instance the lane ended.
+  const roundWhy = (x) => {
+    if (!x) return 'no record';
+    if (x.error) return x.error;
+    const st = x.stop && typeof x.stop === 'object' ? x.stop : null;
+    const said = st && st.status !== 200 ? 'the stop was not taken (' + (st.why || st.status || 'no answer') + (st.words ? ': ' + st.words : '') + ')' : 'saved ' + !!x.saved + ', last result ' + x.lastResult + ', state ' + (x.state || '?');
+    return said + (x.endedByLane ? ', ended by the lane' : '');
+  };
+  const why = first ? 'round ' + (first.i + 1) + ': ' + roundWhy(first.x) : '';
   return verdict('missed', saved + ' of ' + list.length + ' saved: the release notes name the failing case (' + why + ')', facts);
 }
 

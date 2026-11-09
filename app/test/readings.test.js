@@ -1222,6 +1222,41 @@ test('the standard accounts the lane and the installer\'s life cycle make: each 
   for (const n of [...Object.values(T.R11_USERS), T.R6_USER, life[1]]) assert.ok(/^[a-z0-9]{1,20}$/.test(n), n + ': a local account\'s name, 20 characters at most');
 });
 
+test('R3′: the stop asked only of a server that proved it holds the token its watchdog wrote, the file read again at each try; a round that missed says what its stop met, and a copy left running is ended before the next', async () => {
+  // Run 115 saved 5 of 10 (run 101, 7): the lane read token\admin-token once, as health first answered, when the file
+  // still held the copy before's token (the watchdog writes it after its server serves), so the stop was never asked, the
+  // copy ran on, and the next round's run was ignored while it ran.
+  const dir = tmp('agm-r3-token-');
+  const file = path.join(dir, 'admin-token');
+  const OLD = 'a'.repeat(16); // secret-scan: fixture
+  const NEW = 'b'.repeat(16); // secret-scan: fixture
+  const asked = [];
+  const hello = async ({ token }) => { asked.push(token); return token === NEW ? { ok: true, nonce: 'n' } : { ok: false, why: 'unproven', words: 'AGMessage on port 3023 did not prove it holds this PC\'s token' }; };
+  fs.writeFileSync(file, OLD + '\n');
+  setTimeout(() => { fs.writeFileSync(file, NEW + '\n'); }, 300);
+  const proved = await T.proveToken(3023, dir, { ms: 5000, pollMs: 50, hello });
+  assert.deepEqual([proved.ok, proved.token], [true, NEW], 'proved once the watchdog wrote its token');
+  assert.ok(proved.ms >= 250 && proved.ms < 5000, 'its wait measured: ' + proved.ms);
+  assert.ok(asked.includes(OLD) && asked.at(-1) === NEW, 'the file read again at each try');
+  const never = await T.proveToken(3023, dir, { ms: 300, pollMs: 50, hello: async () => ({ ok: false, why: 'unproven', words: 'AGMessage on port 3023 did not prove it holds this PC\'s token' }) });
+  assert.deepEqual([never.ok, never.why, never.words, never.token], [false, 'unproven', 'AGMessage on port 3023 did not prove it holds this PC\'s token', undefined], 'no proof within its time: no token kept, the words machinewire gave');
+  fs.rmSync(file);
+  const none = await T.proveToken(3023, dir, { ms: 100, pollMs: 50, hello });
+  assert.deepEqual([none.ok, none.why], [false, 'notoken']);
+  // The judge names what the failing round's stop met, and whether the lane ended the copy.
+  let x = byId(R.judge(raw({ 'R3′': { rounds: [{ saved: false, lastResult: 267009, state: 'Running', stopOk: false, provedMs: null, stop: { status: null, why: 'unproven', words: 'AGMessage on port 3023 did not prove it holds this PC\'s token' }, endedByLane: true }], savedCount: 0 } })), 'R3′');
+  assert.equal(x.words, '0 of 1 saved: the release notes name the failing case (round 1: the stop was not taken (unproven: AGMessage on port 3023 did not prove it holds this PC\'s token), ended by the lane)');
+  x = byId(R.judge(raw({ 'R3′': { rounds: [{ saved: false, lastResult: 1, state: 'Ready', stopOk: true, provedMs: 812, stop: { status: 200, why: '', words: '' } }], savedCount: 0 } })), 'R3′');
+  assert.equal(x.words, '0 of 1 saved: the release notes name the failing case (round 1: saved false, last result 1, state Ready)', 'a stop taken that did not save is the product\'s miss, said as before');
+  // The reading: the stop only after the proof, with the proved token; the round read before an End; no hall code kept.
+  const src = h.readSource(TAKE_JS);
+  const fn = src.slice(src.indexOf('async function takeR3prime('), src.indexOf('async function proveToken('));
+  assert.match(fn, /const proof = await proveToken\(port, folders\.token, \{ ms: proveMs, pollMs \}\);\n\s+const stopped = proof\.ok \? await wire\.stop\(\{ port, token: proof\.token, reason: 'stop', by: 'the readings lane' \}\) : null;/);
+  assert.ok(fn.indexOf("const q = L.schtasks(['/Query', '/TN', task, '/FO', 'LIST', '/V']).out;") < fn.indexOf("L.schtasks(['/End', '/TN', task]);\n        await until(() => !running(), 15000);"), 'the round read before the lane ends a copy still running');
+  assert.doesNotMatch(fn, /tokenIn\(|\.code = seedCode|seedCode/, 'no token read but through the proof, and no hall\'s code in the record');
+  assert.match(fn, /words: withoutSecrets\(String\(stopped\.words \|\| \(stopped\.json && stopped\.json\.error\) \|\| ''\), proof\.token\)\.slice\(0, 200\)/, 'the stop\'s words kept without the token');
+});
+
 test('a task as a standard account: its account given "Log on as a batch job" through the LSA, read back and taken back; schtasks\' warning kept; and why a task did not start read from Task Scheduler\'s own log', () => {
   // Run 115: tasks as fresh standard accounts never started (last result 0x00041303): Windows Server gives the batch logon
   // to Administrators, Backup Operators and Performance Log Users alone, and a task that runs as an account by its password

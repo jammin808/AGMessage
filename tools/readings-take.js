@@ -1231,14 +1231,15 @@ async function takeR9({ node, app, work, port }, { sizes = R1_SIZES, startMs = 6
  * stop-saves are counted, 10 of 10 the mark. Reported (`progress`) after each round; no round begun once the reading's
  * bound is reached.
  */
-async function takeR3prime(L, { node, app, work, port }, { rounds = 10, startMs = 60000, progress = () => {} } = {}) {
+async function takeR3prime(L, { node, app, work, port }, { rounds = 10, startMs = 60000, proveMs = 35_000, endMs = 20_000, pollMs = 250, progress = () => {} } = {}) {
   const wire = require('../app/lib/machinewire.js');
   const launch = path.join(app, 'launch.js');
   const folders = serveFolders(work, 'r3');
-  const seedCode = seedHalls(folders.data, { halls: 1, messages: 50 })[0];
+  seedHalls(folders.data, { halls: 1, messages: 50 });
   const task = '\\AGMessage-Readings\\Serve';
   // U12's own definition (app/machine.js), its folders the lane's: run on demand here, its boot trigger never fired.
   L.register(task, require('../app/machine.js').serverTaskXml({ uri: task, node, launch, ...folders, events: path.join(work, 'r3', 'events.jsonl'), port }));
+  const running = () => /Running/i.test(L.schtasks(['/Query', '/TN', task, '/FO', 'LIST']).out);
   const out = { task, rounds: [], savedCount: 0 };
   try {
     for (let i = 0; i < rounds && left() > 0; i++) {
@@ -1248,20 +1249,50 @@ async function takeR3prime(L, { node, app, work, port }, { rounds = 10, startMs 
       if (ran.code !== 0) { out.rounds.push({ error: 'schtasks could not run it: ' + (ran.err || ran.out).trim().slice(0, 160) }); continue; }
       const served = await waitHealth(port, { ms: startMs });
       if (!served.ok) { out.rounds.push({ error: 'did not serve' }); L.schtasks(['/End', '/TN', task]); continue; }
-      const token = tokenIn(folders.token);
-      const stopped = token ? await wire.stop({ port, token, reason: 'stop', by: 'the readings lane' }) : null;
-      await until(() => L.lastResult(task) !== null && !(/Running/i.test(L.schtasks(['/Query', '/TN', task, '/FO', 'LIST']).out)), 20000);
+      // Its token is the watchdog's to write once the server serves (supervise.js sayToken), after health first answers;
+      // until then the file holds the token of the copy before, to which nothing answers. The stop is asked only of a
+      // server that proved it holds the token read, the file read again at each try (proveToken).
+      const proof = await proveToken(port, folders.token, { ms: proveMs, pollMs });
+      const stopped = proof.ok ? await wire.stop({ port, token: proof.token, reason: 'stop', by: 'the readings lane' }) : null;
+      await until(() => L.lastResult(task) !== null && !running(), endMs);
       const q = L.schtasks(['/Query', '/TN', task, '/FO', 'LIST', '/V']).out;
       let saved = false;
       try { saved = readJson(path.join(folders.data, 'last-stop.json')).saved === true; } catch { saved = false; }
       const lastResult = Number((/^Last Result:\s*(-?\d+)/m.exec(q) || [])[1]);
       const state = (((/^Status:\s*(.+)$/m.exec(q) || [])[1] || '').trim()).slice(0, 40);
       if (saved && lastResult === 0) out.savedCount++;
-      out.rounds.push({ saved, lastResult: Number.isFinite(lastResult) ? lastResult : null, state, stopOk: !!(stopped && stopped.ok && stopped.status === 200) });
-      if (seedCode && !saved) out.rounds[out.rounds.length - 1].code = seedCode;
+      // What the stop met, in machinewire's words (they name the port, never the token) or the server's own answer.
+      const stop = stopped
+        ? { status: stopped.status || null, why: stopped.why || '', words: withoutSecrets(String(stopped.words || (stopped.json && stopped.json.error) || ''), proof.token).slice(0, 200) }
+        : { status: null, why: proof.why, words: proof.words };
+      const round = { saved, lastResult: Number.isFinite(lastResult) ? lastResult : null, state, stopOk: !!(stopped && stopped.ok && stopped.status === 200), provedMs: proof.ok ? proof.ms : null, stop };
+      // Read before it is ended (an End leaves its own last result): a copy still running is ended here, so a round that
+      // missed never carries into the next, whose run Task Scheduler would ignore while one runs.
+      if (/Running/i.test(state)) {
+        L.schtasks(['/End', '/TN', task]);
+        await until(() => !running(), 15000);
+        round.endedByLane = true;
+      }
+      out.rounds.push(round);
     }
   } finally { L.remove(task); }
   return out;
+}
+
+/**
+ * Whether the server on `port` proves it holds the token its watchdog wrote in `tokenDir`, the file read again at each try
+ * every `pollMs` until `ms` or the reading's own bound: {ok: true, token, ms} (the token only for the stop that follows,
+ * never kept in a record), or {ok: false, why, words, ms}, machinewire's words, which name the port alone.
+ */
+async function proveToken(port, tokenDir, { ms = 35_000, pollMs = 250, hello = (o) => require('../app/lib/machinewire.js').hello(o) } = {}) {
+  const t0 = now();
+  for (;;) {
+    const token = tokenIn(tokenDir);
+    const h = token ? await hello({ port, token }) : { ok: false, why: 'notoken', words: 'no token\\admin-token to read' };
+    if (h.ok) return { ok: true, token, ms: Math.round(now() - t0) };
+    if (now() - t0 >= ms || left() <= 0) return { ok: false, why: String(h.why || ''), words: String(h.words || '').slice(0, 200), ms: Math.round(now() - t0) };
+    await sleep(pollMs);
+  }
 }
 
 /**
@@ -1958,7 +1989,7 @@ if (require.main === module) {
 
 module.exports = {
   zipEntries, memberParts, topFolder, releaseOf, layOut, extractOne, taskXml, winArg, utf16, SERVER_PRINCIPAL, CONTROL_PRINCIPAL, SCRIPTS, LSA_SOURCE, lane, system32, takeR11, probeRun, takeR6, probeExport, R6_USER, R6_TASK,
-  batchWarning, START_REFUSED, hresultOf, startWhy, logonOf,
+  batchWarning, START_REFUSED, hresultOf, startWhy, logonOf, proveToken,
   snapshot, snapshotDiff, udpHeard, waitHealth, quickTunnel, readRelease, probeOffline, probeExit, parseArgs, main, TRYCF, installerSignature,
   sddlOfSave, pipeReach, keepTail, tokenIn, withoutSecrets, placeRefusal, takeR12, take,
   seedHalls, pageSocket, paceMs, takeR1, takeR9, takeR3prime, serveFolders, R1_SIZES, R1_QUIET_MS, PAGE_PACE,
