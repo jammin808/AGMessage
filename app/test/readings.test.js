@@ -31,7 +31,7 @@ const NOT_WINDOWS = process.platform === 'win32' ? false : 'the PowerShell the l
 const byId = (judged, id) => judged.readings.find((x) => x.id === id);
 /** FILE_READ_DATA: what lets an account read a task's definition (tools/readings.js READ_DATA). */
 const READ_DATA_RIGHT = 0x1;
-const ON = { realtime: true, onAccess: true, mode: 'Normal', exclusions: [] };
+const ON = { realtime: true, onAccess: true, mode: 'Normal', exclusions: [], processes: [], extensions: [] };
 const DEFENDER_ON = { defender: { v: 1, after: ON, took: true, errors: [] }, defenderEnd: ON };
 // The bundle's stamp, as tools/stamp-build.js writes it: health names it 0.6.0-dev.40+abc1234.
 const STAMP = { version: '0.6.0', build: 40, installVersion: '0.6.40', commit: 'abc1234def0123456789abcdef0123456789abcd', channel: 'dev', builtAt: '2026-11-02T09:50:00Z' };
@@ -164,7 +164,7 @@ test('Defender: on only when real-time monitoring and scanning on access came on
   assert.match(R.defenderOf(DEFENDER_ON).words, /scanning on access, in its Normal mode/);
   const still = R.defenderOf({ defender: { after: { ...ON, exclusions: ['D:\\', 'E:\\cache'] }, errors: [] }, defenderEnd: ON });
   assert.deepEqual([still.took, still.on], [false, false]);
-  assert.match(still.words, /did not come on as the readings need it \(D:\\ still excluded\)/);
+  assert.match(still.words, /did not come on as the readings need it \(D:\\ still excluded, E:\\cache excluded, not the runner's own\)/);
   const off = R.defenderOf({ defender: { after: { ...ON, realtime: false }, errors: ['real-time monitoring: tamper protection'] }, defenderEnd: { realtime: false } });
   assert.match(off.words, /\(real-time monitoring off\) \(real-time monitoring: tamper protection\)/);
   // Real-time monitoring on is not enough: a Defender that scans nothing on access, or runs passive, scanned nothing R2 and R10 wrote.
@@ -187,6 +187,32 @@ test('Defender: on only when real-time monitoring and scanning on access came on
   const cut = R.defenderOf({ ...DEFENDER_ON, defenderEnd: null });
   assert.deepEqual([cut.on, cut.words.includes('not read again when the readings ended')], [false, true]);
   assert.equal(R.defenderOf({ ...DEFENDER_ON, defenderEnd: { error: 'powershell.exe ended with 1' } }).on, false, 'an end that could not be read is not on');
+  // The runner's own processes and folder, which tools/defender-on.ps1 recorded as it excluded them, leave Defender on,
+  // matched whole in any case and with either slash; any other exclusion does not (fail closed: a wildcard, a short name
+  // or a folder beside what is measured is never read as what it covers), nor a process but the runner's, nor any
+  // extension, nor a list not read, at the start or by the end.
+  const runner = { scanned: false, processes: ['C:\\actions-runner\\bin\\Runner.Listener.exe'], paths: ['C:\\actions-runner'], kept: ['D:\\a\\_temp'] };
+  const own = { ...ON, exclusions: ['c:/actions-runner/'], processes: ['C:\\ACTIONS-RUNNER\\bin\\Runner.Listener.exe'] };
+  const withOwn = R.defenderOf({ defender: { after: own, errors: [], runner }, defenderEnd: own });
+  assert.deepEqual([withOwn.took, withOwn.stayed, withOwn.on], [true, true, true]);
+  assert.match(withOwn.words, /the runner's own processes and folder alone excluded, and still so when the readings ended$/);
+  for (const [x, why] of [['D:\\a', 'it holds the workspace'], ['C:\\actions-runner\\*', 'a wildcard'], ['C:\\Users\\RUNNER~1', 'a short name'], ['C:\\actions-runner2', 'a folder that only shares the runner\'s prefix'], ['E:\\cache', 'beside what is measured, and still not the runner\'s']]) {
+    const after = { ...own, exclusions: ['C:\\actions-runner', x] };
+    const d = R.defenderOf({ defender: { after, errors: [], runner }, defenderEnd: after });
+    assert.deepEqual([d.took, d.on], [false, false], why);
+    assert.ok(d.words.includes('(' + x + ' excluded, not the runner\'s own)'), why + ': ' + d.words);
+  }
+  for (const [after, said] of [[{ ...own, processes: [...own.processes, 'node.exe'] }, '(node.exe excluded as a process, not the runner\'s own)'], [{ ...own, extensions: ['.js'] }, '(the extension .js excluded)'],
+    [{ realtime: true, onAccess: true, mode: 'Normal', exclusions: ['C:\\actions-runner'], extensions: [] }, '(its process exclusions not read)'], [{ realtime: true, onAccess: true, mode: 'Normal', exclusions: [], processes: [] }, 'its extension exclusions not read']]) {
+    const d = R.defenderOf({ defender: { after, errors: [], runner }, defenderEnd: after });
+    assert.deepEqual([d.took, d.on], [false, false], said);
+    assert.ok(d.words.includes(said), d.words);
+  }
+  const late = R.defenderOf({ defender: { after: own, errors: [], runner }, defenderEnd: { ...own, exclusions: ['C:\\actions-runner', 'D:\\a\\_temp\\x'] } });
+  assert.deepEqual([late.took, late.stayed, late.on], [true, false, false], 'excluded by the end');
+  assert.match(late.words, /was not so when the readings ended \(D:\\a\\_temp\\x excluded, not the runner's own\)/);
+  const scanned = R.defenderOf({ defender: { after: ON, errors: [], runner: { scanned: true, processes: [], paths: [] } }, defenderEnd: ON });
+  assert.deepEqual([scanned.on, /alone excluded/.test(scanned.words)], [true, false], 'with the runner scanned too, nothing excluded at all');
 });
 
 // ---------------------------------------------------------------- each reading against its mark
@@ -1299,6 +1325,7 @@ test('on Windows: the PowerShell the lane asks answers in its shape (signatures,
       const d = L.ps(T.SCRIPTS.defender);
       assert.equal(typeof d.realtime, 'boolean');
       assert.ok(Array.isArray(d.exclusions));
+      assert.ok('processes' in d && 'extensions' in d, 'the process and extension exclusions read too: ' + JSON.stringify(d));
     } catch (e) {
       assert.match(e.message, /powershell\.exe ended with/, 'a Windows without Defender\'s module refuses in words');
     }
@@ -1353,7 +1380,7 @@ test('the lane in CI: windows-2025, every action pinned by its commit, no creden
   assert.match(steps[0], /^uses: actions\/checkout@/);
   assert.match(steps[0], /\n {8}with:\n {10}persist-credentials: false(\n|$)/, 'the stand-in tasks run the bundle\'s code from this workspace: no token is left in its .git');
   assert.match(steps[1], /^name: Defender's real-time monitoring back on/, 'Defender first, after the checkout that holds its script');
-  assert.match(steps[1], /shell: powershell\n\s+timeout-minutes: \d+\n\s+run: \.\/tools\/defender-on\.ps1 -Out "\$env:RUNNER_TEMP\\defender\.json"/);
+  assert.match(steps[1], /shell: powershell\n\s+timeout-minutes: \d+\n\s+run: \.\/tools\/defender-on\.ps1 -Out "\$env:RUNNER_TEMP\\defender\.json"$/, 'the runner\'s own excluded, never -ScanRunner');
   // Defender, the zip, the readings but the two as standard accounts, what they wrote kept as the artifact, then R11 and
   // R6 added to the same record, the verdicts, and the record kept again: a runner lost in the accounts' readings still
   // leaves the rest on the server.
@@ -1367,9 +1394,13 @@ test('the lane in CI: windows-2025, every action pinned by its commit, no creden
   assert.match(lane, /\$release = if \(\$env:RELEASE_TAG\) \{ @\('--repo', \$env:GITHUB_REPOSITORY, '--tag', \$env:RELEASE_TAG\) \} else \{ @\(\) \}/, 'no release named: no --tag, never an empty argument');
   assert.match(lane, /\$over = if \(\$previous\.Count -eq 1\) \{ @\('--previous', \$previous\[0\]\.FullName\) \} else \{ @\(\) \}/, 'the newest release\'s zip, when it was had, for R2');
   assert.ok(!/run: [^\n]*\$\{\{ steps\./.test(lane) && !/\n\s+node [^\n]*\$\{\{/.test(lane), 'no step output pasted into a command');
-  for (const keep of steps.filter((x) => x.startsWith('uses: actions/upload-artifact'))) {
-    assert.match(keep, /\n\s+if: always\(\)\n\s+timeout-minutes: \d+\n\s+with:\n\s+name: agmessage-readings-\$\{\{ github\.sha \}\}\n\s+path: readings\n\s+if-no-files-found: warn\n\s+overwrite: true/, 'each keeps the record whatever it says, the later over the earlier');
-  }
+  // The record kept twice whatever it says: what was taken before any standard account, under a name of its own (an upload
+  // over an artifact deletes it first, so a runner lost in the later upload would take it with it), then the whole record
+  // under the name the release reads.
+  const keeps = steps.filter((x) => x.startsWith('uses: actions/upload-artifact'));
+  assert.equal(keeps.length, 2);
+  assert.match(keeps[0], /\n\s+if: always\(\)\n\s+timeout-minutes: \d+\n\s+with:\n\s+name: agmessage-readings-\$\{\{ github\.sha \}\}-taken-\$\{\{ github\.run_attempt \}\}\n\s+path: readings\n\s+if-no-files-found: warn\n\s+overwrite: true/, 'what was taken first, under a name of its own');
+  assert.match(keeps[1], /\n\s+if: always\(\)\n\s+timeout-minutes: \d+\n\s+with:\n\s+name: agmessage-readings-\$\{\{ github\.sha \}\}\n\s+path: readings\n\s+if-no-files-found: warn\n\s+overwrite: true/, 'the whole record under the name the release reads');
   // The readings as standard accounts are taken whatever the take before them ended with.
   assert.match(steps.find((x) => x.startsWith('name: Take the readings as standard accounts')), /^name: Take the readings as standard accounts \(R11, R6; tools\/readings-take\.js\)\n {8}if: \$\{\{ !cancelled\(\) \}\}\n/);
   // A take step cut short still has what it wrote judged.
@@ -1410,11 +1441,40 @@ test('the lane in CI: windows-2025, every action pinned by its commit, no creden
   assert.ok(!bounds.includes(45), 'no step bounded at 45 minutes: ' + bounds);
   const ps = read('tools/defender-on.ps1');
   assert.match(ps, /Set-MpPreference -DisableRealtimeMonitoring \$false/);
-  assert.match(ps, /foreach \(\$x in 'C:\\', 'D:\\'\) \{\n\s+try \{ Remove-MpPreference -ExclusionPath \$x \}/);
   assert.match(ps, /Get-MpComputerStatus/);
   assert.match(ps, /if \(-not \$d -or -not \$d\.realtime -or -not \$d\.onAccess -or \$d\.mode -ne 'Normal'\) \{ return \$false \}/, 'on as tools/readings.js judges it: scanning on access, in its Normal mode');
   assert.match(ps, /\$record\.took = \[bool\]\(Is-On \$record\.after\)/, 'whether it took, read back');
   assert.match(ps, /\nexit 0\n$/, 'it informs, never fails the job for Defender');
+  // Every exclusion it finds removed, each on its own and recorded as it goes (the image's C:\ and D:\ when nothing was
+  // read), of paths, processes and extensions alike.
+  assert.ok(ps.includes("if (-not $found) { $found = [ordered]@{ exclusions = @('C:\\', 'D:\\'); processes = @(); extensions = @() } }"), 'the image\'s two at least');
+  for (const [list, flag, kept] of [['exclusions', 'ExclusionPath', 'paths'], ['processes', 'ExclusionProcess', 'processes'], ['extensions', 'ExclusionExtension', 'extensions']]) {
+    assert.ok(ps.includes('foreach ($x in @($found.' + list + ')) {\n  try { Remove-MpPreference -' + flag + ' $x; $record.removed.' + kept + ' += $x }'), list + ' removed one by one');
+  }
+  assert.match(ps, /extensions = @\(\$p\.ExclusionExtension \| Where-Object \{ \$_ \}\)/, 'the extensions read too');
+  // The runner's own excluded again, unless -ScanRunner: found from its running processes, by their full paths; its
+  // folder never a drive root, never one that holds or lies in what is measured; each recorded once Defender took it.
+  assert.match(ps, /\nif \(-not \$ScanRunner\) \{\n/);
+  assert.match(ps, /Where-Object \{ \$_\.ProcessName -like 'Runner\.\*' -and \$_\.Path \}/);
+  assert.match(ps, /\$paths = @\(\$paths \| Where-Object \{ \(Test-Excludable \$_\) -and \(Test-Path -LiteralPath \$_\) \} \| Sort-Object -Unique\)/, 'every path excluded is one it may name');
+  assert.ok(ps.includes('try { Add-MpPreference -ExclusionPath $p; $record.runner.paths += $p }') && ps.includes('try { Add-MpPreference -ExclusionProcess $e; $record.runner.processes += $e }'), 'each recorded once Defender took it');
+  assert.ok(ps.includes("if (-not $p -or $p -match '^[A-Za-z]:\\\\?$') { return $false }\n  foreach ($k in $kept) { if ((Test-Inside $k $p) -or (Test-Inside $p $k)) { return $false } }"), 'never a drive root, never over or in a kept place');
+  assert.ok(ps.includes("$i = $inner.Replace('/', '\\').TrimEnd('\\') + '\\'") && ps.includes('[System.StringComparison]::OrdinalIgnoreCase'), 'paths compared whole, either slash, any case');
+  const keptAt = ps.indexOf('$kept = @(@(');
+  const keptList = ps.slice(keptAt, ps.indexOf('Sort-Object -Unique', keptAt));
+  for (const k of ['$env:GITHUB_WORKSPACE', '$env:RUNNER_TEMP', '$env:TEMP', '$env:TMP', "'C:\\agm-readings'", '$env:ProgramFiles, $env:ProgramData, $env:LOCALAPPDATA', "Join-Path $env:LOCALAPPDATA 'Temp'"]) assert.ok(keptList.includes(k), k + ' is kept scanned');
+  // On only with no exclusion but the runner's own it made, and none of extensions: fail closed, as the judge.
+  assert.ok(ps.includes('if (@($d.extensions).Count) { return $false }\n  return (Test-OnlyOwn $d.exclusions $record.runner.paths) -and (Test-OnlyOwn $d.processes $record.runner.processes)'), 'on: nothing excluded but the runner\'s own');
+  // The canaries' evidence is readable by whoever reads the repository: of the runner's own logs it keeps the
+  // listener's warnings and errors alone and never the worker's, and every line of every file goes through Hide-Secret.
+  const ev = read('tools/canary-evidence.ps1');
+  assert.match(ev, /Get-Process -Name 'Runner\.Listener'/);
+  assert.match(ev, /-Filter 'Runner_\*\.log'/);
+  assert.ok(!/Worker_/.test(ev) && (ev.match(/-Filter '[^']*'/g) || []).join() === "-Filter 'Runner_*.log'" && (ev.match(/Get-Content /g) || []).length === 1, 'the listener\'s log alone is read, no other');
+  assert.match(ev, /Where-Object \{ \$_ -match '\\b\(ERR\|WARN\)\\b' \}/);
+  const writes = ev.split('\n').filter((l) => /Set-Content|Add-Content/.test(l));
+  assert.ok(writes.length >= 5 && writes.every((l) => /\bHide-Secret \| (Set|Add)-Content/.test(l)), 'every write through Hide-Secret: ' + writes.filter((l) => !/\bHide-Secret \|/.test(l)).join(' / '));
+  assert.ok(ev.includes("-replace 'eyJ[A-Za-z0-9_\\-]+\\.[A-Za-z0-9_\\-]+\\.[A-Za-z0-9_\\-]+', '<token>'") && ev.includes("-replace '(?:[A-Za-z0-9+/=_\\-]|%[0-9A-Fa-f]{2}){32,}', '<long>'") && ev.includes("(sig|signature|token|access_token|key|secret|password|pwd|sessionid)"), 'tokens, signatures and keys blanked');
 });
 test('the release waits for the lane and never is held by it: its notes carry the readings, or say there are none', () => {
   const ci = read('.github/workflows/ci.yml');

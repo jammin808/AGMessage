@@ -640,12 +640,13 @@ jobs:
           $installer = if ($setup.Count -eq 1) { @('--installer', $setup[0].FullName) } else { @() }
           node tools/readings-take.js take --zip $zip[0].FullName --defender "$env:RUNNER_TEMP\defender.json" --out readings/readings.raw.json --deadline-min 38 --skip R11,R6 @release @over @installer
           if ($LASTEXITCODE -ne 0) { throw "the lane could not write its readings (exit $LASTEXITCODE)" }
-      # What was taken, kept on the server before any standard account is made: a runner lost after this still leaves it.
+      # What was taken, kept on the server before any standard account is made: a runner lost after this still leaves it,
+      # under a name of its own (the record's last upload, under the release's name, would delete it first).
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         timeout-minutes: 5
         with:
-          name: agmessage-readings-${{ github.sha }}
+          name: agmessage-readings-${{ github.sha }}-taken-${{ github.run_attempt }}
           path: readings
           if-no-files-found: warn
           overwrite: true
@@ -677,18 +678,25 @@ jobs:
           if-no-files-found: warn
           overwrite: true
 
-  # A question for one run, removed once it is answered: the life cycle and the lane were both lost at the same second,
-  # 56 min after they started, in both attempts of run 105, with no log. These two start in the same second as they do
-  # (the same needs) and do no work of AGMessage's: one turns Defender back on as both of them do first
-  # (tools/defender-on.ps1), the other leaves the image as it is; each then says it is alive every minute for an hour.
-  # Only the first lost: Defender's scanning, back on over the runner's own files, is what loses a runner. Both lost:
-  # the hosted runners themselves. Neither lost: the cause is in the work the two jobs do. The release waits for neither.
-  canary-defender:
-    name: Canary, a runner with Defender back on (no AGMessage work)
+  # A question, removed once it is answered. Run 109 answered the first: the job that turned Defender back on and did
+  # nothing else was failed with the life cycle and the lane within about a second, some 56 minutes after Defender came
+  # on (about 11 after it, if the hosted service's reported 45 minutes before it fails a silent runner holds), while the
+  # one left as the image made it kept its runner for its hour. These two ask the next: with the runner's own processes
+  # and folder excluded again (tools/defender-on.ps1, as the life cycle and the lane now do), does a runner live its
+  # hour; and, scanned as before (-ScanRunner), what did Defender do as it went quiet. Each writes its evidence every 20 s (tools/canary-evidence.ps1, run by each step for its
+  # minutes) and uploads it after each under a name of its own (never over an upload before, which upload-artifact
+  # deletes first), each step going on whatever the one before ended with, so what it held when it was last heard
+  # survives it. The release waits for neither.
+  canary:
+    name: Canary, a runner with Defender back on, the runner's own ${{ matrix.runner }} (no AGMessage work)
     needs: [package, installer]
     if: ${{ github.event_name == 'push' }}
     runs-on: windows-2025
-    timeout-minutes: 75
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [excluded, scanned]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         timeout-minutes: 5
@@ -697,34 +705,163 @@ jobs:
       - name: Defender's real-time monitoring back on, the image's exclusions removed (tools/defender-on.ps1)
         shell: powershell
         timeout-minutes: 5
-        run: ./tools/defender-on.ps1 -Out "$env:RUNNER_TEMP\defender.json"
-      - name: Alive every minute for an hour
+        run: ./tools/defender-on.ps1 -Out "$env:RUNNER_TEMP\canary\defender.json" ${{ matrix.runner == 'scanned' && '-ScanRunner' || '' }}
+      - name: Alive at 2 min, the evidence written every 20 s (tools/canary-evidence.ps1)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
         shell: pwsh
-        timeout-minutes: 65
-        run: |
-          for ($i = 1; $i -le 60; $i++) {
-            Start-Sleep -Seconds 60
-            $scan = @(Get-Process MsMpEng -ErrorAction SilentlyContinue | ForEach-Object { [int]$_.CPU })
-            $free = [int]((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1024)
-            Write-Host ('alive {0} min {1:u}: Defender CPU {2} s, free memory {3} MB' -f $i, (Get-Date).ToUniversalTime(), ($scan -join '+'), $free)
-          }
-  canary-image:
-    name: Canary, a runner as the image left it (no AGMessage work)
-    needs: [package, installer]
-    if: ${{ github.event_name == 'push' }}
-    runs-on: windows-2025
-    timeout-minutes: 75
-    steps:
-      - name: Alive every minute for an hour
+        timeout-minutes: 4
+        run: ./tools/canary-evidence.ps1 -Out "$env:RUNNER_TEMP\canary" -Minutes 2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        timeout-minutes: 3
+        continue-on-error: true
+        with:
+          name: canary-${{ matrix.runner }}-${{ github.sha }}-${{ github.run_attempt }}-m02
+          path: ${{ runner.temp }}/canary
+      - name: Alive at 4 min, the evidence written every 20 s (tools/canary-evidence.ps1)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
         shell: pwsh
-        timeout-minutes: 65
-        run: |
-          for ($i = 1; $i -le 60; $i++) {
-            Start-Sleep -Seconds 60
-            $scan = @(Get-Process MsMpEng -ErrorAction SilentlyContinue | ForEach-Object { [int]$_.CPU })
-            $free = [int]((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1024)
-            Write-Host ('alive {0} min {1:u}: Defender CPU {2} s, free memory {3} MB' -f $i, (Get-Date).ToUniversalTime(), ($scan -join '+'), $free)
-          }
+        timeout-minutes: 4
+        run: ./tools/canary-evidence.ps1 -Out "$env:RUNNER_TEMP\canary" -Minutes 2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        timeout-minutes: 3
+        continue-on-error: true
+        with:
+          name: canary-${{ matrix.runner }}-${{ github.sha }}-${{ github.run_attempt }}-m04
+          path: ${{ runner.temp }}/canary
+      - name: Alive at 6 min, the evidence written every 20 s (tools/canary-evidence.ps1)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        shell: pwsh
+        timeout-minutes: 4
+        run: ./tools/canary-evidence.ps1 -Out "$env:RUNNER_TEMP\canary" -Minutes 2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        timeout-minutes: 3
+        continue-on-error: true
+        with:
+          name: canary-${{ matrix.runner }}-${{ github.sha }}-${{ github.run_attempt }}-m06
+          path: ${{ runner.temp }}/canary
+      - name: Alive at 8 min, the evidence written every 20 s (tools/canary-evidence.ps1)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        shell: pwsh
+        timeout-minutes: 4
+        run: ./tools/canary-evidence.ps1 -Out "$env:RUNNER_TEMP\canary" -Minutes 2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        timeout-minutes: 3
+        continue-on-error: true
+        with:
+          name: canary-${{ matrix.runner }}-${{ github.sha }}-${{ github.run_attempt }}-m08
+          path: ${{ runner.temp }}/canary
+      - name: Alive at 10 min, the evidence written every 20 s (tools/canary-evidence.ps1)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        shell: pwsh
+        timeout-minutes: 4
+        run: ./tools/canary-evidence.ps1 -Out "$env:RUNNER_TEMP\canary" -Minutes 2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        timeout-minutes: 3
+        continue-on-error: true
+        with:
+          name: canary-${{ matrix.runner }}-${{ github.sha }}-${{ github.run_attempt }}-m10
+          path: ${{ runner.temp }}/canary
+      - name: Alive at 12 min, the evidence written every 20 s (tools/canary-evidence.ps1)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        shell: pwsh
+        timeout-minutes: 4
+        run: ./tools/canary-evidence.ps1 -Out "$env:RUNNER_TEMP\canary" -Minutes 2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        timeout-minutes: 3
+        continue-on-error: true
+        with:
+          name: canary-${{ matrix.runner }}-${{ github.sha }}-${{ github.run_attempt }}-m12
+          path: ${{ runner.temp }}/canary
+      - name: Alive at 14 min, the evidence written every 20 s (tools/canary-evidence.ps1)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        shell: pwsh
+        timeout-minutes: 4
+        run: ./tools/canary-evidence.ps1 -Out "$env:RUNNER_TEMP\canary" -Minutes 2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        timeout-minutes: 3
+        continue-on-error: true
+        with:
+          name: canary-${{ matrix.runner }}-${{ github.sha }}-${{ github.run_attempt }}-m14
+          path: ${{ runner.temp }}/canary
+      - name: Alive at 16 min, the evidence written every 20 s (tools/canary-evidence.ps1)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        shell: pwsh
+        timeout-minutes: 4
+        run: ./tools/canary-evidence.ps1 -Out "$env:RUNNER_TEMP\canary" -Minutes 2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        timeout-minutes: 3
+        continue-on-error: true
+        with:
+          name: canary-${{ matrix.runner }}-${{ github.sha }}-${{ github.run_attempt }}-m16
+          path: ${{ runner.temp }}/canary
+      - name: Alive at 20 min, the evidence written every 20 s (tools/canary-evidence.ps1)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        shell: pwsh
+        timeout-minutes: 6
+        run: ./tools/canary-evidence.ps1 -Out "$env:RUNNER_TEMP\canary" -Minutes 4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        timeout-minutes: 3
+        continue-on-error: true
+        with:
+          name: canary-${{ matrix.runner }}-${{ github.sha }}-${{ github.run_attempt }}-m20
+          path: ${{ runner.temp }}/canary
+      - name: Alive at 30 min, the evidence written every 20 s (tools/canary-evidence.ps1)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        shell: pwsh
+        timeout-minutes: 12
+        run: ./tools/canary-evidence.ps1 -Out "$env:RUNNER_TEMP\canary" -Minutes 10
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        timeout-minutes: 3
+        continue-on-error: true
+        with:
+          name: canary-${{ matrix.runner }}-${{ github.sha }}-${{ github.run_attempt }}-m30
+          path: ${{ runner.temp }}/canary
+      - name: Alive at 45 min, the evidence written every 20 s (tools/canary-evidence.ps1)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        shell: pwsh
+        timeout-minutes: 17
+        run: ./tools/canary-evidence.ps1 -Out "$env:RUNNER_TEMP\canary" -Minutes 15
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        timeout-minutes: 3
+        continue-on-error: true
+        with:
+          name: canary-${{ matrix.runner }}-${{ github.sha }}-${{ github.run_attempt }}-m45
+          path: ${{ runner.temp }}/canary
+      - name: Alive at 60 min, the evidence written every 20 s (tools/canary-evidence.ps1)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        shell: pwsh
+        timeout-minutes: 17
+        run: ./tools/canary-evidence.ps1 -Out "$env:RUNNER_TEMP\canary" -Minutes 15
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        timeout-minutes: 3
+        continue-on-error: true
+        with:
+          name: canary-${{ matrix.runner }}-${{ github.sha }}-${{ github.run_attempt }}-m60
+          path: ${{ runner.temp }}/canary
 
   release:
     name: GitHub Release

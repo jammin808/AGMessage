@@ -7190,6 +7190,37 @@ laptop and no Board device walked)
   beside them and do no work of AGMessage's, each saying it is alive every minute for an hour: one with Defender turned
   back on first, the other on the image as it is (only the first lost: Defender's scanning; both: the hosted runners;
   neither: the two jobs' own work). They are removed once they have answered, and the release waits for neither.
+- CI's elevated Windows jobs turn Defender back on with only the runner's own processes and folder excluded. Run 109
+  answered the canaries. Seen: the job that turned Defender back on and did nothing else was failed with the life cycle
+  and the lane, the three within about a second (12:55:14 to 12:55:15), some 56 minutes after each had turned Defender
+  on (11:59:21 to 11:59:33), while the job left as the image made it, started in the same second, said it was alive for
+  its whole hour; the lane's first record, uploaded at 12:09, survived its runner and read Defender on with no path
+  excluded; and the lane's standard accounts' step, bounded at 30 minutes and begun at 12:09, was never ended, so its
+  runner was gone before 12:39. Derived, not measured here: the hosted service is reported to fail a lost runner 45
+  minutes after it last heard from it, which puts each loss about 11 minutes after Defender came on. So every runner
+  that ran more than about 11 minutes after Defender's monitoring came back with the image's exclusions removed was lost
+  (runs 105 and 109, seven jobs; run 101's lane, done in about 8, was not), and the one left as the image made it lived;
+  how is not proved. Now `tools/defender-on.ps1` removes every exclusion it finds, of paths, processes and extensions
+  (the image's C:\ and D:\ among them), each on its own and recorded, then excludes again the runner's own processes
+  (found from those running, `Runner.*`, by their full paths) and the folder they run from (its root, else its
+  binaries' and its `_diag` folders), never a drive root and never a folder that holds or lies in what the readings and
+  the life cycle measure (the workspace, the temp folders, `C:\agm-readings`, AGMessage's folders under Program Files,
+  ProgramData and the user's local application data), each recorded once Defender took it. On is now real-time
+  monitoring and scanning on access on, in Defender's Normal mode, with no exclusion but those: any other path (a
+  wildcard or a short name among them, never read as what it covers), any other process, any extension, or a list not
+  read, in the script and in `tools/readings.js`'s judge alike, at the start and at the lane's end, which now reads the
+  process and extension exclusions too. Whether this keeps the runners is the next run's to say. The image's canary is
+  gone (answered), and the Defender canary is now two, with the runner's own excluded as the life cycle and the lane now
+  do, and scanned as before (`-ScanRunner`), each writing every 20 s Defender's state, its log and what it found, the
+  System log's warnings, the runner listener's warnings and errors (never the worker's log) and its processes and
+  connections (`tools/canary-evidence.ps1`, run by each step for its minutes, every line of every file through a filter
+  that blanks anything shaped like a token, a signature or a key), and uploading that after each step, every 2 minutes
+  for the first 16 and then at 20, 30, 45 and 60, each under a name of its own (an upload over an artifact of its name
+  deletes it first), each step going on whatever the one before ended with. The lane's record taken before its standard
+  accounts is kept under a name of its own for the same reason. `test/readings.test.js` holds the script's rules and
+  the judge's (each taken out fails it): the runner's own, matched whole in any case or slash, is on; a folder that
+  holds the workspace, a wildcard, a short name, a folder sharing only the runner's prefix, a folder beside what is
+  measured, another process, an extension or a list not read is not. Nothing that ships changed.
 - The admin page draws Accounts held aside with its first fill, never before it, and an adoption's one-time passwords
   with the panel's new state, from one answer. CI's browser smoke on Windows (run 106) missed twice on the held list: the
   first left click on ana's ⋯ opened no menu (the click meant to close it then opened one, left open with the focus in

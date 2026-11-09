@@ -312,31 +312,51 @@ function listOf(v) {
   return [];
 }
 
+/** A path or a program's path as Windows compares it: any case, either slash, no trailing backslash. */
+const winPath = (p) => String(p).replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase();
 /**
  * What keeps a Defender reading from being "on": its real-time monitoring off, its scanning on access off, a mode other
- * than Normal (in passive or EDR block mode Defender does no real-time scanning), or C:\ or D:\ still excluded. Empty: on.
+ * than Normal (in passive or EDR block mode Defender does no real-time scanning), C:\ or D:\ still excluded, or any
+ * exclusion but the runner's own that tools/defender-on.ps1 made and recorded (`own`: its folders and its programs, each
+ * matched whole): another path (a wildcard or a short name among them, never read as what it covers), another process,
+ * any extension, or a list not read at all. Empty: on.
  */
-function defenderGaps(x) {
+function defenderGaps(x, own = {}) {
   if (!x || typeof x !== 'object') return ['not read'];
   const gaps = [];
   if (x.realtime !== true) gaps.push('real-time monitoring off');
   if (x.onAccess !== true) gaps.push('scanning on access off');
   if (x.mode !== 'Normal') gaps.push(typeof x.mode === 'string' && x.mode ? 'in ' + x.mode.slice(0, 40) + ', not Normal' : 'its mode not read');
-  const excluded = listOf(x.exclusions).filter((p) => /^[CD]:\\?$/i.test(String(p)));
-  if (excluded.length) gaps.push(excluded.join(' and ') + ' still excluded');
+  const cut = (v) => String(v).slice(0, 120);
+  const ownPaths = new Set(listOf(own.paths).map(winPath));
+  const ownProcesses = new Set(listOf(own.processes).map(winPath));
+  const paths = listOf(x.exclusions).map(String);
+  const drives = paths.filter((p) => /^[CD]:\\?$/i.test(p));
+  if (drives.length) gaps.push(drives.join(' and ') + ' still excluded');
+  const others = paths.filter((p) => !/^[CD]:\\?$/i.test(p) && !ownPaths.has(winPath(p)));
+  if (others.length) gaps.push(others.map(cut).join(' and ') + ' excluded, not the runner\'s own');
+  if (!('processes' in x)) gaps.push('its process exclusions not read');
+  else {
+    const processes = listOf(x.processes).map(String).filter((p) => !ownProcesses.has(winPath(p)));
+    if (processes.length) gaps.push(processes.map(cut).join(' and ') + ' excluded as a process, not the runner\'s own');
+  }
+  if (!('extensions' in x)) gaps.push('its extension exclusions not read');
+  else if (listOf(x.extensions).length) gaps.push('the extension' + (listOf(x.extensions).length > 1 ? 's ' : ' ') + listOf(x.extensions).map(cut).join(', ') + ' excluded');
   return gaps;
 }
 
 /**
  * Defender's record as the lane read it: whether it came on (real-time monitoring, scanning on access, its Normal mode,
- * the image's exclusions gone), and was still so when the readings ended. A lane cut short has no reading at its end.
+ * no exclusion but the runner's own), and was still so when the readings ended. A lane cut short has no reading at its
+ * end.
  */
 function defenderOf(raw) {
   const d = raw && raw.defender && typeof raw.defender === 'object' ? raw.defender : null;
   const after = d && d.after && typeof d.after === 'object' ? d.after : null;
   const end = raw && raw.defenderEnd && typeof raw.defenderEnd === 'object' && !raw.defenderEnd.error ? raw.defenderEnd : null;
-  const tookGaps = defenderGaps(after);
-  const endGaps = defenderGaps(end);
+  const runner = d && d.runner && typeof d.runner === 'object' ? d.runner : {};
+  const tookGaps = defenderGaps(after, runner);
+  const endGaps = defenderGaps(end, runner);
   const took = tookGaps.length === 0;
   const stayed = endGaps.length === 0;
   const errors = d && Array.isArray(d.errors) ? d.errors.map(String) : [];
@@ -345,7 +365,10 @@ function defenderOf(raw) {
   else if (!took) words = 'Defender did not come on as the readings need it (' + tookGaps.join(', ') + ')' + (errors.length ? ' (' + errors.join('; ') + ')' : '');
   else if (!end) words = 'Defender came on, with the image\'s exclusions removed, but was not read again when the readings ended';
   else if (!stayed) words = 'Defender came on, with the image\'s exclusions removed, but was not so when the readings ended (' + endGaps.join(', ') + ')';
-  else words = 'Defender\'s real-time monitoring on, scanning on access, in its Normal mode, the image\'s exclusions of C:\\ and D:\\ removed, and still so when the readings ended';
+  else {
+    const own = listOf(runner.paths).length || listOf(runner.processes).length ? ', the runner\'s own processes and folder alone excluded' : '';
+    words = 'Defender\'s real-time monitoring on, scanning on access, in its Normal mode, the image\'s exclusions of C:\\ and D:\\ removed' + own + ', and still so when the readings ended';
+  }
   return { asked: !!d, took, stayed, on: took && stayed, words };
 }
 

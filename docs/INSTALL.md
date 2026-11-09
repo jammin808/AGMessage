@@ -1125,9 +1125,16 @@ a reading: the installer's life cycle in CI is a gate, as every test is (below).
   an older one still waiting, so every lane runs whole (its two takes at most 38 and 24 minutes, each ending itself) and a
   regression shows on the next readings taken; its checkout keeps no credential (the stand-in tasks run the bundle's code from that folder).
   Its first step after that checkout, `tools/defender-on.ps1`, turns Defender's real-time monitoring back on (GitHub's
-  image turns it off), removes the image's exclusions of `C:\` and `D:\`, and records whether that took, read back from
-  Defender itself: on means real-time monitoring and scanning on access on, in Defender's Normal mode (in passive or EDR
-  block mode it does no real-time scanning), and neither drive excluded. The image's other Defender settings (archive,
+  image turns it off), removes every exclusion it finds (the image's `C:\` and `D:\` among them), excludes again only
+  the runner's own processes and the folder they run from (found from its running processes; never a drive root, and
+  never a folder that holds or lies in what the readings and the life cycle measure: the workspace, the temp folders,
+  `C:\agm-readings`, AGMessage's folders, none of which is excluded), and records it all, read back from Defender
+  itself. The runner's own are excluded because every runner that ran more than about 11 minutes after Defender came
+  back with nothing excluded was lost (CI runs 105 and 109; the 11 derived from the hosted service's reported 45 minutes
+  before it fails a runner it no longer hears), while one left as the image made it lived; whether this keeps them is
+  for the runs after 109 to show. On means real-time monitoring and scanning on access on, in Defender's Normal mode (in
+  passive or EDR block mode it does no real-time scanning), and no exclusion but the runner's own it made: any other
+  path, process or extension, or a list not read, is not on. The image's other Defender settings (archive,
   download and script scanning, behaviour monitoring, cloud protection) stay as it left them, so the runner's Defender
   is narrower than a laptop's: lab 3 is the laptop's own. Then the newest release published is named and its zip
   downloaded (a GitHub answer that fails here stops nothing: R13 then reads not run, and R2 lays this build over its
