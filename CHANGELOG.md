@@ -7347,6 +7347,15 @@ laptop and no Board device walked)
   `test/readings.test.js` holds the scripts, the class's shape, the warning, `startWhy`'s verdicts and the records;
   `test/lifecycle.test.js` holds `logonRefused` with and without `granted` and the test's order. Whether the probe now
   runs as the account is the next run's to say.
+- The smoke reads what a page drew from an act's answer only once the page's next read of it is answered and held. Four
+  steps proved a row drawn from the act's answer, before the page's own read of the list came back, by holding that read
+  (`__reads.hold`) and returning as soon as the act's toast showed, then asking `__reads.waiting(name) > 0`; but
+  `waiting` counts answers held, not reads asked, and the toast comes in the same turn as the page's read, before the
+  server answers it. A local run caught it (a forward taken back on the admin page: `held` false, and the read held a
+  moment later, "1 held" at the release). The Press code turned off, a screen removed, the forward taken back and the
+  side room's code turned off now each wait for their toast and for that answer held before they read the page, so the
+  row is read with the page's read answered and not yet applied; `HOLD_READS`'s comment says so. Nothing that ships
+  changed.
 - The admin page draws Accounts held aside with its first fill, never before it, and an adoption's one-time passwords
   with the panel's new state, from one answer. CI's browser smoke on Windows (run 106) missed twice on the held list: the
   first left click on ana's ⋯ opened no menu (the click meant to close it then opened one, left open with the focus in

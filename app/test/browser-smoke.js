@@ -412,8 +412,11 @@ const SCREEN_PROBE = `(() => {
  * page's next read of what it acted on: `__reads.hold(name, from)` holds, from then on, the answer to each ask of that
  * socket event (`'display:list'`) or each GET of that path (`'GET /api/users'`) the page makes itself (asked from the
  * script `from` names, never the smoke's own reads through the page), read by the page's own handlers only at
- * `__reads.release()`, in their order. `__reads.waiting(name)` counts those held, and `__reads.socket` is the page's socket,
- * for a read of the smoke's own. Nothing is held until asked.
+ * `__reads.release()`, in their order. `__reads.waiting(name)` counts those held: an answer the server has given and the
+ * page has not read, never a read only asked, so a step that proves what the page drew before its read waits for both its
+ * words and `waiting(name) > 0` (the page's read asked and answered, its answer held) before it reads the page: the toast
+ * alone may come before the server answers. `__reads.socket` is the page's socket, for a read of the smoke's own. Nothing
+ * is held until asked.
  */
 const HOLD_READS = `(() => {
   const H = window.__reads = { holding: {}, held: [], marked: {} };
@@ -1867,7 +1870,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await signin.eval(`document.querySelector('.agm-menu [data-action="adminRoom.codeToggle"]').click()`);
     await signin.until(`!!document.querySelector('.agm-ask [data-answer="keep"]')`, 3000);
     await signin.eval(`document.querySelector('.agm-ask [data-answer="keep"]').click()`);
-    const pressOff = await signin.until(`(() => { const t = (document.getElementById('agmToast') || {}).textContent || ''; return t.startsWith('The guest code of Smoke AGM › Press is off') && JSON.stringify({ on: AGM.page.object('adminRoom', '${pressKey}').on, row: /^code [A-Z2-9]{6} \\(off\\)$/.test(${SETUP_ROW(pressKey)}.querySelector('.setup-room-code').textContent), held: window.__reads.waiting('room:settings') > 0 }); })()`, 5000);
+    const pressOff = await signin.until(`(() => { const t = (document.getElementById('agmToast') || {}).textContent || ''; return t.startsWith('The guest code of Smoke AGM › Press is off') && window.__reads.waiting('room:settings') > 0 && JSON.stringify({ on: AGM.page.object('adminRoom', '${pressKey}').on, row: /^code [A-Z2-9]{6} \\(off\\)$/.test(${SETUP_ROW(pressKey)}.querySelector('.setup-room-code').textContent), held: window.__reads.waiting('room:settings') > 0 }); })()`, 5000);
     await signin.eval(`(() => { const t = document.getElementById('agmToast'); if (t) t.textContent = ''; ${SETUP_ROW(pressKey)}.querySelector('.obj-more').click(); return true; })()`);
     const pressOffered = await signin.until(`(() => { const b = document.querySelector('.agm-menu [data-action="adminRoom.codeToggle"]'); return b && b.textContent.trim(); })()`, 3000);
     await signin.eval(`document.querySelector('.agm-menu [data-action="adminRoom.codeToggle"]').click()`);
@@ -3357,7 +3360,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await hallView.eval(`document.querySelector('.agm-menu .agm-mi[data-action="screen.remove"]').click()`);
     await hallView.until(`!!document.querySelector('.agm-ask [data-answer="yes"]')`, 3000);
     await hallView.eval(`document.querySelector('.agm-ask [data-answer="yes"]').click()`);
-    const cutGone = await hallView.until(`(document.getElementById('agmToast') || {}).textContent === 'Removed.' && JSON.stringify({ row: !!${cutRow}, object: !!Screens.of(${codeLiteral(cutScreen)}), held: window.__reads.waiting('display:list') > 0 })`, 5000);
+    const cutGone = await hallView.until(`(document.getElementById('agmToast') || {}).textContent === 'Removed.' && window.__reads.waiting('display:list') > 0 && JSON.stringify({ row: !!${cutRow}, object: !!Screens.of(${codeLiteral(cutScreen)}), held: window.__reads.waiting('display:list') > 0 })`, 5000);
     const screensLetGo = await hallView.eval(`window.__reads.release()`);
     const screenParts = {
       renamed: !!toB.row && toB.prefill === 'Doors renamed' && toB.row === 'Doors B',
@@ -5739,7 +5742,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await admin.until(`!!window.__guestRow.querySelector('.unlink-room[data-room="${firstHall}"]')`, 5000);
     await admin.eval(`(() => { window.__reads.hold('admin:listRooms', 'admin.js'); const t = document.getElementById('agmToast'); if (t) t.textContent = ''; return true; })()`);
     await admin.eval(`window.__guestRow.querySelector('.unlink-room[data-room="${firstHall}"]').click()`);
-    const chipHeld = await admin.until(`/may no longer forward into/.test((document.getElementById('agmToast') || {}).textContent || '') && JSON.stringify({ chip: !!window.__guestRow.querySelector('.unlink-room[data-room="${firstHall}"]'), held: window.__reads.waiting('admin:listRooms') > 0 })`, 5000);
+    const chipHeld = await admin.until(`/may no longer forward into/.test((document.getElementById('agmToast') || {}).textContent || '') && window.__reads.waiting('admin:listRooms') > 0 && JSON.stringify({ chip: !!window.__guestRow.querySelector('.unlink-room[data-room="${firstHall}"]'), held: window.__reads.waiting('admin:listRooms') > 0 })`, 5000);
     const linksKept = await admin.eval(`new Promise((r) => socket.emit('admin:listRooms', (x) => { const all = x.rooms.flatMap((h) => [h, ...(h.side || [])]); r(JSON.stringify(all.flatMap((h) => h.users || []).filter((u) => (u.linkedRooms || []).includes(${codeLiteral(firstHall)})).length)); }))`);
     const forwardLetGo = await admin.eval(`window.__reads.release()`);
     report(chipHeld === JSON.stringify({ chip: false, held: true }) && linksKept === '0' && forwardLetGo > 0,
@@ -5829,7 +5832,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await sideAct('adminRoom.codeToggle');
     await admin.until(`!!document.querySelector('.agm-ask [data-answer="keep"]')`, 3000);
     await admin.eval(`document.querySelector('.agm-ask [data-answer="keep"]').click()`);
-    const sideOff = await admin.until(`(() => { const t = (document.getElementById('agmToast') || {}).textContent || ''; return t.startsWith('The guest code of Smoke AGM › Lawyers is off') && JSON.stringify({ on: roomObject('${sideKey}').on, row: window.__sideRow.querySelector('.room-pick').textContent.endsWith(' · code ${renewedSide} off'), held: window.__reads.waiting('admin:listRooms') > 0 }); })()`, 5000);
+    const sideOff = await admin.until(`(() => { const t = (document.getElementById('agmToast') || {}).textContent || ''; return t.startsWith('The guest code of Smoke AGM › Lawyers is off') && window.__reads.waiting('admin:listRooms') > 0 && JSON.stringify({ on: roomObject('${sideKey}').on, row: window.__sideRow.querySelector('.room-pick').textContent.endsWith(' · code ${renewedSide} off'), held: window.__reads.waiting('admin:listRooms') > 0 }); })()`, 5000);
     await admin.eval(`(() => { const t = document.getElementById('agmToast'); if (t) t.textContent = ''; window.__sideRow.querySelector('.obj-more').click(); return true; })()`);
     const offeredOn = await admin.until(`(() => { const b = document.querySelector('.agm-menu [data-action="adminRoom.codeToggle"]'); return b && b.textContent.trim(); })()`, 3000);
     await admin.eval(`document.querySelector('.agm-menu [data-action="adminRoom.codeToggle"]').click()`);
