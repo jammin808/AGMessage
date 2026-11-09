@@ -7213,6 +7213,98 @@ laptop and no Board device walked)
   covers the first fill: a line above the panel that changes height later in a show (a peer heard, a linked node's line,
   Stagewatch's context) still moves what is below it, and none was measured to. The admin page that ships changed
   (`public/admin.js`, `public/admin-plus.js`), and so did the adoption's answer (`lib/http-accounts.js`).
+- The Accounts page draws an account it changed from the change's own answer, before the editor closes and before it
+  says "Saved". The browser smoke's Clock or countdown step missed once in a full local run: the server kept kim's
+  countdown, locked, while kim's editor, opened again at once, drew Their choice with Lock disabled ("Choose one to lock
+  it."). Proved with the smoke's own steps: the page closed the editor and said "Saved —" as soon as the PATCH answered,
+  and only then read its list again, in two round trips (who is signed in, then the accounts); Edit opened from the list
+  the page held, and nothing drew an open editor again when the list came. With the page's read of the accounts held
+  until the editor was opened again the step failed 13 of 13, and with nothing held it failed once in 20 on a machine
+  under load (eight busy processes on four cores); a person's click on Edit 150 to 600 ms after the toast on a slow
+  network opened the editor as it was before the Save every time, the window lasting about two round trips. The same
+  window made a second Lock it on their devices (an On stage switch, Turn off…) repeat the first, read from the account
+  as it was. Now POST and PATCH /api/users answer the account as the list's row for whoever asked (`rowsFor` in
+  `lib/http-accounts.js`, which makes the list's rows too: the admin's whole, a manager's told only the halls and rooms
+  it reaches, its devices counted as they are now), and the page puts it in place (an account removed is taken out) and
+  draws the rows first; the list is still read again after, the newest read winning, so a read answered late replaces
+  nothing newer. The smoke's tab on the Accounts page holds the page's own reads of the accounts on the smoke's word
+  (`HOLD_READS`, an init script that holds a page's socket answers and HTTP reads until let through): with the read
+  after each act held, kim's editor opened again draws the countdown, locked, and Press taken away, its untouched Save
+  is no change, and Lock it on their devices twice in that window unlocks, then locks. `test/accounts.test.js` holds
+  each answer to the list's row: made and changed by the admin and by a manager, turned off with a device signed in, and
+  an empty change. On the pages and server before this change both fail every time (the smoke's step in four runs of
+  four, the read held so that no timing decides it); the Clock or countdown step itself is as it was. The Accounts page
+  and the two answers that ship changed (`public/users.js`, `lib/http-accounts.js`).
+- A Save on the Accounts page sends only what was changed in its editor. Proved with the smoke's own steps: the Save
+  sent the whole form (the name, role, halls, rooms, On stage halls, chat view, clock, On stage switches and rights),
+  and PATCH /api/users applies each field that differs, so an editor drawn from an account older than the server's sent
+  the older values back under "Saved —": opened in the window above, its untouched Save took the clock's lock off again
+  and gave back a room just taken away, each audited as a change; after a change made elsewhere, which this page is
+  never told of, it did the same with no window at all (another sign-in of the admin's, run; the admin page's person row
+  and Members…, read in the code); and a manager's untouched Save after the admin locked a clock elsewhere would be
+  refused for a lock it never touched (read, not run). Now a Save of an account already made sends what differs from the
+  form as the editor drew it: the rights with the role whenever the role changes (they are its exceptions), the clock by
+  its choice and its lock, each On stage switch on its own, so an untouched Save is no change by construction. The smoke
+  clears kim's clock straight through the server, which the page is not told, and finds kim's editor still drawing the
+  countdown, locked, its untouched Save said as no change, and the clock still cleared; on the page before this change
+  it sends the countdown back, every time. What is left: a field changed both elsewhere and in an editor drawn before
+  that is still the editor's, the last to save, as PATCH /api/users takes no revision to refuse it with; a revision on
+  each account, raised by every writer of it (the admin page's person row, Members…, May send in…), is a change to the
+  accounts' store, not this one. Also left, and neither loses a change: a second act on one account's switch while the
+  first is still unanswered reads the account as it was and repeats the first, and an act whose answer never comes reads
+  the list no sooner than the page's next act. The Accounts page that ships changed (`public/users.js`), and
+  `docs/ACCOUNTS.md` says what a Save sends.
+- The browser smoke's "＋ is preset to the way chosen last on this device" waits for the page a reload brings, never the
+  one it replaces. One local run beside other browser probes read ＋ as "Nothing to put on the speaker's screen yet.",
+  not ticked and not offered, though the step's wait for Show had answered. Proved with the leg's own steps:
+  `location.reload()` answers as the reload is asked, and the wait after it named nothing of the new page, so a browser
+  that had not yet begun the navigation answered it from the old one (Chromium's own behaviour: 11 of 30 on a plain page
+  at twice the CPU's load); the tab's click and the typed words then reached the new page before its scripts had run, so
+  its ❝ Quote tab was never opened and ＋ was drawn as at rest. Every miss of 29 (7 to 9 of 20 at two to ten times the
+  CPU's load) was such a run and no pass of 57 was; the reload held to reach the browser with the next step, 10 of 10.
+  Now the old page is marked in the same call as its reload, the wait is for a page without the mark, and ready is the
+  tab having read the box's words ("Text, 15 characters", ＋ offered for them) rather than Show's state, which the new
+  page's HTML gave before the tab had drawn. With the reload held as above, 10 of 10 pass (the old page answered the
+  wait, now false, in all 10), and 20 of 20 at six times the CPU's load (13 of them raced); the smoke before this
+  change, on the pages of this one, still fails 10 of 10 held. No wait was lengthened and nothing is tried again. Every
+  other reload in the smoke is followed by a wait the old page cannot answer. Nothing that ships changed.
+- The ❝ Quote tab offers 📺 Show only once it has read the quote, and ＋ reads the box's words before what reads a quote
+  has come. Proved with the new page's `docmodel.mjs` held (as a slow venue network holds it): Show was offered from the
+  page's HTML and pressed sent nothing and said nothing, while ＋, beside a box of words, was off with "Paste or type
+  what to show first."; it ended by itself once the module came. Now `app.html` draws Show disabled until the tab has
+  read the quote, and ＋ is drawn for the box's words as plain words until then, as the tab's comment always said, marked
+  as the 🔒 tick marks it (so a confidential quote's ＋ says what Stagewatch does with its line from the first). The smoke
+  holds the module on a new page and finds Show not offered and ＋ offered for the words, then both as before once it
+  comes; on the page before this change it fails every time (11 runs of 11). The hall page that ships changed
+  (`public/app.html`, `public/app.js`).
+- A screen renamed, given a new link or removed in the Screens dialog is drawn from the act's answer before it is said.
+  Proved (the sweep that followed flake A, with nothing held): "Renamed." came about 30 ms before the list was read
+  again, and a rename straight back to the old name was compared with the old name, sent nothing and said nothing, so
+  the screen kept the new name while the person believed it had the old; Copy link in the few milliseconds after "New
+  link copied" copied the link New link… had just stopped; a screen removed was still listed. Now display:update answers
+  the screen as display:list gives it to a page that manages it, and the page puts it (and a new link's path, which
+  display:rotate answered already) in its list, and takes a removed screen out, before anything is said. The smoke holds
+  the hall page's read of its screens (`HOLD_READS`) through a rename and back, New link… then Copy link, and a removal,
+  and finds each drawn, kept and copied from the answer; on the page before this change it fails, the read held so that
+  no timing decides it (the rename back sent nothing and the server kept Doors B, Copy link copied the stopped link, the
+  removed screen stayed listed). The hall page and the answer that ship changed (`public/app.js`, `server.js`).
+- The admin page draws a room's guest code (switched on or off, renewed) and its name from the act's answer, and a
+  forward taken back from the person's links the answer names, before it says either. Proved with the halls' read held:
+  the code's switch pressed again in the window after the first was drawn from the room as it was, sent codeOn true
+  again and said "…is on." again, so a person meaning to turn the code off was told it was on; a chip's × in the window
+  after a forward was let or taken back was still drawn as before. Now the room's row, its menu and its object read the
+  answer (`keepRoom`), and the person's row is drawn from the answer's `linked`, before the halls are read again. The
+  smoke holds the admin page's read of the halls through a code turned off and on again in that window, and through a
+  chip's ×, and finds each drawn from the answer and kept; on the page before this change both fail, the read held so
+  that no timing decides it (the second act offered Turn the code off… again, and the chip stayed). The admin page that
+  ships changed (`public/admin.js`).
+- Set up on the halls board draws a room's guest code, its new code, its name and its removal from the act's answer
+  before it says it. Proved with Set up's read of its rooms held, as the admin page's was: Press's code turned off was
+  still drawn on, and its menu offered Turn the code off… again in that window, so a second act on a room read the room
+  as it was. Now Set up's room is put in place from the answer (`keepSetupRoom`) before the rooms are read again. The
+  smoke holds Set up's read of its rooms through Press's code turned off and on again in that window and finds both
+  drawn from the answer and kept; on the page before this change it fails, the read held so that no timing decides it.
+  The halls board that ships changed (`public/halls.js`).
 - The installer's build accepts the installer it built. `installer/build-installer.ps1` reads the version back from the
   file it compiled and compares it with the build's, and read its strings with the padding Windows' version resource
   keeps after them, so CI's first build of it (run 96) refused "0.6.0.96" padded with blanks as not "0.6.0.96". The

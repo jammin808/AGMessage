@@ -1416,6 +1416,56 @@ test('a one-hall tech given users.manage manages only accounts within its own ri
   }
 });
 
+test('an account made or changed is answered as the list\'s row for whoever asked: the admin\'s whole, a manager\'s told only its own halls and rooms, its devices counted as they are now', async (t) => {
+  const srv = await startServer();
+  const { base } = srv;
+  const sockets = [];
+  t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });
+  const PW = 'mixing desk on stage left';
+  const admin = (await setupAdmin(base)).cookie;
+  const hall = async (name) => (await api(base, 'POST', '/api/rooms', { name }, { cookie: admin })).body.code;
+  const hallA = await hall('Hall A');
+  const ctl = await connect(base, admin); sockets.push(ctl);
+  const LEGAL = (await emit(ctl, 'room:create', { hall: hallA, name: 'Legal' })).key;
+  const listed = async (cookie, username) => (await api(base, 'GET', '/api/users', undefined, { cookie })).body.users.find((u) => u.username === username);
+  // Made by the admin: the answer is the admin's row of it.
+  const made = await api(base, 'POST', '/api/users', { username: 'kim', name: 'Kim Tech', role: 'tech', halls: [hallA], rooms: [LEGAL], password: PW }, { cookie: admin });
+  assert.equal(made.status, 200, JSON.stringify(made.body));
+  assert.deepEqual(made.body.user, await listed(admin, 'kim'), 'made: the admin\'s row');
+  assert.deepEqual([made.body.user.sessions, made.body.user.locked], [0, '']);
+  // Changed by the admin: the row as it is now, its clock among it.
+  const clocked = await api(base, 'PATCH', '/api/users/' + made.body.user.id, { clock: { show: 'stage', locked: true } }, { cookie: admin });
+  assert.deepEqual([clocked.status, clocked.body.changed, clocked.body.user.clock], [200, ['clock'], { show: 'stage', locked: true }]);
+  assert.deepEqual(clocked.body.user, await listed(admin, 'kim'), 'changed: the admin\'s row');
+  // A manager of Hall A given Legal: its answer is its own row, told only what it reaches, its counts with it.
+  const lee = await api(base, 'POST', '/api/users', { username: 'lee', name: 'Lee Lead', role: 'tech', halls: [hallA], rooms: [LEGAL], grant: ['users.manage'], password: PW }, { cookie: admin });
+  const leeIn = (await api(base, 'POST', '/api/auth/login', { username: 'lee', password: PW })).cookie;
+  assert.ok(leeIn, 'lee signs in');
+  const sam = await api(base, 'POST', '/api/users', { username: 'sam', name: 'Sam Stage', role: 'staff', halls: [hallA], password: PW }, { cookie: leeIn });
+  assert.equal(sam.status, 200, JSON.stringify(sam.body));
+  assert.deepEqual(sam.body.user, await listed(leeIn, 'sam'), 'made by a manager: its row');
+  const viewed = await api(base, 'PATCH', '/api/users/' + sam.body.user.id, { view: 'simple' }, { cookie: leeIn });
+  assert.deepEqual([viewed.status, viewed.body.changed], [200, ['view']]);
+  assert.deepEqual(viewed.body.user, await listed(leeIn, 'sam'), 'changed by a manager: its row');
+  assert.deepEqual([viewed.body.user.otherRooms, viewed.body.user.otherHalls], [0, 0], 'the counts a manager\'s row carries');
+  assert.ok(lee.body.user.id);
+  // Turned off with a device signed in: answered with no device, as the list now counts it.
+  const samIn = (await api(base, 'POST', '/api/auth/login', { username: 'sam', password: PW }, { headers: { 'cf-connecting-ip': '198.51.100.8' } })).cookie;
+  assert.ok(samIn, 'sam signs in');
+  assert.equal((await listed(admin, 'sam')).sessions, 1);
+  const off = await api(base, 'PATCH', '/api/users/' + sam.body.user.id, { disabled: true }, { cookie: admin });
+  assert.deepEqual([off.status, off.body.user.disabled, off.body.user.sessions], [200, true, 0]);
+  assert.deepEqual(off.body.user, await listed(admin, 'sam'), 'turned off: the admin\'s row');
+  // An empty change (a Save that changed nothing) is answered the row as it stands, nothing changed and no row audited.
+  const before = wordsOfUpdate(srv.dataDir).length;
+  const none = await api(base, 'PATCH', '/api/users/' + made.body.user.id, {}, { cookie: admin });
+  assert.deepEqual([none.status, none.body.changed], [200, []]);
+  assert.deepEqual(none.body.user, await listed(admin, 'kim'), 'nothing changed: the row as it stands');
+  assert.equal(wordsOfUpdate(srv.dataDir).length, before, 'no audit row');
+});
+/** The audit rows of account changes, as written. */
+const wordsOfUpdate = (dataDir) => fs.readFileSync(path.join(dataDir, 'audit.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((e) => e.action === 'user.update');
+
 test('saving an account unchanged changes nothing; the device count is what still signs in', async (t) => {
   const srv = await startServer();
   const { base } = srv;
@@ -1501,7 +1551,7 @@ test('an account is given side rooms, On stage halls and a chat view: each entry
   const kim = await post({ username: 'kim', role: 'tech', halls: [hallA], rooms: [LEGAL.toLowerCase(), LEGAL], board: [hallA], view: 'simple' });
   assert.equal(kim.status, 200, JSON.stringify(kim.body));
   const u = kim.body.user;
-  assert.deepEqual([u.rooms, u.board, u.view, u.rights.rooms, u.rights.board, Object.keys(u).slice(-5)], [[LEGAL], [hallA], 'simple', [LEGAL], [hallA], ['rooms', 'board', 'view', 'clock', 'onStage']]);
+  assert.deepEqual([u.rooms, u.board, u.view, u.rights.rooms, u.rights.board, Object.keys(u).slice(-7)], [[LEGAL], [hallA], 'simple', [LEGAL], [hallA], ['rooms', 'board', 'view', 'clock', 'onStage', 'sessions', 'locked']]);
   assert.deepEqual(wordsOf(srv.dataDir, 'user.create').find((r) => r[0] === 'kim'), ['kim', 'role tech, halls ' + hallA + '; rooms → Legal (Hall A) ' + LEGAL + '; board → On stage in ' + hallA + '; view → simple']);
   const plain = await post({ username: 'sam', role: 'staff', halls: [hallA] });
   assert.deepEqual([plain.body.user.rooms, plain.body.user.board, plain.body.user.view, wordsOf(srv.dataDir, 'user.create').find((r) => r[0] === 'sam')[1]], [[], [], '', 'role staff, halls ' + hallA], 'none of the three, none said');

@@ -4246,7 +4246,8 @@ io.on('connection', (socket) => {
     audit.write(actor(), 'display.update', d.id, 'name ' + d.name + (to && to !== from ? ', moved ' + from + ' → ' + to : ''), socket.data.ip);
     io.to('display:' + d.id).emit('display:state', displayState(d));
     displaysChanged(from); if (to && to !== from) displaysChanged(to);
-    ack({ ok: true });
+    // The screen as it is now, as display:list gives it to a page that manages it: the page draws it from this answer.
+    ack({ ok: true, display: { ...Displays.status(d, displays.hallHolding(d.hall)), path: displays.path(d) } });
   });
   socket.on('display:rotate', ({ id } = {}, ack) => {
     ack = ok(ack);

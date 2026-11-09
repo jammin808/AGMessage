@@ -395,6 +395,45 @@ const SCREEN_PROBE = `(() => {
 // before 15.4 is. NO_DIALOG, beside it: no <dialog> at all (its close(), open and returnValue gone) and no submit event's
 // submitter, which came with it. BELOW: a browser below the floor, without WeakRef, which came with it; every way a page
 // asks the server or opens a socket is counted in `__asked`, from before the page's own scripts run.
+/**
+ * A page's own reads held on the smoke's word, so a step meets every time the window between an act's answer and the
+ * page's next read of what it acted on: `__reads.hold(name, from)` holds, from then on, the answer to each ask of that
+ * socket event (`'display:list'`) or each GET of that path (`'GET /api/users'`) the page makes itself (asked from the
+ * script `from` names, never the smoke's own reads through the page), read by the page's own handlers only at
+ * `__reads.release()`, in their order. `__reads.waiting(name)` counts those held, and `__reads.socket` is the page's socket,
+ * for a read of the smoke's own. Nothing is held until asked.
+ */
+const HOLD_READS = `(() => {
+  const H = window.__reads = { holding: {}, held: [], marked: {} };
+  const named = (name) => Object.prototype.hasOwnProperty.call(H.holding, name);
+  const own = (name) => named(name) && (!H.holding[name] || String(new Error().stack).includes('/' + H.holding[name] + ':'));
+  H.hold = (name, from) => { H.holding[name] = from || ''; return true; };
+  H.waiting = (name) => H.held.filter((x) => x.name === name).length;
+  H.release = () => { H.holding = {}; const q = H.held.splice(0); for (const x of q) x.go(); return q.length; };
+  let real = null; let wrapped = null;
+  Object.defineProperty(window, 'io', { configurable: true, get() { return wrapped; }, set(v) {
+    real = v;
+    wrapped = function () {
+      const s = H.socket = real.apply(this, arguments);
+      const emit0 = s.emit; const onack0 = s.onack;
+      s.emit = function (ev) { if (typeof arguments[arguments.length - 1] === 'function' && own(ev)) H.marked[s.ids] = ev; return emit0.apply(this, arguments); };
+      s.onack = function (p) {
+        const ev = p && H.marked[p.id];
+        if (ev) { delete H.marked[p.id]; if (named(ev)) { H.held.push({ name: ev, go: () => onack0.call(s, p) }); return undefined; } }
+        return onack0.call(this, p);
+      };
+      return s;
+    };
+    Object.assign(wrapped, v);
+  } });
+  const fetch0 = window.fetch;
+  window.fetch = function (input, init) {
+    const p = fetch0.apply(this, arguments);
+    const name = ((init && init.method) || 'GET') + ' ' + String(input && input.url ? input.url : input);
+    if (!own(name)) return p;
+    return new Promise((resolve, reject) => { H.held.push({ name, go: () => p.then(resolve, reject) }); });
+  };
+})();`;
 const FLOOR = `(() => { delete HTMLDialogElement.prototype.showModal; delete HTMLElement.prototype.showPopover; delete Navigator.prototype.wakeLock; delete window.requestIdleCallback; delete window.cancelIdleCallback; delete HTMLFormElement.prototype.requestSubmit; })();`;
 const NO_DIALOG = `(() => { for (const k of ['close', 'open', 'returnValue', 'show']) delete HTMLDialogElement.prototype[k]; delete SubmitEvent.prototype.submitter; })();`;
 const BELOW = `(() => { delete window.WeakRef; const asked = window.__asked = [];
@@ -1464,7 +1503,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     ben.close();
 
     // Admin dashboard: logs in on this machine and lists the room.
-    const admin = await edge.tab(`${base}/admin.html`);
+    const admin = await edge.tab(`${base}/admin.html`, { init: HOLD_READS });
     await admin.until('document.readyState === "complete"');
     await admin.eval(`fetch('/api/admin/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: '${TOKEN}' }) }).then(() => location.reload())`);
     report(!!(await admin.until(`!document.getElementById('dashboard').hidden && document.body.textContent.includes('${code}') && document.getElementById('aiModel').textContent.includes('claude')`)), 'admin dashboard lists the room and its AI / show-network panels');
@@ -1616,7 +1655,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await admin.eval(`document.getElementById('userViewClose').click()`);
 
     // Accounts: the first admin is made on the sign-in page; the halls board and the accounts page render under the CSP.
-    const signin = await edge.tab(`${base}/`);
+    const signin = await edge.tab(`${base}/`, { init: HOLD_READS });
     report(!!(await signin.until(`!document.getElementById('setupPane').hidden`)), 'sign-in page offers the first admin when there are no accounts');
     await readOldWords('the sign-in and join page', signin);
     // The join page asks for the code first: once six characters are still (half a second, or Enter, or leaving the field)
@@ -1794,6 +1833,25 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await signin.until(`!!document.querySelector('.agm-menu [data-action="adminRoom.codeToggle"]')`, 3000);
     await signin.eval(`document.querySelector('.agm-menu [data-action="adminRoom.codeToggle"]').click()`);
     const pressOn = await signin.until(`(() => { const t = ${SETUP_ROW(pressKey)}.querySelector('.setup-room-code').textContent; return /^code [A-Z2-9]{6}$/.test(t) && (document.getElementById('agmToast') || {}).textContent; })()`, 5000);
+    // A room's code switched in Set up is drawn from its act's answer before it is said: with the page's own read of Set
+    // up's rooms held (HOLD_READS) until the step has acted again, Press's code turned off reads off at once, on its row and
+    // in its menu, and the menu's Turn the code on in that window turns it on, which the server keeps.
+    await signin.eval(`(() => { window.__reads.hold('room:settings', 'halls.js'); const t = document.getElementById('agmToast'); if (t) t.textContent = ''; ${SETUP_ROW(pressKey)}.querySelector('.obj-more').click(); return true; })()`);
+    await signin.until(`!!document.querySelector('.agm-menu [data-action="adminRoom.codeToggle"]')`, 3000);
+    await signin.eval(`document.querySelector('.agm-menu [data-action="adminRoom.codeToggle"]').click()`);
+    await signin.until(`!!document.querySelector('.agm-ask [data-answer="keep"]')`, 3000);
+    await signin.eval(`document.querySelector('.agm-ask [data-answer="keep"]').click()`);
+    const pressOff = await signin.until(`(() => { const t = (document.getElementById('agmToast') || {}).textContent || ''; return t.startsWith('The guest code of Smoke AGM › Press is off') && JSON.stringify({ on: AGM.page.object('adminRoom', '${pressKey}').on, row: /^code [A-Z2-9]{6} \\(off\\)$/.test(${SETUP_ROW(pressKey)}.querySelector('.setup-room-code').textContent), held: window.__reads.waiting('room:settings') > 0 }); })()`, 5000);
+    await signin.eval(`(() => { const t = document.getElementById('agmToast'); if (t) t.textContent = ''; ${SETUP_ROW(pressKey)}.querySelector('.obj-more').click(); return true; })()`);
+    const pressOffered = await signin.until(`(() => { const b = document.querySelector('.agm-menu [data-action="adminRoom.codeToggle"]'); return b && b.textContent.trim(); })()`, 3000);
+    await signin.eval(`document.querySelector('.agm-menu [data-action="adminRoom.codeToggle"]').click()`);
+    const pressOnAgain = await signin.until(`(document.getElementById('agmToast') || {}).textContent === 'The guest code of Smoke AGM › Press is on.' && AGM.page.object('adminRoom', '${pressKey}').on && 'on'`, 5000);
+    if (await signin.eval(`!!document.querySelector('.agm-ask')`)) await press(signin, 'Escape');
+    const pressKept = await signin.eval(`new Promise((r) => window.__reads.socket.emit('room:settings', { code: '${code}' }, (x) => r(JSON.stringify(((x && x.rooms) || []).filter((y) => y.key === '${pressKey}').map((y) => y.codeOn)))))`);
+    const setupLetGo = await signin.eval(`window.__reads.release()`);
+    report(pressOff === JSON.stringify({ on: false, row: true, held: true }) && /Turn the code on$/.test(pressOffered || '') && pressOnAgain === 'on' && pressKept === '[true]' && setupLetGo > 0,
+      `a room's code switched in Set up is drawn from the act's answer before its rooms are read again: turned off, its row and its menu say so at once, and Turn the code on in that window turns it on (${pressOff}; "${pressOffered}"; ${pressOnAgain}; kept ${pressKept}; ${setupLetGo} held)`);
+    await signin.until(`/^code [A-Z2-9]{6}$/.test(${SETUP_ROW(pressKey)}.querySelector('.setup-room-code').textContent)`, 5000);
     // May send in… (the admin's), over Set up: every hall's rooms by hall, Press itself listed and never offered, a ↔
     // offered only beside a tick. The Main room ticked with its ↔ and saved: one save, said, and each room's row in Set up
     // says which rooms may send into it. Opened again, the Main room is drawn both ways; unticked, its ↔ stays as it is
@@ -1840,7 +1898,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     report(pressButton === JSON.stringify({ words: 'Press', href: `/app.html?code=${pressKey}&as=account&role=research`, rooms: true, open: 'Open Main', above: true })
       && linkInStep(roomButtonDoors) && roomButtonDoors.want === JSON.stringify(['room.open', 'room.tab', 'room.copy', 'room.code', 'room.setup']),
       `the room is a room button on its hall's row, a link above the row's own whose right-click and Shift+F10 open the room's own menu, and the row's ⋯ offers Open Main and Rooms ▸ (${pressButton}; ${roomButtonDoors.want}; ${roomButtonDoors.right} / ${roomButtonDoors.key})`);
-    const users = await edge.tab(`${base}/users.html`);
+    const users = await edge.tab(`${base}/users.html`, { init: HOLD_READS });
     report(!!(await users.until(`document.querySelectorAll('#userRows tr').length === 1`)), 'the accounts page lists the admin');
     await readOldWords('the Accounts page', users);
     const rightsWords = await users.eval(`(async () => { const r = await AGM.api('GET', '/api/users'); return JSON.stringify([r.caps['display.control'], r.roles.find((x) => x.id === 'tech').words]); })()`);
@@ -1925,6 +1983,65 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       && clockSaved === 'saved' && clockKept === JSON.stringify({ show: 'stage', locked: true }) && clockAgain.show === 'stage' && clockAgain.locked && !clockAgain.disabled && clockAgain.words === 'Applies in the simple view.'
       && clockCleared === JSON.stringify({ show: null, locked: false }),
       `the Accounts page's Clock or countdown beside Chat view: their choice first and Lock disabled with why; the countdown chosen and locked, saved (pages told, none closed) and kept (${clockKept}); shown again, "Applies in the simple view." with Chat view Full (${JSON.stringify({ clockFirst, clockAgain })})`);
+    // A Save sends only what was changed in the editor: kim's clock was cleared above straight through the server (this
+    // page is not told), so kim's editor still draws the countdown, locked, as the page last read it; its untouched Save
+    // sends nothing, is said as no change, and the clock stays cleared — never sent back as the editor drew it.
+    await users.until(`!document.getElementById('userDialog').open`);
+    await users.eval(`(${KIM_TR}).querySelector('button').click()`);
+    await users.until(`document.getElementById('userDialog').open && !!${TREE}`);
+    const staleDrawn = await users.eval(`JSON.stringify([document.getElementById('uClock').value, document.getElementById('uClockLock').checked])`);
+    await users.eval(`(() => { document.getElementById('agmToast').textContent = ''; document.getElementById('userSave').click(); return true; })()`);
+    const elsewhereSaid = await users.until(`!document.getElementById('userDialog').open && (document.getElementById('agmToast') || {}).textContent`, 5000);
+    const elsewhereKept = await users.eval(`AGM.api('GET', '/api/users').then((r) => JSON.stringify(r.users.find((u) => u.username === 'kim').clock))`);
+    report(staleDrawn === JSON.stringify(['stage', true]) && elsewhereSaid === 'Saved — nothing changed.' && elsewhereKept === JSON.stringify({ show: null, locked: false }),
+      `an Accounts editor drawn before a change made elsewhere sends back nothing it did not change: its untouched Save is no change and the clock cleared elsewhere stays cleared (drawn ${staleDrawn}; "${elsewhereSaid}"; kept ${elsewhereKept})`);
+    // An account changed on this page is drawn from the change's own answer before it is said: the page's own read of the
+    // accounts after each act is held (HOLD_READS) until the step has read what it acts on, so every step meets the
+    // window a person meets before the list comes. Kim, read afresh, given the countdown locked and Press taken away:
+    // opened again before the list comes, the editor draws both, its untouched Save is no change, and Lock it on their
+    // devices from kim's ⋯, twice in the window, unlocks and then locks again.
+    await users.until(`!document.getElementById('userDialog').open`);
+    await users.eval(`AGM.api('PATCH', '/api/users/' + (${KIM_TR}).dataset.key, { clock: null, rooms: ['${pressKey}'] }).then((r) => r.ok)`);
+    await users.eval(`(window.__replaced = true, location.reload())`);
+    await users.until(`!window.__replaced && !!window.__reads && document.querySelectorAll('#userRows > tr[data-key]').length === 2 && !!(${KIM_TR})`);
+    const HELD_LIST = `window.__reads.waiting('GET /api/users') > 0`;
+    const KIM_FORM = `JSON.stringify({ show: document.getElementById('uClock').value, locked: document.getElementById('uClockLock').checked, press: document.querySelector('#uHalls input.t-room[value="${pressKey}"]').checked })`;
+    await users.eval(`window.__reads.hold('GET /api/users', 'users.js')`);
+    await users.eval(`(${KIM_TR}).querySelector('button').click()`);
+    await users.until(`document.getElementById('userDialog').open && !!${TREE}`);
+    const heldBefore = await users.eval(KIM_FORM);
+    await users.eval(`(() => { const c = document.getElementById('uClock'); c.value = 'stage'; c.dispatchEvent(new Event('change')); document.getElementById('uClockLock').click();
+      document.querySelector('#uHalls input.t-room[value="${pressKey}"]').click(); const t = document.getElementById('agmToast'); if (t) t.textContent = ''; document.getElementById('userSave').click(); return true; })()`);
+    const heldSaved = await users.until(`!document.getElementById('userDialog').open && ${HELD_LIST} && (document.getElementById('agmToast') || {}).textContent`, 5000);
+    await users.eval(`(${KIM_TR}).querySelector('button').click()`);
+    await users.until(`document.getElementById('userDialog').open && !!${TREE}`);
+    const heldReopened = await users.eval(KIM_FORM);
+    await users.eval(`(() => { const t = document.getElementById('agmToast'); if (t) t.textContent = ''; document.getElementById('userSave').click(); return true; })()`);
+    const heldUntouched = await users.until(`!document.getElementById('userDialog').open && ${HELD_LIST} && (document.getElementById('agmToast') || {}).textContent`, 5000);
+    const KIM_NOW = `AGM.api('GET', '/api/users').then((r) => { const k = r.users.find((u) => u.username === 'kim'); return JSON.stringify({ clock: k.clock, rooms: k.rooms }); })`;
+    const heldServer = await users.eval(KIM_NOW);
+    const lockOnce = async () => {
+      await users.eval(`(() => { const t = document.getElementById('agmToast'); if (t) t.textContent = ''; (${KIM_TR}).querySelector('.obj-more').click(); return true; })()`);
+      const item = await users.until(`(() => { const b = document.querySelector('.agm-menu [data-action="account.clockLock"]'); return b && b.getAttribute('aria-checked'); })()`, 3000);
+      await users.eval(`document.querySelector('.agm-menu [data-action="account.clockLock"]').click()`);
+      const said = await users.until(`${NO_MENU} && ${HELD_LIST} && (document.getElementById('agmToast') || {}).textContent`, 5000);
+      return { item, said, clock: JSON.parse(await users.eval(KIM_NOW)).clock };
+    };
+    const unlocked = await lockOnce();
+    const lockedAgain = await lockOnce();
+    const letGo = await users.eval(`window.__reads.release()`);
+    await users.eval(`AGM.api('PATCH', '/api/users/' + (${KIM_TR}).dataset.key, { clock: null, rooms: ['${pressKey}'] }).then((r) => r.ok)`);
+    const heldParts = {
+      before: heldBefore === JSON.stringify({ show: '', locked: false, press: true }),
+      saved: heldSaved === 'Saved — their open pages reconnect with the new rights.',
+      reopened: heldReopened === JSON.stringify({ show: 'stage', locked: true, press: false }),
+      untouched: heldUntouched === 'Saved — nothing changed.' && heldServer === JSON.stringify({ clock: { show: 'stage', locked: true }, rooms: [] }),
+      unlock: unlocked.item === 'true' && unlocked.said === 'Kim Tech\'s clock or countdown: Stagewatch countdown.' && JSON.stringify(unlocked.clock) === JSON.stringify({ show: 'stage', locked: false }),
+      lock: lockedAgain.item === 'false' && lockedAgain.said === 'Kim Tech\'s clock or countdown: Stagewatch countdown, locked on their devices.' && JSON.stringify(lockedAgain.clock) === JSON.stringify({ show: 'stage', locked: true }),
+      held: letGo > 0,
+    };
+    const accountMissed = Object.keys(heldParts).filter((k) => !heldParts[k]);
+    report(accountMissed.length === 0, `an account changed on the Accounts page is drawn from the change's answer before it is said, whenever the list comes: opened again before the list is read, kim's editor draws the countdown, locked, and Press taken away, its untouched Save is no change, and Lock it on their devices twice in that window unlocks, then locks (missed: ${accountMissed.join(', ') || 'none'}; ${JSON.stringify({ heldBefore, heldSaved, heldReopened, heldUntouched, heldServer, unlocked, lockedAgain, letGo })})`);
     // On stage is a seat the account takes: while the rights ticked hold no Send messages (a Viewer) a seat is not offered,
     // with the server's words; a role that posts is offered it; unticking every hall ticks the hall of each seat ticked.
     await users.until(`!document.getElementById('userDialog').open`);
@@ -2272,7 +2389,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     floorCloser.close();
     floor.close();
     noDialog.close();
-    const hallView = await edge.tab(`${base}/app.html?code=${code}&as=account&role=research`);
+    const hallView = await edge.tab(`${base}/app.html?code=${code}&as=account&role=research`, { init: HOLD_READS });
     report(!!(await hallView.until(`typeof joined !== "undefined" && joined && document.getElementById('whoami').textContent.startsWith('Ana Admin')`)), 'an account opens its hall with its own name');
     await readOldWords('the hall page opened by an account, Backstage', hallView);
 
@@ -3151,6 +3268,65 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     if (rotateSaid === 'field') await press(hallView, 'Escape');
     report(rotateAsk === JSON.stringify({ title: 'Give Doors renamed a new link?', focused: 'no', yes: 'New link' }) && !!rotated && !!rotateSaid && !!(await hallView.until(`!document.querySelector('.agm-ask') && document.getElementById('screensDialog').open`, 3000)),
       `New link… asks in place in the Screens dialog with the safe answer focused, and its yes gives the screen a new link to copy (${JSON.stringify({ rotateAsk, rotated: !!rotated, rotateSaid })})`);
+    // A screen changed in the Screens dialog is drawn from its act's answer before it is said: the page's own read of the
+    // hall's screens is held (HOLD_READS) until each step has acted again, so it meets the window a person meets before the
+    // list comes. Renamed Doors B and at once back to Doors renamed, both are sent and the row says each, and the server
+    // keeps Doors renamed; given a new link, Copy link copies the new one; removed, a screen leaves the list at once.
+    const cutScreen = await hallView.eval(`new Promise((r) => socket.emit('display:create', { code: ROOM, name: 'Doors cut' }, (x) => r(x.display.id)))`);
+    const cutRow = `[...document.querySelectorAll('#screenList .screen-item')].find((li) => li.dataset.screenId === ${codeLiteral(cutScreen)})`;
+    await hallView.until(`!!${cutRow}`, 5000);
+    await hallView.eval(`window.__reads.hold('display:list', 'app.js')`);
+    const QUIET_TOAST = `(() => { const t = document.getElementById('agmToast'); if (t) t.textContent = ''; return true; })()`;
+    const renameTo = async (name) => {
+      const prefill = await openRename();
+      await hallView.eval(QUIET_TOAST);
+      await hallView.eval(`document.querySelector('.agm-ask input').value = ${codeLiteral(name)}`);
+      await press(hallView, 'Enter');
+      const row = await hallView.until(`!document.querySelector('.agm-ask') && (document.getElementById('agmToast') || {}).textContent === 'Renamed.' && (${screenRow}).querySelector('strong').textContent`, 5000);
+      return { prefill, row };
+    };
+    const toB = await renameTo('Doors B');
+    const backA = await renameTo('Doors renamed');
+    const SERVER_SCREEN = (id) => `new Promise((r) => socket.emit('display:list', { code: ROOM }, (x) => r(JSON.stringify(x.displays.find((d) => d.id === ${codeLiteral(id)}) || null))))`;
+    const nameKept = JSON.parse(await hallView.eval(SERVER_SCREEN(doorScreen)) || 'null');
+    // Each link copied, as the page asked for it to be copied (a field to copy it from, when the browser will not, closed).
+    await hallView.eval(`(() => { const c0 = window.__copy0 = AGM.copy; window.__copied = []; AGM.copy = (text, o) => { window.__copied.push(text); return c0(text, o); }; return true; })()`);
+    const copiedFrom = async (action, yes, said) => {
+      const n = await hallView.eval(`window.__copied.length`);
+      await hallView.eval(QUIET_TOAST);
+      await hallView.eval(`${screenRow}.querySelector('.obj-more').click()`);
+      await hallView.until(`!!document.querySelector('.agm-menu .agm-mi[data-action="${action}"]')`, 3000);
+      await hallView.eval(`document.querySelector('.agm-menu .agm-mi[data-action="${action}"]').click()`);
+      if (yes) { await hallView.until(`!!document.querySelector('.agm-ask [data-answer="yes"]')`, 3000); await hallView.eval(`document.querySelector('.agm-ask [data-answer="yes"]').click()`); }
+      const text = await hallView.until(`window.__copied.length > ${n} && window.__copied[${n}]`, 5000);
+      // Copied, as the toast says, or offered in a field to copy from by hand (closed).
+      const how = await hallView.until(`(() => { const a = document.querySelector('.agm-ask'); return a && a.querySelector('.agm-ask-title').textContent === 'Copy it from here' ? 'field' : (document.getElementById('agmToast') || {}).textContent === ${codeLiteral(said)} && 'copied'; })()`, 5000);
+      if (how === 'field') await press(hallView, 'Escape');
+      await hallView.until(`!document.querySelector('.agm-ask') && ${NO_MENU}`, 3000);
+      return text;
+    };
+    const rotatedCopy = await copiedFrom('screen.rotate', true, 'New link copied — open it on the screen.');
+    const copiedAfter = await copiedFrom('screen.copy', false, 'Link copied.');
+    await hallView.eval(`(() => { AGM.copy = window.__copy0; return true; })()`);
+    const pathKept = (JSON.parse(await hallView.eval(SERVER_SCREEN(doorScreen)) || 'null') || {}).path;
+    await hallView.eval(QUIET_TOAST);
+    await hallView.eval(`${cutRow}.querySelector('.obj-more').click()`);
+    await hallView.until(`!!document.querySelector('.agm-menu .agm-mi[data-action="screen.remove"]')`, 3000);
+    await hallView.eval(`document.querySelector('.agm-menu .agm-mi[data-action="screen.remove"]').click()`);
+    await hallView.until(`!!document.querySelector('.agm-ask [data-answer="yes"]')`, 3000);
+    await hallView.eval(`document.querySelector('.agm-ask [data-answer="yes"]').click()`);
+    const cutGone = await hallView.until(`(document.getElementById('agmToast') || {}).textContent === 'Removed.' && JSON.stringify({ row: !!${cutRow}, object: !!Screens.of(${codeLiteral(cutScreen)}), held: window.__reads.waiting('display:list') > 0 })`, 5000);
+    const screensLetGo = await hallView.eval(`window.__reads.release()`);
+    const screenParts = {
+      renamed: !!toB.row && toB.prefill === 'Doors renamed' && toB.row === 'Doors B',
+      back: !!backA.row && backA.prefill === 'Doors B' && backA.row === 'Doors renamed' && !!nameKept && nameKept.name === 'Doors renamed',
+      link: !!pathKept && rotatedCopy === base + pathKept && copiedAfter === rotatedCopy,
+      removed: cutGone === JSON.stringify({ row: false, object: false, held: true }),
+      held: screensLetGo > 0,
+    };
+    const screenMissed = Object.keys(screenParts).filter((k) => !screenParts[k]);
+    report(screenMissed.length === 0, `a screen changed in the Screens dialog is drawn from the act's answer before it is said, whenever the list comes: renamed and at once renamed back, both are sent and kept; Copy link after New link… copies the new link; a screen removed leaves the list (missed: ${screenMissed.join(', ') || 'none'}; ${JSON.stringify({ toB, backA, nameKept: nameKept && nameKept.name, rotatedCopy, copiedAfter, pathKept, cutGone, screensLetGo })})`);
+    await hallView.until(`(${screenRow}).querySelector('strong').textContent === 'Doors renamed' && !${cutRow}`, 5000);
     // An ask about a screen removed elsewhere meanwhile closes, and says so.
     const goneScreen = await hallView.eval(`new Promise((r) => socket.emit('display:create', { code: ROOM, name: 'Doors gone' }, (x) => r(x.display.id)))`);
     const goneRow = `[...document.querySelectorAll('#screenList .screen-item')].find((li) => li.dataset.screenId === ${codeLiteral(goneScreen)})`;
@@ -4665,17 +4841,36 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       report(JSON.stringify(sentNow) === JSON.stringify(['Revenue Q3: £4.2m']) && kept === 'send' && sendLine === 'said',
         `🖥 Send now sends the line at once with the push, the room's line reads "… a line (17 characters) to the speaker's screen with a push", and the choice is kept on this device (${JSON.stringify({ sentToast, sentNow, kept })})`);
 
-      // Preset to the last way on this device, after a reload.
-      await desk.eval(`location.reload()`);
-      await desk.until(`typeof joined !== 'undefined' && joined && F.canSendToStage && F.canPropose && !document.getElementById('quoteTab').hidden`, 15000);
+      // Preset to the last way on this device, after a reload. Each step after it goes to the new page, never to the one
+      // being replaced, which answers every part of the wait as it stands: the old page is marked as it reloads, and the
+      // new one, which holds no mark, is waited for. Ready is the tab having read the box's words, its ＋ offered for them.
+      await desk.eval(`(window.__replaced = true, location.reload())`);
+      await desk.until(`!window.__replaced && typeof joined !== 'undefined' && joined && F.canSendToStage && F.canPropose && !document.getElementById('quoteTab').hidden`, 15000);
       await desk.eval(`document.getElementById('quoteTab').click()`);
       await typed('Turnout was 64%');
-      const presetReady = await desk.until(`!document.getElementById('quoteShow').disabled && 'ready'`, 8000);
+      const presetReady = await desk.until(`!document.getElementById('quoteShow').disabled && document.getElementById('quoteSay').textContent.startsWith('Text, 15 characters') && !document.querySelector('#quoteLine [data-line-on]').disabled && 'ready'`, 8000);
       const presetState = presetReady ? null : JSON.parse(await desk.eval(QUOTE_STATE));
       await setTick('quoteLine', true);
       const preset = await plus('quoteLine');
       report(presetReady === 'ready' && preset.send.checked && !preset.propose.checked, `＋ is preset to the way chosen last on this device (${JSON.stringify(presetState ? { preset, presetState } : preset)})`);
       await setTick('quoteLine', false);
+      // On a new page, before what reads a quote has come (its docmodel.mjs, held here as a slow venue network holds it),
+      // 📺 Show is not offered, since it could not send, and ＋ reads the box's words as they are; once it has come, the
+      // tab says what the quote is and offers Show.
+      const moduleAsked = new Promise((r) => { desk.on('Fetch.requestPaused', (p) => r(p.requestId)); });
+      await desk.eval(`(window.__replaced = true, location.reload())`);
+      await desk.until(`!window.__replaced && typeof joined !== 'undefined' && joined && F.canSendToStage && F.canPropose && !document.getElementById('quoteTab').hidden`, 15000);
+      await desk.send('Fetch.enable', { patterns: [{ urlPattern: '*/docmodel.mjs*', requestStage: 'Request' }] });
+      await desk.eval(`document.getElementById('quoteTab').click()`);
+      await typed('Turnout was 64%');
+      const moduleHeld = await Promise.race([moduleAsked, sleep(10000).then(() => '')]);
+      const beforeModule = JSON.parse(await desk.eval(`JSON.stringify({ show: !document.getElementById('quoteShow').disabled, open: !document.getElementById('quotePane').classList.contains('hidden') })`));
+      const plusBefore = await plus('quoteLine');
+      if (moduleHeld) await desk.send('Fetch.continueRequest', { requestId: moduleHeld });
+      await desk.send('Fetch.disable');
+      const moduleReady = await desk.until(`!document.getElementById('quoteShow').disabled && document.getElementById('quoteSay').textContent.startsWith('Text, 15 characters') && 'ready'`, 8000);
+      report(!!moduleHeld && beforeModule.open && !beforeModule.show && plusBefore.enabled && plusBefore.why === '' && moduleReady === 'ready',
+        `before what reads a quote has come, the ❝ Quote tab offers no Show and ＋ reads the box's words; once it has come, Show is offered (${JSON.stringify({ held: !!moduleHeld, beforeModule, plusBefore: { enabled: plusBefore.enabled, why: plusBefore.why }, moduleReady })})`);
 
       // The Preview's bar: a document's line is the line typed above it, never its name; with none, ＋ is disabled with why.
       await desk.eval(`(() => { attachFile(new File([Uint8Array.from(atob('${fixture('board-pack-tagged.pdf').toString('base64')}'), (c) => c.charCodeAt(0))], 'board pack.pdf', { type: 'application/pdf' })); return true; })()`);
@@ -5491,6 +5686,22 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const chipGone = await admin.until(`!window.__guestRow.querySelector('.unlink-room[data-room="${firstHall}"]')`, 5000);
     report(!!halls && JSON.parse(halls).every(([hallCode, role, checked]) => hallCode !== code && role === 'menuitemcheckbox' && checked === 'false') && /^Stop .+ forwarding into .+$/.test(chip || '') && unforward && !!ticked && !!untickedGone && !!chipGone,
       `Let them forward into ▸ lists every other hall as a tick; ticked, the guest may forward there (its chip: "${chip}") and No longer forward into ▸ is offered; unticking it, or the chip's ×, takes it back (${halls}; ${JSON.stringify({ unforward, ticked: !!ticked, unticked: !!untickedGone })})`);
+    // A forward taken back on the admin page is drawn on the person's row from its act's answer before it is said: let
+    // through the menu again (the list read as it opens), then, with the page's own read of the halls held (HOLD_READS)
+    // until the step has read the row, the chip's × takes it back, the chip goes at once, and the server holds no link.
+    await admin.eval(`window.__guestRow.querySelector('.obj-more').click()`);
+    await admin.until(`!!document.querySelector('.agm-menu [data-action="person.forward"]')`, 3000);
+    await admin.eval(`document.querySelector('.agm-menu [data-action="person.forward"]').click()`);
+    await admin.until(`!!document.querySelector('.agm-sub .agm-mi[data-value="${firstHall}"]')`, 5000);
+    await admin.eval(`document.querySelector('.agm-sub .agm-mi[data-value="${firstHall}"]').click()`);
+    await admin.until(`!!window.__guestRow.querySelector('.unlink-room[data-room="${firstHall}"]')`, 5000);
+    await admin.eval(`(() => { window.__reads.hold('admin:listRooms', 'admin.js'); const t = document.getElementById('agmToast'); if (t) t.textContent = ''; return true; })()`);
+    await admin.eval(`window.__guestRow.querySelector('.unlink-room[data-room="${firstHall}"]').click()`);
+    const chipHeld = await admin.until(`/may no longer forward into/.test((document.getElementById('agmToast') || {}).textContent || '') && JSON.stringify({ chip: !!window.__guestRow.querySelector('.unlink-room[data-room="${firstHall}"]'), held: window.__reads.waiting('admin:listRooms') > 0 })`, 5000);
+    const linksKept = await admin.eval(`new Promise((r) => socket.emit('admin:listRooms', (x) => { const all = x.rooms.flatMap((h) => [h, ...(h.side || [])]); r(JSON.stringify(all.flatMap((h) => h.users || []).filter((u) => (u.linkedRooms || []).includes(${codeLiteral(firstHall)})).length)); }))`);
+    const forwardLetGo = await admin.eval(`window.__reads.release()`);
+    report(chipHeld === JSON.stringify({ chip: false, held: true }) && linksKept === '0' && forwardLetGo > 0,
+      `a forward taken back on the admin page leaves the person's row with the act's answer, before the halls are read again: the chip goes at once and the server holds no link (${chipHeld}; links ${linksKept}; ${forwardLetGo} held)`);
     // The header: the theme and Logout are ordinary buttons in its row, and nothing covers Logout at 1440, 1024 or 390 px.
     const covered = [];
     for (const [w, h] of [[1440, 900], [1024, 768], [390, 844]]) {
@@ -5569,6 +5780,24 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const sideOn = await admin.until(`(() => { const o = roomObject('${sideKey}'); return !!o && o.on && document.getElementById('watchedCodeNote').textContent === 'Guest code ' + o.guestCode + ': guests join with it.' && window.__sideRow.querySelector('.room-pick').textContent; })()`, 5000);
     report(/^[A-Z2-9]{6}$/.test(sideCodeBefore || '') && newCodeAsk === 'New guest code for Smoke AGM › Lawyers?' && /^[A-Z2-9]{6}$/.test(renewedSide || '') && renewedSide !== sideCodeBefore && (sideOn || '').endsWith(' · code ' + renewedSide),
       `a side room's code: New code… asks and renews it, the row and the header say the new one, and Turn the code on switches it with no ask (${sideCodeBefore} → ${renewedSide}; ${newCodeAsk}; "${sideOn}")`);
+    // A room's code switched on the admin page is drawn from its act's answer before it is said: with the page's own read
+    // of the halls held (HOLD_READS) until the step has acted again, Lawyers' code turned off reads off at once, on its row
+    // and in its menu, and the menu's Turn the code on in that window turns it on, which the server keeps.
+    await admin.eval(`(() => { window.__reads.hold('admin:listRooms', 'admin.js'); const t = document.getElementById('agmToast'); if (t) t.textContent = ''; return true; })()`);
+    await sideAct('adminRoom.codeToggle');
+    await admin.until(`!!document.querySelector('.agm-ask [data-answer="keep"]')`, 3000);
+    await admin.eval(`document.querySelector('.agm-ask [data-answer="keep"]').click()`);
+    const sideOff = await admin.until(`(() => { const t = (document.getElementById('agmToast') || {}).textContent || ''; return t.startsWith('The guest code of Smoke AGM › Lawyers is off') && JSON.stringify({ on: roomObject('${sideKey}').on, row: window.__sideRow.querySelector('.room-pick').textContent.endsWith(' · code ${renewedSide} off'), held: window.__reads.waiting('admin:listRooms') > 0 }); })()`, 5000);
+    await admin.eval(`(() => { const t = document.getElementById('agmToast'); if (t) t.textContent = ''; window.__sideRow.querySelector('.obj-more').click(); return true; })()`);
+    const offeredOn = await admin.until(`(() => { const b = document.querySelector('.agm-menu [data-action="adminRoom.codeToggle"]'); return b && b.textContent.trim(); })()`, 3000);
+    await admin.eval(`document.querySelector('.agm-menu [data-action="adminRoom.codeToggle"]').click()`);
+    const sideOnAgain = await admin.until(`(document.getElementById('agmToast') || {}).textContent === 'The guest code of Smoke AGM › Lawyers is on.' && roomObject('${sideKey}').on && 'on'`, 5000);
+    if (await admin.eval(`!!document.querySelector('.agm-ask')`)) await press(admin, 'Escape');
+    const codeKept = await admin.eval(`new Promise((r) => socket.emit('admin:listRooms', (x) => { const side = x.rooms.flatMap((h) => h.side || []).find((y) => y.key === '${sideKey}'); r(JSON.stringify(side && side.codeOn)); }))`);
+    const codeLetGo = await admin.eval(`window.__reads.release()`);
+    report(sideOff === JSON.stringify({ on: false, row: true, held: true }) && /Turn the code on$/.test(offeredOn || '') && sideOnAgain === 'on' && codeKept === 'true' && codeLetGo > 0,
+      `a room's code switched on the admin page is drawn from the act's answer before the halls are read again: turned off, its row and its menu say so at once, and Turn the code on in that window turns it on (${sideOff}; "${offeredOn}"; ${sideOnAgain}; kept ${codeKept}; ${codeLetGo} held)`);
+    await admin.until(`window.__sideRow.querySelector('.room-pick').textContent.endsWith(' · code ${renewedSide}')`, 5000);
     // May send in… on the admin page: Lawyers' picker, the hall's Main room ticked with its ↔ and saved; both lists hold
     // it, beside Press, which Set up let send into the Main room.
     await sideAct('adminRoom.sendFrom');

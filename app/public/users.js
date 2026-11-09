@@ -49,6 +49,8 @@
 
   let data = null;          // {users, roles, caps, halls, giveable, rooms, giveableRooms, capGroups}
   let editing = null;       // the account being edited, or null for a new one
+  let opened = null;        // the form as the editor drew it on an account already made: its Save sends what differs from it
+  let loads = 0;            // the newest list read's number: an older read's answers are let go
   let meId = '';            // the signed-in account: on its own row only the name is the viewer's to change
   let saving = false;       // a save in flight: a second click or Enter sends nothing
 
@@ -66,8 +68,14 @@
   $('tabAudit').addEventListener('click', () => tab('audit'));
 
   // ---------------------------------------------------------------- people
+  /**
+   * The list read again, the newest read winning: one asked earlier and answered later than another (or than an account
+   * an act's answer put in place, which asks one after it) replaces nothing.
+   */
   async function load() {
+    const n = ++loads;
     const [me, admin] = await Promise.all([AGM.api('GET', '/api/auth/me'), AGM.api('GET', '/api/admin/me')]);
+    if (n !== loads) return;
     if (!me.account) { location.replace('/?next=/users.html'); return; }
     meId = me.account.id;
     meAnswer = me.account;
@@ -84,11 +92,34 @@
     if (!canUsers && canAudit) tab('audit');
     if (!canUsers) return;
     const r = await AGM.api('GET', '/api/users');
+    if (n !== loads) return;
     if (!r.ok) { $('tabPeople').hidden = true; if (canAudit) tab('audit'); else $('peoplePane').hidden = true; AGM.toast(r.error, true); return; }
     data = r;
     // To an admin: the accounts an adoption left out, kept aside for the token at the laptop (the server's words).
     $('leftOut').hidden = !r.leftOut;
     $('leftOut').textContent = r.leftOut ? AGM.mark('couldNot') + ' ' + r.leftOut : '';
+    renderUsers();
+  }
+
+  /**
+   * An account as an act's answer carries it (the server's row for this viewer, as the list has it) put in its place, or
+   * among the rest by username as the list orders them, and the rows drawn again: what an act changed is what the page
+   * holds before anything says it is done, so an Edit or an act on that account reads it as it is now.
+   */
+  function keep(u) {
+    if (!data || !u || typeof u.id !== 'string') return;
+    const i = data.users.findIndex((x) => x.id === u.id);
+    if (i >= 0) data.users[i] = u;
+    else {
+      const at = data.users.findIndex((x) => x.username.localeCompare(u.username) > 0);
+      data.users.splice(at < 0 ? data.users.length : at, 0, u);
+    }
+    renderUsers();
+  }
+  /** An account removed taken from the list, and the rows drawn again, before the removal is said. */
+  function drop(id) {
+    if (!data) return;
+    data.users = data.users.filter((x) => x.id !== id);
     renderUsers();
   }
 
@@ -216,6 +247,7 @@
     $('disableBtn').hidden = self;
     $('removeBtn').hidden = self;
     if (u) $('disableBtn').textContent = AGM.catalog.entry('account', 'account.disable').label(F, accountObject(u.id) || u);
+    opened = u ? formChange() : null;
     AGM.openDialog($('userDialog'));
   }
 
@@ -276,7 +308,7 @@
   // hall unticked takes its On stage seat with it, every hall unticked (by the person, or by a role of named halls)
   // ticks each hall whose seat is ticked, and while the rights ticked hold no Send messages a seat the account does not
   // hold is not offered (one it holds can still be taken away). Only a person's own ticks move another; nothing moves on
-  // its own, so an untouched Save sends what the account holds.
+  // its own, so an untouched Save sends nothing (sentOf).
   const mateOf = (cls, code) => [...$('uHalls').querySelectorAll('input.' + cls)].find((x) => x.value === code);
   $('uHalls').addEventListener('change', (e) => {
     const c = e.target;
@@ -420,8 +452,7 @@
     const caps = Array.from($('uCaps').querySelectorAll('input:checked')).map((c) => c.value);
     const ticked = (cls) => Array.from($('uHalls').querySelectorAll('input.' + cls + ':checked')).map((c) => c.value);
     // A hall, an On stage hall or a room the account holds that is not on the list (removed since) is not shown, so it is
-    // not the editor's to drop: it is sent back as it is, and an untouched Save stays no change — none of that person's
-    // pages reload.
+    // not the editor's to drop: a list sent carries it as it is.
     const listedHall = (code) => data.halls.some((h) => h.code === code);
     const listedRoom = (key) => roomsListed().some((r) => r.key === key);
     const kept = (field, listed) => (editing && Array.isArray(editing[field]) ? editing[field].filter((k) => !listed(k)) : []);
@@ -443,6 +474,25 @@
     if ($('uAll').dataset.touched || $('uAll').checked !== role.allHalls) change.allHalls = $('uAll').checked;
     return change;
   }
+  /**
+   * What a Save of an account already made sends: only what the person changed since the editor drew it (`was`, the form
+   * as opened), so an untouched Save is no change, and a field changed elsewhere since (another device, the admin page,
+   * Members…) is never sent back as the editor drew it. The rights go with the role whenever it changes (grant and revoke
+   * are the role's exceptions); the clock by its choice and its lock, and the On stage switches one by one, each only
+   * where it was changed.
+   */
+  function sentOf(now, was) {
+    const differs = (a, b) => JSON.stringify(a) !== JSON.stringify(b);
+    const out = {};
+    for (const k of ['name', 'halls', 'rooms', 'board', 'view', 'grant', 'revoke', 'allHalls']) if (k in now && differs(now[k], was[k])) out[k] = now[k];
+    if (differs(now.role, was.role)) Object.assign(out, { role: now.role, grant: now.grant, revoke: now.revoke });
+    for (const k of ['clock', 'onStage']) {
+      if (!now[k]) continue;
+      const part = Object.fromEntries(Object.keys(now[k]).filter((f) => !was[k] || differs(now[k][f], was[k][f])).map((f) => [f, now[k][f]]));
+      if (Object.keys(part).length) out[k] = part;
+    }
+    return out;
+  }
 
   // A Save is one request at a time, held until it is answered (a late answer too): a second click or Enter sends nothing.
   $('userForm').addEventListener('submit', (e) => {
@@ -450,12 +500,13 @@
     if (saving) return;
     saving = true; $('userSave').disabled = true;
     const was = editing;
-    const change = formChange();
+    const change = was && opened ? sentOf(formChange(), opened) : formChange();
     const inEditor = () => $('userDialog').open && editing === was;
     const sayIn = (words) => { if (inEditor()) { $('userError').textContent = words; $('userError').hidden = false; } else say(words, true); };
     const done = (r) => {
       saving = false; $('userSave').disabled = false;
       if (!r.ok) { sayIn(lateWords(r) + r.error); return; }
+      keep(r.user);
       if (inEditor()) $('userDialog').close();
       if (r.password) showSecret(r.user.name, r.password);
       else say(lateWords(r) + (was ? 'Saved — ' + (!r.changed.length ? 'nothing changed.' : r.changed.every((f) => f === 'view' || f === 'clock' || f === 'onStage') ? 'their open pages draw it now.' : 'their open pages reconnect with the new rights.') : 'Added.'));
@@ -467,13 +518,17 @@
 
   /**
    * An act on an account: its answer said (as late, when it came after "No answer"), its words in the editor when the
-   * editor is open on it, and the list read again. `done(r, late)` hears what it did and the words a late answer starts with.
+   * editor is open on it, and the list read again. The account the answer carries (a change's) is put in place first, and
+   * an account removed taken out, so what is said is what the page holds. `done(r, late)` hears what it did and the words
+   * a late answer starts with.
    */
   function accountAct(o, method, path, body, done) {
     const inEditor = () => $('userDialog').open && editing && editing.id === o.id;
     const sayIn = (words) => { if (inEditor()) { $('userError').textContent = words; $('userError').hidden = false; } else say(words, true); };
     http(method, '/api/users/' + encodeURIComponent(o.id) + path, body, (r) => {
       if (!r.ok) { sayIn(lateWords(r) + r.error); return; }
+      if (r.user) keep(r.user);
+      else if (method === 'DELETE') drop(o.id);
       if (inEditor()) $('userDialog').close();
       done(r, lateWords(r));
       load();

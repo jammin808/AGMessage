@@ -454,23 +454,35 @@
     const o = setupHallObject();
     if (o) A.act('adminRoom', 'adminRoom.create', o, { anchor: $('setupAddRoom'), opener: $('setupAddRoom'), get: () => (setupRooms && setupRooms.hall === o.code ? setupHallObject() : null), gone: 'That hall is gone.' });
   });
-  /** A refusal said, or what was done, and Set up's rooms read again. */
-  const roomDone = (fail, done) => (res) => {
+  /**
+   * A room of Set up as an act's answer leaves it (`fields`; null: removed), put in place and the rows drawn again before the
+   * act is said, so a second act on it reads it as it is now, whenever the list is read again.
+   */
+  function keepSetupRoom(key, fields) {
+    const list = setupRooms && Array.isArray(setupRooms.rooms) ? setupRooms.rooms : null;
+    const i = list ? list.findIndex((x) => x.key === key) : -1;
+    if (i < 0) return;
+    if (fields) list[i] = { ...list[i], ...fields }; else list.splice(i, 1);
+    drawSetupRooms();
+  }
+  /** A refusal said, or what was done (the room as the answer leaves it kept first, by `kept`), and Set up's rooms read again. */
+  const roomDone = (fail, done, kept) => (res) => {
     if (!res || !res.ok) { AGM.toast((res && res.error) || fail, true); return; }
+    if (kept) kept(res);
     done(res);
     refreshSetupRooms();
   };
   Object.assign(RUN, {
     'adminRoom.create': (o, c) => AGM.outbox.now('room:create', { hall: o.code, name: (c.values && c.values.name) || '' }, roomDone('Not made.', (res) => AGM.toast('Made ' + res.name + ' in ' + o.hall + ': its guest code is off.'))),
-    'adminRoom.rename': (o, c) => AGM.outbox.now('room:update', { code: o.code, name: (c.values && c.values.name) || '' }, roomDone('Not renamed.', (res) => AGM.toast(res.already ? 'It is called ' + res.name + ' already.' : 'Renamed ' + res.name + '.'))),
+    'adminRoom.rename': (o, c) => AGM.outbox.now('room:update', { code: o.code, name: (c.values && c.values.name) || '' }, roomDone('Not renamed.', (res) => AGM.toast(res.already ? 'It is called ' + res.name + ' already.' : 'Renamed ' + res.name + '.'), (res) => keepSetupRoom(o.code, { name: res.name }))),
     'adminRoom.codeToggle': (o, c) => AGM.outbox.now('room:update', o.on ? { code: o.code, codeOn: false, keepGuests: c.choice !== 'out' } : { code: o.code, codeOn: true }, roomDone('Not changed.', (res) => {
       const n = (k) => k + (k === 1 ? ' guest page' : ' guest pages');
       AGM.toast(res.codeOn ? 'The guest code of ' + o.hall + ' is on.'
         : Number.isInteger(res.sentOut) ? 'The guest code of ' + o.hall + ' is off: ' + n(res.sentOut) + ' sent out.'
           : 'The guest code of ' + o.hall + ' is off' + (Number.isInteger(res.kept) ? ': ' + n(res.kept) + ' stay.' : '.'));
-    })),
-    'adminRoom.newCode': (o) => AGM.outbox.now('room:update', { code: o.code, newCode: true }, roomDone('No new code.', (res) => AGM.toast('The new guest code of ' + o.hall + ' is ' + res.guestCode + '.'))),
-    'adminRoom.remove': (o, c) => AGM.outbox.now('admin:deleteRoom', { roomCode: o.code, purgeFiles: !!(c.values && c.values.purge) }, roomDone('Not removed.', (res) => AGM.toast(res.keptWords ? 'Removed. ' + res.keptWords : 'Removed ' + o.hall + '.', !!res.keptWords))),
+    }, (res) => keepSetupRoom(o.code, { codeOn: res.codeOn, ...(Number.isInteger(res.sentOut) ? { guests: 0 } : {}) }))),
+    'adminRoom.newCode': (o) => AGM.outbox.now('room:update', { code: o.code, newCode: true }, roomDone('No new code.', (res) => AGM.toast('The new guest code of ' + o.hall + ' is ' + res.guestCode + '.'), (res) => keepSetupRoom(o.code, { guestCode: res.guestCode, codeOn: res.codeOn }))),
+    'adminRoom.remove': (o, c) => AGM.outbox.now('admin:deleteRoom', { roomCode: o.code, purgeFiles: !!(c.values && c.values.purge) }, roomDone('Not removed.', (res) => AGM.toast(res.keptWords ? 'Removed. ' + res.keptWords : 'Removed ' + o.hall + '.', !!res.keptWords), () => keepSetupRoom(o.code, null))),
     'adminRoom.members': (o) => AGM.members.open({ code: o.code, name: o.name, hall: o.hall, main: o.main, hallName: (setupRooms && setupRooms.hallName) || o.hall }, { say: (w, bad) => AGM.toast(w, bad) }),
     // Which rooms may send into it: every hall's rooms, each ticked with ↔ and send back; the rows' lists read again after.
     'adminRoom.sendFrom': (o) => AGM.sendFrom.open({ code: o.code, hall: o.hall }, { read: readSetupRooms, say: (w, bad) => AGM.toast(w, bad), done: refreshSetupRooms }),

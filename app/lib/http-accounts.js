@@ -264,31 +264,42 @@ function mountAccounts(app, o) {
     return '';
   }
 
-  app.get('/api/users', signedIn('users.manage'), (req, res) => {
-    res.setHeader('Cache-Control', 'no-store');
-    // `locked`: why this viewer may not change that person (empty when they may); `giveable`: the rights and halls this
-    // viewer may hand out — the page offers what the server allows. A hall's code is a guest's way in, so a viewer who
-    // does not reach every hall is told only the halls it reaches: on the list, and on each person's row and its On stage
-    // halls (`otherHalls` counts the rest). A row it may edit holds no other hall (rbac.exceeds would lock it), so a save
-    // drops none. Side rooms likewise, by `giveableRooms`: the admin is told every room (`rooms`, each by key with its name
-    // and its hall's), anyone else the rooms it is given itself, on the list and on each row (`otherRooms` counts the rest).
+  /**
+   * The accounts as `viewer` is told them on the Accounts page, one row each (`row(u)`, u an Accounts.view): the list's
+   * rows and the account a change answers are made here alike, so a page that draws the account an answer carries draws
+   * what the list would say of it. `locked`: why this viewer may not change that person (empty when they may);
+   * `giveable`: the rights and halls this viewer may hand out — the page offers what the server allows. A hall's code is a
+   * guest's way in, so a viewer who does not reach every hall is told only the halls it reaches: on the list, and on each
+   * person's row and its On stage halls (`otherHalls` counts the rest). A row it may edit holds no other hall
+   * (rbac.exceeds would lock it), so a save drops none. Side rooms likewise, by `giveableRooms`: the admin is told every
+   * room (`rooms`, each by key with its name and its hall's), anyone else the rooms it is given itself, on the list and on
+   * each row (`otherRooms` counts the rest).
+   */
+  function rowsFor(viewer) {
     const activeAdmins = accounts.activeAdmins();
-    const giveable = rbac.giveable(req.agm.account);
-    const giveableRooms = rbac.giveableRooms(req.agm.account);
+    const giveable = rbac.giveable(viewer);
+    const giveableRooms = rbac.giveableRooms(viewer);
     const reaches = (code) => giveable.allHalls || giveable.halls.includes(code);
     const holds = (key) => giveableRooms.all || giveableRooms.rooms.includes(key);
-    const users = accounts.list().map((u) => {
-      const row = { ...u, sessions: sessions.of(u.id).length, locked: rbac.mayChange(req.agm.account, u, {}, { activeAdmins }) || '' };
-      if (giveable.admin) return row;
+    const row = (u) => {
+      const all = { ...u, sessions: sessions.of(u.id).length, locked: rbac.mayChange(viewer, u, {}, { activeAdmins }) || '' };
+      if (giveable.admin) return all;
       const rooms = u.rights.rooms.filter(holds);
-      const told = { ...row, rights: { ...u.rights, rooms }, rooms: u.rooms.filter(holds), otherRooms: u.rights.rooms.length - rooms.length };
+      const told = { ...all, rights: { ...u.rights, rooms }, rooms: u.rooms.filter(holds), otherRooms: u.rights.rooms.length - rooms.length };
       if (giveable.allHalls) return told;
       const halls = u.rights.halls.filter(reaches);
       return {
         ...told, halls: u.halls.filter(reaches), board: u.board.filter(reaches), rights: { ...told.rights, halls, board: u.rights.board.filter(reaches) },
         otherHalls: u.rights.halls.length - halls.length,
       };
-    });
+    };
+    return { giveable, giveableRooms, reaches, holds, row };
+  }
+
+  app.get('/api/users', signedIn('users.manage'), (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const { giveable, giveableRooms, reaches, holds, row } = rowsFor(req.agm.account);
+    const users = accounts.list().map(row);
     const rooms = roomNames().filter((r) => holds(r.key)).map((r) => ({ key: r.key, name: r.name, hall: reaches(r.hall) ? r.hall : '', hallName: r.hallName }));
     // `capGroups`: the rights in the page's three groups (rbac.CAP_GROUPS), each by its rights' names. `leftOut`, last: to an
     // account whose role is admin, the accounts an adoption left out and keeps aside, in words ('' when none).
@@ -310,7 +321,8 @@ function mountAccounts(app, o) {
     const named = sideRooms();
     const more = ['rooms', 'board', 'view'].filter((f) => f in r.account).map((f) => '; ' + f + ' → ' + describe(f, r.account, named)).join('');
     audit.write(actorOf(req.agm), 'user.create', r.account.username, 'role ' + r.account.role + hallWords(r.account) + more, guard.clientIp(req));
-    res.json({ ok: true, user: Accounts.view(r.account), password: r.password });
+    // The account made, as the list's row for this viewer (rowsFor): the page draws it from this answer.
+    res.json({ ok: true, user: rowsFor(req.agm.account).row(Accounts.view(r.account)), password: r.password });
   });
 
   app.patch('/api/users/:id', signedIn('users.manage'), (req, res) => {
@@ -338,7 +350,9 @@ function mountAccounts(app, o) {
       const said = (f) => (f === 'clock' ? clockChangeWords(target.clock, wasClock) : f === 'onStage' ? views.onStageSaid(target.onStage, wasOnStage) : describe(f, target, named));
       audit.write(actorOf(req.agm), 'user.update', target.username, changed.map((f) => f + ' → ' + said(f)).join('; '), guard.clientIp(req));
     }
-    res.json({ ok: true, user: Accounts.view(target), changed });
+    // The account as it is now, as the list's row for this viewer (rowsFor): the page draws it from this answer before it
+    // says it is saved.
+    res.json({ ok: true, user: rowsFor(req.agm.account).row(Accounts.view(target)), changed });
   });
 
   app.post('/api/users/:id/password', signedIn('users.manage'), async (req, res) => {

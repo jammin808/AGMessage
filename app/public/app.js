@@ -4776,6 +4776,17 @@ const Screens = (function () {
   }
   function syncAll() { $('screensAll').checked = list.length > 0 && list.every((d) => ticked.has(d.id)); }
   function done(words) { return (r) => AGM.toast(r && r.ok ? words : (r && r.error) || 'Not changed.', !(r && r.ok)); }
+  /**
+   * A screen as an act's answer leaves it, put in the list and drawn before the act is said (`d`: the screen as the answer
+   * gives it, which a screen moved to another hall leaves; null: removed), so the next act on it reads it as it is now,
+   * whenever the list is read again.
+   */
+  function keep(id, d) {
+    const i = list.findIndex((x) => x.id === id);
+    if (i < 0) return;
+    if (d && d.hall === HALL_KEY) list[i] = d; else list.splice(i, 1);
+    render();
+  }
   const copy = (text, anchor) => copyText(text, 'Link copied.', anchor);
   /** The screens' rows drawn again with the page's facts (its connection, its rights), while the dialog shows them. */
   function redraw() { if (list.length) render(); }
@@ -4812,12 +4823,13 @@ const Screens = (function () {
     'screen.open': (d) => { window.open(d.path, '_blank', 'noopener,noreferrer'); },
     'screen.rename': (d, { values }) => {
       const name = values && values.name ? values.name.trim() : '';
-      if (name && name !== d.name) AGM.outbox.now('display:update', { id: d.id, name }, done('Renamed.'));
+      if (name && name !== d.name) AGM.outbox.now('display:update', { id: d.id, name }, (r) => { if (r && r.ok && r.display) keep(d.id, r.display); done('Renamed.')(r); });
     },
+    // The new link is the screen's at once: Copy link copies it, never the one it replaced.
     'screen.rotate': (d, { anchor }) => AGM.outbox.now('display:rotate', { id: d.id }, (r) => {
-      if (r && r.ok) { copyText(location.origin + r.path, 'New link copied — open it on the screen.', anchor); } else AGM.toast((r && r.error) || 'Not changed.', true);
+      if (r && r.ok) { const now = screenOf(d.id); if (now && typeof r.path === 'string') now.path = r.path; copyText(location.origin + r.path, 'New link copied — open it on the screen.', anchor); } else AGM.toast((r && r.error) || 'Not changed.', true);
     }),
-    'screen.remove': (d) => AGM.outbox.now('display:remove', { id: d.id }, done('Removed.')),
+    'screen.remove': (d) => AGM.outbox.now('display:remove', { id: d.id }, (r) => { if (r && r.ok) keep(d.id, null); done('Removed.')(r); }),
   });
 
   /**
@@ -7133,8 +7145,12 @@ const QuoteTab = (() => {
     if (!on) { if (open()) selectTab('text'); return; }
     if (!open()) return;
     drawFrom();
-    // Until the quote is read below, the ＋ is drawn for the words in the box read as plain words.
-    speaker.draw(model ? { kind: 'snippet', ...(quoteNow() || {}) } : null, NONE);
+    const secretTick = document.getElementById('quoteSecret');
+    const marked = secretTick && secretTick.checked ? { confidential: true } : {};
+    // Until the quote is read below, the ＋ is drawn for the words in the box read as plain words (before what reads a
+    // quote has come, the box's words as they are), marked as the 🔒 tick marks it, and Show is offered only once it is
+    // read (app.html draws it disabled).
+    speaker.draw({ kind: 'snippet', ...(model ? quoteNow() || {} : { text: box.value }), ...marked }, NONE);
     PreviewBar.fillTargets(toSel, arriveSel, arriveWhy);
     const t = PreviewBar.target(toSel);
     showBtn.textContent = '📺 Show ' + (t.to === 'board' ? 'the Board' : t.name);
@@ -7152,8 +7168,6 @@ const QuoteTab = (() => {
     const over = q ? model.pasteOver(q) : null;
     const words = note.value.trim();
     // What will go, as the Board's page draws it: measured at a glance on a tablet (PickBar.long), once for each quote.
-    const secretTick = document.getElementById('quoteSecret');
-    const marked = secretTick && secretTick.checked ? { confidential: true } : {};
     const content = q && !over && !told.error ? { kind: 'snippet', ...q, ...(told.from ? { from: told.from } : {}), ...(words ? { note: words } : {}), ...marked } : null;
     const key = content ? JSON.stringify(content) : '';
     if (content && (!glanced || glanced.key !== key)) glanced = { key, long: PickBar.long(m, content) };

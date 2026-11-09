@@ -63,9 +63,12 @@ this person may give by name, its Main room ("Hall 2 — Main room and hall righ
 beside it and its side rooms set in under it, then any side room it holds of a hall it does not reach, under that hall's
 name; a side room is given without its hall (Legal alone), ticking On stage ticks the hall and unticking the hall takes On
 stage with it; **Chat view** (By seat, Simple, Full) sits beside the role. What the person may not give is shown and not
-offered, and one's own row is all shown, nothing offered. A Save sends the rooms, On stage halls and halls the account
-holds that the page does not list (gone since) back as they are, so an untouched Save is still "Saved — nothing
-changed." Each row reads where the account goes: "Hall 2 (Main, Legal) · On stage", "Every hall" first for an account of
+offered, and one's own row is all shown, nothing offered. A Save of an account already made sends only what the person
+changed since the editor drew it (a list changed goes whole, with the rooms, On stage halls and halls the account holds
+that the page does not list, gone since, as they are), so an untouched Save is "Saved — nothing changed." and a field
+changed elsewhere meanwhile (another device, the admin page, Members…) is not sent back; a field changed both there and
+in the editor saves the editor's, as the change takes no revision. Every change's answer carries the account as the
+list's row for that viewer, which the page puts in place before it closes the editor or says it is saved. Each row reads where the account goes: "Hall 2 (Main, Legal) · On stage", "Every hall" first for an account of
 every hall, and what this viewer is not told as a count. A room's **Members…** (a hall's **Board members…**: who sits On
 stage in its Main room), on the admin page's list and in the hall's Set up, is the same change for many accounts at once,
 for whoever manages accounts (`/api/admin/me`'s `manageUsers` and `/api/halls`' `canManageUsers`, the routes' own check):

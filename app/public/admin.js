@@ -258,6 +258,16 @@ function roomObject(code) {
     guestCode: at.room.guestCode || '', on: !!at.room.codeOn, guests: Number.isInteger(at.room.guests) ? at.room.guests : null, codeIsKey: main && !!at.hall.codeIsKey,
   };
 }
+/**
+ * A room of the list as an act's answer leaves it (its name, its guest code, whether the code is on), put in place and the
+ * list drawn again before the act is said, so a second act on it reads it as it is now, whenever the list is read again.
+ */
+function keepRoom(code, fields) {
+  const at = roomAt(code);
+  if (!at) return;
+  Object.assign(at.room, fields);
+  renderRoomList(allRooms);
+}
 /** What a hall whose code is still its address says (the residual: its key is its code until New code). */
 const RESIDUAL = 'This hall\'s code is also its address: anyone with an account in it can read it. Choose New code to separate them.';
 /** A room's guest code as its row says it: the code, and "off" while it admits nobody new. */
@@ -603,11 +613,16 @@ usersTbody.addEventListener('click', (e) => {
   const get = () => personObject(tr.dataset.key);
   ADMIN.act('person', 'person.unforward', o, { value: b.dataset.room, anchor: b, node: tr, opener: b, get, gone: 'That person has left the hall.' });
 });
-/** Let a person forward into a hall, or no longer: the server's answer said, the row drawn again from the room list. */
+/**
+ * Let a person forward into a hall, or no longer: the rooms the answer says they may forward into now drawn on their row
+ * first (a chip each), then the answer said, and the row drawn again from the room list.
+ */
 function forwardInto(o, code, on) {
   if (!o) { say('That person has left the hall.', true); return; }
   const said = (res) => {
     if (!res || !res.ok) { say((res && res.error) || (on ? 'Not linked.' : 'Not unlinked.'), true); return; }
+    const u = currentRoom && Array.isArray(currentRoom.users) ? currentRoom.users.find((x) => x.socketId === o.socketId) : null;
+    if (u && Array.isArray(res.linked)) { u.linkedRooms = res.linked; renderUsers(currentRoom.users); }
     say(on ? o.name + ' may forward into ' + (roomNameForCode(code) || code) + '.' : o.name + ' may no longer forward into ' + (roomNameForCode(code) || code) + '.');
     socket.emit('admin:listRooms', (after) => {
       if (!after?.ok) return;
@@ -914,6 +929,7 @@ Object.assign(ADMIN_RUN, {
   // The guest code switched on, or off with the guest pages in it kept or sent out (the ask's choice): said with what it did.
   'adminRoom.codeToggle': (o, c) => AGM.outbox.now('room:update', o.on ? { code: o.code, codeOn: false, keepGuests: c.choice !== 'out' } : { code: o.code, codeOn: true }, (res) => {
     if (!res || !res.ok) { say((res && res.error) || 'Not changed.', true); return; }
+    keepRoom(o.code, { codeOn: res.codeOn, ...(Number.isInteger(res.sentOut) ? { guests: 0 } : {}) });
     const n = (k) => k + (k === 1 ? ' guest page' : ' guest pages');
     say(res.codeOn ? 'The guest code of ' + o.hall + ' is on.'
       : Number.isInteger(res.sentOut) ? 'The guest code of ' + o.hall + ' is off: ' + n(res.sentOut) + ' sent out.'
@@ -923,6 +939,7 @@ Object.assign(ADMIN_RUN, {
   }),
   'adminRoom.newCode': (o) => AGM.outbox.now('room:update', { code: o.code, newCode: true }, (res) => {
     if (!res || !res.ok) { say((res && res.error) || 'No new code.', true); return; }
+    keepRoom(o.code, { guestCode: res.guestCode, codeOn: res.codeOn, ...(o.main ? { codeIsKey: res.guestCode === o.code } : {}) });
     say('The new guest code of ' + o.hall + ' is ' + res.guestCode + '.');
     if (currentRoom && currentRoom.code === o.code) codeNow(res.guestCode, res.codeOn);
     refreshRooms();
@@ -936,6 +953,7 @@ Object.assign(ADMIN_RUN, {
   'adminRoom.sendFrom': (o) => AGM.sendFrom.open({ code: o.code, hall: o.hall }, { read: readRoomSettings, say }),
   'adminRoom.rename': (o, c) => AGM.outbox.now('room:update', { code: o.code, name: (c.values && c.values.name) || '' }, (res) => {
     if (!res || !res.ok) { say((res && res.error) || 'Not renamed.', true); return; }
+    keepRoom(o.code, { name: res.name });
     say(res.already ? 'It is called ' + res.name + ' already.' : 'Renamed ' + res.name + '.');
     if (currentRoom && currentRoom.code === o.code) nameWatched(o.code);
     refreshRooms();
