@@ -5,15 +5,16 @@
 # agmessage.runBase, a development build 0.6.0-dev.<build>+<sha> on a branch, a release 0.6.0+<build>.<sha> on the tag
 # v0.6.0. The zip is extracted and started once, and must answer with that build. The zip is also an artifact of its own,
 # the zip itself (archive: false). The installer is built from that zip on
-# windows-2025 (Inno Setup 7.1.0, pinned), without its two .bat files, and its life cycle run for real there, elevated:
-# installed, upgraded from the build before it, refused, rolled back, gone back from and uninstalled, every test it declares
-# run and passed. A tag publishes a GitHub Release with the zip, the installer and its payload's sums, the SBOM, SHA256SUMS
+# windows-2025 (Inno Setup 7.1.0, pinned), without its two .bat files, and its life cycle run for real there, elevated, on
+# the image as it is (Defender's real-time monitoring off, as the image leaves it): installed, upgraded from the build
+# before it, refused, rolled back, gone back from and uninstalled, every test it declares run and passed. A tag publishes a GitHub Release with the zip, the installer and its payload's sums, the SBOM, SHA256SUMS
 # and a build-provenance attestation of the zips, the installer and its payload's sums, verified before it publishes and
 # the release read back for its immutability once it has, once every job above is green and only when its version is
 # above every release already published and every other version tagged, asked again just before it publishes, one
 # release job at a time. For every push, a tag and a run asked for by hand (Actions, CI, Run workflow),
-# the Windows evidence lane takes its readings of that zip on windows-2025, with Defender's real-time monitoring back
-# on, one lane at a time per ref and never cancelled once it runs: they inform the release's notes and never hold it.
+# the Windows evidence lane takes its readings of that zip on windows-2025, those that need Defender with its real-time
+# monitoring back on, then the rest with it put back as the image left it, one lane at a time per ref and never cancelled
+# once it runs: they inform the release's notes and never hold it.
 name: CI
 
 on:
@@ -392,16 +393,18 @@ jobs:
           if-no-files-found: error
 
   # The installer's life cycle (the 0.6.0 plan's Part 6, unit U16), run for real on windows-2025, elevated (a hosted
-  # runner's account is an administrator, never prompted), with Defender's real-time monitoring turned back on first:
-  # this build's installer, the one the installer job built and a release ships, the build before it and a build that
-  # does not start, both made here from this build's payload (the zip's stage, its build.json stamped again by
-  # tools/lifecycle.js stage) with Inno Setup 7.1.0 pinned and checked as the installer job pins it. The release order is
-  # asked first: this build must be above the newest release by MAJOR.MINOR.BUILD, or an installed AGMessage of that
-  # release would refuse it. installer/test/*.test.js are node:test files, run one after another, and every test they
-  # declare must have run and passed (tools/lifecycle.js count, reading the run's TAP report): none skipped, left to do
-  # or missing. A gate, as every test is: the release publishes only once it passed. Every action is pinned by its commit;
-  # every step has a bound of its own, and together they end inside the job's; the life cycle's step holds every bound its
-  # tests and hooks declare (test/lifecycle.test.js), so a slow run that keeps to them is never cut short unexplained.
+  # runner's account is an administrator, never prompted), on GitHub's image as it is, Defender's real-time monitoring
+  # off as the image leaves it (nothing here turns it on, and whether the installer passes under Defender is no longer
+  # tested in CI: the comment before its first step says why and where it is taken instead): this build's installer, the
+  # one the installer job built and a release ships, the build before it and a build that does not start, both made here
+  # from this build's payload (the zip's stage, its build.json stamped again by tools/lifecycle.js stage) with Inno
+  # Setup 7.1.0 pinned and checked as the installer job pins it. The release order is asked first: this build must be
+  # above the newest release by MAJOR.MINOR.BUILD, or an installed AGMessage of that release would refuse it.
+  # installer/test/*.test.js are node:test files, run one after another, and every test they declare must have run and
+  # passed (tools/lifecycle.js count, reading the run's TAP report): none skipped, left to do or missing. A gate, as
+  # every test is: the release publishes only once it passed. Every action is pinned by its commit; every step has a
+  # bound of its own, and together they end inside the job's; the life cycle's step holds every bound its tests and
+  # hooks declare (test/lifecycle.test.js), so a slow run that keeps to them is never cut short unexplained.
   lifecycle:
     name: Installer life cycle (Windows, elevated)
     needs: [package, installer]
@@ -415,12 +418,18 @@ jobs:
         timeout-minutes: 5
         with:
           persist-credentials: false
-      # First, before anything is laid down: the image turns Defender's real-time monitoring off and excludes C:\ and D:\.
-      # Every install below is made with it back on, as on the show laptop.
-      - name: Defender's real-time monitoring back on, the image's exclusions removed (tools/defender-on.ps1)
-        shell: powershell
-        timeout-minutes: 5
-        run: ./tools/defender-on.ps1 -Out "$env:RUNNER_TEMP\defender.json"
+      # On the image as it is: Defender's real-time monitoring off and C:\ and D:\ excluded, as GitHub's image leaves them,
+      # and nothing here turns it on. In runs 105, 109 and 110 every job that ran tools/defender-on.ps1 was lost. Seen in
+      # run 110: its four such jobs (this one, the lane and two canaries; three of the four with the runner's own processes
+      # and folder excluded again) went silent about ten minutes after Defender came on and were failed by the service
+      # about 45 minutes after their last report. Derived for runs 105 and 109, from the 45 minutes the service was
+      # reported (not seen) to wait: some 10 to 11 minutes after it came on. A job left as the image made it lived its
+      # whole hour beside three that were lost (run 109). The life cycle runs far longer than ten minutes, so it runs as
+      # that job did, and whether an install, an upgrade, a rollback, a go back and an uninstall pass under Defender is
+      # no longer tested in CI: the readings lane's R2, R9 and R10 time laying the payload, the upgrade's backup and
+      # node.exe's extraction with it on, and none of them runs the installer. The installer under the laptop's own
+      # Defender is the show laptop's: lab 6's upgrade during a rehearsal and lab 7's Upgrade and Go back; no lab line
+      # takes a first install, a rollback or an uninstall under it.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         timeout-minutes: 5
         with:
@@ -555,16 +564,30 @@ jobs:
   # miss means and which readings wait for a later unit's code). They inform the release and never hold it: a reading
   # that misses its mark is written in the release's notes with the fallback its unit names; only a lane that cannot
   # write its readings fails here, and the release does not wait on that. Every action here is pinned by its commit.
-  # Every step has a bound of its own, and together they end well inside the job's: a step that runs over fails, the job
-  # ends failed, never cancelled, and the release, which waits for it, still publishes. The take bounds itself, so its
-  # step's limit is never what ends it: each reading has a bound of its own (BOUNDS in tools/readings-take.js) and begins
-  # only while it fits in the deadline each take step gives it (--deadline-min), and the take ends by itself within
-  # STOP_MIN of that deadline, its record written. The readings as standard accounts (R11, R6), which log on as accounts
-  # the lane makes, are a take step of their own, after the record of the rest is kept as the artifact, so a runner lost in
-  # them still leaves what was taken before. It runs for every push, a tag and a run asked for by hand
-  # (never a pull request, whose commits are pushes already), one at a time per ref: once it runs nothing cancels it,
-  # and a newer push's waits, the newest waiting taking the place of an older one, so a regression shows on the next
-  # readings taken, never on a run cut short.
+  # Every step has a bound of its own, and together they end inside the job's with 5 minutes to spare (the test holds
+  # the margin): a step that runs over fails, the job ends failed, never cancelled, and the release, which waits for it,
+  # still publishes. The take bounds itself, so its step's limit is never what ends it: each reading has a bound of its
+  # own (BOUNDS in tools/readings-take.js) and begins only while it fits in the deadline each take step gives it
+  # (--deadline-min), and the take ends by itself within STOP_MIN of that deadline, its record written. Defender's
+  # real-time monitoring is on only for the readings that need it (R2, R9 and R10): turned on once the zips are
+  # downloaded, those three taken in a take of their own (Take A), and Defender put back as the image left it in the
+  # step right after it, whatever it ended with, before any other reading, then Take A's record and Defender's being put
+  # back kept on the server at once. Seen in run 110: its four jobs that ran tools/defender-on.ps1 (the life cycle, this
+  # lane and two canaries; three of the four with the runner's own processes and folder excluded again, one canary with
+  # them scanned) went silent about ten minutes after Defender came on, and were failed by the service about 45 minutes
+  # after their last report. Derived for runs 105 and 109, where nothing was excluded, from the 45 minutes the service
+  # was reported (not seen) to wait: lost some 10 to 11 minutes after it came on. A job left as the image made it lived
+  # its hour (run 109), and run 101's lane, which ended about 8 minutes after turning Defender on, was not lost. Not
+  # known: how. Defender is on here for tools/defender-on.ps1's read-back and Take A, whose deadline is 6 minutes, the
+  # take ending itself within its step's limit: about 3.5 minutes at run 109's times (not measured with this order),
+  # though a slow R2 or a slow take can keep it on past ten minutes. Whether this keeps the runner is the next run's to
+  # say. The rest are taken after it, each take saying whether it was given Defender's record, and the judge holds a
+  # reading that needs Defender to Defender only when the take that took it was given that record. The readings as standard accounts (R11, R6), which log on as accounts
+  # the lane makes, are a take step of their own, after the record of the rest is kept as the artifact, so a runner lost
+  # in them still leaves what was taken before. It runs for every push, a tag and a run asked for by hand (never a pull
+  # request, whose commits are pushes already), one at a time per ref: once it runs nothing cancels it, and a newer
+  # push's waits, the newest waiting taking the place of an older one, so a regression shows on the next readings taken,
+  # never on a run cut short.
   readings:
     name: Windows readings (the evidence lane)
     if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.package.result == 'success' }}
@@ -580,12 +603,8 @@ jobs:
         timeout-minutes: 5
         with:
           persist-credentials: false
-      # First, before anything is laid down or measured: the image turns Defender's real-time monitoring off and
-      # excludes C:\ and D:\. Every reading below is taken with it back on, and whether that took is recorded beside them.
-      - name: Defender's real-time monitoring back on, the image's exclusions removed (tools/defender-on.ps1)
-        shell: powershell
-        timeout-minutes: 5
-        run: ./tools/defender-on.ps1 -Out "$env:RUNNER_TEMP\defender.json"
+      # Node, the zips and the newest release before Defender is turned on: nothing measured depends on Defender while
+      # they are downloaded (R2 and R10 open the zips with it on), so its window holds Take A alone.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         timeout-minutes: 5
         with:
@@ -621,11 +640,24 @@ jobs:
           }
           "tag=$tag" >> $env:GITHUB_OUTPUT
           exit 0
-      # Every reading but the two as standard accounts, within a deadline of 38 minutes: the take ends by itself inside
-      # this step's limit (the deadline and STOP_MIN), its record written, whatever a reading met.
-      - name: Take the readings (tools/readings-take.js)
+      # Before any of the bundle is laid down or measured: the image turns Defender's real-time monitoring off and
+      # excludes C:\ and D:\. The readings that need it are taken with it back on in the step right after this, and
+      # whether that took is recorded beside them; it is put back as the image left it in the step after that.
+      - name: Defender's real-time monitoring back on, the image's exclusions removed (tools/defender-on.ps1)
+        shell: powershell
+        timeout-minutes: 5
+        run: ./tools/defender-on.ps1 -Out "$env:RUNNER_TEMP\defender.json"
+      # Take A: the readings that need Defender (R2, R9 and R10), with its monitoring on, within a deadline of 6 minutes.
+      # Each begins only while its own bound (5, 2 and 2 minutes) fits in what is left of it: at run 109's times (R2 142 s,
+      # the payload laid in about 20 s, R10 15 s, R9 3 s; about 3 minutes) all three begin with about a minute to spare,
+      # and an R2 past about 3.4 minutes leaves R9 not taken this run, one past about 3.7 minutes R10 too. The take ends
+      # by itself as soon as they have, and in any case within this step's limit (the deadline and STOP_MIN), its record
+      # written: Defender stays on for about 3.5 minutes at run 109's times (not measured with this order), and a slow R2
+      # or a slow take can keep it on past ten minutes. R2 lays this build over the newest release's zip, as the take of
+      # every reading did.
+      - name: Take the readings that need Defender, with it on (R2, R9, R10; tools/readings-take.js)
         shell: pwsh
-        timeout-minutes: 44
+        timeout-minutes: 12
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
         run: |
@@ -633,12 +665,52 @@ jobs:
           if ($zip.Count -ne 1) { throw "expected one bundle zip in dist, found $($zip.Count)" }
           $previous = @(Get-ChildItem (Join-Path $env:RUNNER_TEMP 'previous') -Filter 'AGMessage-Portable-*.zip' -ErrorAction SilentlyContinue)
           $over = if ($previous.Count -eq 1) { @('--previous', $previous[0].FullName) } else { @() }
+          # The release named and the installer, as the take of every reading was given them: no --tag at all when none is
+          # named, never an empty argument, and no --installer when its job built none.
+          $release = if ($env:RELEASE_TAG) { @('--repo', $env:GITHUB_REPOSITORY, '--tag', $env:RELEASE_TAG) } else { @() }
+          $setup = @(Get-ChildItem installer-dist -Filter 'AGMessage-Setup-*-unsigned.exe' -ErrorAction SilentlyContinue)
+          $installer = if ($setup.Count -eq 1) { @('--installer', $setup[0].FullName) } else { @() }
+          node tools/readings-take.js take --zip $zip[0].FullName --defender "$env:RUNNER_TEMP\defender.json" --out readings/readings.raw.json --deadline-min 6 --only R2,R9,R10 @release @over @installer
+          if ($LASTEXITCODE -ne 0) { throw "the lane could not write its readings with Defender (exit $LASTEXITCODE)" }
+      # Defender as the image left it, whatever the take before ended with and before any other reading: real-time
+      # monitoring off, the runner's own exclusions removed and the image's put back, each recorded as it goes and read
+      # back from Defender (tools/defender-off.ps1). It never fails the job.
+      - name: Defender as the image left it, real-time monitoring off and its exclusions back (tools/defender-off.ps1)
+        if: always()
+        shell: powershell
+        timeout-minutes: 3
+        run: ./tools/defender-off.ps1 -Record "$env:RUNNER_TEMP\defender.json" -Out readings/defender-off.json
+      # What Take A took and Defender's being put back (tools/defender-off.ps1's record, in the record's folder), kept on
+      # the server at once, whatever they ended with, under a name of its own: a runner lost in a later take still leaves
+      # them. A small folder, bounded as the canaries' uploads are.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        timeout-minutes: 3
+        with:
+          name: agmessage-readings-${{ github.sha }}-defender-${{ github.run_attempt }}
+          path: readings
+          if-no-files-found: warn
+          overwrite: true
+      # The rest but the two as standard accounts, added to the same record without Defender (no --defender: the record
+      # keeps Defender as the take before read it, and this take is written as given no Defender record), within a
+      # deadline of 23 minutes (these readings took about 6 in run 109), whatever the takes before ended with: the take
+      # ends by itself inside this step's limit (the deadline and STOP_MIN), its record written, whatever a reading met.
+      # R2, R9 and R10 are kept as the take before wrote them.
+      - name: Take the readings that need no Defender, with it off again (tools/readings-take.js)
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        timeout-minutes: 29
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          $zip = @(Get-ChildItem dist -Filter 'AGMessage-Portable-*.zip')
+          if ($zip.Count -ne 1) { throw "expected one bundle zip in dist, found $($zip.Count)" }
           # No release named: no --tag at all, never an empty argument, and R13 reads not run with why.
           $release = if ($env:RELEASE_TAG) { @('--repo', $env:GITHUB_REPOSITORY, '--tag', $env:RELEASE_TAG) } else { @() }
           # The installer, when its job built it: R5 reads Windows' verdict on its signature beside the two programs'.
           $setup = @(Get-ChildItem installer-dist -Filter 'AGMessage-Setup-*-unsigned.exe' -ErrorAction SilentlyContinue)
           $installer = if ($setup.Count -eq 1) { @('--installer', $setup[0].FullName) } else { @() }
-          node tools/readings-take.js take --zip $zip[0].FullName --defender "$env:RUNNER_TEMP\defender.json" --out readings/readings.raw.json --deadline-min 38 --skip R11,R6 @release @over @installer
+          node tools/readings-take.js take --zip $zip[0].FullName --out readings/readings.raw.json --deadline-min 23 --skip R2,R9,R10,R11,R6 --add @release @installer
           if ($LASTEXITCODE -ne 0) { throw "the lane could not write its readings (exit $LASTEXITCODE)" }
       # What was taken, kept on the server before any standard account is made: a runner lost after this still leaves it,
       # under a name of its own (the record's last upload, under the release's name, would delete it first).
@@ -650,7 +722,8 @@ jobs:
           path: readings
           if-no-files-found: warn
           overwrite: true
-      # R11 and R6, added to the same record (--add), within a deadline of 24 minutes, whatever the take before ended with.
+      # R11 and R6, added to the same record (--add) without Defender, within a deadline of 24 minutes, whatever the takes
+      # before ended with.
       - name: Take the readings as standard accounts (R11, R6; tools/readings-take.js)
         if: ${{ !cancelled() }}
         shell: pwsh
@@ -658,7 +731,7 @@ jobs:
         run: |
           $zip = @(Get-ChildItem dist -Filter 'AGMessage-Portable-*.zip')
           if ($zip.Count -ne 1) { throw "expected one bundle zip in dist, found $($zip.Count)" }
-          node tools/readings-take.js take --zip $zip[0].FullName --defender "$env:RUNNER_TEMP\defender.json" --out readings/readings.raw.json --deadline-min 24 --only R11,R6 --add
+          node tools/readings-take.js take --zip $zip[0].FullName --out readings/readings.raw.json --deadline-min 24 --only R11,R6 --add
           if ($LASTEXITCODE -ne 0) { throw "the lane could not write its readings as standard accounts (exit $LASTEXITCODE)" }
       # The record is written before the first reading, as each begins and after each, so a take step that did not end
       # still has what it took judged.
@@ -678,17 +751,25 @@ jobs:
           if-no-files-found: warn
           overwrite: true
 
-  # A question, removed once it is answered. Run 109 answered the first: the job that turned Defender back on and did
-  # nothing else was failed with the life cycle and the lane within about a second, some 56 minutes after Defender came
-  # on (about 11 after it, if the hosted service's reported 45 minutes before it fails a silent runner holds), while the
-  # one left as the image made it kept its runner for its hour. These two ask the next: with the runner's own processes
-  # and folder excluded again (tools/defender-on.ps1, as the life cycle and the lane now do), does a runner live its
-  # hour; and, scanned as before (-ScanRunner), what did Defender do as it went quiet. Each writes its evidence every 20 s (tools/canary-evidence.ps1, run by each step for its
-  # minutes) and uploads it after each under a name of its own (never over an upload before, which upload-artifact
-  # deletes first), each step going on whatever the one before ended with, so what it held when it was last heard
-  # survives it. The release waits for neither.
+  # A question, removed once it is answered. Run 110 answered the last: the runner was lost with the runner's own
+  # processes and folder excluded again (tools/defender-on.ps1, as the life cycle and the lane then did) and with them
+  # scanned alike. Seen: its four jobs that ran tools/defender-on.ps1 (the life cycle, the lane and both canaries; three of
+  # the four with the runner's own excluded, one canary with them scanned) went silent within a second or two of
+  # 15:00:28, Defender's real-time protection having come on at 14:50:13 to 14:50:27, and the service failed them at
+  # 15:45:57 to about 15:47, about 45 minutes after their last report. Only the two canaries kept evidence: uploaded at
+  # 15:00:27, it shows healthy machines up to their last heartbeat at 15:00:12 (Defender's CPU low, 13 GB free, the
+  # runner listener's connections established, no detection or scan in Defender's log). Not known: how, which cannot be
+  # seen from inside the machine. Tried and lost: nothing excluded (runs 105 and 109, run 110's scanned canary) and only
+  # the runner's own excluded (run 110). These two ask the next: does a runner live its hour when Defender is turned back
+  # on and put back as the image left it some 4 to 5 minutes later (on-then-off: tools/defender-on.ps1, the evidence at 2
+  # and 4 minutes and their uploads, then tools/defender-off.ps1; the lane's own window is typically similar, about 4
+  # minutes, not measured); and does turning the real-time monitoring on alone, the image's C:\ and D:\ exclusions kept,
+  # never yet tried, end a runner (monitoring-only). Each writes its evidence every 20 s
+  # (tools/canary-evidence.ps1, run by each step for its minutes) and uploads it after each under a name of its own
+  # (never over an upload before, which upload-artifact deletes first), each step going on whatever the one before ended
+  # with, so what it held when it was last heard survives it. The release waits for neither.
   canary:
-    name: Canary, a runner with Defender back on, the runner's own ${{ matrix.runner }} (no AGMessage work)
+    name: Canary, a runner with Defender ${{ matrix.defender }} (no AGMessage work)
     needs: [package, installer]
     if: ${{ github.event_name == 'push' }}
     runs-on: windows-2025
@@ -696,16 +777,22 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [excluded, scanned]
+        defender: [on-then-off, monitoring-only]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         timeout-minutes: 5
         with:
           persist-credentials: false
       - name: Defender's real-time monitoring back on, the image's exclusions removed (tools/defender-on.ps1)
+        if: ${{ matrix.defender == 'on-then-off' }}
         shell: powershell
         timeout-minutes: 5
-        run: ./tools/defender-on.ps1 -Out "$env:RUNNER_TEMP\canary\defender.json" ${{ matrix.runner == 'scanned' && '-ScanRunner' || '' }}
+        run: ./tools/defender-on.ps1 -Out "$env:RUNNER_TEMP\canary\defender.json"
+      - name: Defender's real-time monitoring on alone, the image's exclusions kept
+        if: ${{ matrix.defender == 'monitoring-only' }}
+        shell: powershell
+        timeout-minutes: 5
+        run: Set-MpPreference -DisableRealtimeMonitoring $false
       - name: Alive at 2 min, the evidence written every 20 s (tools/canary-evidence.ps1)
         if: ${{ !cancelled() }}
         continue-on-error: true
@@ -717,7 +804,7 @@ jobs:
         timeout-minutes: 3
         continue-on-error: true
         with:
-          name: canary-${{ matrix.runner }}-${{ github.sha }}-${{ github.run_attempt }}-m02
+          name: canary-${{ matrix.defender }}-${{ github.sha }}-${{ github.run_attempt }}-m02
           path: ${{ runner.temp }}/canary
       - name: Alive at 4 min, the evidence written every 20 s (tools/canary-evidence.ps1)
         if: ${{ !cancelled() }}
@@ -730,8 +817,16 @@ jobs:
         timeout-minutes: 3
         continue-on-error: true
         with:
-          name: canary-${{ matrix.runner }}-${{ github.sha }}-${{ github.run_attempt }}-m04
+          name: canary-${{ matrix.defender }}-${{ github.sha }}-${{ github.run_attempt }}-m04
           path: ${{ runner.temp }}/canary
+      # Some 4 to 5 minutes after Defender came on (its two evidence steps of 2 minutes and their uploads): put back as the
+      # image left it, recorded beside the evidence. This is the canary's window, not the lane's, which is typically
+      # similar (about 4 minutes, not measured).
+      - name: Defender as the image left it, real-time monitoring off and its exclusions back (tools/defender-off.ps1)
+        if: ${{ always() && matrix.defender == 'on-then-off' }}
+        shell: powershell
+        timeout-minutes: 3
+        run: ./tools/defender-off.ps1 -Record "$env:RUNNER_TEMP\canary\defender.json" -Out "$env:RUNNER_TEMP\canary\defender-off.json"
       - name: Alive at 6 min, the evidence written every 20 s (tools/canary-evidence.ps1)
         if: ${{ !cancelled() }}
         continue-on-error: true
@@ -743,7 +838,7 @@ jobs:
         timeout-minutes: 3
         continue-on-error: true
         with:
-          name: canary-${{ matrix.runner }}-${{ github.sha }}-${{ github.run_attempt }}-m06
+          name: canary-${{ matrix.defender }}-${{ github.sha }}-${{ github.run_attempt }}-m06
           path: ${{ runner.temp }}/canary
       - name: Alive at 8 min, the evidence written every 20 s (tools/canary-evidence.ps1)
         if: ${{ !cancelled() }}
@@ -756,7 +851,7 @@ jobs:
         timeout-minutes: 3
         continue-on-error: true
         with:
-          name: canary-${{ matrix.runner }}-${{ github.sha }}-${{ github.run_attempt }}-m08
+          name: canary-${{ matrix.defender }}-${{ github.sha }}-${{ github.run_attempt }}-m08
           path: ${{ runner.temp }}/canary
       - name: Alive at 10 min, the evidence written every 20 s (tools/canary-evidence.ps1)
         if: ${{ !cancelled() }}
@@ -769,7 +864,7 @@ jobs:
         timeout-minutes: 3
         continue-on-error: true
         with:
-          name: canary-${{ matrix.runner }}-${{ github.sha }}-${{ github.run_attempt }}-m10
+          name: canary-${{ matrix.defender }}-${{ github.sha }}-${{ github.run_attempt }}-m10
           path: ${{ runner.temp }}/canary
       - name: Alive at 12 min, the evidence written every 20 s (tools/canary-evidence.ps1)
         if: ${{ !cancelled() }}
@@ -782,7 +877,7 @@ jobs:
         timeout-minutes: 3
         continue-on-error: true
         with:
-          name: canary-${{ matrix.runner }}-${{ github.sha }}-${{ github.run_attempt }}-m12
+          name: canary-${{ matrix.defender }}-${{ github.sha }}-${{ github.run_attempt }}-m12
           path: ${{ runner.temp }}/canary
       - name: Alive at 14 min, the evidence written every 20 s (tools/canary-evidence.ps1)
         if: ${{ !cancelled() }}
@@ -795,7 +890,7 @@ jobs:
         timeout-minutes: 3
         continue-on-error: true
         with:
-          name: canary-${{ matrix.runner }}-${{ github.sha }}-${{ github.run_attempt }}-m14
+          name: canary-${{ matrix.defender }}-${{ github.sha }}-${{ github.run_attempt }}-m14
           path: ${{ runner.temp }}/canary
       - name: Alive at 16 min, the evidence written every 20 s (tools/canary-evidence.ps1)
         if: ${{ !cancelled() }}
@@ -808,7 +903,7 @@ jobs:
         timeout-minutes: 3
         continue-on-error: true
         with:
-          name: canary-${{ matrix.runner }}-${{ github.sha }}-${{ github.run_attempt }}-m16
+          name: canary-${{ matrix.defender }}-${{ github.sha }}-${{ github.run_attempt }}-m16
           path: ${{ runner.temp }}/canary
       - name: Alive at 20 min, the evidence written every 20 s (tools/canary-evidence.ps1)
         if: ${{ !cancelled() }}
@@ -821,7 +916,7 @@ jobs:
         timeout-minutes: 3
         continue-on-error: true
         with:
-          name: canary-${{ matrix.runner }}-${{ github.sha }}-${{ github.run_attempt }}-m20
+          name: canary-${{ matrix.defender }}-${{ github.sha }}-${{ github.run_attempt }}-m20
           path: ${{ runner.temp }}/canary
       - name: Alive at 30 min, the evidence written every 20 s (tools/canary-evidence.ps1)
         if: ${{ !cancelled() }}
@@ -834,7 +929,7 @@ jobs:
         timeout-minutes: 3
         continue-on-error: true
         with:
-          name: canary-${{ matrix.runner }}-${{ github.sha }}-${{ github.run_attempt }}-m30
+          name: canary-${{ matrix.defender }}-${{ github.sha }}-${{ github.run_attempt }}-m30
           path: ${{ runner.temp }}/canary
       - name: Alive at 45 min, the evidence written every 20 s (tools/canary-evidence.ps1)
         if: ${{ !cancelled() }}
@@ -847,7 +942,7 @@ jobs:
         timeout-minutes: 3
         continue-on-error: true
         with:
-          name: canary-${{ matrix.runner }}-${{ github.sha }}-${{ github.run_attempt }}-m45
+          name: canary-${{ matrix.defender }}-${{ github.sha }}-${{ github.run_attempt }}-m45
           path: ${{ runner.temp }}/canary
       - name: Alive at 60 min, the evidence written every 20 s (tools/canary-evidence.ps1)
         if: ${{ !cancelled() }}
@@ -860,7 +955,7 @@ jobs:
         timeout-minutes: 3
         continue-on-error: true
         with:
-          name: canary-${{ matrix.runner }}-${{ github.sha }}-${{ github.run_attempt }}-m60
+          name: canary-${{ matrix.defender }}-${{ github.sha }}-${{ github.run_attempt }}-m60
           path: ${{ runner.temp }}/canary
 
   release:

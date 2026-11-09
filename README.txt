@@ -1549,9 +1549,9 @@ Your own show laptop
     folder imported into it once; an event archived and the next begun.
 
 Checked before release
-  - Each build's Windows readings, taken on CI with Defender on; each
-    release's notes say the ones that missed their mark. The Board's own
-    devices are walked before 0.6.0 is released.
+  - Each build's Windows readings, taken on CI (those that need Defender
+    with it on); each release's notes say the ones that missed their
+    mark. The Board's own devices are walked before 0.6.0 is released.
 
 What's new in 0.5
 -----------------

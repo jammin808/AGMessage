@@ -11242,6 +11242,15 @@ Each is one commit, `AGMessage 0.6.0, unit Un: <what landed>`. Every reader is n
      - Lab 7: the laptop's admin as a standard account: Show the admin token, Start, Stop with a reason, Upgrade (online
        and offline) and Go back; then the same from a second standard account given `start` and `stop` only, and from a
        third given nothing.
+   - *As built (#30), which `docs/INSTALL.md` (The Windows readings and the lab lines) governs: Defender is on for
+     R2, R9 and R10 alone, not for the lane. The lane's first take is those three, given the record
+     `tools/defender-on.ps1` wrote, and bounded to some 6 minutes; `tools/defender-off.ps1` then puts Defender back as
+     the image left it (real-time monitoring off, the removed exclusions added again), whatever that take ended with;
+     the other readings are taken after it, each take given no Defender record, so the judge never reads one of them as
+     taken with Defender on. The cause is U16's: in CI runs 105, 109 and 110 every hosted runner that ran more than
+     about 10 minutes with Defender on was lost (seen in run 110, some 10 minutes after it came on), while run 101's
+     lane, done in about 8 minutes, was not. Two canaries keep the evidence of a runner with Defender back on until
+     the hosted service loses it.*
 8. **[#36]** **unit U8: the busy line, and a stop that saves, at loopback with a proof of the token.**
    - *Read with 2-S.2 (Part 0 §0.8 C4): only the folder-held words read the busy line; a copy refused at the port cannot name the folder pipe (`app/server.js:2453-2454`).*
    - *As built (#36), the wire U12, U17 and U18 speak, which `docs/INSTALL.md` (The busy line, and the stop at loopback) governs: the hello carries the machine's own challenge (`?c=`, 32 hex characters; a hello without one is refused) and the server's proof covers it after the nonce, a line apart, so a hello read earlier proves nothing; the stop's body is `{reason, by, force}`, `reason` one of `stop`, `upgrade` and `back` (any other word refused) and `force` the reason a person typed; a stop asked while one is under way answers `already`; a nonce's refusal says `again`, and the machine asks once more; no browser's request (an Origin or a Sec-Fetch-* header) is answered, nor any while the token is shorter than 16 characters; a page is active by its seat's input or a message its hall holds from the window (answer 39's "a message"), so a restart keeps it; the machine's wait is for the whole answer; the nudge reads nothing until U17. U12's `machine.js` (Node's built-ins only) carries its own copy of the machine's half, held to `app/test/busy.test.js`'s vectors.*
@@ -11562,7 +11571,17 @@ Each is one commit, `AGMessage 0.6.0, unit Un: <what landed>`. Every reader is n
       verification runs into a machine folder the life cycle makes and never starts, since a quiet install starts its node
       and the installer's import page is offered to a person alone, and its refusal on the installed node that served;
       a junction and another account's folder are refused before the first install and, past the record's check, at the
-      root an uninstall kept; every test and hook is bounded, and the life cycle's step holds them all.*
+      root an uninstall kept; every test and hook is bounded, and the life cycle's step holds them all. U7's Defender step
+      is no longer the job's first, nor any step of it: the job runs on GitHub's image as it is (Defender's real-time
+      monitoring off, `C:\` and `D:\` excluded), because in CI runs 105, 109 and 110 every hosted runner that ran more
+      than about 10 minutes after that step was lost (seen in run 110, about ten minutes after Defender came on, three of
+      its four with the runner's own processes and folder excluded again, one with them scanned; derived for runs 105 and
+      109, some 10 to 11 minutes after), while a job left as the image made it lived its hour (run 109) and run 101's
+      lane, done in about 8 minutes, was not lost. So whether an install, an upgrade, a rollback, a go back and an
+      uninstall pass under Defender is no longer tested in CI (U7's R2, R9 and R10 time laying the payload, the upgrade's
+      backup and `node.exe`'s extraction with it on, and none runs the installer); the installer under the laptop's own
+      Defender is the show laptop's, lab 6's upgrade during a rehearsal and lab 7's Upgrade and Go back
+      (`docs/INSTALL.md`).*
 17. **[#74]** **unit U17: the laptop's admin, the rights it gives, and the control tasks (answer 38).**
     - **The record.** `Admin`, `AdminName` and `Grants` in `HKLM\SOFTWARE\AGMessage`, written by `machine.js` only
       (U12). The install appends `machine.admin`.

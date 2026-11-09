@@ -424,16 +424,22 @@ extracts it and starts the bundle once (its own Node and watchdog must answer `/
 within 30 s), runs both .bat files under cmd on Windows, builds the installer from that zip on `windows-2025`
 (`installer/AGMessage.iss`, Inno Setup 7.1.0 pinned by hash and checked against its release's digest and its publisher's
 signature; `installer/build-installer.ps1` lays the zip's stage down without its two .bat files and writes
-`SHA256SUMS.payload` beside it), runs the installer's life cycle for real on `windows-2025`, elevated, with Defender back
-on (`installer/test/`: installed, upgraded from the build before it, refused, rolled back, gone back from and
+`SHA256SUMS.payload` beside it), runs the installer's life cycle for real on `windows-2025`, elevated, on the image as
+it is (`installer/test/`: installed, upgraded from the build before it, refused, rolled back, gone back from and
 uninstalled, the build before and a build that does not start made from the same payload; every test it declares must
-run and pass, `tools/lifecycle.js`), and a `v*` tag publishes a release, once that life cycle passed, with the zip, the
-installer and a build-provenance attestation of the zips, the installer and its payload's sums, each verified with
-`gh attestation verify` before it publishes, the release read back for its immutability once it has (`tools/provenance.js`),
+run and pass, `tools/lifecycle.js`; Defender's real-time monitoring off and `C:\` and `D:\` excluded, as the image
+leaves them: in CI runs 105, 109 and 110 every hosted runner that ran on after the monitoring was turned back on with the
+image's exclusions removed was lost, seen in run 110 about ten minutes after it came on and derived for the other two,
+so whether the installer passes under Defender is not tested in CI and is the show laptop's, its labs 6 and 7), and a
+`v*` tag publishes a release, once that
+life cycle passed, with the zip, the installer and a build-provenance attestation of the zips, the installer and its
+payload's sums, each verified with `gh attestation verify` before it publishes, the release read back for its immutability once it has (`tools/provenance.js`),
 its notes saying each reading that missed its mark and, from [docs/DESIGN.md](docs/DESIGN.md) (Measured on the show
 laptop), each of the show laptop's readings that triggered its change and those not measured. For every push, a tag and a run asked for by hand
-(Actions, CI, Run workflow), it takes the Windows readings of that zip on `windows-2025` with Defender's real-time
-monitoring turned back on first (the evidence lane, its actions pinned by commit: what each reading is, its mark and
+(Actions, CI, Run workflow), it takes the Windows readings of that zip on `windows-2025`, those that need Defender (R2,
+R9 and R10) in a take of their own with its real-time monitoring turned back on, then the rest with it put back as the
+image left it (the
+evidence lane, its actions pinned by commit: what each reading is, its mark and
 what a miss means are in [docs/INSTALL.md](docs/INSTALL.md)), one lane at a time per branch, never cancelled once it
 runs: a newer push's waits its turn. The readings inform a release and never hold it. A CI run's development build is the artifact named
 `AGMessage-Portable-<version>.zip`: the zip itself, to Extract All as a release's. `tools\build-portable.ps1` builds the

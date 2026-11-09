@@ -1037,24 +1037,37 @@ AGMessage for real, on `windows-2025`, elevated (a hosted runner's account is an
 push, a tag and a run asked for by hand; the release is published only once it passed. A test is a gate, never a
 reading.
 
-- **The job.** Defender's real-time monitoring back on first (`tools/defender-on.ps1`, as the readings lane does); Inno
-  Setup 7.1.0 pinned and checked as the installer job pins it; every action pinned by its commit, every step bounded
-  inside the job's bound, and the life cycle's own step holding every bound its tests and hooks declare (`test/lifecycle.test.js`
-  sums them), so a run slow inside its tests' bounds is never cut short with nothing said. Every wait of a test ends by
-  itself: an installer is waited for 11 minutes at most and never ended from the test (Inno Setup's rollback does not run
-  on a kill), and while one still runs the next install is refused at once, naming it, so the tests after a hung
-  installer fail by their names and none runs beside it; the stand-ins it starts (a silent listener, a file held open)
-  are refused when they do not come up within a minute and ended within 20 s when asked; a portable copy that will not
-  stop at loopback has its whole tree ended; the long programs (`machine.js`, the facts reader, `launch.js`, the
-  uninstaller) run without holding the test's loop, so its own bound ends its wait; and the run gives a test or hook that
-  names no bound the longest any test declares (`--test-timeout`) and ends the file once its last test and hook have,
-  whatever a hung one left running (`--test-force-exit`), so the count and the logs' upload still run. Then **the release order** (`tools/lifecycle.js order`): this build's install version must be
-  above the newest release's, read from the build its notes name on their first line ("Build 0.6.0+41.abc1234.", as the
-  release job writes them), or an AGMessage installed from that release would refuse this build's installer; a list or
-  notes that cannot be read stop the job. Then **three builds from one payload**: this build's installer, the installer
-  job's (the one a release ships); the build before it, the zip's stage stamped one build lower (at build 1, the highest
-  build of the line below); and the next build, whose server ends at once with code 1 (`tools/lifecycle.js stage`), each
-  built by `installer/build-installer.ps1`, which checks the version the file carries.
+- **The job.** On GitHub's image as it is: Defender's real-time monitoring off and `C:\` and `D:\` excluded, as the
+  image leaves them, and no step turns it on. In CI runs 105, 109 and 110 every job that ran `tools/defender-on.ps1` was
+  lost. Seen in run 110: its four such jobs (the life cycle, the lane and two canaries; three of the four with the
+  runner's own processes and folder excluded again) went silent about ten minutes after Defender came on and were failed
+  by the service about 45 minutes after their last report. Derived for runs 105 and 109, where nothing was excluded, from
+  the 45 minutes the service was reported (not seen) to wait: lost some 10 to 11 minutes after it came on. A job left as
+  the image made it lived its whole hour beside three that were lost (run 109). The life cycle runs far longer than ten
+  minutes, so it runs as that job did, and **whether an install, an upgrade, a rollback, a go back and an uninstall pass
+  under Defender is no longer tested in CI**: the readings lane's R2, R9 and R10 (below) time laying the payload, the
+  upgrade's backup and `node.exe`'s extraction with Defender on, and none of them runs the installer; lab 3 takes those
+  three on the laptop. The installer under the laptop's own Defender is the show laptop's: lab 6's upgrade during a
+  rehearsal and lab 7's Upgrade and Go back (lab 4 runs the installer under Smart App Control, not Defender's scanning); no
+  lab line takes a first install, a rollback or an uninstall under Defender.
+  Inno Setup 7.1.0 pinned and checked as the installer job pins it; every action pinned by its commit, every step
+  bounded inside the job's bound, and the life cycle's own step holding every bound its tests and hooks declare (`test/lifecycle.test.js` sums them), so a run slow inside its tests'
+  bounds is never cut short with nothing said. Every wait of a test ends by itself: an installer is waited for 11
+  minutes at most and never ended from the test (Inno Setup's rollback does not run on a kill), and while one still runs
+  the next install is refused at once, naming it, so the tests after a hung installer fail by their names and none runs
+  beside it; the stand-ins it starts (a silent listener, a file held open) are refused when they do not come up within a
+  minute and ended within 20 s when asked; a portable copy that will not stop at loopback has its whole tree ended; the
+  long programs (`machine.js`, the facts reader, `launch.js`, the uninstaller) run without holding the test's loop, so
+  its own bound ends its wait; and the run gives a test or hook that names no bound the longest any test declares
+  (`--test-timeout`) and ends the file once its last test and hook have, whatever a hung one left running
+  (`--test-force-exit`), so the count and the logs' upload still run. Then **the release order**
+  (`tools/lifecycle.js order`): this build's install version must be above the newest release's, read from the build its
+  notes name on their first line ("Build 0.6.0+41.abc1234.", as the release job writes them), or an AGMessage installed
+  from that release would refuse this build's installer; a list or notes that cannot be read stop the job. Then **three
+  builds from one payload**: this build's installer, the installer job's (the one a release ships); the build before it,
+  the zip's stage stamped one build lower (at build 1, the highest build of the line below); and the next build, whose
+  server ends at once with code 1 (`tools/lifecycle.js stage`), each built by `installer/build-installer.ps1`, which
+  checks the version the file carries.
 - **The life cycle** (`installer/test/lifecycle.test.js`, node:test, one test after another, each leaving what the next
   begins from): a quiet first install with no `/ADMIN=`, another `/DIR=`, a junction or a folder another account made at
   `%ProgramData%\AGMessage`, and a portable copy on the port, each refused with its words and nothing made; the build
@@ -1122,28 +1135,54 @@ a reading: the installer's life cycle in CI is a gate, as every test is (below).
   job has built the zip, for every push, a `v*` tag and a run asked for by hand (Actions, CI, Run workflow), never for a
   pull request (its commits are pushes already). It runs one at a time per branch or tag, in a concurrency group of its
   own that never cancels a lane once it runs: a newer push's lane waits its turn, the newest waiting taking the place of
-  an older one still waiting, so every lane runs whole (its two takes at most 38 and 24 minutes, each ending itself) and a
-  regression shows on the next readings taken; its checkout keeps no credential (the stand-in tasks run the bundle's code from that folder).
-  Its first step after that checkout, `tools/defender-on.ps1`, turns Defender's real-time monitoring back on (GitHub's
-  image turns it off), removes every exclusion it finds (the image's `C:\` and `D:\` among them), excludes again only
-  the runner's own processes and the folder they run from (found from its running processes; never a drive root, and
-  never a folder that holds or lies in what the readings and the life cycle measure: the workspace, the temp folders,
-  `C:\agm-readings`, AGMessage's folders, none of which is excluded), and records it all, read back from Defender
-  itself. The runner's own are excluded because every runner that ran more than about 11 minutes after Defender came
-  back with nothing excluded was lost (CI runs 105 and 109; the 11 derived from the hosted service's reported 45 minutes
-  before it fails a runner it no longer hears), while one left as the image made it lived; whether this keeps them is
-  for the runs after 109 to show. On means real-time monitoring and scanning on access on, in Defender's Normal mode (in
-  passive or EDR block mode it does no real-time scanning), and no exclusion but the runner's own it made: any other
-  path, process or extension, or a list not read, is not on. The image's other Defender settings (archive,
-  download and script scanning, behaviour monitoring, cloud protection) stay as it left them, so the runner's Defender
-  is narrower than a laptop's: lab 3 is the laptop's own. Then the newest release published is named and its zip
-  downloaded (a GitHub answer that fails here stops nothing: R13 then reads not run, and R2 lays this build over its
-  own, each saying why); `tools/readings-take.js` lays the zip down and takes each reading this build can, each on its
-  own (one that fails is written with why, and the rest are taken), reading Defender again at the end; and
-  `tools/readings.js` judges each against its mark. The job's summary is the table below with the run's verdicts; its
-  artifact, `agmessage-readings-<commit>`, holds the measurements and the verdicts. A reading that needs Defender on and
-  was taken without it is never met: it reads "not run", unless it is over its mark anyway, which Defender would only
-  make worse.
+  an older one still waiting, so every lane runs whole (its three takes given deadlines of 6, 23 and 24 minutes, each
+  ending itself within its step's limit) and a regression shows on the next readings taken; its checkout keeps no
+  credential (the stand-in tasks run the bundle's code from that folder). Node, the zip, the installer and the newest
+  release published (named, and its zip downloaded: a GitHub answer that fails here stops nothing, R13 then reads not
+  run, and R2 lays this build over its own, each saying why) are had first: nothing measured depends on Defender while
+  they are downloaded, since R2 and R10 open the zips with it on.
+  Then `tools/defender-on.ps1` turns Defender's real-time monitoring back on (GitHub's image turns it off), removes
+  every exclusion it finds (the image's `C:\` and `D:\` among them), excludes again only the runner's own processes and
+  the folder they run from (found from its running processes; never a drive root, and never a folder that holds or lies
+  in what the readings measure or AGMessage's own: the workspace, the temp folders, `C:\agm-readings`, AGMessage's
+  folders, none of which is excluded), and records it all, read back from Defender itself. On means real-time monitoring
+  and scanning on access on, in Defender's Normal mode (in passive or EDR block mode it does no real-time scanning), and
+  no exclusion but the runner's own it made: any other path, process or extension, or a list not read, is not on. The
+  image's other Defender settings (archive, download and script scanning, behaviour monitoring, cloud protection) stay
+  as it left them, so the runner's Defender is narrower than a laptop's: lab 3 is the laptop's own. In the step right
+  after it, `tools/readings-take.js` lays the zip down and takes the readings that need Defender, R2, R10 and R9, with
+  it on (Take A, with a deadline of 6 minutes; about 3 minutes at run 109's times), reading Defender again at their end. Each
+  begins only while its own bound (5, 2 and 2 minutes) fits in what is left of that deadline: at run 109's times (R2
+  142 s, the payload laid in about 20 s, R10 15 s, R9 3 s) all three begin with about a minute to spare, and an R2 past
+  about 3.4 minutes leaves R9 not taken that run, one past about 3.7 minutes R10 too. In the step right after Take A,
+  whatever it ended with and before any other reading, `tools/defender-off.ps1` puts Defender back as the image left it:
+  real-time monitoring off, the runner's own exclusions removed and every exclusion `tools/defender-on.ps1` removed
+  added back (`C:\` and `D:\` when its record cannot be read), each on its own and recorded as it goes, then read back
+  for up to 30 s, the monitoring asked off again at each read that still says it is on; it never fails the job. Its
+  record is written beside the readings, and the two are kept on the server at once
+  (`agmessage-readings-<commit>-defender-<attempt>`), so a runner lost in a later take still leaves what Take A took and
+  Defender's being put back. Defender is on for `tools/defender-on.ps1`'s read-back and Take A: about 3.5 minutes at run
+  109's times (not measured with this order), and a slow R2 or a slow take can keep it on past ten minutes, since Take A
+  ends itself only within its step's limit of 12 minutes.
+  Why. The runner's own are excluded because, in CI runs 105 and 109, every runner that ran more than about 10 minutes
+  after Defender came back with nothing excluded was lost (derived, not seen: some 10 to 11 minutes after, from when the
+  hosted service failed them less the 45 minutes it was reported to wait), while one left as the image made it lived (run
+  109) and run 101's lane, done about 8 minutes after turning Defender on, was not lost. Seen in run 110: that did
+  not keep them either. Its four jobs that ran `tools/defender-on.ps1` (the life cycle, the lane and two canaries that
+  did no AGMessage work; three of the four with the runner's own excluded, one canary with them scanned) went silent
+  within a second or two of one another, about ten minutes after Defender came on, and the service failed them about 45
+  minutes after their last report; only the two canaries kept evidence, which shows healthy machines up to their last
+  heartbeat, about 15 s before they went silent. Run 101's lane, which ended about 8 minutes after turning Defender on, was
+  not lost. How Defender's coming on ends a hosted runner is not known, and cannot be seen from inside the machine;
+  whether taking Defender's readings in a take of their own and putting it back right after keeps the lane's runner is
+  for the runs after 110 to show.
+  Then every other reading this build can take is taken without Defender, each on its own (one that fails is written
+  with why, and the rest are taken), and `tools/readings.js` judges each against its mark. The record says which take
+  took each reading and whether that take was given Defender's record. The job's summary is the table below with the
+  run's verdicts; its artifact, `agmessage-readings-<commit>`, holds the measurements and the verdicts. A reading that
+  needs Defender on and was taken without it (Defender not on as the readings need it, or a take given no Defender
+  record, which the lane begins after the step that puts Defender back, whatever that step ended with) is never met: it reads "not run", unless it is over
+  its mark anyway, which Defender would only make worse.
 - **Bounded.** Every step of the job has a bound of its own, and together they end inside the job's, so the job ends
   passed or failed, never cancelled by its own timeout, and the release that waits for it still runs. The take bounds
   itself, so its step never needs the runner to cancel it: each reading has a bound of its own (`BOUNDS` in
@@ -1161,15 +1200,20 @@ a reading: the installer's life cycle in CI is a gate, as every test is (below).
   made account is ended by Task Scheduler at 10 minutes whatever the lane does. A Ctrl+C, Ctrl+Break or SIGTERM (the
   runner's cancel at a step's limit) writes the record at once, not whole and saying what stopped it, and removes the
   tasks and rules before the take exits 2, inside the 7.5 s the runner waits; the accounts are the thrown-away runner's.
-  The take exits as soon as its record is written, so no handle left open keeps its step alive. **Two takes**: the
-  readings but R11 and R6 (a deadline of 38 minutes, in a step of 44), their record then kept as the artifact
-  (`agmessage-readings-<commit>`), then R11 and R6, which log on as standard accounts the lane makes, added to the same
-  record (a deadline of 24 minutes, in a step of 30, run whatever the first ended with), then the verdicts and the
-  artifact again: a runner lost in the accounts' readings still leaves everything taken before them on the server. A
-  reading left to the other take reads "not taken here: left to a take of its own" until that take writes it. A runner
+  The take exits as soon as its record is written, so no handle left open keeps its step alive. **Three takes**, one
+  record: R2, R10 and R9 with Defender on (a deadline of 6 minutes, in a step of 12; their bounds 5, 2 and 2 minutes),
+  their record and Defender's being put back kept as an artifact at once, then the readings but those and R11 and R6,
+  added to the same record without Defender (a deadline of 23 minutes, in a step of 29, run whatever the first ended
+  with), the record then kept as the artifact (`agmessage-readings-<commit>-taken-<attempt>`), then R11 and R6, which
+  log on as standard accounts the lane makes, added to it too (a deadline of 24 minutes, in a step of 30, run whatever the takes before ended with), then the
+  verdicts and the artifact again: a runner lost in the accounts' readings still leaves everything taken before them on
+  the server. Only the first take is given Defender's record (`--defender`); a take added without it keeps the record's
+  Defender as the take before read it and asks nothing of it. A reading left to another take reads "not taken here: left
+  to a take of its own" until that take writes it, and one the record already holds is kept as it is. A runner
   that stops answering the service is failed by GitHub some time later with no log and no annotation, and nothing on it
-  is kept (run 105's two elevated jobs, both attempts): no step's limit is 45 minutes, the time a hosted Windows runner's
-  loss is reported to take to be failed, so a step's limit and a lost runner are not read as one.
+  is kept (run 105's two elevated jobs, both attempts): no step's limit is 45 minutes, about the time a lost hosted
+  Windows runner takes to be failed after its last report (seen in run 110, 15:00:27 to 15:45:57; reported, not
+  measured, for runs 105 and 109), so a step's limit and a lost runner are not read as one.
 - **CI's alone.** `take` registers tasks as SYSTEM and LocalService, adds a firewall rule and grants LocalService its
   work folder, so it refuses, before it makes or removes anything, a machine that is not a GitHub-hosted runner, a work
   folder it did not make, and a `\AGMessage\Server` task it did not make (the installed node's). It is never run on the

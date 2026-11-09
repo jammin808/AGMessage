@@ -7190,7 +7190,7 @@ laptop and no Board device walked)
   beside them and do no work of AGMessage's, each saying it is alive every minute for an hour: one with Defender turned
   back on first, the other on the image as it is (only the first lost: Defender's scanning; both: the hosted runners;
   neither: the two jobs' own work). They are removed once they have answered, and the release waits for neither.
-- CI's elevated Windows jobs turn Defender back on with only the runner's own processes and folder excluded. Run 109
+- `tools/defender-on.ps1` turns Defender back on with only the runner's own processes and folder excluded. Run 109
   answered the canaries. Seen: the job that turned Defender back on and did nothing else was failed with the life cycle
   and the lane, the three within about a second (12:55:14 to 12:55:15), some 56 minutes after each had turned Defender
   on (11:59:21 to 11:59:33), while the job left as the image made it, started in the same second, said it was alive for
@@ -7208,10 +7208,11 @@ laptop and no Board device walked)
   ProgramData and the user's local application data), each recorded once Defender took it. On is now real-time
   monitoring and scanning on access on, in Defender's Normal mode, with no exclusion but those: any other path (a
   wildcard or a short name among them, never read as what it covers), any other process, any extension, or a list not
-  read, in the script and in `tools/readings.js`'s judge alike, at the start and at the lane's end, which now reads the
-  process and extension exclusions too. Whether this keeps the runners is the next run's to say. The image's canary is
-  gone (answered), and the Defender canary is now two, with the runner's own excluded as the life cycle and the lane now
-  do, and scanned as before (`-ScanRunner`), each writing every 20 s Defender's state, its log and what it found, the
+  read, in the script and in `tools/readings.js`'s judge alike, at the start and at the end of the readings taken with
+  it, which now reads the process and extension exclusions too. Whether this keeps the runners is the next run's to
+  say. The image's canary is gone (answered), and the Defender canary became two, with the runner's own excluded as
+  the life cycle and the lane then did, and scanned as before (`-ScanRunner`), each writing every 20 s Defender's
+  state, its log and what it found, the
   System log's warnings, the runner listener's warnings and errors (never the worker's log) and its processes and
   connections (`tools/canary-evidence.ps1`, run by each step for its minutes, every line of every file through a filter
   that blanks anything shaped like a token, a signature or a key), and uploading that after each step, every 2 minutes
@@ -7221,6 +7222,64 @@ laptop and no Board device walked)
   the judge's (each taken out fails it): the runner's own, matched whole in any case or slash, is on; a folder that
   holds the workspace, a wildcard, a short name, a folder sharing only the runner's prefix, a folder beside what is
   measured, another process, an extension or a list not read is not. Nothing that ships changed.
+- CI's Windows readings lane has Defender's real-time monitoring on only for the take of the readings that need it, and
+  puts it back as the image left it right after that take; the installer's life cycle runs on the image as it is. Run
+  110 answered the canaries. Seen: its four jobs that ran `tools/defender-on.ps1` (the life cycle, the lane, and two
+  canaries that did no AGMessage work; three of the four with the runner's own processes and folder excluded again, one
+  canary with them scanned) went silent within a second or two of 15:00:28, Defender's real-time protection having come
+  on at 14:50:13 to 14:50:27, and the service failed them at 15:45:57 to about 15:47, about 45 minutes after their last
+  report (seen here for the first time; for runs 105 and 109 the 45 minutes was reported, not measured). Only the two
+  canaries kept evidence: uploaded at 15:00:27, it shows healthy machines up to their last heartbeat at 15:00:12
+  (Defender's CPU low, 13 GB free, the runner listener's connections established, Defender's log with no detection or
+  scan, only a signature update at 14:56). In run 109 a job left as the image made it lived its whole hour beside three
+  that were lost, and run 101's lane, which ended about 8 minutes after turning Defender on, was not lost. Derived: in
+  runs 105 and 109 too every job that ran `tools/defender-on.ps1` was lost, some 10 to 11 minutes after Defender came on
+  (when the service failed them, less its reported 45 minutes). Tried and lost: nothing excluded (runs 105 and 109, and
+  run 110's scanned canary) and only the runner's own excluded (run 110: the change above does not prevent it). Never
+  tried: the real-time monitoring on with the image's `C:\` and `D:\` exclusions kept. Not known: how Defender's coming
+  on ends a hosted runner, which cannot be seen from inside the machine. Now the life cycle no longer runs
+  `tools/defender-on.ps1`: it runs as the job that lived its hour did, so whether an install, an upgrade, a rollback, a
+  go back and an uninstall pass under Defender is no longer tested in CI (the lane's R2, R9 and R10 time laying the
+  payload, the upgrade's backup and `node.exe`'s extraction with it on, and none of them runs the installer); the
+  installer under the laptop's own Defender is the show laptop's, lab 6's upgrade during a rehearsal and lab 7's Upgrade
+  and Go back (no lab line takes a first install, a rollback or an uninstall under it). The lane has Node, the zip, the
+  installer and the newest release's zip before it turns Defender back on as before (nothing measured depends on
+  Defender while they are downloaded: R2 and R10 open the zips with it on), then takes R2, R10 and R9 (Take A: their
+  bounds now 5, 2 and 2 minutes, in a take with a deadline of 6 minutes that ends itself within its step's limit of 12;
+  at run 109's times, R2 142 s, the payload laid in about 20 s, R10 15 s, R9 3 s, all three begin with about a minute
+  to spare, and an R2 past about 3.4 minutes leaves R9 not taken that run, one past about 3.7 minutes R10 too), then
+  `tools/defender-off.ps1`, whatever that take ended with, puts Defender back as the image left it: real-time monitoring
+  off first, the runner's own exclusions removed, every exclusion `tools/defender-on.ps1` removed added back (`C:\` and
+  `D:\` when its record cannot be read), each on its own and recorded as it goes, then read back for up to 30 s, the
+  monitoring asked off again at each read that still says it is on (a refusal of that recorded once); it never fails
+  the job, and its record, written beside the readings, is kept on the server at once with what Take A took
+  (`agmessage-readings-<commit>-defender-<attempt>`), so a runner lost in a later take still leaves them. Defender is on
+  for `tools/defender-on.ps1`'s read-back and Take A: about 3.5 minutes at run 109's times (not measured with this
+  order), and a slow R2 or a slow take can keep it on past ten minutes. The rest are taken after it, added to the same
+  record (a deadline of 23 minutes, in a step of 29), then R11 and R6 as before. `tools/readings-take.js`: `--defender`
+  may be left out only by a take that adds to a record (`--add`), which keeps the record's Defender as the take before
+  read it and does not read it at its end; each take is written with whether it was given Defender's record, each
+  reading with the take that took it, and a reading left to another take that the record already holds is kept.
+  `tools/readings.js` holds R2, R9 and R10 to Defender only when their take was given its record: one taken in a take
+  given none reads not run, saying it was taken in that take, which was given no Defender record (the lane puts Defender
+  back as the image left it before it), unless it is over its mark anyway, and R9 taken so is no part of R2's mark; a
+  record without take indexes is judged as before; Defender's words say "when the readings taken with it ended", and
+  name the takes given no record. The judge observes Defender only through the record a take was given and read again
+  at its end, and its words claim no more. The canaries now ask the next question: with Defender turned on and put back
+  as the image left it some 4 to 5 minutes later (`on-then-off`: its evidence at 2 and 4 minutes and their uploads come
+  between; the lane's own window is typically similar, about 4 minutes, not measured), and with the real-time
+  monitoring turned on alone, the image's exclusions kept (`monitoring-only`), does a runner live its hour.
+  `test/readings.test.js` holds the three takes (only the first given Defender's record, each reading taken by exactly
+  one, each bound under its take's deadline), the steps from `tools/defender-on.ps1` to `tools/defender-off.ps1`
+  exactly those two and Take A (its deadline 6 minutes at most, its step's limit no more than that and `STOP_MIN`),
+  Defender turned on only after the downloads, Take A's record kept right after Defender is put back, the script's
+  order and rules (the monitoring asked off again in the read-back, its refusal said once), `take()`'s wiring to the
+  record (one begun and one ended, each reading given its take's index, Defender read again only in `endRecord`), the
+  judge's verdicts per take, and the canary while it runs (its two legs, `on-then-off` putting Defender back after its
+  evidence at 4 minutes whatever came before, `monitoring-only` touching no exclusion, every upload under a name of its
+  own); `test/lifecycle.test.js` holds that no step of the life cycle turns Defender on or changes it, that the job says
+  what CI no longer tests and where it is taken instead, and that the comment above the job does not say Defender is
+  turned on. Whether this keeps the lane's runner is the next run's to say. Nothing that ships changed.
 - The admin page draws Accounts held aside with its first fill, never before it, and an adoption's one-time passwords
   with the panel's new state, from one answer. CI's browser smoke on Windows (run 106) missed twice on the held list: the
   first left click on ana's ⋯ opened no menu (the click meant to close it then opened one, left open with the focus in

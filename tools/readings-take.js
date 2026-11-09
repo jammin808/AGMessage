@@ -1,14 +1,21 @@
 #!/usr/bin/env node
 'use strict';
 /**
- * The Windows evidence lane's measuring run (the 0.6.0 plan's Part 6, unit U7), on the CI's windows-2025 runner, elevated,
- * after tools/defender-on.ps1 has turned Defender's real-time monitoring back on. It writes what it measured; the verdicts
- * are tools/readings.js's.
+ * The Windows evidence lane's measuring run (the 0.6.0 plan's Part 6, unit U7), on the CI's windows-2025 runner, elevated:
+ * the readings that need Defender after tools/defender-on.ps1 has turned its real-time monitoring back on, the rest after
+ * tools/defender-off.ps1 has put it back as the image left it. It writes what it measured; the verdicts are
+ * tools/readings.js's.
  *
- *   node tools/readings-take.js take --zip <bundle.zip> --defender <defender.json> --out <raw.json>
+ *   node tools/readings-take.js take --zip <bundle.zip> --out <raw.json> [--defender <defender.json>]
  *                                    [--previous <the newest release's zip>] [--work C:\agm-readings] [--port 3124]
  *                                    [--repo <owner/name> --tag <vX.Y.Z>] [--installer <AGMessage-Setup-…-unsigned.exe>]
  *                                    [--deadline-min <n>] [--only <R11,R6>] [--skip <R11,R6>] [--add]
+ *     --defender names tools/defender-on.ps1's record: a take given it keeps that record and reads Defender again at its
+ *     end. Only a take that adds to an earlier record (--add) may be given none (the lane's takes after
+ *     tools/defender-off.ps1): it keeps the record's `defender` and `defenderEnd` as the take before wrote them and asks
+ *     Windows nothing of Defender. Each take is written in `takes` with whether it was given that record (`defender`), and
+ *     each reading begun in `times` with the take that took it (`take`, its index in `takes`), so the judge holds a
+ *     reading that needs Defender to it only when its take was given that record.
  *       R2   the bundle's payload laid over the one before it (the newest release's, when its zip is given; this build's
  *            own when not, said so), round by round: each file inflated to a name of its own beside it, then renamed
  *            over the earlier one
@@ -53,9 +60,11 @@
  *     lane made that outlives a reading (`held`: tasks, firewall rules, standard accounts, watchdogs) is removed at its
  *     end, and at a Ctrl+C, Ctrl+Break or SIGTERM the record is written at once and its tasks and rules removed before it
  *     exits 2; it exits once its record is written, whatever handle is still open. --only and --skip name the readings
- *     a take takes or leaves to another (a skipped one written as left to it), and --add adds to the record an earlier
- *     take of the same job wrote at --out: CI takes the readings as standard accounts (R11, R6) in a step of their own,
- *     after the rest are kept as an artifact.
+ *     a take takes or leaves to another (a skipped one written as left to it, unless the record it adds to holds it
+ *     already: what an earlier take wrote of it is kept), and --add adds to the record an earlier take of the same job
+ *     wrote at --out: CI takes the readings that need Defender (R2, R9, R10) first, with it on, then the rest with it put
+ *     back as the image left it, then the readings as standard accounts (R11, R6) in a step of their own, after the rest
+ *     are kept as an artifact.
  *     It is CI's alone: it refuses a machine that is not a GitHub-hosted runner, a work folder it did not make, and a
  *     \AGMessage\Server task it did not make, before anything is made or removed. Exit 0 once the record is written, 2
  *     when it cannot be, 64 for a word it does not know, a run off Windows or a machine it refuses.
@@ -89,14 +98,22 @@ const ORDER = Object.freeze(['R2', 'R10', 'R5', 'R1', 'R8', 'R4', 'R7', 'R12', '
  * begins only while the bound fits in what is left of the lane's deadline. Each is set above what the reading takes on a
  * healthy windows-2025 runner (the readings but R11 and R6 took under 30 minutes together in run 101; R12's waits are a
  * fixed 150 s and 90 s), and R11's and R6's, never yet taken whole, above the sum of their rounds' usual waits, so a slow
- * runner is cut by a reading's bound, with what it took kept, never by the step's limit.
+ * runner is cut by a reading's bound, with what it took kept, never by the step's limit. R2, R10 and R9, which need
+ * Defender, are taken one after another in a take of their own while it is on, with a deadline of 6 minutes (R2 142 s,
+ * R10 15 s and R9 3 s in run 109, the payload laid in about 20 s between R2 and the other two). Each begins only while
+ * its bound fits in what is left of that deadline: at run 109's times all three begin with about a minute to spare, and
+ * an R2 past about 3.4 minutes leaves R9 not taken this run, one past about 3.7 minutes R10 too. The take ends itself
+ * within its step's limit whatever they met, so Defender is put back as the image left it after that take; at run 109's
+ * times about 3.5 minutes after it came on (not measured with this order), and past ten minutes when R2 or the take is
+ * slow.
  */
-const BOUNDS = Object.freeze({ R2: 5, R10: 3, R5: 2, R1: 10, R8: 4, R4: 6, R7: 1, R12: 6, R9: 5, 'R3′': 8, R13: 5, R11: 12, R6: 10 });
+const BOUNDS = Object.freeze({ R2: 5, R10: 2, R5: 2, R1: 10, R8: 4, R4: 6, R7: 1, R12: 6, R9: 2, 'R3′': 8, R13: 5, R11: 12, R6: 10 });
 /** The lane's deadline, in minutes from the take's start, when the command names none (--deadline-min). */
 const DEADLINE_MIN = 38;
 /**
  * What a take needs after its deadline to end by itself, in minutes: a cut reading's minute to settle, the cleanup's two,
- * Defender read again and the record written. A take step's limit is its deadline and this at least (test/readings.test.js).
+ * Defender read again (by a take given its record) and the record written. A take step's limit is its deadline and this at
+ * least (test/readings.test.js).
  */
 const STOP_MIN = 6;
 /** How long a reading at its bound has to end (its own finally blocks: its tasks removed) before it is written cut and the lane goes on. */
@@ -1292,7 +1309,8 @@ async function takeR6(L, { node, root, self, work, sys }, { exportMs = 150000, p
 /**
  * The readings of `plan` ([id, fn(progress)], in order) taken one after another into `raw.readings`, each on its own and
  * within its own bound (`boundsMs[id]`) and the lane's deadline (`deadlineMs` from `began`), so the take ends by itself:
- *   - one `skip` names is written with its words, and not taken;
+ *   - one `skip` names is written with its words, and not taken; one the record already holds (written by an earlier take
+ *     this one adds to) is kept as it is;
  *   - one begins only while its bound fits in what is left of the deadline, else it is written "not taken: the lane's
  *     deadline" with the time left and the time it needs, so a reading begun is never cut by the step's limit;
  *   - as it begins its record says so (`running`) and is written, and each round it reports (`progress`) is written beside
@@ -1300,10 +1318,11 @@ async function takeR6(L, { node, root, self, work, sys }, { exportMs = 150000, p
  *   - at its bound every wait of it ends and no program of it starts (`within`, by its own bound in `bounded`, which the
  *     next reading does not share); one not ended `settleMs` after its bound is written cut, its rounds so far kept, and
  *     the lane goes on; one that ends past its bound is written cut too, what it took kept and never judged;
- *   - its record is written as it ends, its begin and its seconds kept in `raw.times` and said on the console.
+ *   - its record is written as it ends, its begin, its seconds and the take that took it (`take`, this take's index in
+ *     `raw.takes`, when given) kept in `raw.times` and said on the console.
  * A record that cannot be written is said, and the readings go on. Resolves once each reading of the plan is written.
  */
-async function takeAll(plan, { raw, save, say = (line) => console.log(line), began = now(), deadlineMs, boundsMs, skip = new Map(), settleMs = SETTLE_MS }) {
+async function takeAll(plan, { raw, save, say = (line) => console.log(line), began = now(), deadlineMs, boundsMs, skip = new Map(), settleMs = SETTLE_MS, take = null }) {
   if (!raw.readings || typeof raw.readings !== 'object') raw.readings = {};
   if (!raw.times || typeof raw.times !== 'object') raw.times = {};
   const at = () => Math.round((now() - began) / 1000);
@@ -1312,6 +1331,10 @@ async function takeAll(plan, { raw, save, say = (line) => console.log(line), beg
     const boundMs = boundsMs[id];
     const leftMs = deadlineMs - (now() - began);
     let rec = null;
+    if (skip.has(id) && Object.hasOwn(raw.readings, id)) {
+      say('readings-take: ' + id + ' left to another take, and kept as the record it adds to holds it');
+      continue;
+    }
     if (skip.has(id)) rec = { skipped: skip.get(id) };
     else if (!(boundMs > 0)) rec = { error: 'it has no bound of its own (BOUNDS)' };
     else if (boundMs > leftMs) rec = { skipped: 'not taken: the lane\'s deadline (' + span(Math.max(0, leftMs)) + ' left of its ' + span(deadlineMs) + ', and its own bound is ' + span(boundMs) + ')' };
@@ -1323,7 +1346,7 @@ async function takeAll(plan, { raw, save, say = (line) => console.log(line), beg
     }
     const running = 'begun at ' + at() + ' s, its own bound ' + span(boundMs);
     raw.readings[id] = { running };
-    raw.times[id] = { begunS: at() };
+    raw.times[id] = { begunS: at(), ...(Number.isInteger(take) ? { take } : {}) };
     write('as ' + id + ' began');
     say('readings-take: ' + id + ' ' + running);
     const end = now() + boundMs;
@@ -1438,6 +1461,36 @@ function recordAt(file) {
   return { raw: r };
 }
 
+/**
+ * The record a take writes into: the one an earlier take wrote (`was.raw`, --add) or a new one, not whole until this take
+ * ends, with this take's entry added to `takes` ({at, deadlineMin, only, skip, defender, ended}; one lost part way has no
+ * `ended`), `defender` saying whether it was given tools/defender-on.ps1's record (--defender). With
+ * that record, `defender` is it (null, said, when it cannot be read); without it (a take added after
+ * tools/defender-off.ps1), the record's `defender` and `defenderEnd` stay as the take before wrote them. {raw, step}.
+ */
+function beginRecord(was, o, env, { say = (line) => console.error(line) } = {}) {
+  const raw = was.raw || newRecord(env);
+  raw.complete = false;
+  delete raw.stopped;
+  const step = { at: new Date().toISOString(), deadlineMin: o.deadlineMin || DEADLINE_MIN, only: o.only || [], skip: o.skip || [], defender: !!o.defender, ended: '' };
+  raw.takes = [...(Array.isArray(raw.takes) ? raw.takes : []), step];
+  if (step.defender) {
+    try { raw.defender = readJson(o.defender); } catch (e) { raw.defender = null; say('readings-take: no Defender record (' + e.message + ')'); }
+  }
+  return { raw, step };
+}
+
+/**
+ * A take's end in its record: a take given Defender's record reads it again (`defenderEnd`), so the judge knows whether it
+ * was still on when the readings taken with it ended; a take given none asks Windows nothing of Defender and leaves
+ * `defenderEnd` as the take before wrote it. Then the take's end, and the record whole.
+ */
+async function endRecord(raw, step, L) {
+  if (step.defender) raw.defenderEnd = await guarded(() => L.ps(SCRIPTS.defender));
+  step.ended = new Date().toISOString();
+  raw.complete = true;
+}
+
 async function take(o) {
   if (process.platform !== 'win32') { console.error('readings-take: the readings are Windows\'; nothing was taken'); return 64; }
   const began = now();
@@ -1455,14 +1508,9 @@ async function take(o) {
   const out = path.resolve(o.out);
   const was = o.add ? recordAt(out) : {};
   if (was.refused) { console.error('readings-take: ' + was.refused + '; nothing was taken'); return 2; }
-  const raw = was.raw || newRecord(env);
-  raw.complete = false;
-  delete raw.stopped;
-  const deadlineMin = o.deadlineMin || DEADLINE_MIN;
-  // Each take that wrote this record, with its deadline and what it took or left: one lost part way has no `ended`.
-  const step = { at: new Date().toISOString(), deadlineMin, only: o.only || [], skip: o.skip || [], ended: '' };
-  raw.takes = [...(Array.isArray(raw.takes) ? raw.takes : []), step];
-  try { raw.defender = readJson(o.defender); } catch (e) { raw.defender = null; console.error('readings-take: no Defender record (' + e.message + ')'); }
+  // Each take that wrote this record, with its deadline, what it took or left and whether it was given Defender's record.
+  const { raw, step } = beginRecord(was, o, env);
+  const deadlineMin = step.deadlineMin;
   const save = () => { fs.mkdirSync(path.dirname(out), { recursive: true }); writeJson(out, raw); };
   fs.rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 });
   fs.mkdirSync(path.join(work, 'lane'), { recursive: true });
@@ -1673,6 +1721,7 @@ async function take(o) {
       deadlineMs: deadlineMin * 60_000,
       boundsMs: Object.fromEntries(Object.entries(BOUNDS).map(([id, min]) => [id, min * 60_000])),
       skip: new Map((o.skip || []).map((id) => [id, 'not taken here: left to a take of its own (--skip), which had not taken it when this record was written'])),
+      take: raw.takes.length - 1,
     };
     await takeAll(plan(['R2']), opts);
     try {
@@ -1683,13 +1732,11 @@ async function take(o) {
     await takeAll(plan(ORDER.filter((id) => id !== 'R2')), opts);
   } finally {
     // Whatever a reading left (a task its own finally could not remove, an account made before a failure, a watchdog that
-    // outlived its end) is removed here, within two minutes, before Defender is read again.
+    // outlived its end) is removed here, within two minutes, before Defender is read again (a take given its record).
     raw.cleanup = release(L);
   }
-  raw.defenderEnd = await guarded(() => L.ps(SCRIPTS.defender));
+  await endRecord(raw, step, L);
   for (const s of signals) process.removeListener(s, onSignal);
-  step.ended = new Date().toISOString();
-  raw.complete = true;
   try { save(); } catch (e) { console.error('readings-take: the record could not be written (' + e.message + ')'); return 2; }
   console.log('readings-take: written to ' + o.out + ' in ' + Math.round((now() - began) / 1000) + ' s');
   return 0;
@@ -1739,7 +1786,8 @@ async function main(argv) {
   if (a.verb === 'probe-run' && a.positional.length === 1) return probeRun(a.positional[0]);
   if (a.verb === 'probe-export' && a.positional.length === 1) return probeExport(a.positional[0]);
   if (a.verb === 'probe-server' && a.positional.length === 1) return probeServer(a.positional[0]);
-  if (a.verb === 'take' && !a.positional.length && a.flags.zip && a.flags.defender && a.flags.out) {
+  // --defender may be left out only by a take that adds to an earlier record (--add): the lane's takes after tools/defender-off.ps1.
+  if (a.verb === 'take' && !a.positional.length && a.flags.zip && a.flags.out && (a.flags.defender || a.flags.add === true)) {
     const port = Number(a.flags.port || 3124);
     if (!Number.isInteger(port) || port < 1024 || port > 65535) { console.error('readings-take: --port is a port from 1024 to 65535'); return 64; }
     const deadlineMin = Number(a.flags['deadline-min'] || DEADLINE_MIN);
@@ -1747,9 +1795,9 @@ async function main(argv) {
     const only = readingsOf(a.flags.only);
     const skip = readingsOf(a.flags.skip);
     if (!only || !skip) { console.error('readings-take: --only and --skip name readings the lane takes, separated by commas (' + ORDER.join(',') + ')'); return 64; }
-    return take({ zip: a.flags.zip, previous: a.flags.previous || '', defender: a.flags.defender, out: a.flags.out, work: a.flags.work || 'C:\\agm-readings', port, repo: a.flags.repo || '', tag: a.flags.tag || '', installer: a.flags.installer || '', deadlineMin, only, skip, add: a.flags.add === true });
+    return take({ zip: a.flags.zip, previous: a.flags.previous || '', defender: a.flags.defender || '', out: a.flags.out, work: a.flags.work || 'C:\\agm-readings', port, repo: a.flags.repo || '', tag: a.flags.tag || '', installer: a.flags.installer || '', deadlineMin, only, skip, add: a.flags.add === true });
   }
-  console.error('readings-take: take --zip <bundle.zip> --defender <defender.json> --out <raw.json> [--previous <zip>] [--work <folder>] [--port <n>] [--repo <owner/name> --tag <vX.Y.Z>] [--installer <exe>] [--deadline-min <n>] [--only <ids>] [--skip <ids>] [--add] | probe-server <dir> | probe-exit <dir> | probe-release <dir> | probe-offline <dir> | probe-run <dir> | probe-export <dir>');
+  console.error('readings-take: take --zip <bundle.zip> --out <raw.json> --defender <defender.json> (left out only with --add, after Defender was turned back off) [--previous <zip>] [--work <folder>] [--port <n>] [--repo <owner/name> --tag <vX.Y.Z>] [--installer <exe>] [--deadline-min <n>] [--only <ids>] [--skip <ids>] [--add] | probe-server <dir> | probe-exit <dir> | probe-release <dir> | probe-offline <dir> | probe-run <dir> | probe-export <dir>');
   return 64;
 }
 
@@ -1777,5 +1825,5 @@ module.exports = {
   sddlOfSave, pipeReach, keepTail, tokenIn, withoutSecrets, placeRefusal, takeR12, take,
   seedHalls, pageSocket, paceMs, takeR1, takeR9, takeR3prime, serveFolders, R1_SIZES, R1_QUIET_MS, PAGE_PACE,
   SERVER_TASK, STAND_IN, DEFINITION_TASK, CONTROL_DEFINITION_TASK, RESTART_TASKS, R11_TASKS, R11_USERS, R11_ROUNDS, WORK_MARK,
-  ORDER, BOUNDS, DEADLINE_MIN, STOP_MIN, SETTLE_MS, takeAll, release, stopOn, recordAt, readingsOf, finish, held, within, left, until, run, endWatchdog,
+  ORDER, BOUNDS, DEADLINE_MIN, STOP_MIN, SETTLE_MS, takeAll, release, stopOn, recordAt, beginRecord, endRecord, readingsOf, finish, held, within, left, until, run, endWatchdog,
 };

@@ -1,22 +1,27 @@
 <#
-  The Windows evidence lane's first step (the 0.6.0 plan's Part 6, unit U7), and the installer's job's first step after it:
-  GitHub's Windows images turn Defender's real-time monitoring off and exclude C:\ and D:\
+  The Windows evidence lane's step before the readings that need Defender (the 0.6.0 plan's Part 6, unit U7), and the
+  Defender canary's: GitHub's Windows images turn Defender's real-time monitoring off and exclude C:\ and D:\
   (actions/runner-images, images/windows/scripts/build/Configure-WindowsDefender.ps1). This turns the monitoring back on,
   removes every exclusion it finds (of paths, processes and extensions: the image's C:\ and D:\ among them), excludes
   again only the runner's own processes and the folder they run from, and records it all, read back from Defender itself
-  (Get-MpComputerStatus, Get-MpPreference), so every reading taken after it says whether Defender scanned what it
-  measured. The image's other settings (archive, download and script scanning, behaviour monitoring, cloud protection)
-  stay as it left them: the runner's Defender is narrower than a laptop's, which lab 3 is for.
+  (Get-MpComputerStatus, Get-MpPreference), so each reading taken with it on says whether Defender scanned what it
+  measured. tools/defender-off.ps1 puts the image's state back from this record right after the readings that need it.
+  The image's other settings (archive, download and script scanning, behaviour monitoring, cloud protection) stay as it
+  left them: the runner's Defender is narrower than a laptop's, which lab 3 is for.
 
     powershell -File tools\defender-on.ps1 -Out <defender.json> [-ScanRunner]
 
-  Why the runner's own are excluded again: every runner that ran more than about 11 minutes after this turned the
-  monitoring on with the image's exclusions removed was lost (CI runs 105 and 109, seven jobs; a lost runner's job is
-  failed by the hosted service, reportedly 45 minutes after it was last heard, which is where the 11 comes from), a job
-  that did nothing else among them, while one left as the image made it kept its runner for its hour (run 109). How is
-  not proved. They are found from the running processes (Runner.*), never named here; the folder is never a drive root
-  and never one that holds or lies in what the readings and the life cycle measure (`kept`). -ScanRunner leaves them
-  scanned as before, for the question alone.
+  Why the runner's own are excluded again: in CI runs 105 and 109 every runner that ran more than about 10 minutes after
+  this turned the monitoring on with the image's exclusions removed was lost (seven jobs, a job that did nothing else
+  among them; derived, not seen: some 10 to 11 minutes after, from when the hosted service failed them less the 45
+  minutes it was reported to wait), while one left as the image made it kept its runner for its hour (run 109) and run
+  101's lane, done about 8 minutes after this, was not lost. Excluding them did not keep the runners of
+  run 110 either (seen: silent about ten minutes after this turned the monitoring on, failed about 45 minutes after their
+  last report), which is why the lane now puts Defender back right after the readings that need it
+  (tools/defender-off.ps1). How is not known. They are found from the running processes (Runner.*), never named here;
+  the folder is never a drive root and never one that holds or lies in what the readings measure or AGMessage's own
+  folders (`kept`). -ScanRunner leaves them scanned as before: run 110 answered the question it was for (scanned, the
+  runner was lost alike) and no job passes it now; it is kept for a question to come.
 
   On means real-time monitoring and scanning on access on, in Defender's Normal mode, and no exclusion but those this
   made for the runner (tools/readings.js judges the record alike). It never fails the job for Defender: a monitoring
@@ -53,7 +58,7 @@ $record = [ordered]@{ v = 1; at = (Get-Date).ToUniversalTime().ToString('o'); be
   removed = [ordered]@{ paths = @(); processes = @(); extensions = @() }
   runner = [ordered]@{ scanned = [bool]$ScanRunner; processes = @(); paths = @(); kept = @() } }
 
-# What the readings and the life cycle measure, which the runner's folder may neither hold nor lie in.
+# What the readings measure and AGMessage's own folders, which the runner's folder may neither hold nor lie in.
 $kept = @()
 try {
   $kept = @(@($env:GITHUB_WORKSPACE, $env:RUNNER_TEMP, $env:TEMP, $env:TMP, 'C:\agm-readings') +

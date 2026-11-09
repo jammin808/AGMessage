@@ -25,8 +25,10 @@
  *
  * Invariants:
  *   - A reading is judged only on what was measured: one not taken, or taken without what its mark needs (Defender's
- *     real-time monitoring on, scanning on access, in its normal mode, for R2, R9 and R10), is "not run" with why, never
- *     met. A measurement over its mark is a miss even without Defender, which only adds to it.
+ *     real-time monitoring on, scanning on access, in its normal mode, for R2, R9 and R10: in a take given Defender's
+ *     record, never one written as given none, which the lane begins after the step that puts Defender back as the
+ *     image left it, whatever that step ended with), is "not run" with why, never met. A measurement over its mark is a miss even without Defender, which only adds
+ *     to it. The judge observes Defender only through the record a take was given and read again at its end.
  *   - The lab lines are the show laptop's and never a runner's: the lane reports each "not run"; only docs/INSTALL.md,
  *     where a person writes what the laptop showed, records one taken.
  *   - The show laptop's readings are a person's: only docs/DESIGN.md, where a person writes what the laptop's health
@@ -347,8 +349,9 @@ function defenderGaps(x, own = {}) {
 
 /**
  * Defender's record as the lane read it: whether it came on (real-time monitoring, scanning on access, its Normal mode,
- * no exclusion but the runner's own), and was still so when the readings ended. A lane cut short has no reading at its
- * end.
+ * no exclusion but the runner's own), and was still so when the readings taken with it ended (the take given its record
+ * reads it again; a take given none asks nothing of it). A lane cut short has no reading at its end. The takes written as
+ * given no Defender record are named.
  */
 function defenderOf(raw) {
   const d = raw && raw.defender && typeof raw.defender === 'object' ? raw.defender : null;
@@ -363,13 +366,39 @@ function defenderOf(raw) {
   let words;
   if (!d) words = 'Defender was not asked (no record of its step)';
   else if (!took) words = 'Defender did not come on as the readings need it (' + tookGaps.join(', ') + ')' + (errors.length ? ' (' + errors.join('; ') + ')' : '');
-  else if (!end) words = 'Defender came on, with the image\'s exclusions removed, but was not read again when the readings ended';
-  else if (!stayed) words = 'Defender came on, with the image\'s exclusions removed, but was not so when the readings ended (' + endGaps.join(', ') + ')';
+  else if (!end) words = 'Defender came on, with the image\'s exclusions removed, but was not read again when the readings taken with it ended';
+  else if (!stayed) words = 'Defender came on, with the image\'s exclusions removed, but was not so when the readings taken with it ended (' + endGaps.join(', ') + ')';
   else {
     const own = listOf(runner.paths).length || listOf(runner.processes).length ? ', the runner\'s own processes and folder alone excluded' : '';
-    words = 'Defender\'s real-time monitoring on, scanning on access, in its Normal mode, the image\'s exclusions of C:\\ and D:\\ removed' + own + ', and still so when the readings ended';
+    words = 'Defender\'s real-time monitoring on, scanning on access, in its Normal mode, the image\'s exclusions of C:\\ and D:\\ removed' + own + ', and still so when the readings taken with it ended';
   }
+  const without = (Array.isArray(raw && raw.takes) ? raw.takes : []).map((t, i) => (t && typeof t === 'object' && t.defender === false ? i + 1 : 0)).filter(Boolean);
+  if (without.length) words += '; take' + (without.length > 1 ? 's ' + without.slice(0, -1).join(', ') + ' and ' + without[without.length - 1] : ' ' + without[0]) + ' of ' + raw.takes.length + ' given no Defender record (the lane puts Defender back as the image left it before ' + (without.length > 1 ? 'them' : 'it') + ')';
   return { asked: !!d, took, stayed, on: took && stayed, words };
+}
+
+/**
+ * The take that took reading `id`, as the record names it (`times[id].take`, its index in `takes`): {take (counted from
+ * 1), defender: false} for one written as given no Defender record (the lane's takes after tools/defender-off.ps1); null
+ * for a record that names no take for it (one take's record), an index that names no take, or a take not written so.
+ */
+function takenWithout(raw, id) {
+  const times = raw && raw.times && typeof raw.times === 'object' ? raw.times[id] : null;
+  const index = times && typeof times === 'object' ? times.take : undefined;
+  const takes = raw && Array.isArray(raw.takes) ? raw.takes : [];
+  if (!Number.isInteger(index) || index < 0 || index >= takes.length) return null;
+  const t = takes[index];
+  return t && typeof t === 'object' && t.defender === false ? { take: index + 1, defender: false } : null;
+}
+
+/**
+ * Defender as reading `x` was taken: the record's (`def`), unless `x` needs Defender and the take that took it was given
+ * no Defender record, which nothing the record says of Defender covers: then not on, with its words.
+ */
+function defenderFor(raw, x, def) {
+  const t = x.defender ? takenWithout(raw, x.id) : null;
+  if (!t) return def;
+  return { ...def, on: false, after: true, words: 'it was taken in take ' + t.take + ', which was given no Defender record (the lane puts Defender back as the image left it before it)' };
 }
 
 const NOT_TAKEN = 'not taken by this lane';
@@ -435,8 +464,10 @@ function judgeR2(r, raw, def) {
   if (worst > 6000) return verdict('missed', what + ': over 6 s alone, before R9\'s backup' + (def.on ? '' : ' (and without Defender, which only adds to it)'), facts);
   if (!def.on) return verdict('not run', what + ', but ' + def.words + ': not the reading its mark needs', facts);
   const r9 = measured(raw, 'R9');
-  const backup = r9.taken ? slowest([r9.value.emptyMs, r9.value.largeMs].filter(isMs)) : Number.NaN;
-  if (!Number.isFinite(backup)) return verdict('open', what + '; the mark is R2 and R9 together, and R9 is not run', facts);
+  // R9 taken in a take given no Defender record is no part of R2's mark, which needs it.
+  const r9Without = r9.taken && takenWithout(raw, 'R9');
+  const backup = r9.taken && !r9Without ? slowest([r9.value.emptyMs, r9.value.largeMs].filter(isMs)) : Number.NaN;
+  if (!Number.isFinite(backup)) return verdict('open', what + '; the mark is R2 and R9 together, and R9 ' + (r9Without ? 'was taken in take ' + r9Without.take + ', which was given no Defender record' : 'is not run'), facts);
   const sum = worst + backup;
   return verdict(sum <= 6000 ? 'met' : 'missed', what + ', with R9\'s backup ' + ms(backup) + ': ' + ms(sum) + (sum <= 6000 ? ' (≤ 6 s)' : ' (over 6 s)'), { ...facts, backupMs: backup });
 }
@@ -733,8 +764,12 @@ function judge(raw) {
       const why = reading.needs && !judgeOne ? 'needs ' + reading.needs.join('; ') : cutShort && m.why === NOT_TAKEN ? 'not taken: the lane ended before it (' + (r.stopped ? 'stopped by ' + String(r.stopped).slice(0, 80) : 'cut short') + ')' : m.why;
       return { ...base, ...verdict('not run', why) };
     }
+    // A reading that needs Defender is judged against it only when the take that took it was given its record; one taken
+    // in a take given none is never met, recorded or open: not run, unless it missed its mark anyway.
+    const its = defenderFor(r, reading, def);
     let v;
-    try { v = judgeOne(m.value, r, def); } catch (e) { v = verdict('not run', 'its record could not be read (' + e.message + ')'); }
+    try { v = judgeOne(m.value, r, its); } catch (e) { v = verdict('not run', 'its record could not be read (' + e.message + ')'); }
+    if (its.after && v.state !== 'missed' && v.state !== 'not run') v = verdict('not run', v.words + ', but ' + its.words + ': not the reading its mark needs', v.facts);
     return { ...base, ...v };
   });
   return {
@@ -1011,6 +1046,6 @@ if (require.main === module) process.exitCode = main(process.argv.slice(2));
 module.exports = {
   READINGS, LABS, STATES, MARKS, SID_NAMES, STANDARD_ACCOUNT,
   rightsMask, daclOf, holds, csvRows, privilegesOf, sidsOf, taskSidOf, ruleFields,
-  defenderOf, defenderGaps, stampFull, judge, summary, notes, labRecord, isJudged, recordInstall, main,
+  defenderOf, defenderGaps, defenderFor, takenWithout, stampFull, judge, summary, notes, labRecord, isJudged, recordInstall, main,
   LAPTOP_IDS, LAPTOP_RECORD, laptopReadings, laptopNotes,
 };

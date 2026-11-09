@@ -162,13 +162,15 @@ CI (`.github/workflows/ci.yml`): `analyze` (lint, secret scan, version), `test-l
 Chrome smoke), `test-crlf` (the suites on Linux on a checkout with Windows' CR LF line ends), `test-windows` (tests, Edge
 smoke), `package` (the stamped portable zip, also an artifact of its own unwrapped, CycloneDX SBOM, SHA256SUMS),
 `installer` (the installer built from that zip on `windows-2025`, Inno Setup pinned and checked, never run there),
-`lifecycle` (the installer's life cycle run for real on `windows-2025`, elevated, Defender back on first: the release order
-asked, the build before this one and one that does not start made from the same payload, `installer/test/*.test.js` run
-and every test they declare counted; a gate, which the release waits for),
+`lifecycle` (the installer's life cycle run for real on `windows-2025`, elevated, Defender as the image leaves it, so
+the installer under Defender is the show laptop's, not CI's: the release order asked, the build before this one and one
+that does not start made from the same payload, `installer/test/*.test.js` run and every test they declare counted; a
+gate, which the release waits for),
 `readings` (the Windows evidence lane on `windows-2025`, for every push, a `v*` tag and a run asked for by hand, one
 at a time per ref and never cancelled once it runs, a newer push's waiting its turn; each other job is cancelled by a
 newer push of its ref through a group of its own, never the whole run's; its actions pinned by commit:
-Defender turned back on first, then the readings of that zip, judged against their marks; they inform and never hold) and, on a `v*` tag that names
+Defender turned back on for the take of the readings that need it alone, then put back as the image left it for the
+rest, the readings of that zip judged against their marks; they inform and never hold) and, on a `v*` tag that names
 `app/package.json`'s version, above every release already published and every other version tagged (asked again as its
 first step, one release job at a time), `release` with the zip, the installer and a build-provenance attestation of the zips, the
 installer and `SHA256SUMS.payload`, each verified before it publishes and the release read back for `immutable` once it
@@ -249,7 +251,7 @@ A sentence and the files; the detail is the code's and the CHANGELOG's. A test n
 | The module fence: the server's layers, the handler modules held narrow, no new verb in `server.js` | `app/test/modules.test.js` |
 | The one gate, and the contexts a handler module is given | `app/lib/gate.js`, `app/lib/handlers/` |
 | The portable build: `AGMessage-Portable-<version>.zip` holding one folder, `AGMessage`; every path it makes held under MAX_PATH | `tools/fetch-runtime.ps1`, `tools/build-portable.ps1`, `tools/zip-paths.js`, `start-agmessage.bat`, `make-shareable-copy.bat`; test `zippaths` |
-| The Windows evidence lane: the readings and the lab lines, judged against their marks; the release's notes on them and on the show laptop's readings as `docs/DESIGN.md` records them | `tools/readings.js`, `tools/readings-take.js`, `tools/defender-on.ps1`, `docs/INSTALL.md`, `docs/DESIGN.md`; test `readings` |
+| The Windows evidence lane: the readings and the lab lines, judged against their marks; the release's notes on them and on the show laptop's readings as `docs/DESIGN.md` records them | `tools/readings.js`, `tools/readings-take.js`, `tools/defender-on.ps1`, `tools/defender-off.ps1`, `docs/INSTALL.md`, `docs/DESIGN.md`; test `readings` |
 | Test helpers: a server on a throwaway folder, `readSource`, `freePort` / `freeUdpPort`, the files the fences read, Office files built from XML and the document worker run as a browser runs it | `app/test/helpers.js` |
 | Papers | `README.md`, `README.txt`, `CHANGELOG.md`, `SECURITY.md`, `docs/` (`ACCOUNTS`, `DISPLAYS`, `NODES`, `SHOWBUS`, `DESIGN`, `ANALYSIS`, `DEVICES`, `INSTALL`) |
 | The 0.6.0 plan: what to build, in which order, and the owner's answers it rests on | `docs/plan/0.6.0/PLAN.md`, `docs/plan/0.6.0/DECISIONS.md`, `docs/plan/0.6.0/board-view/` |

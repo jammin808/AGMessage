@@ -1,10 +1,11 @@
 'use strict';
 // The Windows evidence lane (the plan's Part 6, unit U7): the readings R1-R13 and the lab lines, each with its mark and
 // what a miss means (tools/readings.js), judged only on what was measured and never holding the release; what the lane
-// measures on the runner and what its stand-in tasks run (tools/readings-take.js); the CI job that takes them first turns
-// Defender back on, is pinned by commit, and feeds the release's notes without holding it; and the papers say the same
-// marks. The lane itself runs on windows-2025 in CI; here every part of it that is not Windows' own is run, and on Windows
-// the PowerShell it asks is run too.
+// measures on the runner and what its stand-in tasks run (tools/readings-take.js); the CI job that takes them turns
+// Defender back on for the take of the readings that need it alone and puts it back as the image left it right after,
+// is pinned by commit, and feeds the release's notes without holding it; and the papers say the same marks. The lane
+// itself runs on windows-2025 in CI; here every part of it that is not Windows' own is run, and on Windows the
+// PowerShell it asks is run too.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
@@ -159,7 +160,7 @@ test('nothing measured is nothing met: every reading not run with why (or retire
   assert.match(byId(R.judge(raw({ R9: { runs: 10 } })), 'R9').words, /backed up no folder/);
 });
 
-test('Defender: on only when real-time monitoring and scanning on access came on, in its Normal mode, with C:\\ and D:\\ no longer excluded, and were still so at the end', () => {
+test('Defender: on only when real-time monitoring and scanning on access came on, in its Normal mode, with C:\\ and D:\\ no longer excluded, and were still so when the readings taken with it ended', () => {
   assert.deepEqual(R.defenderOf(DEFENDER_ON), { asked: true, took: true, stayed: true, on: true, words: R.defenderOf(DEFENDER_ON).words });
   assert.match(R.defenderOf(DEFENDER_ON).words, /scanning on access, in its Normal mode/);
   const still = R.defenderOf({ defender: { after: { ...ON, exclusions: ['D:\\', 'E:\\cache'] }, errors: [] }, defenderEnd: ON });
@@ -183,9 +184,9 @@ test('Defender: on only when real-time monitoring and scanning on access came on
   assert.equal(R.defenderOf({ defender: { after: { ...ON, exclusions: null }, errors: [] }, defenderEnd: ON }).on, true, 'no exclusions at all');
   const lapsed = R.defenderOf({ ...DEFENDER_ON, defenderEnd: { ...ON, realtime: false } });
   assert.deepEqual([lapsed.took, lapsed.stayed, lapsed.on], [true, false, false]);
-  assert.match(lapsed.words, /was not so when the readings ended \(real-time monitoring off\)/);
+  assert.match(lapsed.words, /was not so when the readings taken with it ended \(real-time monitoring off\)/);
   const cut = R.defenderOf({ ...DEFENDER_ON, defenderEnd: null });
-  assert.deepEqual([cut.on, cut.words.includes('not read again when the readings ended')], [false, true]);
+  assert.deepEqual([cut.on, cut.words.includes('not read again when the readings taken with it ended')], [false, true]);
   assert.equal(R.defenderOf({ ...DEFENDER_ON, defenderEnd: { error: 'powershell.exe ended with 1' } }).on, false, 'an end that could not be read is not on');
   // The runner's own processes and folder, which tools/defender-on.ps1 recorded as it excluded them, leave Defender on,
   // matched whole in any case and with either slash; any other exclusion does not (fail closed: a wildcard, a short name
@@ -195,7 +196,7 @@ test('Defender: on only when real-time monitoring and scanning on access came on
   const own = { ...ON, exclusions: ['c:/actions-runner/'], processes: ['C:\\ACTIONS-RUNNER\\bin\\Runner.Listener.exe'] };
   const withOwn = R.defenderOf({ defender: { after: own, errors: [], runner }, defenderEnd: own });
   assert.deepEqual([withOwn.took, withOwn.stayed, withOwn.on], [true, true, true]);
-  assert.match(withOwn.words, /the runner's own processes and folder alone excluded, and still so when the readings ended$/);
+  assert.match(withOwn.words, /the runner's own processes and folder alone excluded, and still so when the readings taken with it ended$/);
   for (const [x, why] of [['D:\\a', 'it holds the workspace'], ['C:\\actions-runner\\*', 'a wildcard'], ['C:\\Users\\RUNNER~1', 'a short name'], ['C:\\actions-runner2', 'a folder that only shares the runner\'s prefix'], ['E:\\cache', 'beside what is measured, and still not the runner\'s']]) {
     const after = { ...own, exclusions: ['C:\\actions-runner', x] };
     const d = R.defenderOf({ defender: { after, errors: [], runner }, defenderEnd: after });
@@ -210,7 +211,7 @@ test('Defender: on only when real-time monitoring and scanning on access came on
   }
   const late = R.defenderOf({ defender: { after: own, errors: [], runner }, defenderEnd: { ...own, exclusions: ['C:\\actions-runner', 'D:\\a\\_temp\\x'] } });
   assert.deepEqual([late.took, late.stayed, late.on], [true, false, false], 'excluded by the end');
-  assert.match(late.words, /was not so when the readings ended \(D:\\a\\_temp\\x excluded, not the runner's own\)/);
+  assert.match(late.words, /was not so when the readings taken with it ended \(D:\\a\\_temp\\x excluded, not the runner's own\)/);
   const scanned = R.defenderOf({ defender: { after: ON, errors: [], runner: { scanned: true, processes: [], paths: [] } }, defenderEnd: ON });
   assert.deepEqual([scanned.on, /alone excluded/.test(scanned.words)], [true, false], 'with the runner scanned too, nothing excluded at all');
 });
@@ -237,6 +238,44 @@ test('R2: the slowest round against 6 s with R9; over 6 s alone is missed even w
   x = byId(R.judge(raw({ R2: { ...r2, rounds: [7000] } }, noDefender)), 'R2');
   assert.equal(x.state, 'missed', 'over its mark without Defender is over it with Defender too');
   assert.equal(byId(R.judge(raw({ R2: { files: 3, rounds: [] } })), 'R2').state, 'not run');
+});
+
+test('a reading that needs Defender is held to it only when the take that took it was given Defender\'s record: one taken in a take given none is not run, saying so; a record without take indexes is judged as before', () => {
+  const r2 = { files: 5122, bytes: 197_000_000, emptyMs: 7100, rounds: [3100, 2900, 3300], over: 'v0.5.1' };
+  const r9 = { emptyMs: 400, largeMs: 2600, sizes: [{ name: 'empty', backupMs: 400, saved: true }, { name: 'large', backupMs: 2600, saved: true }] };
+  const r10 = { rounds: [{ extractMs: 800, runMs: 300, totalMs: 1100, code: 0 }] };
+  // The lane's three takes: the first given Defender's record, the two after it written as given none.
+  const takes = [{ only: ['R2', 'R9', 'R10'], defender: true }, { skip: ['R2', 'R9', 'R10', 'R11', 'R6'], defender: false }, { only: ['R11', 'R6'], defender: false }];
+  const lane = (times, readings = { R2: r2, R9: r9, R10: r10 }) => R.judge(raw(readings, { takes, times }));
+  // Taken in the take with Defender: judged as before.
+  let j = lane({ R2: { begunS: 1, s: 142, take: 0 }, R10: { begunS: 165, s: 15, take: 0 }, R9: { begunS: 180, s: 3, take: 0 } });
+  assert.deepEqual(['R2', 'R9', 'R10'].map((id) => byId(j, id).state), ['met', 'recorded', 'recorded']);
+  assert.match(j.defender.words, /and still so when the readings taken with it ended; takes 2 and 3 of 3 given no Defender record \(the lane puts Defender back as the image left it before them\)$/, 'the takes given none named');
+  assert.match(R.defenderOf(raw({}, { takes: takes.slice(0, 2) })).words, /; take 2 of 2 given no Defender record \(the lane puts Defender back as the image left it before it\)$/, 'one named alone');
+  // R2 taken in a take given none: not run, saying so, never met.
+  j = lane({ R2: { begunS: 1, take: 1 }, R10: { begunS: 165, take: 0 }, R9: { begunS: 180, take: 0 } });
+  assert.equal(byId(j, 'R2').state, 'not run');
+  assert.match(byId(j, 'R2').words, /^5122 files, 188 MB laid over v0\.5\.1's payload, the slowest of 3 rounds 3\.30 s, but it was taken in take 2, which was given no Defender record \(the lane puts Defender back as the image left it before it\): not the reading its mark needs$/);
+  assert.equal(byId(j, 'R10').state, 'recorded', 'each reading by the take that took it');
+  // …and over its mark anyway is still missed, which Defender would only make worse.
+  assert.equal(byId(lane({ R2: { take: 2 } }, { R2: { ...r2, rounds: [7000] }, R9: r9 }), 'R2').state, 'missed');
+  // R10 and R9 alike; R9 taken in a take given none is no part of R2's mark, which stays open.
+  j = lane({ R2: { take: 0 }, R10: { take: 2 }, R9: { take: 1 } });
+  assert.deepEqual([byId(j, 'R10').state, byId(j, 'R9').state, byId(j, 'R2').state], ['not run', 'not run', 'open']);
+  assert.match(byId(j, 'R10').words, /, but it was taken in take 3, which was given no Defender record \(the lane puts Defender back as the image left it before it\): not the reading its mark needs$/);
+  assert.match(byId(j, 'R9').words, /^the upgrade backup's time: empty 400 ms, saved; large 2\.60 s, saved \(beside R2\), but it was taken in take 2, which was given no Defender record \(the lane puts Defender back as the image left it before it\): not the reading its mark needs$/);
+  assert.match(byId(j, 'R2').words, /the mark is R2 and R9 together, and R9 was taken in take 2, which was given no Defender record$/);
+  // The judge says what the record knows, never that it saw Defender turned back off.
+  for (const id of ['R2', 'R9', 'R10']) assert.doesNotMatch(byId(j, id).words + j.defender.words, /turned back off|after Defender was/, id);
+  // A reading that needs no Defender is judged alike whichever take took it.
+  const r12 = { nonZero: { starts: 2, waitedMs: 61000 }, zero: { starts: 1, waitedMs: 90000 } };
+  assert.equal(byId(lane({ R12: { take: 1 } }, { R12: r12 }), 'R12').state, byId(R.judge(raw({ R12: r12 })), 'R12').state);
+  // A record without take indexes (one take's), an index that names no take, or a take that does not say: as before.
+  for (const times of [undefined, { R2: { begunS: 1, s: 142 } }, { R2: { take: 7 } }, { R2: { take: '1' } }]) {
+    assert.equal(byId(R.judge(raw({ R2: r2, R9: r9 }, times ? { takes, times } : {})), 'R2').state, 'met', JSON.stringify(times));
+  }
+  assert.equal(byId(R.judge(raw({ R2: r2, R9: r9 }, { takes: [{}, {}], times: { R2: { take: 1 } } })), 'R2').state, 'met', 'a take that does not say it was given no Defender record');
+  assert.equal(R.defenderOf(raw({}, { takes: [{}, { defender: true }] })).words, R.defenderOf(DEFENDER_ON).words, 'no take named when none was given no record');
 });
 
 test('R4: met only with SeChangeNotifyPrivilege alone in the server\'s token and the server serving under the task; the task\'s SID read', () => {
@@ -742,6 +781,91 @@ test('the take\'s words: a deadline, the readings a take takes or leaves, the re
   assert.ok(src.indexOf('held.accounts.add(R6_USER);') < src.indexOf('L.ps(SCRIPTS.users, { AGM_R11_USERS: R6_USER'));
 });
 
+test('a take given Defender\'s record reads it again at its end; one added after Defender was turned back off (--add, no --defender) keeps the record\'s and asks nothing of it; each take says which it was, and each reading the take that took it; take() is wired to these and reads Defender nowhere else', async () => {
+  const dir = tmp('agm-takes-');
+  try {
+    // A take on its own needs Defender's record; one that adds to a record may be given none.
+    const flags = ['take', '--zip', path.join(dir, 'x.zip'), '--out', path.join(dir, 'o.json'), '--work', path.join(dir, 'work')];
+    const alone = spawnSync(process.execPath, [TAKE_JS, ...flags], { encoding: 'utf8' });
+    assert.equal(alone.status, 64);
+    assert.match(alone.stderr, /^readings-take: take --zip <bundle\.zip> --out <raw\.json> --defender <defender\.json> \(left out only with --add, after Defender was turned back off\)/, 'refused, with the words');
+    // …which goes on to what any take asks first: Windows, then the bundle (a GitHub-hosted runner's Windows job reads it).
+    const added = spawnSync(process.execPath, [TAKE_JS, ...flags, '--add'], { encoding: 'utf8', env: { ...process.env, RUNNER_ENVIRONMENT: 'github-hosted' } });
+    assert.doesNotMatch(added.stderr, /take --zip <bundle\.zip>/, 'an --add without --defender is not refused for it: ' + added.stderr);
+    if (process.platform === 'win32') assert.deepEqual([added.status, /nothing was taken/.test(added.stderr)], [2, true], added.stderr);
+    else assert.deepEqual([added.status, /the readings are Windows'; nothing was taken/.test(added.stderr)], [64, true], added.stderr);
+    assert.ok(!fs.existsSync(path.join(dir, 'o.json')) && !fs.existsSync(path.join(dir, 'work')), 'and nothing was taken here');
+    // The record a take begins.
+    const file = path.join(dir, 'defender.json');
+    fs.writeFileSync(file, '﻿' + JSON.stringify({ v: 1, after: ON, took: true, errors: [] }));
+    const said = [];
+    const first = T.beginRecord({}, { defender: file, deadlineMin: 6, only: ['R2', 'R9', 'R10'] }, {}, { say: (l) => said.push(l) });
+    assert.deepEqual(first.raw.defender, { v: 1, after: ON, took: true, errors: [] });
+    assert.deepEqual([first.step.defender, first.step.deadlineMin, first.step.only, first.step.ended, first.raw.complete], [true, 6, ['R2', 'R9', 'R10'], '', false]);
+    assert.deepEqual(first.raw.takes, [first.step]);
+    first.raw.defenderEnd = ON;
+    first.raw.readings = { R2: { files: 3 } };
+    first.raw.complete = true;
+    first.raw.stopped = 'x';
+    const was = JSON.parse(JSON.stringify(first.raw));
+    const next = T.beginRecord({ raw: was }, { deadlineMin: 26, skip: ['R2', 'R9', 'R10', 'R11', 'R6'] }, {});
+    assert.equal(next.raw, was, 'added to the record before');
+    assert.deepEqual([next.raw.defender, next.raw.defenderEnd], [first.raw.defender, ON], 'Defender kept as the take before wrote it');
+    assert.deepEqual(next.raw.takes.map((t) => t.defender), [true, false], 'each take says whether it was taken with Defender');
+    assert.deepEqual([next.raw.complete, 'stopped' in next.raw, next.raw.readings], [false, false, { R2: { files: 3 } }]);
+    // A record that cannot be read is said, and Defender is not asked.
+    const unread = T.beginRecord({}, { defender: path.join(dir, 'none.json') }, {}, { say: (l) => said.push(l) });
+    assert.deepEqual([unread.raw.defender, unread.step.defender], [null, true]);
+    assert.match(said.join('\n'), /^readings-take: no Defender record \(/);
+    // Its end: Defender read again only by a take taken with it.
+    const asked = [];
+    const L = { ps: (script) => { asked.push(script === T.SCRIPTS.defender ? 'defender' : 'other'); return { ...ON, realtime: false }; } };
+    await T.endRecord(next.raw, next.step, L);
+    assert.deepEqual(asked, [], 'a take without Defender asks Windows nothing of it');
+    assert.deepEqual([next.raw.defenderEnd, next.raw.complete, typeof next.step.ended], [ON, true, 'string']);
+    assert.ok(next.step.ended);
+    await T.endRecord(first.raw, first.step, L);
+    assert.deepEqual([asked, first.raw.defenderEnd.realtime], [['defender'], false], 'a take with Defender reads it again');
+    // Each reading begun names the take that took it, and one left to another take that the record holds is kept.
+    const rec = { v: 1, readings: { R2: { files: 3 } }, times: { R2: { begunS: 1, s: 142, take: 0 } } };
+    const lines = [];
+    await T.takeAll([['R2', () => ({ never: true })], ['R5', () => ({ files: [] })], ['R11', () => ({ never: true })]], {
+      raw: rec, save: () => {}, say: (l) => lines.push(l), deadlineMs: 60_000, boundsMs: { R2: 1000, R5: 1000, R11: 1000 },
+      skip: new Map([['R2', 'left'], ['R11', 'left to a take of its own']]), take: 1,
+    });
+    assert.deepEqual(rec.readings, { R2: { files: 3 }, R5: { files: [] }, R11: { skipped: 'left to a take of its own' } });
+    assert.deepEqual([rec.times.R2, rec.times.R5.take, rec.times.R11], [{ begunS: 1, s: 142, take: 0 }, 1, undefined]);
+    assert.ok(lines.includes('readings-take: R2 left to another take, and kept as the record it adds to holds it'), lines.join('\n'));
+    // A take given no index writes none, as the record of one take did.
+    const one = { v: 1, readings: {} };
+    await T.takeAll([['R5', () => ({ files: [] })]], { raw: one, save: () => {}, say: () => {}, deadlineMs: 60_000, boundsMs: { R5: 1000 } });
+    assert.equal('take' in one.times.R5, false);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  // take() itself runs only on Windows: its wiring to what is run above is read from its source. One record begun and one
+  // ended, after the cleanup; every reading given this take's index (the last of `takes`, the one beginRecord added); and
+  // Defender read again nowhere but in endRecord, which reads it only for a take given its record.
+  const src = read('tools/readings-take.js');
+  const fn = (head) => {
+    const at = src.indexOf('\n' + head);
+    assert.ok(at > 0, head + ' is in tools/readings-take.js');
+    return src.slice(at, src.indexOf('\n}\n', at) + 3);
+  };
+  const takeSrc = fn('async function take(o) {\n');
+  assert.deepEqual([(takeSrc.match(/\bbeginRecord\(/g) || []).length, (takeSrc.match(/\bendRecord\(/g) || []).length], [1, 1], 'one record begun and one ended');
+  assert.ok(takeSrc.includes('\n  const { raw, step } = beginRecord(was, o, env);\n'), 'the record begun from the one it adds to and this take\'s words');
+  assert.ok(takeSrc.includes('\n  await endRecord(raw, step, L);\n'), 'the record ended, awaited, with this take\'s step');
+  assert.ok(takeSrc.indexOf('raw.cleanup = release(L);') > 0 && takeSrc.indexOf('raw.cleanup = release(L);') < takeSrc.indexOf('await endRecord('), 'after the cleanup');
+  const optsAt = takeSrc.indexOf('\n    const opts = {\n');
+  const optsSrc = takeSrc.slice(optsAt, takeSrc.indexOf('\n    };\n', optsAt));
+  assert.ok(optsAt > 0 && /\n {6}take: raw\.takes\.length - 1,(\n|$)/.test(optsSrc), 'each reading given this take\'s index: ' + optsSrc);
+  assert.equal((takeSrc.match(/\bawait takeAll\(plan\([^\n]*\), opts\);/g) || []).length, 2, 'R2 and the rest each taken with those opts');
+  assert.equal((takeSrc.match(/\btakeAll\(/g) || []).length, 2, 'and by no other call');
+  assert.equal((src.match(/SCRIPTS\s*(?:\.\s*defender\b|\[\s*['"`]defender['"`]\s*\])/g) || []).length, 1, 'Defender\'s script named once in the file');
+  assert.equal((src.match(/L\.ps\(SCRIPTS\.defender\)/g) || []).length, 1);
+  assert.ok(fn('async function endRecord(').includes('\n  if (step.defender) raw.defenderEnd = await guarded(() => L.ps(SCRIPTS.defender));\n'), 'read again only in endRecord, only for a take given its record');
+  assert.ok(!/defenderEnd\s*=/.test(takeSrc), 'take() never writes Defender\'s end itself');
+});
+
 test('a page the lane seats waits for an answer within its bound: a server that takes the socket and answers nothing gives null, never a wait for ever', async () => {
   const { WebSocketServer } = require('ws');
   const port = await h.freePort();
@@ -795,7 +919,7 @@ test('the notes: each miss with its fallback, then what was met, open and not ru
   const cut = R.judge(raw({ R2: { files: 1, bytes: 1, rounds: [100] } }, { complete: false, defenderEnd: null }));
   assert.equal(cut.complete, false);
   assert.equal(byId(cut, 'R5').words, 'not taken: the lane ended before it (cut short)');
-  assert.match(R.notes(cut, ''), /The lane was cut short: a reading it had not reached reads not run\. Defender came on, .* not read again when the readings ended\./);
+  assert.match(R.notes(cut, ''), /The lane was cut short: a reading it had not reached reads not run\. Defender came on, .* not read again when the readings taken with it ended\./);
   assert.match(R.summary(cut), /The lane was cut short/);
   assert.equal(R.judge(raw({})).complete, true, 'a record that does not say it was cut short is whole');
   const s = R.summary(j);
@@ -1354,7 +1478,7 @@ function job(ci, name) {
   return next < 0 ? rest : rest.slice(0, next + 3);
 }
 
-test('the lane in CI: windows-2025, every action pinned by its commit, no credential left in its checkout, Defender turned on before anything is laid or measured, every step bounded inside the job, its readings kept whatever they say', () => {
+test('the lane in CI: windows-2025, every action pinned by its commit, no credential left in its checkout, Defender turned on once the zips are here, on for the take of the readings that need it alone and put back as the image left it right after, that take\'s record kept at once, every step bounded inside the job, its readings kept whatever they say', () => {
   const ci = read('.github/workflows/ci.yml');
   const lane = job(ci, 'readings');
   assert.match(lane, /\n {4}runs-on: windows-2025\n/);
@@ -1371,7 +1495,7 @@ test('the lane in CI: windows-2025, every action pinned by its commit, no creden
     assert.ok(job(ci, name).includes('\n    concurrency:\n      group: ci-$' + '{{ github.ref }}-' + name + extra + '-$' + "{{ github.event_name == 'workflow_dispatch' && 'by-hand' || 'auto' }}\n      cancel-in-progress: $" + "{{ github.event_name != 'workflow_dispatch' }}\n"), name + ': cancelled by a newer push or pull request of its ref, never by one asked for by hand');
   }
   const uses = [...lane.matchAll(/^\s*(?:- )?uses: (\S+)(.*)$/gm)];
-  assert.deepEqual(uses.map((u) => u[1].split('@')[0]), ['actions/checkout', 'actions/setup-node', 'actions/download-artifact', 'actions/download-artifact', 'actions/upload-artifact', 'actions/upload-artifact']);
+  assert.deepEqual(uses.map((u) => u[1].split('@')[0]), ['actions/checkout', 'actions/setup-node', 'actions/download-artifact', 'actions/download-artifact', 'actions/upload-artifact', 'actions/upload-artifact', 'actions/upload-artifact']);
   const installerStep = lane.slice(lane.indexOf('name: agmessage-installer-$' + '{{ github.sha }}') - 200, lane.indexOf('name: agmessage-installer-$' + '{{ github.sha }}'));
   assert.match(installerStep, /\n {8}continue-on-error: true\n {8}with:\n {10}$/, 'an installer job that built nothing stops no reading');
   for (const [, ref, comment] of uses) assert.match(ref + comment, /^[\w.-]+\/[\w.-]+@[0-9a-f]{40} # v\d+\.\d+\.\d+$/, ref + ' is pinned by its commit, its tag beside it');
@@ -1379,29 +1503,44 @@ test('the lane in CI: windows-2025, every action pinned by its commit, no creden
   const steps = lane.split(/\n {6}- /).slice(1).map((x) => x.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n'));
   assert.match(steps[0], /^uses: actions\/checkout@/);
   assert.match(steps[0], /\n {8}with:\n {10}persist-credentials: false(\n|$)/, 'the stand-in tasks run the bundle\'s code from this workspace: no token is left in its .git');
-  assert.match(steps[1], /^name: Defender's real-time monitoring back on/, 'Defender first, after the checkout that holds its script');
-  assert.match(steps[1], /shell: powershell\n\s+timeout-minutes: \d+\n\s+run: \.\/tools\/defender-on\.ps1 -Out "\$env:RUNNER_TEMP\\defender\.json"$/, 'the runner\'s own excluded, never -ScanRunner');
-  // Defender, the zip, the readings but the two as standard accounts, what they wrote kept as the artifact, then R11 and
-  // R6 added to the same record, the verdicts, and the record kept again: a runner lost in the accounts' readings still
-  // leaves the rest on the server.
-  const at = (from, what) => lane.indexOf(what, from);
+  // Node, the zip, the installer and the newest release's are had before Defender is turned on (nothing measured depends
+  // on Defender while they are downloaded: R2 and R10 open the zips with it on), so its window holds no download.
+  const onStep = steps.findIndex((x) => x.includes('./tools/defender-on.ps1'));
+  const offStep = steps.findIndex((x) => x.includes('./tools/defender-off.ps1'));
+  assert.deepEqual(steps.slice(1, onStep).map((x) => (x.startsWith('uses: ') ? x.split('@')[0] : x.split('\n')[0])), ['uses: actions/setup-node', 'uses: actions/download-artifact', 'uses: actions/download-artifact', 'name: The newest release published (for R13), and its zip (for R2)'], 'Node, the zip, the installer and the release, then Defender');
+  assert.match(steps[onStep], /^name: Defender's real-time monitoring back on/);
+  assert.match(steps[onStep], /shell: powershell\n\s+timeout-minutes: \d+\n\s+run: \.\/tools\/defender-on\.ps1 -Out "\$env:RUNNER_TEMP\\defender\.json"$/, 'the runner\'s own excluded, never -ScanRunner');
+  // The zip, Defender, the readings that need it, Defender put back as the image left it, what was taken kept at once,
+  // the rest but the two as standard accounts added to the same record, what they wrote kept as the artifact, then R11
+  // and R6 added to it, the verdicts, and the record kept again: a runner lost in a later take still leaves what was
+  // taken before it on the server. Read with the comments left out, so a comment that names a step is not taken for it.
+  const bare = lane.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+  const at = (from, what) => bare.indexOf(what, from);
   const order = [];
-  for (const what of ['tools/defender-on.ps1', 'actions/download-artifact', 'node tools/readings-take.js take --zip', 'actions/upload-artifact', 'node tools/readings-take.js take --zip', 'node tools/readings.js judge readings/readings.raw.json --out readings/readings.json --summary $env:GITHUB_STEP_SUMMARY', 'actions/upload-artifact']) order.push(at(order.length ? order[order.length - 1] + 1 : 0, what));
-  assert.ok(order.every((i, k) => i > 0 && (k === 0 || i > order[k - 1])), 'Defender, the zip, the readings, kept, the readings as standard accounts, the verdicts, kept: ' + order);
-  assert.match(lane, /--defender "\$env:RUNNER_TEMP\\defender\.json" --out readings\/readings\.raw\.json --deadline-min (\d+) --skip R11,R6 @release @over @installer\n/, 'the tag through the environment, never pasted into the script');
-  assert.match(lane, /--defender "\$env:RUNNER_TEMP\\defender\.json" --out readings\/readings\.raw\.json --deadline-min (\d+) --only R11,R6 --add\n/, 'R11 and R6 added to the same record');
+  for (const what of ['actions/setup-node', 'actions/download-artifact', 'actions/download-artifact', 'name: The newest release published', 'tools/defender-on.ps1', 'node tools/readings-take.js take --zip', 'tools/defender-off.ps1', 'actions/upload-artifact', 'node tools/readings-take.js take --zip', 'actions/upload-artifact', 'node tools/readings-take.js take --zip', 'node tools/readings.js judge readings/readings.raw.json --out readings/readings.json --summary $env:GITHUB_STEP_SUMMARY', 'actions/upload-artifact']) order.push(at(order.length ? order[order.length - 1] + 1 : 0, what));
+  assert.ok(order.every((i, k) => i > 0 && (k === 0 || i > order[k - 1])), 'Node, the zips, the release, Defender, the readings with Defender, Defender put back, kept, the rest, kept, the readings as standard accounts, the verdicts, kept: ' + order);
+  assert.equal((lane.match(/node tools\/readings-take\.js take /g) || []).length, 3, 'three takes, one record');
+  assert.match(lane, /node tools\/readings-take\.js take --zip \$zip\[0\]\.FullName --defender "\$env:RUNNER_TEMP\\defender\.json" --out readings\/readings\.raw\.json --deadline-min (\d+) --only R2,R9,R10 @release @over @installer\n/, 'the readings that need Defender first, with its record; the tag through the environment, never pasted into the script');
+  assert.match(lane, /node tools\/readings-take\.js take --zip \$zip\[0\]\.FullName --out readings\/readings\.raw\.json --deadline-min (\d+) --skip R2,R9,R10,R11,R6 --add @release @installer\n/, 'the rest added to the same record, given no Defender record');
+  assert.match(lane, /node tools\/readings-take\.js take --zip \$zip\[0\]\.FullName --out readings\/readings\.raw\.json --deadline-min (\d+) --only R11,R6 --add\n/, 'R11 and R6 added to the same record, given no Defender record');
+  assert.equal((lane.match(/--defender /g) || []).length, 1, 'only the take with Defender on is given its record');
   assert.match(lane, /\$installer = if \(\$setup\.Count -eq 1\) \{ @\('--installer', \$setup\[0\]\.FullName\) \} else \{ @\(\) \}/, 'the installer, when its job built it, for R5');
   assert.match(lane, /\$release = if \(\$env:RELEASE_TAG\) \{ @\('--repo', \$env:GITHUB_REPOSITORY, '--tag', \$env:RELEASE_TAG\) \} else \{ @\(\) \}/, 'no release named: no --tag, never an empty argument');
   assert.match(lane, /\$over = if \(\$previous\.Count -eq 1\) \{ @\('--previous', \$previous\[0\]\.FullName\) \} else \{ @\(\) \}/, 'the newest release\'s zip, when it was had, for R2');
   assert.ok(!/run: [^\n]*\$\{\{ steps\./.test(lane) && !/\n\s+node [^\n]*\$\{\{/.test(lane), 'no step output pasted into a command');
-  // The record kept twice whatever it says: what was taken before any standard account, under a name of its own (an upload
-  // over an artifact deletes it first, so a runner lost in the later upload would take it with it), then the whole record
-  // under the name the release reads.
+  // The record kept three times whatever it says, each under a name of its own (an upload over an artifact deletes it
+  // first, so a runner lost in a later upload would take it with it): what the take with Defender wrote and Defender's
+  // being put back, at once; what was taken before any standard account; then the whole record under the name the
+  // release reads.
   const keeps = steps.filter((x) => x.startsWith('uses: actions/upload-artifact'));
-  assert.equal(keeps.length, 2);
-  assert.match(keeps[0], /\n\s+if: always\(\)\n\s+timeout-minutes: \d+\n\s+with:\n\s+name: agmessage-readings-\$\{\{ github\.sha \}\}-taken-\$\{\{ github\.run_attempt \}\}\n\s+path: readings\n\s+if-no-files-found: warn\n\s+overwrite: true/, 'what was taken first, under a name of its own');
-  assert.match(keeps[1], /\n\s+if: always\(\)\n\s+timeout-minutes: \d+\n\s+with:\n\s+name: agmessage-readings-\$\{\{ github\.sha \}\}\n\s+path: readings\n\s+if-no-files-found: warn\n\s+overwrite: true/, 'the whole record under the name the release reads');
-  // The readings as standard accounts are taken whatever the take before them ended with.
+  assert.equal(keeps.length, 3);
+  assert.match(keeps[0], /\n\s+if: always\(\)\n\s+timeout-minutes: \d+\n\s+with:\n\s+name: agmessage-readings-\$\{\{ github\.sha \}\}-defender-\$\{\{ github\.run_attempt \}\}\n\s+path: readings\n\s+if-no-files-found: warn\n\s+overwrite: true$/, 'what the take with Defender wrote and Defender put back, under a name of its own');
+  assert.equal(steps[offStep + 1], keeps[0], 'kept right after Defender is put back, before any other reading');
+  assert.match(keeps[1], /\n\s+if: always\(\)\n\s+timeout-minutes: \d+\n\s+with:\n\s+name: agmessage-readings-\$\{\{ github\.sha \}\}-taken-\$\{\{ github\.run_attempt \}\}\n\s+path: readings\n\s+if-no-files-found: warn\n\s+overwrite: true/, 'what was taken before any standard account, under a name of its own');
+  assert.match(keeps[2], /\n\s+if: always\(\)\n\s+timeout-minutes: \d+\n\s+with:\n\s+name: agmessage-readings-\$\{\{ github\.sha \}\}\n\s+path: readings\n\s+if-no-files-found: warn\n\s+overwrite: true/, 'the whole record under the name the release reads');
+  assert.equal(new Set(keeps.map((x) => /\n\s+name: ([^\n]+)\n/.exec(x)[1])).size, 3, 'three names');
+  // The readings without Defender, and those as standard accounts, are taken whatever the takes before them ended with.
+  assert.match(steps.find((x) => x.startsWith('name: Take the readings that need no Defender')), /^name: Take the readings that need no Defender, with it off again \(tools\/readings-take\.js\)\n {8}if: \$\{\{ !cancelled\(\) \}\}\n/);
   assert.match(steps.find((x) => x.startsWith('name: Take the readings as standard accounts')), /^name: Take the readings as standard accounts \(R11, R6; tools\/readings-take\.js\)\n {8}if: \$\{\{ !cancelled\(\) \}\}\n/);
   // A take step cut short still has what it wrote judged.
   assert.match(steps.find((x) => x.startsWith('name: Judge them')), /\n {8}if: \$\{\{ !cancelled\(\) \}\}\n/);
@@ -1415,15 +1554,17 @@ test('the lane in CI: windows-2025, every action pinned by its commit, no creden
   // Every step bounded, and all of them together inside the job's bound: a step that runs over fails, and the job ends
   // failed, never cancelled by its own timeout, so the release that waits for it still runs. Each take step's limit
   // holds the deadline it gives the take and the take's own stop after it (STOP_MIN), so the take always ends itself;
-  // every reading has a bound of its own, and each fits inside the deadline of the step that takes it, so each may begin.
+  // every reading has a bound of its own, and each fits inside the deadline of the step that takes it, so each may begin
+  // (under it: a take spends a moment before its first reading).
   const bounds = steps.map((x) => { const m = /\n {8}timeout-minutes: (\d+)\n/.exec('\n' + x.split('\n').slice(1).join('\n') + '\n'); return m ? Number(m[1]) : null; });
   assert.ok(bounds.every((b) => Number.isInteger(b) && b > 0), 'every step has its own bound: ' + bounds);
   const jobBound = Number(/\n {4}timeout-minutes: (\d+)\n/.exec(lane)[1]);
   assert.ok(bounds.reduce((a, b) => a + b, 0) + 5 <= jobBound, 'the steps end inside the job: ' + bounds + ' within ' + jobBound);
   assert.deepEqual(Object.keys(T.BOUNDS).sort(), [...T.ORDER].sort(), 'every reading the lane takes has a bound of its own, and only those');
-  const takes = steps.map((x, k) => [x, bounds[k]]).filter(([x]) => x.startsWith('name: Take the readings'));
-  assert.equal(takes.length, 2);
-  const taken = new Set();
+  const takes = steps.map((x, k) => [x, bounds[k], k]).filter(([x]) => x.startsWith('name: Take the readings'));
+  assert.equal(takes.length, 3);
+  const taken = [];
+  const withDefender = [];
   for (const [x, limit] of takes) {
     const deadline = Number(/--deadline-min (\d+) /.exec(x)[1]);
     assert.ok(deadline + T.STOP_MIN <= limit, x.split('\n')[0] + ': its deadline of ' + deadline + ' min and the take\'s own stop after it (' + T.STOP_MIN + ' min) inside its limit of ' + limit);
@@ -1431,13 +1572,33 @@ test('the lane in CI: windows-2025, every action pinned by its commit, no creden
     const skip = /--skip (\S+)/.exec(x);
     const ids = only ? only[1].split(',') : T.ORDER.filter((id) => !(skip ? skip[1].split(',') : []).includes(id));
     for (const id of ids) {
-      assert.ok(T.BOUNDS[id] <= deadline, id + '\'s own bound fits in its step\'s deadline');
-      taken.add(id);
+      assert.ok(T.BOUNDS[id] < deadline, id + '\'s own bound fits under its step\'s deadline');
+      taken.push(id);
+      if (/ --defender /.test(x)) withDefender.push(id);
     }
   }
-  assert.deepEqual([...taken].sort(), [...T.ORDER].sort(), 'each reading is taken by one step or the other');
-  // No step's limit is 45 minutes: a hosted runner lost to the service is failed 45 minutes after it was last heard,
-  // and a limit of that length would read as the step's own.
+  assert.deepEqual([...taken].sort(), [...T.ORDER].sort(), 'each reading is taken by exactly one step');
+  // Defender is on only for the readings that need it, every one of them: they are the first take (Take A), the only one
+  // given its record, in the step right after tools/defender-on.ps1; Defender is put back as the image left it in the
+  // step right after that take, whatever it ended with (always), so the steps from the one to the other are exactly
+  // [tools/defender-on.ps1, Take A, tools/defender-off.ps1]; every take after it is given no Defender record.
+  assert.deepEqual(withDefender.sort(), R.READINGS.filter((x) => x.defender).map((x) => x.id).sort(), 'the readings taken with Defender are those that need it');
+  const [first] = takes;
+  assert.ok(/ --defender /.test(first[0]) && takes.slice(1).every(([x]) => !/--defender/.test(x)), 'the take with Defender comes first, and no take after it is given its record');
+  assert.ok(onStep > 0 && first[2] === onStep + 1 && offStep === onStep + 2, 'Defender\'s window: on, Take A, off: ' + [onStep, first[2], offStep]);
+  assert.deepEqual(steps.slice(onStep + 1, offStep), [first[0]], 'nothing but Take A between turning Defender on and putting it back');
+  // Take A's window bounded: its deadline 6 minutes at most, and its step's limit no more than that deadline and the
+  // take's own stop after it (with the bound above, exactly that), so a take that runs long ends itself before its step does.
+  const deadlineA = Number(/--deadline-min (\d+) /.exec(first[0])[1]);
+  assert.ok(deadlineA <= 6, 'Take A\'s deadline at most 6 minutes: ' + deadlineA);
+  assert.ok(first[1] <= deadlineA + T.STOP_MIN, 'Take A\'s step limit no more than its deadline and STOP_MIN: ' + first[1]);
+  const off = steps[offStep];
+  assert.match(off, /^name: Defender as the image left it[^\n]*\(tools\/defender-off\.ps1\)\n {8}if: always\(\)\n {8}shell: powershell\n {8}timeout-minutes: \d+\n {8}run: \.\/tools\/defender-off\.ps1 -Record "\$env:RUNNER_TEMP\\defender\.json" -Out readings\/defender-off\.json$/, 'Defender put back right after the readings that need it, whatever they ended with, from what tools/defender-on.ps1 recorded, its own record in the readings\' folder');
+  assert.equal(steps.filter((x) => /defender-(on|off)\.ps1|MpPreference/.test(x)).length, 2, 'Defender turned on once and put back once, nothing else of it');
+  assert.ok(steps.findIndex((x) => x.startsWith('name: Take the readings that need no Defender')) > first[2] + 1, 'the rest after Defender is put back');
+  // No step's limit is 45 minutes: a hosted runner lost to the service is failed about 45 minutes after it was last heard
+  // (seen in run 110: last report 15:00:27, failed 15:45:57; reported, not measured, for runs 105 and 109), and a limit of
+  // that length would read as the step's own.
   assert.ok(!bounds.includes(45), 'no step bounded at 45 minutes: ' + bounds);
   const ps = read('tools/defender-on.ps1');
   assert.match(ps, /Set-MpPreference -DisableRealtimeMonitoring \$false/);
@@ -1465,6 +1626,36 @@ test('the lane in CI: windows-2025, every action pinned by its commit, no creden
   for (const k of ['$env:GITHUB_WORKSPACE', '$env:RUNNER_TEMP', '$env:TEMP', '$env:TMP', "'C:\\agm-readings'", '$env:ProgramFiles, $env:ProgramData, $env:LOCALAPPDATA', "Join-Path $env:LOCALAPPDATA 'Temp'"]) assert.ok(keptList.includes(k), k + ' is kept scanned');
   // On only with no exclusion but the runner's own it made, and none of extensions: fail closed, as the judge.
   assert.ok(ps.includes('if (@($d.extensions).Count) { return $false }\n  return (Test-OnlyOwn $d.exclusions $record.runner.paths) -and (Test-OnlyOwn $d.processes $record.runner.processes)'), 'on: nothing excluded but the runner\'s own');
+  // Defender put back as the image left it: real-time monitoring off first; the runner's own exclusions tools/defender-on.ps1
+  // recorded removed, then every exclusion it removed added back (C:\ and D:\ when its record cannot be read), each on its
+  // own and recorded as it goes; read back; off only with real-time monitoring off and both drives excluded again. It
+  // informs, never failing the job for Defender.
+  const offPs = read('tools/defender-off.ps1');
+  assert.match(offPs, /\nparam\(\[Parameter\(Mandatory = \$true\)\]\[string\]\$Record, \[Parameter\(Mandatory = \$true\)\]\[string\]\$Out\)\n/);
+  assert.ok(!/\$record\b/i.test(offPs.replace(/\$Record\b/g, '')) && !/\$out\b/i.test(offPs.replace(/\$Out\b/g, '')), 'no variable that is a parameter under another case (PowerShell\'s names know no case)');
+  const offAt = offPs.indexOf('try { Set-MpPreference -DisableRealtimeMonitoring $true }');
+  assert.ok(offAt > 0 && offAt < offPs.indexOf('Get-Content -LiteralPath $Record'), 'real-time monitoring off first');
+  assert.ok(offPs.includes("$removed = [ordered]@{ paths = @('C:\\', 'D:\\'); processes = @(); extensions = @() }"), 'the image\'s two when the record cannot be read');
+  for (const [list, flag, kept] of [['paths', 'ExclusionPath', 'paths'], ['processes', 'ExclusionProcess', 'processes'], ['extensions', 'ExclusionExtension', 'extensions']]) {
+    assert.ok(offPs.includes('foreach ($x in $removed.' + list + ') {\n  try { Add-MpPreference -' + flag + ' $x; $result.restored.' + kept + ' += $x }'), list + ' added back one by one');
+  }
+  assert.ok(offPs.includes('foreach ($p in $own.paths) {\n  try { Remove-MpPreference -ExclusionPath $p; $result.unexcluded.paths += $p }') && offPs.includes('foreach ($e in $own.processes) {\n  try { Remove-MpPreference -ExclusionProcess $e; $result.unexcluded.processes += $e }'), 'the runner\'s own removed one by one');
+  assert.ok(offPs.indexOf('Remove-MpPreference -ExclusionPath $p') < offPs.indexOf('Add-MpPreference -ExclusionPath $x'), 'the runner\'s own removed before the image\'s are put back, so a path in both stays excluded');
+  assert.ok(offPs.includes('$own = [ordered]@{ paths = @(Get-List $on.runner.paths); processes = @(Get-List $on.runner.processes) }') && offPs.includes('paths = @(Get-List $on.removed.paths); processes = @(Get-List $on.removed.processes); extensions = @(Get-List $on.removed.extensions)'), 'what tools/defender-on.ps1 recorded, read back');
+  assert.ok(offPs.includes("if (-not $d -or $d.realtime) { return $false }\n  return (Test-Names $d.exclusions 'C:\\') -and (Test-Names $d.exclusions 'D:\\')"), 'off: real-time monitoring off, both drives excluded again');
+  assert.match(offPs, /\$result\.off = \[bool\]\(Test-Off \$result\.after\)/, 'whether it took, read back');
+  // Read back for up to 30 s, the real-time monitoring asked off again, in a try of its own, at each read that still says
+  // it is on; a refusal of that recorded once, not at every pass.
+  const loopAt = offPs.indexOf('$deadline = (Get-Date).AddSeconds(30)');
+  const loop = offPs.slice(loopAt, offPs.indexOf('} while ((Get-Date) -lt $deadline)', loopAt));
+  assert.ok(loopAt > offAt && loop.includes('\ndo {\n'), 'the read-back loop, after the first ask');
+  assert.ok(loop.includes("  if (Test-Off $result.after) { break }\n  if ($result.after -and $result.after.realtime) {\n    try { Set-MpPreference -DisableRealtimeMonitoring $true } catch {\n      if (-not $againSaid) { $result.errors += ('real-time monitoring, asked again: ' + $_.Exception.Message) }\n      $againSaid = $true\n    }\n  }\n  Start-Sleep -Seconds 2\n"), 'asked off again while a read says it is on, its refusal said once: ' + loop);
+  assert.ok(offPs.indexOf('$againSaid = $false') > 0 && offPs.indexOf('$againSaid = $false') < loopAt + loop.indexOf('\ndo {\n'), 'said once a run, not once a pass');
+  assert.ok(loop.includes("\ndo {\n  try { $result.after = Read-Defender } catch {\n    $result.after = $null\n    if (-not $readSaid) { $result.errors += ('read after: ' + $_.Exception.Message) }\n    $readSaid = $true\n  }\n"), 'a read that fails, said once: ' + loop);
+  assert.ok(offPs.indexOf('$readSaid = $false') > 0 && offPs.indexOf('$readSaid = $false') < loopAt + loop.indexOf('\ndo {\n'), 'a failed read said once a run, not once a pass');
+  assert.equal((offPs.match(/Set-MpPreference -DisableRealtimeMonitoring \$true/g) || []).length, 2, 'the first ask, and the ask again in the loop');
+  assert.ok(!/DisableRealtimeMonitoring \$false/.test(offPs), 'never turned on here');
+  assert.match(offPs, /\nexit 0\n$/, 'it informs, never fails the job for Defender');
   // The canaries' evidence is readable by whoever reads the repository: of the runner's own logs it keeps the
   // listener's warnings and errors alone and never the worker's, and every line of every file goes through Hide-Secret.
   const ev = read('tools/canary-evidence.ps1');
@@ -1476,6 +1667,57 @@ test('the lane in CI: windows-2025, every action pinned by its commit, no creden
   assert.ok(writes.length >= 5 && writes.every((l) => /\bHide-Secret \| (Set|Add)-Content/.test(l)), 'every write through Hide-Secret: ' + writes.filter((l) => !/\bHide-Secret \|/.test(l)).join(' / '));
   assert.ok(ev.includes("-replace 'eyJ[A-Za-z0-9_\\-]+\\.[A-Za-z0-9_\\-]+\\.[A-Za-z0-9_\\-]+', '<token>'") && ev.includes("-replace '(?:[A-Za-z0-9+/=_\\-]|%[0-9A-Fa-f]{2}){32,}', '<long>'") && ev.includes("(sig|signature|token|access_token|key|secret|password|pwd|sessionid)"), 'tokens, signatures and keys blanked');
 });
+// The Defender canary is temporary: a question asked of GitHub's hosted runners, removed with this test once it is
+// answered. While it runs, each leg must ask what it says it asks, or its answer means nothing.
+test('the Defender canary (temporary): two legs; on-then-off turns Defender on and puts it back after its evidence at 4 minutes, whatever came before; monitoring-only turns the real-time monitoring on alone and touches no exclusion; every evidence step uploaded under a name of its own, whatever it ended with', () => {
+  const ci = read('.github/workflows/ci.yml');
+  const canary = job(ci, 'canary');
+  assert.match(canary, /\n {4}strategy:\n {6}fail-fast: false\n {6}matrix:\n {8}defender: \[on-then-off, monitoring-only\]\n/, 'the two legs, and no other');
+  assert.ok(!/\$\{\{ matrix\.(?!defender\b)/.test(canary), 'no other matrix key read');
+  const steps = canary.split(/\n {6}- /).slice(1).map((x) => x.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n').replace(/\n+$/, ''));
+  // The leg a step is run in ('' for both): read from its own condition.
+  const leg = (x) => (/\n {8}if: \$\{\{ (?:always\(\) && )?matrix\.defender == '([\w-]+)' \}\}\n/.exec(x) || [])[1] || '';
+  for (const x of steps) assert.ok(['', 'on-then-off', 'monitoring-only'].includes(leg(x)), 'a leg the matrix names: ' + x.split('\n')[0]);
+  // on-then-off: tools/defender-on.ps1 before any evidence, then, after the evidence at 4 minutes and its upload,
+  // tools/defender-off.ps1 whatever the steps before ended with (always()), before the evidence at 6 minutes.
+  const on = steps.findIndex((x) => x.includes('./tools/defender-on.ps1'));
+  const off = steps.findIndex((x) => x.includes('./tools/defender-off.ps1'));
+  const four = steps.findIndex((x) => x.startsWith('name: Alive at 4 min,'));
+  const six = steps.findIndex((x) => x.startsWith('name: Alive at 6 min,'));
+  assert.ok(on > 0 && on < steps.findIndex((x) => x.startsWith('name: Alive at')), 'Defender on before any evidence');
+  assert.ok(four > on && off === four + 2 && six === off + 1, 'put back after the evidence at 4 minutes and its upload, before the next: ' + [on, four, off, six]);
+  assert.match(steps[four + 1], /\n {10}name: canary-\$\{\{ matrix\.defender \}\}-\$\{\{ github\.sha \}\}-\$\{\{ github\.run_attempt \}\}-m04\n/, 'the evidence at 4 minutes kept before Defender is put back');
+  assert.match(steps[on], /^name: [^\n]*\n {8}if: \$\{\{ matrix\.defender == 'on-then-off' \}\}\n {8}shell: powershell\n {8}timeout-minutes: \d+\n {8}run: \.\/tools\/defender-on\.ps1 -Out "\$env:RUNNER_TEMP\\canary\\defender\.json"$/, 'on-then-off alone, the runner\'s own excluded as the lane has them');
+  assert.match(steps[off], /^name: [^\n]*\n {8}if: \$\{\{ always\(\) && matrix\.defender == 'on-then-off' \}\}\n {8}shell: powershell\n {8}timeout-minutes: \d+\n {8}run: \.\/tools\/defender-off\.ps1 -Record "\$env:RUNNER_TEMP\\canary\\defender\.json" -Out "\$env:RUNNER_TEMP\\canary\\defender-off\.json"$/, 'put back whatever came before, on-then-off alone, recorded beside the evidence');
+  // monitoring-only: one step, the real-time monitoring turned on and nothing else; no step it runs removes or adds an
+  // exclusion, runs either script or turns the monitoring off.
+  const mon = steps.filter((x) => leg(x) === 'monitoring-only');
+  assert.equal(mon.length, 1, 'one step of its own');
+  assert.match(mon[0], /^name: [^\n]*\n {8}if: \$\{\{ matrix\.defender == 'monitoring-only' \}\}\n {8}shell: powershell\n {8}timeout-minutes: \d+\n {8}run: Set-MpPreference -DisableRealtimeMonitoring \$false$/, 'the real-time monitoring on, and nothing else');
+  assert.ok(steps.indexOf(mon[0]) > 0 && steps.indexOf(mon[0]) < steps.findIndex((x) => x.startsWith('name: Alive at')), 'before any evidence');
+  for (const x of steps.filter((y) => leg(y) !== 'on-then-off')) {
+    assert.ok(!/defender-o(n|ff)\.ps1|(Add|Remove)-MpPreference|-Exclusion|DisableRealtimeMonitoring \$true/i.test(x), 'monitoring-only runs it, and it touches no exclusion nor turns the monitoring off: ' + x.split('\n')[0]);
+  }
+  assert.deepEqual(steps.filter((x) => /defender-o(n|ff)\.ps1|MpPreference/i.test(x)).map(leg), ['on-then-off', 'monitoring-only', 'on-then-off'], 'every step that touches Defender is one leg\'s');
+  // The evidence: each step goes on whatever the one before ended with, and is uploaded right after it under a name of its
+  // own (an upload over another deletes it first), whatever it ended with; nothing else is uploaded.
+  const alive = steps.map((x, k) => [x, k]).filter(([x]) => x.startsWith('name: Alive at'));
+  assert.ok(alive.length >= 2, 'the evidence steps');
+  const names = [];
+  for (const [x, k] of alive) {
+    const min = /^name: Alive at (\d+) min,/.exec(x)[1];
+    assert.match(x, /\n {8}if: \$\{\{ !cancelled\(\) \}\}\n {8}continue-on-error: true\n/, 'Alive at ' + min + ' goes on whatever came before, and stops nothing');
+    const up = /^uses: actions\/upload-artifact@[0-9a-f]{40} # v\d+\.\d+\.\d+\n {8}if: \$\{\{ !cancelled\(\) \}\}\n {8}timeout-minutes: \d+\n {8}continue-on-error: true\n {8}with:\n {10}name: canary-\$\{\{ matrix\.defender \}\}-\$\{\{ github\.sha \}\}-\$\{\{ github\.run_attempt \}\}-m(\d{2})\n {10}path: \$\{\{ runner\.temp \}\}\/canary$/.exec(steps[k + 1]);
+    assert.ok(up, 'Alive at ' + min + ' uploaded right after it, whatever it ended with: ' + steps[k + 1]);
+    assert.equal(up[1], min.padStart(2, '0'), 'Alive at ' + min + ' uploaded under its own name');
+    names.push(min.padStart(2, '0'));
+  }
+  assert.equal(new Set(names).size, names.length, 'each under a name of its own');
+  assert.equal(steps.filter((x) => x.startsWith('uses: actions/upload-artifact')).length, alive.length, 'an upload after each evidence step, and no other');
+  assert.match(canary, /\n {4}if: \$\{\{ github\.event_name == 'push' \}\}\n/, 'pushes alone');
+  assert.ok(!/\bcanary\b/.test(job(ci, 'release').split('\n').filter((l) => !/^\s*#/.test(l)).join('\n')), 'the release waits for neither leg');
+});
+
 test('the release waits for the lane and never is held by it: its notes carry the readings, or say there are none', () => {
   const ci = read('.github/workflows/ci.yml');
   const release = job(ci, 'release');

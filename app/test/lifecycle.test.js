@@ -546,7 +546,7 @@ function job(ci, name) {
 /** A job's steps, each from its "- " to the next. */
 const stepsOf = (j) => j.slice(j.indexOf('\n    steps:\n') + 12).split(/\n {6}- /).map((x) => x.replace(/^ {6}- /, '').split('\n').filter((l) => !/^\s*#/.test(l)).join('\n').trim()).filter(Boolean);
 
-test('the life cycle in CI: an elevated windows-2025 job after the installer\'s, Defender back on first, every action pinned by its commit, Inno Setup pinned as the installer job pins it, the release order asked, the two other builds made from the zip\'s stage, every test counted, its logs kept; the release waits for it', () => {
+test('the life cycle in CI: an elevated windows-2025 job after the installer\'s, on the image as it is (nothing turns Defender on), every action pinned by its commit, Inno Setup pinned as the installer job pins it, the release order asked, the two other builds made from the zip\'s stage, every test counted, its logs kept; the release waits for it', () => {
   const ci = h.readSource('.github/workflows/ci.yml');
   const lc = job(ci, 'lifecycle');
   assert.ok(ci.indexOf('\n  lifecycle:\n') > ci.indexOf('\n  installer:\n'), 'after the installer job');
@@ -555,7 +555,28 @@ test('the life cycle in CI: an elevated windows-2025 job after the installer\'s,
   for (const [, ref, comment] of lc.matchAll(/^\s*(?:- )?uses: (\S+)(.*)$/gm)) assert.match(ref + comment, /^[\w.-]+\/[\w.-]+@[0-9a-f]{40} # v\d+\.\d+\.\d+$/, ref + ' is pinned by its commit');
   const steps = stepsOf(lc);
   assert.match(steps[0], /^uses: actions\/checkout@[0-9a-f]{40} # v[\d.]+\n\s+timeout-minutes: \d+\n\s+with:\n\s+persist-credentials: false$/);
-  assert.match(steps[1], /^name: Defender's real-time monitoring back on, the image's exclusions removed \(tools\/defender-on\.ps1\)\n[\s\S]*run: \.\/tools\/defender-on\.ps1 -Out "\$env:RUNNER_TEMP\\defender\.json"$/, 'Defender, before anything is laid down');
+  // On the image as it is, as the job that lived its hour was (runs 105, 109 and 110 lost every runner that ran on past
+  // tools/defender-on.ps1: seen in run 110 about ten minutes after it, derived for the other two): no step runs it or
+  // changes Defender in any other way, and the job says why.
+  const defenderSteps = steps.filter((x) => /defender-o(n|ff)\.ps1|-MpPreference\b|DisableRealtimeMonitoring/i.test(x));
+  assert.deepEqual(defenderSteps, [], 'no step of the life cycle turns Defender on or changes it');
+  assert.match(steps[1], /^uses: actions\/setup-node@/, 'the checkout, then Node: nothing between them');
+  assert.ok(!/tools[\\/]defender-on\.ps1/.test(lc.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n')), 'tools/defender-on.ps1 is run nowhere in the job');
+  const why = lc.slice(lc.indexOf('\n    steps:\n'), lc.indexOf('actions/setup-node@'));
+  assert.ok(/runs 105, 109 and 110/.test(why) && /as GitHub's image leaves them/.test(why), 'the job says why it runs on the image as it is: ' + why);
+  // What CI no longer proves is said where the job runs: the installer under Defender is the show laptop's.
+  const said = (text) => text.split('\n').filter((l) => /^\s*#/.test(l)).map((l) => l.replace(/^\s*# ?/, '')).join(' ');
+  assert.match(said(why), /whether an install, an upgrade, a rollback, a go back and an uninstall pass under Defender is no longer tested in CI/);
+  assert.match(said(why), /The installer under the laptop's own Defender is the show laptop's: lab 6's upgrade during a rehearsal and lab 7's Upgrade and Go back/);
+  // The comment above the job says how it runs, as its steps do: never that Defender is turned (back) on first.
+  const above = [];
+  for (const l of ci.slice(0, ci.indexOf('\n  lifecycle:\n')).split('\n').reverse()) { if (/^ {2}#/.test(l)) above.unshift(l); else break; }
+  const head = said(above.join('\n'));
+  assert.ok(above.length > 3 && /^The installer's life cycle \(the 0\.6\.0 plan's Part 6, unit U16\)/.test(head), 'the comment above the job, read whole: ' + head);
+  for (const turnedOn of [/\bback on first\b/i, /\bturned back on\b/i, /\bturns? (?:it |Defender )?on first\b/i, /\bDefender back on\b/i, /\bwith Defender's real-time monitoring turned\b/i, /\bwith Defender on\b/i]) {
+    assert.doesNotMatch(head, turnedOn, 'the comment above the job never says Defender is turned on: ' + head);
+  }
+  assert.match(head, /on GitHub's image as it is, Defender's real-time monitoring off as the image leaves it/, 'it says the job runs on the image as it is');
   // Inno Setup as the installer job installs it: the same pin, the release API's digest and the publisher's signature.
   const pinOf = (text) => /\$pin = '([0-9A-F]{64})'/.exec(text)[1];
   const inno = steps.find((x) => x.startsWith('name: Inno Setup 7.1.0 (pinned)'));
