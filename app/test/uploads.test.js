@@ -584,11 +584,18 @@ test('a holding slide\'s picture lives while the slide is up (a fresh upload, or
 
   // The boot sweep: stage files past their wait are removed at the next start unless something else holds them: a screen,
   // the hall's holding image, an Earlier entry. One nothing holds goes, which says the sweep ran.
-  const screen = await picture('screen.png');
-  const holding = await picture('holding.png');
+  // Each fresh upload is shown at once: the server forgets one nothing names once its wait (here WAIT) has passed, so
+  // uploading the four first and showing them after let the first expire whenever the uploads took longer (a 429 waits
+  // 2.1 s), and its push was refused as a file of no room.
+  const shownThenWithdrawn = async (name) => {
+    const up = await picture(name);
+    assert.equal((await emit(s, 'page:withdraw', { code, seq: await push({ kind: 'image', url: up.url }) })).ok, true);
+    return up;
+  };
+  const screen = await shownThenWithdrawn('screen.png');
+  const holding = await shownThenWithdrawn('holding.png');
+  const control = await shownThenWithdrawn('control.png');
   const earlier = await picture('earlier.png');
-  const control = await picture('control.png');
-  for (const up of [screen, holding, control]) assert.equal((await emit(s, 'page:withdraw', { code, seq: await push({ kind: 'image', url: up.url }) })).ok, true);
   const shown = await push({ kind: 'image', url: earlier.url });
   assert.equal((await emit(s, 'page:push', { code, to: 'board', content: { kind: 'chat', layer: 'info' }, ifSeq: shown })).ok, true);
   const d = (await emit(s, 'display:create', { code, name: 'Lectern' })).display;

@@ -7376,6 +7376,12 @@ laptop and no Board device walked)
   stop met. `test/readings.test.js` proves a token written 300 ms after the first try, a proof that never comes, no token
   at all, the judge's words and the reading's order. Run 115's verdicts are recorded in `docs/INSTALL.md`
   (`tools/readings.js record`; R6, R10 and R11 were not taken, by the faults fixed above, and keep their earlier cells).
+- `test/uploads.test.js`'s holding-slide test shows each fresh upload as soon as it is made. Its boot-sweep part uploaded
+  four pictures, then showed three; the server forgets a fresh upload nothing names once its wait has passed (the test
+  sets it to 1.5 s, and the sweep runs every 1.5 s), so when the uploads took longer (a 429 waits 2.1 s, or a loaded
+  machine) the first was forgotten before it was shown and its push refused as a file of no room. A local run on the
+  CR LF checkout failed so; with a wait of twice the sweep before the first show the old order fails every time, and the
+  new one does not wait between an upload and its show. Nothing that ships changed.
 - The admin page draws Accounts held aside with its first fill, never before it, and an adoption's one-time passwords
   with the panel's new state, from one answer. CI's browser smoke on Windows (run 106) missed twice on the held list: the
   first left click on ana's ⋯ opened no menu (the click meant to close it then opened one, left open with the focus in
