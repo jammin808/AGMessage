@@ -7356,6 +7356,12 @@ laptop and no Board device walked)
   side room's code turned off now each wait for their toast and for that answer held before they read the page, so the
   row is read with the page's read answered and not yet applied; `HOLD_READS`'s comment says so. Nothing that ships
   changed.
+- Dependabot's two pull requests against `main` (jammin808/AGMessage#6, the runtime group; #7, the tooling group) are
+  taken into 0.6.0 at the versions they name, not newer: `@anthropic-ai/sdk` 1.3.0 to 1.6.0 and `ws` 8.22.0 to 8.22.1,
+  which the portable folder and the installer ship, and `globals` 17.13.0 to 17.14.0, for the analyzers alone (ESLint
+  10.14.0 and eslint-plugin-security 4.2.1, the rest of #7, were already here). The lock file changes those three alone
+  (socket.io's own `ws` stays 8.21.3); `npm run audit` finds no advisory and every package's registry signature
+  verified. Both pull requests close themselves once 0.6.0 is on `main`.
 - The admin page draws Accounts held aside with its first fill, never before it, and an adoption's one-time passwords
   with the panel's new state, from one answer. CI's browser smoke on Windows (run 106) missed twice on the held list: the
   first left click on ana's ⋯ opened no menu (the click meant to close it then opened one, left open with the focus in
