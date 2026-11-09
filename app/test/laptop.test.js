@@ -18,6 +18,8 @@ const h = require('./helpers');
 const { readSource } = h;
 const { ServerLog, Lines, redact, HIDDEN } = require('../lib/serverlog');
 const laptop = require('../lib/laptop');
+const startup = require('../lib/startup');
+const machine = require('../machine');
 const tlsmod = require('../lib/tls');
 
 const ROOT = path.join(__dirname, '..');
@@ -246,6 +248,13 @@ test('the installed node\'s start refused as configured: the next start, from an
   t.after(() => w.stop());
   assert.ok(await until(() => /AGMessage \S+ is running/.test(w.out()) && /^[0-9a-f]{16}$/.test(read(path.join(f.AGM_TOKEN_DIR, 'admin-token'))), 20000), w.out());
   const port = w.port;
+  // The installed node says how it runs on the host's health, its program folder named: what a copy refused at the port
+  // and machine.js read, with no token, to choose their words (run 115's life cycle found it missing).
+  const programDir = path.dirname(ROOT);
+  const local = await (await fetch(`http://127.0.0.1:${port}/api/health`)).json();
+  assert.deepEqual(local.install, { runs: 'task', installed: true, dir: programDir, light: 'green', words: 'installed in ' + programDir + ', run by its server task' });
+  assert.equal((await machine.healthOf(port)).runs, 'task', 'machine.js reads the installed node as the task');
+  assert.equal((await startup.readPortHolder(port)).runs, 'task', 'and so does a copy refused at the port');
   const cookie = (await h.api(`http://127.0.0.1:${port}`, 'POST', '/api/admin/login', { token: read(path.join(f.AGM_TOKEN_DIR, 'admin-token')) })).cookie;
   const s = await h.connect(`http://127.0.0.1:${port}`, cookie);
   t.after(() => s.close());

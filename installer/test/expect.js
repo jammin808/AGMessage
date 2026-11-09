@@ -23,6 +23,14 @@ const ANSWER_S = 5;
  * node.exe starts, within `startMs` of its task's run; its task's own time limit, `limitMinutes`.
  */
 const PROBE = Object.freeze({ runMs: 30_000, answerMs: 180_000, startMs: 120_000, limitMinutes: 10 });
+/**
+ * The first admin account the life cycle makes at loopback (its seed): its username and its display name, and the words
+ * each passphrase of it starts with. The server refuses a password that holds the username or the name, spaces aside
+ * (lib/accounts.js passwordProblem), so the words name neither: test/lifecycle.test.js holds them to that rule on Linux.
+ */
+const SEED_ACCOUNT = Object.freeze({ username: 'lifecycle', name: 'Life Cycle', passphrase: 'installer walk across the hall ' });
+/** A passphrase for the seed account, its random part given (pure): the fixed words, then `random`. */
+const seedPassphrase = (random) => SEED_ACCOUNT.passphrase + String(random);
 /** The probe's longest run for `n` requests, from its first line to its last (pure). */
 const probeWorstMs = (n) => n * (PROBE.runMs + PROBE.answerMs);
 /**
@@ -300,7 +308,7 @@ const ITEMS = Object.freeze([
 ].map(([item, test]) => Object.freeze({ item, test })));
 
 module.exports = {
-  ANSWER_S, PROBE, LOGON_REFUSED, WORDS, ITEMS, FORBIDDEN, INNO_OWN, KEPT_INSTALLER, STORED_PASSWORD,
-  planOf, buildOf, named, probeWorstMs, logonRefused, resultWords, logText, innoLog, recordOf, forbiddenOn, payloadOf, againstPayload, snapshotDiff,
+  ANSWER_S, PROBE, LOGON_REFUSED, WORDS, ITEMS, FORBIDDEN, INNO_OWN, KEPT_INSTALLER, STORED_PASSWORD, SEED_ACCOUNT,
+  seedPassphrase, planOf, buildOf, named, probeWorstMs, logonRefused, resultWords, logText, innoLog, recordOf, forbiddenOn, payloadOf, againstPayload, snapshotDiff,
   secretsIn, scrubbed, eventsOf, factsKept,
 };

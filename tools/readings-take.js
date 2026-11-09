@@ -156,7 +156,7 @@ const bounded = new AsyncLocalStorage();
 /** What is left of the current reading's bound, in ms: Infinity outside a reading. */
 const left = () => { const b = bounded.getStore(); return b ? b.end - now() : Infinity; };
 /** `ms`, shortened to what is left of the current reading's bound: 0 once it is reached. */
-const within = (ms) => Math.max(0, Math.min(ms, left()));
+const within = (ms) => Math.max(0, Math.floor(Math.min(ms, left())));
 /** A wait of `ms` that ends at the current reading's bound. */
 const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, within(ms)); });
 /** A wait of `ms` no reading's bound shortens: the lane's own, while it ends and removes what it made. */

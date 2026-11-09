@@ -16,6 +16,7 @@ const machine = require('../machine');
 const startup = require('../lib/startup');
 const dataformat = require('../lib/dataformat');
 const wire = require('../lib/machinewire');
+const { passwordProblem } = require('../lib/accounts');
 const { compareBuilds, readStamp, compose, parseBuild } = require('../lib/version');
 const L = require('../../tools/lifecycle.js');
 const defines = require('../../tools/installer-defines.js');
@@ -487,6 +488,19 @@ test('what the life cycle must keep across an upgrade, an uninstall that keeps t
   ]);
 });
 
+test('the seed\'s first admin account: every passphrase the life cycle makes for it is one the server takes, the username and the name aside', () => {
+  const { username, name } = expect.SEED_ACCOUNT;
+  // Each is the fixed words and 12 random characters (9 bytes, base64url), as the life cycle makes them.
+  for (const random of ['AAAAAAAAAAAA', 'zzzzzzzzzzzz', '-_-_-_-_-_-_', 'Q1w2E3r4T5y6']) {
+    const p = expect.seedPassphrase(random);
+    assert.equal(passwordProblem(p, { username, name }), null, 'the server takes ' + JSON.stringify(p));
+  }
+  // The rule the first run's seed broke: the name, spaces aside, is refused, so the words must hold neither.
+  assert.equal(passwordProblem('the life cycle AAAAAAAAAAAA', { username, name }), 'The password may not contain your name.');
+  assert.match(LIFECYCLE, /const passphrase = \(\) => \{ const p = expect\.seedPassphrase\(crypto\.randomBytes\(9\)\.toString\('base64url'\)\);/, 'the life cycle makes each passphrase from these words');
+  assert.match(LIFECYCLE, /\{ token, username: expect\.SEED_ACCOUNT\.username, name: expect\.SEED_ACCOUNT\.name, password \}/, 'and its seed names this account');
+});
+
 // ---------------------------------------------------------------- the waits
 
 test('every wait of the life cycle ends by itself, named: an installer at its bound and none beside it, the watch beside the upgrade, the asks of a seed, the stand-ins it starts and ends, and the long programs run without holding the loop', () => {
@@ -518,6 +532,8 @@ test('every wait of the life cycle ends by itself, named: an installer at its bo
   assert.match(HANDS, /const machineJs = async \([^\n]*\n[^\n]*\n\s+const r = await runAsync\(/, 'machine.js runs without holding the loop');
   assert.match(HANDS, /const facts = async \([^\n]*\n\s+const r = await runAsync\(/, 'the facts reader runs without holding the loop');
   assert.match(HANDS, /const r = await runAsync\(path\.win32\.join\(p\.app, 'unins000\.exe'\)/);
+  // An uninstaller that refused or failed is not waited for (run 115 waited out 6 minutes on each refusal).
+  assert.match(HANDS, /const gone = r\.code === 0 \? await until\(isGone, ms\) : isGone\(\);/, 'only an uninstall that ended with 0 is waited for until the install is gone');
   assert.match(LIFECYCLE, /const launch = \(args\) => runAsync\(/);
   const calls = [...LIFECYCLE.matchAll(/(await )?(H\.facts\(|H\.machineJs\(|H\.control\(|launch\(\[)/g)];
   assert.ok(calls.length >= 20, 'the calls are found: ' + calls.length);

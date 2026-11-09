@@ -211,14 +211,16 @@ function hands({ work, logs }) {
     child.once('error', (e) => { done(null); console.error('the installer did not run: ' + e.message); });
   });
   /**
-   * The uninstaller run quietly ({app}\unins000.exe), then waited for until the install is gone (it hands the work to a
-   * copy of itself and its record and folder go last), at most `ms`: {code, ms, log, said, gone}.
+   * The uninstaller run quietly ({app}\unins000.exe), then, when it ended with 0, waited for until the install is gone (it
+   * hands the work to a copy of itself and its record and folder go last), at most `ms`: {code, ms, log, said, gone}. One
+   * that ended otherwise refused or failed, so nothing is waited for: `gone` is whether the install is gone already.
    */
   const uninstall = async (args, what, { ms = 6 * 60_000 } = {}) => {
     const log = logFor(what);
     const t0 = Date.now();
     const r = await runAsync(path.win32.join(p.app, 'unins000.exe'), ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', ...args, '/LOG=' + log], { ms, cwd: p.sys });
-    const gone = await until(() => !fs.existsSync(path.win32.join(p.app, 'unins000.exe')) && !(record() || {}).InstallDir, ms);
+    const isGone = () => !fs.existsSync(path.win32.join(p.app, 'unins000.exe')) && !(record() || {}).InstallDir;
+    const gone = r.code === 0 ? await until(isGone, ms) : isGone();
     await sleep(2000);
     const text = logOf(log);
     return { code: r.code, ms: Date.now() - t0, log, text, said: expect.innoLog(text), gone: !!gone };

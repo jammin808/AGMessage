@@ -513,6 +513,15 @@ test('the installer\'s own chain is left out of the programs of {app}: the kept 
   assert.deepEqual(pids([asker]), [6090], 'a kept installer this check was not run by stays');
   assert.deepEqual(pids([loader, older, nodeUp, elsewhere]), [6200, 6300, 6400], 'another kept installer, a node.exe of {app} and a look-alike outside installers\\ stay, ancestors or not');
   assert.deepEqual(pids([{ ...loader, exe: KEPT.toUpperCase() }]), [], 'Windows\' paths compared without case');
+  // The uninstaller's first phase waits in {app} while its copy in %TEMP% runs machine.js uninstall: left out when it is
+  // this check's ancestor (with the instance that asked for the elevation), kept otherwise and anywhere but {app} itself.
+  const UNINS = APP + '\\unins000.exe';
+  const firstPhase = { pid: 3792, name: 'unins000.exe', cmd: '"' + UNINS + '" /VERYSILENT', exe: UNINS, ancestor: true };
+  const unAsker = { ...firstPhase, pid: 3780, ancestor: false };
+  assert.deepEqual(pids([firstPhase, unAsker, nodeUp]), [6300], 'the uninstaller running this uninstall, both its instances; a node.exe of {app} stays');
+  assert.deepEqual(pids([unAsker]), [3780], 'an uninstaller this check was not run by stays');
+  assert.deepEqual(pids([{ ...firstPhase, exe: APP + '\\app\\unins000.exe' }, { ...firstPhase, pid: 3793, exe: APP + '\\installers\\unins001.exe' }, { ...firstPhase, pid: 3794, exe: APP + '\\uninstall.exe' }]), [3792, 3793, 3794], 'only an unins###.exe in {app} itself');
+  assert.deepEqual(machine.outsideOwnChain([firstPhase, loader], APP + '\\').map((p) => p.pid), [], '{app} named with its last backslash');
   const root = tmp('agm-chain-');
   const check = (programs, more = {}) => machine.run(['preinstall-check', '--machine', root, '--sys', SYS, '--port', '3023', '--app', APP, ...(more.rollback ? ['--rollback'] : [])], { run: windows({ programs: { programs } }).run, net: { portAnswers: async () => !!more.answers, pid: () => 4120 } });
   let r = await check([loader, asker]);

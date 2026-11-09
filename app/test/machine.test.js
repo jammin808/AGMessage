@@ -823,6 +823,16 @@ test('uninstall with --app: a person\'s console open from {app} is refused befor
   let r = await machine.run(['uninstall', '--machine', root, '--sys', SYS, '--app', APP], { run: w.run, net: n });
   assert.deepEqual([r.code, stopped, w.win.tasks.size], [3, 0, 1], 'refused before the stop, every task in place');
   assert.equal(r.text, 'AGMessage\'s own console is open (node.exe (pid 5000) runs from ' + APP + '): close its window, then uninstall again. Nothing was removed.');
+  // The uninstaller's own first phase, waiting in {app} while its copy in %TEMP% runs this (run 115 refused itself on it):
+  // left out, at the first look and at the wait for {app}'s programs to end alike.
+  const firstPhase = { pid: 3792, name: 'unins000.exe', cmd: '"' + APP + '\\unins000.exe" /VERYSILENT', exe: APP + '\\unins000.exe', ancestor: true };
+  w = withPrograms(() => ({ programs: [firstPhase] }));
+  r = await machine.run(['uninstall', '--machine', root, '--sys', SYS, '--app', APP], { run: w.run, net: n });
+  assert.equal(r.code, 0, 'the uninstall that runs it is not refused on it: ' + r.text);
+  // One that is not this uninstall's ancestor is another uninstaller's, and refuses as any program of {app} does.
+  w = withPrograms(() => ({ programs: [{ ...firstPhase, ancestor: false }] }));
+  r = await machine.run(['uninstall', '--machine', root, '--sys', SYS, '--app', APP], { run: w.run, net: n });
+  assert.deepEqual([r.code, r.text], [3, 'AGMessage\'s own console is open (unins000.exe (pid 3792) runs from ' + APP + '): close its window, then uninstall again. Nothing was removed.']);
   // The watchdog ends once the server has: waited for, then the uninstall goes on.
   let asked = 0;
   w = withPrograms(() => ({ programs: asked++ < 3 ? [watchdog] : [] }));

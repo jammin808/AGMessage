@@ -65,7 +65,7 @@ const secrets = () => [...[...H.tokens].map((value) => ({ label: 'a token', valu
 const scrub = (text) => expect.scrubbed(text, secrets());
 const note = (line) => { report.push('- ' + scrub(line)); };
 
-const passphrase = () => { const p = 'the life cycle ' + crypto.randomBytes(9).toString('base64url'); H.passwords.add(p); return p; };
+const passphrase = () => { const p = expect.seedPassphrase(crypto.randomBytes(9).toString('base64url')); H.passwords.add(p); return p; };
 const ci = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
 const exists = (f) => fs.existsSync(f);
 /** What a run said, for an assertion's message: its exit code and its log's last messages. */
@@ -119,7 +119,7 @@ const ASK_MS = 15_000;
  */
 async function seed(token, hallName) {
   const password = passphrase();
-  const setup = await api(BASE, 'POST', '/api/setup', { token, username: 'lifecycle', name: 'Life Cycle', password }, { ms: ASK_MS });
+  const setup = await api(BASE, 'POST', '/api/setup', { token, username: expect.SEED_ACCOUNT.username, name: expect.SEED_ACCOUNT.name, password }, { ms: ASK_MS });
   assert.equal(setup.status, 200, scrub('the first admin account: ' + JSON.stringify(setup.body)));
   const hall = await api(BASE, 'POST', '/api/rooms', { name: hallName }, { cookie: setup.cookie, ms: ASK_MS });
   assert.match(String(hall.body && hall.body.code), /^[A-Z0-9]{6}$/, scrub('a hall: ' + JSON.stringify(hall.body)));

@@ -120,7 +120,8 @@ installer again. …" before anything runs or an end is kept (the portable copy'
 ## A port already in use
 
 The installed node reads `http://127.0.0.1:<PORT>/api/health` once, within a second, sending no token. Only the
-holder's version, build and channel choose the words, and nothing is decided on them:
+holder's version, build and channel (`install.runs`, which health gives this laptop and the admin) choose the words, and
+nothing is decided on them:
 
 - an AGMessage answers (another copy, since the installed node runs one instance): "Another copy of AGMessage, 0.6.0
   (build …), holds port 3023. Close its window: AGMessage takes the port back on its next try."
@@ -433,14 +434,18 @@ event into its audit row (The machine's events, below).
   port is refused. Nothing on the port: ready, with or without a token (a first install has none). The installed AGMessage proving its token is asked how busy it is:
   busy is refused without a typed reason (`/FORCE`), and one that does not answer within 5 s is refused, naming its pid.
   Anything else on the port is refused with who holds it: "AGMessage 0.5.1 is running on port 3023 from a folder: press
-  Ctrl+C in its window, then continue" from its `/api/health`, or "Another program (pid 4120) holds port 3023: close it,
-  then continue".
+  Ctrl+C in its window, then continue" from its `/api/health` (an answer whose `install.runs` is not `task`), "The
+  AGMessage installed on this PC (…) answers on port 3023 but did not prove it holds this PC's token: stop it from the
+  Task Scheduler, then continue" (one whose `install.runs` is `task`), or "Another program (pid 4120) holds port 3023:
+  close it, then continue".
 - **`machine.js upgrade-stop`** asks nothing when the disk is short of the room the backup takes (its copies and 1 GB
   beside them), unless forced. Then the stop at loopback with the proof of the token, reason `upgrade`, who asked
   (`--by`) and the reason typed: it waits for the server to end (its port closed, up to 2 minutes), reads
   `last-stop.json` written after it asked, and says "AGMessage stopped for the upgrade and saved at 20:31; backup …". No
   record, a stop that did not save, or no backup made (the record's `unbacked` says why) is refused (3) unless forced.
-- **`machine.js uninstall`** refuses while a console of the Start menu is open from `--app` ({app}), then stops the
+- **`machine.js uninstall`** refuses while a console of the Start menu is open from `--app` ({app}) (the uninstaller's
+  own first phase is not one: Inno Setup's `unins000.exe` in {app}, which waits there while its copy in `%TEMP%` runs this,
+  is left out when it is a parent of this check, with its other instance, as the installer's own chain is), then stops the
   server at loopback (it saves; Task Scheduler's End, TerminateProcess, is never the stop), waits for its port to close,
   ends and removes every task in `\AGMessage\` (the server task, the control task the record names for the laptop's admin
   and each account given a right, and any other the folder lists), waits for every program of {app} to end (one still

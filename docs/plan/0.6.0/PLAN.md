@@ -11067,6 +11067,12 @@ Each is one commit, `AGMessage 0.6.0, unit Un: <what landed>`. Every reader is n
   - `dir` is `null` unless installed. A folder run's path would name the Windows account (`C:\Users\<name>\…`).
   - The laptop's admin and the grants are in the admin health's "This laptop" only, never in the context (U.5.1).
   - The current event (U15) is in the admin health and on the admin page.
+  - *As built (found by run 115's life cycle, the first to run to its end, where the install's own server task read as
+    no channel at all): `install` was not in either until then, so `install.runs`, which a copy refused at the port and
+    `machine.js` read to choose their words, was always empty. It is `{runs, installed, dir, light, words}` now
+    (`lib/startup.js` `installFacts`), last but one in the host's and the admin's health and last in the context: `light`
+    green installed, grey for a folder run. `signed` and `host` are not built: the server reads neither the HKLM record
+    nor Task Scheduler (`machine.js status` reads both, elevated).*
 - **The hello is unchanged.** It is unauthenticated, and an `inst` field would be a Show Bus amendment across four
   repositories (U.10).
 - **The AI's brief is unchanged**, except that it reads the current event's halls only and never an archive (U15). No

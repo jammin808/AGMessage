@@ -239,6 +239,18 @@ function silentHolder(port) {
   return new Promise((resolve) => { srv.listen(port, '127.0.0.1', () => resolve({ conns, close: () => new Promise((r) => { for (const s of sockets) s.destroy(); srv.close(r); }) })); });
 }
 
+test('how this copy runs (install): the channel, installed or not, the program folder only when installed, a light and words', () => {
+  assert.deepEqual(startup.installFacts({ runs: 'portable', programDir: 'C:\\Users\\ana\\Desktop\\AGMessage' }), {
+    runs: 'portable', installed: false, dir: null, light: 'grey', words: 'run from a folder (the portable copy)',
+  }, 'a folder run names no folder: its path would name the Windows account');
+  assert.deepEqual(startup.installFacts({ runs: 'task', programDir: 'C:\\Program Files\\AGMessage' }), {
+    runs: 'task', installed: true, dir: 'C:\\Program Files\\AGMessage', light: 'green', words: 'installed in C:\\Program Files\\AGMessage, run by its server task',
+  });
+  // What a copy refused at the port reads from it, as the server answers it: the two readers take `install.runs`.
+  assert.equal(startup.holderOf(JSON.stringify({ version: '0.6.0', build: 'b', install: startup.installFacts({ runs: 'task', programDir: 'C:\\x' }) })).runs, 'task');
+  assert.equal(startup.holderOf(JSON.stringify({ version: '0.6.0', build: 'b', install: startup.installFacts({ runs: 'portable', programDir: 'C:\\x' }) })).runs, 'portable');
+});
+
 test('the port\'s holder: read from its health once, cleaned and cut short; anything else is another program', async (t) => {
   const port = await h.freePort();
   let reply = { body: { ok: true, version: '0.5.1', build: '0.5.1+9.abc1234', uptime: 4 } };

@@ -141,6 +141,9 @@ function buildContext(f) {
     // What another app may propose (through the show desk — a person approves): a notice to every open meeting.
     commands: [{ verb: 'notice <text>', risk: 'review', words: 'Show a notice to everyone in every open meeting' }],
     peers,
+    // How this node runs (lib/startup.js installFacts): the channel, installed or not, its program folder only when
+    // installed, a light and words; never the laptop's admin or the grants, which are the admin health's alone.
+    install: f.install ? { runs: f.install.runs, installed: f.install.installed === true, dir: f.install.installed === true ? f.install.dir : null, light: f.install.light, words: f.install.words } : null,
   };
 }
 

@@ -30,6 +30,8 @@ async function startServer(dataDir, port) {
   throw new Error('server did not start:\n' + out);
 }
 const { stopServer: stop, freePort, pngOf, inviteOf } = require('./helpers');   // asked over IPC, so it saves first on Windows too
+const startup = require('../lib/startup');
+const machine = require('../machine');
 
 const emit = (s, ev, arg) => new Promise((resolve) => s.emit(ev, arg, resolve));
 const connect = (base, cookie) => new Promise((resolve, reject) => {
@@ -401,6 +403,8 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     assert.equal(ctx.node.id, settings.nodeId);
     assert.ok(['green', 'amber', 'red', 'grey'].includes(ctx.light));
     assert.ok(ctx.items.some((i) => i.kind === 'prompt' && /Refer to slide 14/.test(i.state)), 'open prompt questions are listed');
+    // How the node runs, a folder run naming no folder; never the laptop's admin or the grants.
+    assert.deepEqual(ctx.install, { runs: 'portable', installed: false, dir: null, light: 'grey', words: 'run from a folder (the portable copy)' });
     const text = JSON.stringify(ctx);
     for (const secret of ['Capex is on slide 14', 'Chair', 'Ana', 'AGM 2026', code]) assert.ok(!text.includes(secret), 'context leaks ' + secret);
     const viaCookie = await fetch(base + '/api/context', { headers: { cookie } });
@@ -412,6 +416,13 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     assert.ok(local.ok && 'restarts' in local && 'loopMs' in local, 'detail on the host');
     const remote = await (await fetch(base + '/api/health', { headers: { 'cf-connecting-ip': '203.0.113.9' } })).json();
     assert.deepEqual(Object.keys(remote).sort(), ['build', 'ok', 'uptime', 'version']);
+    // How it runs, on the host's detail: the portable folder, which names no folder of its own. A copy refused at the port
+    // reads `install.runs` from here with no token, and machine.js reads it within its answer's bound (64 KB).
+    assert.deepEqual(local.install, { runs: 'portable', installed: false, dir: null, light: 'grey', words: 'run from a folder (the portable copy)' });
+    const raw = await (await fetch(base + '/api/health')).text();
+    assert.ok(Buffer.byteLength(raw) < 64 * 1024, 'the host\'s health fits machine.js\'s bound: ' + Buffer.byteLength(raw) + ' bytes');
+    assert.deepEqual(await startup.readPortHolder(port), { version: local.version, build: local.build, runs: 'portable' }, 'the start\'s holder reader');
+    assert.deepEqual(await machine.healthOf(port), { version: local.version, build: local.build, runs: 'portable' }, 'machine.js\'s holder reader');
     assert.ok(remote.build.startsWith(remote.version + '-dev') || remote.build.startsWith(remote.version + '+'), 'the build names its version and channel: ' + remote.build);
   });
 
@@ -433,7 +444,7 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     const health = async () => (await fetch(base + '/api/health')).json();
     const ask = (s, ev) => new Promise((resolve) => { s.emit(ev, resolve); });
     const h = await health();
-    assert.deepEqual(Object.keys(h).slice(-18), ['elu', 'rssMb', 'maxSocketsPerAddress', 'tunnelSockets', 'largestHall', 'latest', 'peaks', 'showDay', 'tunnel', 'refused', 'acceptErrors', 'format', 'sleeps', 'power', 'lastStop', 'event', 'signins', 'sideRooms'], 'appended at the end of the detail');
+    assert.deepEqual(Object.keys(h).slice(-19), ['elu', 'rssMb', 'maxSocketsPerAddress', 'tunnelSockets', 'largestHall', 'latest', 'peaks', 'showDay', 'tunnel', 'refused', 'acceptErrors', 'format', 'sleeps', 'power', 'lastStop', 'event', 'signins', 'install', 'sideRooms'], 'appended at the end of the detail');
     // The accounts and the sign-ins as the start opened them (lib/keyedstore.js): no secret, no hash.
     assert.deepEqual(Object.keys(h.signins), ['accounts', 'sessions', 'adminSessions', 'record', 'set', 'gens', 'changed']);
     assert.deepEqual([h.signins.accounts.state, h.signins.record.state], [h.signins.accounts.state === 'none' ? 'none' : 'ok', 'ok']);

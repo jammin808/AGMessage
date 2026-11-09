@@ -614,7 +614,8 @@ test('the lane bounds itself: a reading begins only while its own bound fits in 
   const late = [];
   const plan = [
     ['S', () => ({ never: true })],
-    ['A', () => ({ value: 1 })],
+    // A program it starts inside its bound is given what is left of it in whole milliseconds (spawnSync refuses a fraction).
+    ['A', () => ({ value: 1, room: T.within(60_000), ran: T.run(process.execPath, ['-e', '0']).code })],
     // Reports a round, then never ends inside its bound: cut once its settle has passed. When it wakes later, past its
     // bound, no program of it starts, though the next reading is running under a bound of its own.
     ['B', async (progress) => {
@@ -639,13 +640,14 @@ test('the lane bounds itself: a reading begins only while its own bound fits in 
     save: () => { saved.push(JSON.parse(JSON.stringify(raw.readings))); },
     say: (line) => lines.push(line),
     deadlineMs: 3000,
-    boundsMs: { S: 100, A: 300, B: 100, C: 5000, D: 1000, E: 300 },
+    boundsMs: { S: 100, A: 1500, B: 100, C: 5000, D: 1000, E: 300 },
     skip: new Map([['S', 'not taken here: left to a take of its own']]),
     settleMs: 50,
   });
   assert.ok(Date.now() - t0 < 2500, 'the lane went on past the reading that did not end: ' + (Date.now() - t0) + ' ms');
   assert.deepEqual(raw.readings.S, { skipped: 'not taken here: left to a take of its own' });
-  assert.deepEqual(raw.readings.A, { value: 1 });
+  assert.deepEqual([raw.readings.A.value, raw.readings.A.ran], [1, 0], 'a program started inside a reading\'s bound ran: ' + JSON.stringify(raw.readings.A));
+  assert.ok(Number.isInteger(raw.readings.A.room) && raw.readings.A.room > 1000 && raw.readings.A.room <= 1500, 'what is left of a bound is whole milliseconds: ' + raw.readings.A.room);
   assert.deepEqual(raw.readings.B.rounds, [1], 'its rounds so far, as it last reported them');
   assert.match(raw.readings.B.cut, /^its own bound of 0\.1 s: it had not ended 0\.1 s after it$/);
   assert.equal(raw.readings.B.running, undefined, 'no longer said to be running');

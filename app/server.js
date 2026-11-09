@@ -95,6 +95,7 @@ function cannotStartYet(words) {
 const CHANNEL = startup.channelOf(process.env, { programDir: path.dirname(__dirname) });
 if (CHANNEL.problem) cannotStartYet(CHANNEL.problem);
 const RUNS = CHANNEL.runs;
+const INSTALL = Object.freeze(startup.installFacts({ runs: RUNS, programDir: path.dirname(__dirname) }));
 // The machine key is read now and made, when there is none, only once this copy holds its data folder (`firstWrites`).
 secretbox.deferMaking();
 const PORT = parseInt(process.env.PORT || '3023', 10);
@@ -650,6 +651,9 @@ function healthFacts() {
     // The accounts and the sign-ins as stores.open() found them (lib/keyedstore.js): each store's state and words, the
     // record outside the data folder, the set and each store's newest save. No secret, hash or digest.
     signins: stores.report(),
+    // How this copy runs (lib/startup.js installFacts): the channel, installed or not, its program folder when installed,
+    // a light and words. A copy refused at the port reads `install.runs` here, from loopback, to choose its words.
+    install: INSTALL,
   };
 }
 /**
@@ -6571,6 +6575,7 @@ function currentContext(link) {
     peerContexts: Object.fromEntries(Array.from(peerLinks.values()).filter((l) => l.status === 'live' && l.context && (!link || !l.hall || codes.has(l.hall))).map((l) => [l.node.id, { light: l.context.light, headline: l.context.headline }])),
     peers: discovery ? discovery.list() : [],
     aiOn: !!aiKey(), tunnel: !!tunnelProc, recent: link ? recentEvents.filter((e) => !e.link || e.link === link.id) : recentEvents,
+    install: INSTALL,
   });
 }
 // Post each linked Stagewatch its own context: on change, and at least every 5 s. Refresh Stagewatch's own every 5 s.

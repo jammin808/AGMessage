@@ -7280,6 +7280,43 @@ laptop and no Board device walked)
   own); `test/lifecycle.test.js` holds that no step of the life cycle turns Defender on or changes it, that the job says
   what CI no longer tests and where it is taken instead, and that the comment above the job does not say Defender is
   turned on. Whether this keeps the lane's runner is the next run's to say. Nothing that ships changed.
+- Run 115 (`b2dd554`) ran the installer's life cycle to its end for the first time: 14 of its 32 tests passed. Its
+  first attempt was failed by GitHub itself (an "Internal server error" on the run, inside GitHub's Actions and Checks
+  API incident of 18:12 to 18:59 UTC, before the zip's job was made; the jobs it would make were the same as run 110's),
+  and its second ran every job. With Defender's real-time monitoring on for R2, R9 and R10 alone, about 3 minutes, and
+  put back as the image left it (`defender-off.json`: off, `C:\` and `D:\` excluded again), the lane ran its 14
+  minutes and ended, and both canaries were still alive past their 30-minute step, the one with the monitoring on and
+  the image's exclusions kept among them. Four causes, each fixed here:
+  - **The seed's first admin account was refused.** The life cycle's passphrase began "the life cycle", which holds
+    the account's name "Life Cycle" once the spaces are taken out, and the server refuses a password holding the name
+    ("The password may not contain your name."). With no seed, the hall was not busy, the upgrade refused for a busy
+    AGMessage went through, and the tests after it read an install that was already this build. The seed's username,
+    name and passphrase words are `installer/test/expect.js`'s now ("installer walk across the hall …"), and
+    `test/lifecycle.test.js` holds every passphrase the life cycle makes to `lib/accounts.js`'s own rule.
+  - **Health and the context had no `install`.** The plan gives both `install` (how the copy runs), and a copy refused
+    at the port and `machine.js` read `install.runs` from the holder's health to choose their words, but the server
+    never sent it, so the installed node read as no channel ("it runs as the server task": `''`) and a portable copy
+    refused by the installed node was told another copy ran. Both carry `install {runs, installed, dir, light, words}`
+    now (`lib/startup.js` `installFacts`): `runs` `portable` or `task`, `dir` the program folder only when installed (a
+    folder run's would name the Windows account), `light` green installed and grey from a folder; last but one in the
+    host's and the admin's health (before `sideRooms`), last in the context, never in the health anyone else reads.
+    `signed` and `host` (PlayMap's names) are not built: the server reads neither the record nor Task Scheduler.
+    `test/server.test.js` reads it from a portable server, through both readers and within `machine.js`'s 64 KB bound,
+    and in the context; `test/laptop.test.js` from an installed node's watchdog, whose readers both say `task`.
+  - **The uninstall refused itself.** Inno Setup's uninstaller waits in {app} (`unins000.exe`) while its copy in
+    `%TEMP%` runs `machine.js uninstall`, which took that waiting first phase for a console of the Start menu left open
+    ("AGMessage's own console is open (unins000.exe …)"), refused, and left the install in place; the tests after it
+    found it. An `unins###.exe` in {app} itself that is a parent of the check is left out now, with its other instance,
+    as the kept installer running the way back is (`machine.js` `outsideOwnChain`); one that is not this uninstall's
+    still refuses. `test/installer.test.js` and `test/machine.test.js` hold both, the latter with run 115's own words.
+    The life cycle no longer waits out 6 minutes for an uninstall that refused: it waits only for one that ended with 0.
+  - **R10 was not taken:** "The value of "timeout" is out of range" — the time left of a reading's bound was a fraction
+    of a millisecond (`performance.now()`), which `spawnSync` refuses. `tools/readings-take.js` `within` gives whole
+    milliseconds now; `test/readings.test.js` starts a program inside a bound, and fails as run 115 did without it.
+  Still open from run 115: a task registered to run as a fresh standard account never starts (its result stays
+  0x00041303, "has not yet run"), so the life cycle's probe as that account, R6 and R11 were not taken; R1 (2.56 s at
+  the largest hall), R2 (20.7 s with Defender on), R3′ (5 of 10 saved) and R12 (no restart after a non-zero exit)
+  missed their marks.
 - The admin page draws Accounts held aside with its first fill, never before it, and an adoption's one-time passwords
   with the panel's new state, from one answer. CI's browser smoke on Windows (run 106) missed twice on the held list: the
   first left click on ana's ⋯ opened no menu (the click meant to close it then opened one, left open with the focus in

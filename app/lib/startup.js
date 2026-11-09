@@ -9,6 +9,8 @@
  *                                  loopback with no token; the answer only chooses the words, nothing is decided on it
  *   channelOf                      the channel this copy runs in (AGM_RUNS) and, for the installed node, its three
  *                                  folders and its logs folder, read before the watchdog or the server writes anything
+ *   installFacts                   how this copy runs, for the admin health and the context (`install`): the channel,
+ *                                  installed or not, the install's folder (only when installed), a light and words
  *   serverLogFile                  where the watchdog keeps its console: the installed node's logs folder, or data\logs
  *   taskTokenProblem, tokenLine    where the admin token is said: the installed node's watchdog takes no secret from its
  *                                  environment and writes the token into a folder of its own; the banner's Token line
@@ -161,6 +163,24 @@ function portHolderWords(holder, { port, runs }) {
   return `AGMessage ${holder.version} (build ${holder.build}) is already running on port ${port}. Use its window, or close it and start this copy again.`;
 }
 
+/**
+ * How this copy runs, for the admin health's and the context's `install` (pure), in PlayMap's `machine.install` names where
+ * the meaning matches: {runs, installed, dir, light, words}. `runs` is the channel ('portable' or 'task'), which a copy
+ * refused at the port reads from the holder's health to choose its words (holderOf, machine.js healthOf); `installed` is
+ * the installed node's task; `dir` its program folder ({app}), and null for a folder run, whose path would name the
+ * Windows account (C:\Users\<name>\…); `light` green when installed, grey for a folder run (the context's lights).
+ */
+function installFacts({ runs, programDir }) {
+  const installed = runs === 'task';
+  return {
+    runs,
+    installed,
+    dir: installed ? String(programDir) : null,
+    light: installed ? 'green' : 'grey',
+    words: installed ? 'installed in ' + String(programDir) + ', run by its server task' : 'run from a folder (the portable copy)',
+  };
+}
+
 /** The channels a copy runs in (AGM_RUNS): the portable folder (unset, or empty, as cmd leaves it), or the installed node. */
 const CHANNELS = Object.freeze(['portable', 'task']);
 /** The installed node's folders, each named by its own variable, as the task's launcher sets them. */
@@ -292,4 +312,4 @@ function tokenLine({ tty, runs, token, file }) {
   return '    Token: not shown here, since this output is not a window a person reads and may be kept. Start AGMessage in its own window to see it, or set ADMIN_TOKEN, 16 or more random letters and digits, before it starts.';
 }
 
-module.exports = { openerPlan, openBrowser, isFullPath, serverLogFile, cloudflaredFile, noCloudflaredWords, readPortHolder, portHolderWords, holderOf, channelOf, CHANNELS, taskTokenProblem, tokenLine, TOKEN_FILE, TOKEN_HERE, TASK_SECRETS };
+module.exports = { openerPlan, openBrowser, isFullPath, serverLogFile, cloudflaredFile, noCloudflaredWords, readPortHolder, portHolderWords, holderOf, channelOf, installFacts, CHANNELS, taskTokenProblem, tokenLine, TOKEN_FILE, TOKEN_HERE, TASK_SECRETS };

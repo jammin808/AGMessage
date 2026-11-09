@@ -776,17 +776,26 @@ function serverProgram(p) {
 }
 /** A kept installer's name in {app}\installers\ (the installer keeps itself there by its install version). */
 const KEPT_INSTALLER = /^AGMessage-Setup-\d{1,3}\.\d{1,3}\.\d{1,5}-unsigned\.exe$/i;
+/** Inno Setup's uninstaller in {app} itself (unins000.exe, the next free number when that one is taken). */
+const UNINSTALLER = /^unins\d{3}\.exe$/i;
 /**
- * The programs of {app} without the installer's own chain (pure): a kept installer (an AGMessage-Setup-…-unsigned.exe
- * directly in {app}\installers\, which only an elevated install lays there) that is an ancestor of this process is the
- * installer running this check, waiting for it to end, so it and every program of that same file (the instance that asked
- * for the elevation) are left out. Its file is never replaced by the install it runs. Any other program of {app}, an
- * ancestor or not, stays: a kept installer this check was not run by, or a node.exe of {app}, holds what an install replaces.
+ * The programs of {app} without the installer's own chain (pure). Two files of {app} run a check of machine.js and wait for
+ * it: a kept installer (an AGMessage-Setup-…-unsigned.exe directly in {app}\installers\, which only an elevated install lays
+ * there) running the way back, and Inno Setup's uninstaller (an unins###.exe directly in {app}), whose first phase waits
+ * there while a copy of it in %TEMP% runs the uninstall. Either, when it is an ancestor of this process, is what runs this
+ * check, so it and every program of that same file (the instance that asked for the elevation) are left out; neither file
+ * is replaced or removed while it waits. Any other program of {app}, an ancestor or not, stays: a kept installer or an
+ * uninstaller this check was not run by, or a node.exe of {app}, holds what an install replaces or an uninstall removes.
  */
 function outsideOwnChain(list, app) {
-  const dir = path.win32.join(String(app), 'installers').toLowerCase();
-  const kept = (p) => path.win32.dirname(p.exe).toLowerCase() === dir && KEPT_INSTALLER.test(path.win32.basename(p.exe));
-  const mine = new Set(list.filter((p) => p.ancestor === true && p.exe && kept(p)).map((p) => p.exe.toLowerCase()));
+  const dir = path.win32.dirname(path.win32.join(String(app), 'unins000.exe')).toLowerCase();
+  const kept = path.win32.join(dir, 'installers');
+  const own = (p) => {
+    const where = path.win32.dirname(p.exe).toLowerCase();
+    const name = path.win32.basename(p.exe);
+    return (where === kept && KEPT_INSTALLER.test(name)) || (where === dir && UNINSTALLER.test(name));
+  };
+  const mine = new Set(list.filter((p) => p.ancestor === true && p.exe && own(p)).map((p) => p.exe.toLowerCase()));
   return list.filter((p) => !(p.exe && mine.has(p.exe.toLowerCase())));
 }
 /** Programs as words (pure): "node.exe (pid 4120), …", at most three named. */
