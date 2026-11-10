@@ -7473,6 +7473,18 @@ laptop and no Board device walked)
   that check, and the next test looked for the backup one `backups` too deep. `installer/test/expect.js` and the place
   it looks follow the record; `test/machine.test.js` holds that pattern to a real server's stop (the old one fails it),
   and `test/lifecycle.test.js`'s stand-in record names the backup as the server does. Nothing that ships changed.
+- The portable import's export answers the installer through the handle that wrote its first answer. It writes into the
+  import folder of the account that started Setup, where that account may add a file and write it; its first answer
+  (that it did not finish) was a file made there, and every later one opened that file again to replace it. CI run 123's
+  R6, the export run as a standard account the lane made, ended with 2 and left its first answer in place, so the
+  elevated import read "The export did not finish" whatever the export had done: writing its answer again failed. Why
+  is not yet known (the lane kept only the answer, not the export's own words, which name the error); the export no
+  longer depends on it (`launch.js`: its answer file opened once, each answer put in place of the one before through
+  that handle, then closed). `test/import.test.js`
+  exports with any second open of that file refused, as that account met it: the old export fails as R6 did (2, its
+  first answer kept), the new one answers its export and a refusal alike. R6's record now keeps the export's own words,
+  a file the account writes twice in its inbox (whose grants are the import folder's) with each write's outcome, and
+  both files' access lists read elevated; its words say what the second write met, beside the reading, never judged.
 - The admin page draws Accounts held aside with its first fill, never before it, and an adoption's one-time passwords
   with the panel's new state, from one answer. CI's browser smoke on Windows (run 106) missed twice on the held list: the
   first left click on ana's ⋯ opened no menu (the click meant to close it then opened one, left open with the focus in

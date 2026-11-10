@@ -331,6 +331,40 @@ test('export refuses, with nothing exported: a copy running on the folder, a fol
   assert.ok(!fs.existsSync(machine.importDir(bare, ANA)));
 });
 
+test('the export answers through the handle that made its first answer: a second open of that file refused, as one failed for the standard account the Windows readings made (R6), changes nothing it says', async () => {
+  const win = windows();
+  // A folder last run by this build that sealed nothing, with no machine key: what R6's standard account exports.
+  const p = { src: path.join(tmp('agm-port-'), 'AGMessage'), keys: path.join(tmp('agm-home-'), '.agmessage') };
+  fs.mkdirSync(path.join(p.src, 'app', 'data'), { recursive: true });
+  fs.writeFileSync(path.join(p.src, 'app', 'data', 'format.json'), JSON.stringify({ format: dataformat.FORMAT, build: BUILD.full, at: Date.now() }));
+  fs.mkdirSync(p.keys, { recursive: true });
+  /** The file system as that account meets it: its answer file is made once, and any later open of it is refused. */
+  const once = (file) => {
+    let made = false;
+    const open = (f) => {
+      if (typeof f !== 'string' || path.resolve(f) !== file) return;
+      if (made) throw Object.assign(new Error('EPERM: operation not permitted, open \'' + f + '\''), { code: 'EPERM' });
+      made = true;
+    };
+    return { ...fs, openSync: (f, ...a) => { open(f); return fs.openSync(f, ...a); }, writeFileSync: (f, ...a) => { open(f); return fs.writeFileSync(f, ...a); }, appendFileSync: (f, ...a) => { open(f); return fs.appendFileSync(f, ...a); } };
+  };
+  const exported = async (src) => {
+    const root = machineFolder();
+    assert.ok(machine.importStage({ '--for': ANA, '--machine': root, '--sys': SYS }, { run: win.run }).words.startsWith('The import is ready'));
+    const file = path.join(machine.importDir(root, ANA), launch.EXPORT_SAID);
+    const r = await launch.exportPortable({ source: src, machine: root, sys: SYS, run: win.run, profile: p.keys, fsImpl: once(file) });
+    return { r, said: JSON.parse(read(file)) };
+  };
+  let { r, said } = await exported(p.src);
+  assert.equal(r.code, launch.DONE, r.text);
+  assert.deepEqual([said.id, said.code, said.words], [r.id, launch.DONE, r.text], 'its last answer replaced the first, which said it did not finish');
+  // A refusal too is the answer the installer reads.
+  ({ r, said } = await exported(tmp('agm-empty-')));
+  assert.equal(r.code, launch.NOT_DONE, r.text);
+  assert.match(said.words, /holds no portable AGMessage's data \(app\\data\): choose the folder that holds start-agmessage\.bat\. Nothing was exported\.$/);
+  assert.equal(said.words, r.text);
+});
+
 test('the elevated import refuses a node that has served (any hall, account or audit row, or keys of its own), with its words: nothing is ever merged', () => {
   const win = windows();
   const fresh = machineFolder();

@@ -538,6 +538,15 @@ function sddlOfSave(bytes) {
   const text = Buffer.from(bytes).toString('utf16le').replace(/^\uFEFF/, '');
   return text.split(/\r?\n/).map((l) => l.trim()).find((l) => /^(O:|G:|D:)/.test(l)) || '';
 }
+/** A file's or folder's access list, read elevated (icacls /save into `work`): its SDDL, or why it was not read. */
+function aclOf(L, target, work) {
+  const file = path.join(work, 'acl-' + crypto.randomBytes(4).toString('hex') + '.txt');
+  const saved = run(L.exe('icacls.exe'), [target, '/save', file]);
+  let sddl = '';
+  try { sddl = sddlOfSave(fs.readFileSync(file)); } catch { /* not saved: said below */ }
+  try { fs.rmSync(file, { force: true }); } catch { /* the lane's own work folder, removed with it */ }
+  return sddl || 'not read (icacls /save ended with ' + saved.code + ': ' + String(saved.err || saved.out).trim().slice(0, 200) + ')';
+}
 
 /** A client's connection to a pipe, made by a child Node of its own so a slow SMB answer never holds the lane. */
 const PIPE_REACH = String.raw`const s = require('node:net').connect(process.argv[1]); const say = (o) => { process.stdout.write(JSON.stringify(o)); s.destroy(); process.exit(0); }; s.on('connect', () => say({ connected: true, error: '' })); s.on('error', (e) => say({ connected: false, error: String(e.code || e.message) }));`;
@@ -680,8 +689,10 @@ function probeRun(dir) {
  * probe-export: R6's, as a task running as one standard account runs it, as Inno's ExecAsOriginalUser runs launch.js for
  * the account that started Setup: a file made in that account's own %LOCALAPPDATA%\AGMessage (which the lane, elevated,
  * then reads), and the bundle's launch.js export of the plan's portable folder into that account's import folder, by
- * their absolute paths. Its exit code, its words' tail and where its profile is written to ran.json (no secret: the
- * export writes none).
+ * their absolute paths; then a file of its own written twice in its inbox (the plan's `reopen`), whose folder it may add a
+ * file to and whose files it may write, as the import folder's: whether the second write, an open of a file it made,
+ * is let through. Its exit code, its words' tail, each write's outcome and where its profile is written to ran.json (no
+ * secret: the export writes none).
  */
 function probeExport(dir) {
   const plan = readJson(path.join(dir, 'plan.json'));
@@ -694,7 +705,9 @@ function probeExport(dir) {
     made = 'made';
   } catch (e) { made = String((e && (e.code || e.message)) || 'not made').slice(0, 120); }
   const r = run(process.execPath, [String(plan.launch), 'export', '--source', String(plan.source), '--machine', String(plan.machine), '--sys', system32()], { ms: 120000 });
-  writeJson(path.join(dir, 'ran.json'), { code: r.code, out: (r.out + r.err).trim().slice(-600), local, made, user: os.userInfo().username, at: Date.now() });
+  const wrote = (n) => { try { fs.writeFileSync(String(plan.reopen), 'R6 ' + n + '\n'); return 'written'; } catch (e) { return String((e && (e.code || e.message)) || 'not written').slice(0, 120); } };
+  const reopen = plan.reopen ? { first: wrote(1), again: wrote(2) } : null;
+  writeJson(path.join(dir, 'ran.json'), { code: r.code, out: (r.out + r.err).trim().slice(-600), local, made, reopen, user: os.userInfo().username, at: Date.now() });
   return 0;
 }
 
@@ -1452,7 +1465,8 @@ async function takeR6(L, { node, root, self, work, sys }, { exportMs = 150000, p
     out.stage = step('stage', ['--sys', sys]);
     progress(out);
     if (out.stage.code !== 0) return out;
-    writeJson(path.join(probe, 'plan.json'), { launch: path.join(root, 'app', 'launch.js'), source, machine: machineRoot });
+    const reopen = path.join(machineRoot, 'machine', 'inbox', u.sid, 'r6-reopen.txt');
+    writeJson(path.join(probe, 'plan.json'), { launch: path.join(root, 'app', 'launch.js'), source, machine: machineRoot, reopen });
     const warned = L.register(R6_TASK, taskXml({ description: 'AGMessage readings R6: launch.js export, as ' + u.name, sid: u.sid, logon: 'Password', limit: 'PT10M', command: node, args: [self, 'probe-export', probe], cwd: path.dirname(self) }), { user: u.name, password });
     if (warned) out.registered = warned;
     try {
@@ -1463,7 +1477,14 @@ async function takeR6(L, { node, root, self, work, sys }, { exportMs = 150000, p
       if (!ran) { out.export = { code: null, err: 'the task as ' + u.name + ' wrote nothing within ' + exportMs / 1000 + ' s (last result ' + L.lastResult(R6_TASK) + '): ' + L.whyNot(R6_TASK, since).words }; return out; }
       let said = {};
       try { said = readJson(path.join(machineRoot, 'machine', 'inbox', u.sid, 'import', 'export.json')); } catch (e) { said = { words: 'its answer was not read elevated (' + (e.code || e.message) + ')' }; }
-      out.export = { code: ran.code, words: String(said.words || ran.out || '').slice(0, 400), user: String(ran.user || ''), made: String(ran.made || '') };
+      // What the export said itself, beside the answer it left, and what Windows let the account do with a file it made
+      // (each write's outcome, both files' access lists as read elevated).
+      out.export = {
+        code: ran.code, words: String(said.words || ran.out || '').slice(0, 400), said: String(ran.out || '').slice(-400), user: String(ran.user || ''), made: String(ran.made || ''),
+        ...(ran.reopen && typeof ran.reopen === 'object' ? { reopen: { first: String(ran.reopen.first || ''), again: String(ran.reopen.again || '') } } : {}),
+        acl: { answer: aclOf(L, path.join(machineRoot, 'machine', 'inbox', u.sid, 'import', 'export.json'), work), reopen: aclOf(L, reopen, work) },
+      };
+      try { fs.rmSync(reopen, { force: true }); } catch { /* left in the reading's own machine folder, removed with it */ }
       progress(out);
       out.take = step('take', ['--app', root, '--source', source, '--sys', sys]);
       try { fs.readFileSync(path.join(String(ran.local), 'AGMessage', 'r6-probe.txt')); out.profileRead = { ok: true }; } catch (e) { out.profileRead = { ok: false, code: String((e && e.code) || 'EIO') }; }

@@ -976,16 +976,41 @@ async function exportPortable({ source, machine, sys, port = 0, run = childProce
   const id = crypto.randomBytes(12).toString('hex');
   // The account may add files to its import folder and write them, and nothing more (it may not even read the folder's
   // attributes): its first answer, that the export did not finish, is what tells whether the folder was made ready for it,
-  // and stays as its answer should the export stop part way.
-  try { fsImpl.writeFileSync(path.join(dir, EXPORT_SAID), JSON.stringify({ v: 1, id, code: NOT_DONE, words: 'The export did not finish: nothing was exported.' })); } catch (e) {
+  // and stays as its answer should the export stop part way. Every later answer is written through the handle that wrote
+  // the first, never by opening its file again: that handle is granted as the file is made, by the folder's right to add
+  // a file, so the answer the installer reads never rests on what a second open of the file is granted.
+  const file = path.join(dir, EXPORT_SAID);
+  let fd = null;
+  try {
+    fd = fsImpl.openSync(file, 'w');
+    putAnswer(fsImpl, fd, { v: 1, id, code: NOT_DONE, words: 'The export did not finish: nothing was exported.' });
+  } catch (e) {
+    if (fd !== null) closeQuietly(fsImpl, fd);
     return { code: NOT_DONE, text: 'The import was not made ready for ' + me.name + ' on this PC (' + dir + ': ' + ((e && e.code) || 'EIO') + '): it is run from AGMessage\'s installer, as the Windows account that started it.' };
   }
   const answer = (code, text, more = {}) => {
-    try { fsImpl.writeFileSync(path.join(dir, EXPORT_SAID), JSON.stringify({ v: 1, id, code, words: text, ...more })); } catch (e) {
+    try { putAnswer(fsImpl, fd, { v: 1, id, code, words: text, ...more }); } catch (e) {
       return { code: NOT_DONE, text: text + ' (Its answer could not be left for the installer: ' + ((e && e.code) || 'EIO') + '.)' };
     }
     return { code, text, id, ...more };
   };
+  try {
+    return await exportBundle({ source, machine, port, fsImpl, facts, profile, ask, me, dir, id, answer });
+  } finally { closeQuietly(fsImpl, fd); }
+}
+/** An answer put in place of the one before it, through the handle `fd` holds: the file cut to nothing, then written whole. */
+function putAnswer(fsImpl, fd, rec) {
+  const bytes = Buffer.from(JSON.stringify(rec), 'utf8');
+  fsImpl.ftruncateSync(fd, 0);
+  let at = 0;
+  while (at < bytes.length) at += fsImpl.writeSync(fd, bytes, at, bytes.length - at, at);
+}
+/** A handle closed, a failure to close it said by nothing: what was written through it stands. */
+function closeQuietly(fsImpl, fd) {
+  try { fsImpl.closeSync(fd); } catch { /* written already; a close that fails loses nothing written */ }
+}
+/** The export's own steps, once its first answer is in place (exportPortable): each refusal and its end answered through `answer`. */
+async function exportBundle({ source, machine, port, fsImpl, facts, profile, ask, me, dir, id, answer }) {
   const refuse = (text) => answer(NOT_DONE, text + ' Nothing was exported.');
   const at = path.resolve(source);
   const own = portableOf(at);

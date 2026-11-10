@@ -402,6 +402,12 @@ test('R6: open when a standard account\'s export wrote its bundle and the elevat
   x = byId(R.judge(raw({ R6: { sid: good.sid, stage: good.stage, export: { code: null, err: 'its task did not run: access denied' } } })), 'R6');
   assert.deepEqual([x.state, x.words], ['not run', 'the export as a standard account was not taken (its task did not run: access denied)']);
   assert.equal(byId(R.judge(raw({ R6: { skipped: 'the standard account was not made' } })), 'R6').words, 'the standard account was not made');
+  // What Windows let the account do with a file it made, said beside the reading and never judged.
+  const reopened = (reopen) => byId(R.judge(raw({ R6: { ...good, export: { ...good.export, reopen } } })), 'R6');
+  x = reopened({ first: 'written', again: 'EPERM' });
+  assert.deepEqual([x.state, x.words.includes('read the file it made; a file it made in its inbox, written again: refused (EPERM). The two readings')], ['open', true]);
+  assert.ok(reopened({ first: 'written', again: 'written' }).words.includes('; a file it made in its inbox, written again: let through. '));
+  assert.ok(reopened({ first: 'EACCES', again: 'EACCES' }).words.includes('; a file of its own in its inbox was not made (EACCES). '));
 });
 
 test('R11: met at 10 of 10, the account the control task is for running it (answered as SYSTEM for its SID) and a second account refused; anything less is missed with the first round that did not', () => {
