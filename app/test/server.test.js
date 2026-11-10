@@ -11,6 +11,11 @@ const { io } = require('socket.io-client');
 
 const ROOT = path.join(__dirname, '..');
 const TOKEN = 'testadmintoken01';
+/**
+ * A fake Stagewatch's socket answers the link's ping (Show Bus §5), as a Stagewatch does: the link reads it live (§4: stale
+ * after 6 s of silence, when the show desk is left alone) however long a step waits on it.
+ */
+const answerPings = (c) => c.on('message', (d) => { let m; try { m = JSON.parse(String(d)); } catch { return; } if (m.cmd === 'ping') c.send(JSON.stringify({ type: 'pong', t: m.t, t2: Date.now(), t3: Date.now() })); });
 
 
 async function startServer(dataDir, port) {
@@ -544,7 +549,7 @@ test('AGMessage server: security, resume, persistence', async (t) => {
       res.end('{"ok":true}');
     });
     const wss = new WebSocketServer({ server: fake, path: '/ws' });
-    wss.on('connection', (c) => { ws = c; c.send(JSON.stringify({ type: 'state', mode: 'countdown', text: '05:00', title: 'Keynote', messageId: 0 })); });
+    wss.on('connection', (c) => { ws = c; answerPings(c); c.send(JSON.stringify({ type: 'state', mode: 'countdown', text: '05:00', title: 'Keynote', messageId: 0 })); });
     await new Promise((r) => fake.listen(0, '127.0.0.1', r));
     try {
       await emit(ctl, 'admin:settings', { stagewatchUrl: '127.0.0.1:' + fake.address().port, stagewatchKey: 'swk_node' });
@@ -619,7 +624,7 @@ test('AGMessage server: security, resume, persistence', async (t) => {
       });
     });
     const wss = new WebSocketServer({ server: fake, path: '/ws' });
-    wss.on('connection', (c) => c.send(JSON.stringify({ type: 'state', mode: 'countdown', text: '05:00', title: 'Keynote', messageId: 0 })));
+    wss.on('connection', (c) => { answerPings(c); c.send(JSON.stringify({ type: 'state', mode: 'countdown', text: '05:00', title: 'Keynote', messageId: 0 })); });
     await new Promise((r) => fake.listen(0, '127.0.0.1', r));
     const updates = [];
     const notices = [];

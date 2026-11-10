@@ -11,6 +11,11 @@ const nodes = require('../lib/nodes');
 const { startServer, stopServer, api, connect, emit, answer, until, fakeStagewatch, setupAdmin } = require('./helpers');
 
 const PATTERNS_TOKEN = 'K7QM-3XWD-P9RA';   // secret-scan: fixture — a fake pairing token for the fake Patterns
+/**
+ * How long a change has to reach settings.json: one synchronous write and fsync on the server's loop, 100 ms after it,
+ * which a loaded runner has held for seconds (CI run 122's AG-1).
+ */
+const SAVE_MS = 8000;
 
 test('C03: a flood of hellos with fresh ids neither grows the peers table without bound nor pushes it once per hello', async () => {
   let changes = 0;
@@ -141,7 +146,7 @@ test('C20: a Patterns certificate that changes is refused until the admin types 
   assert.equal((await view()).status, 'refused', 'still refused');
   assert.deepEqual(await answer(ctl, 'nodes:acceptCertificate', { id: 'patx', fingerprint: typed }), { ok: true });
   await until(async () => (await view()).status === 'live', 8000, 'live again');
-  await until(() => pinOnDisk() === fpB, 3000, 'the new certificate pinned');
+  await until(() => pinOnDisk() === fpB, SAVE_MS, 'the new certificate pinned');
   assert.deepEqual(await answer(ctl, 'nodes:acceptCertificate', { id: 'patx', fingerprint: typed }), { ok: false, error: 'No certificate of Patterns TLS waits to be confirmed.' }, 'nothing left to accept');
   assert.deepEqual(await answer(ctl, 'nodes:acceptCertificate', { id: 'nobody', fingerprint: typed }), { ok: false, error: 'Not linked.' });
   const audit = await api(srv.base, 'GET', '/api/audit?limit=50', undefined, { cookie: admin });
@@ -149,10 +154,10 @@ test('C20: a Patterns certificate that changes is refused until the admin types 
 
   renew();
   assert.ok((await emit(ctl, 'nodes:unlink', { id: 'patx' })).ok);
-  await until(() => pinOnDisk() === undefined, 3000, 'unlinking forgets the pin');
+  await until(() => pinOnDisk() === undefined, SAVE_MS, 'unlinking forgets the pin');
   assert.ok((await emit(ctl, 'nodes:link', { id: 'patx', t: 'patterns', url, name: 'Patterns TLS', token: PATTERNS_TOKEN })).ok);
   await until(async () => (await view()).status === 'live', 8000, 'linked again with the node\'s new certificate');
-  await until(() => pinOnDisk() === tlsmod.fingerprint(cert.certDer), 3000, 'pinned to the new one');
+  await until(() => pinOnDisk() === tlsmod.fingerprint(cert.certDer), SAVE_MS, 'pinned to the new one');
 });
 
 test('AG-1: a Patterns over HTTPS on another machine gets its token only once a person typed the start of its fingerprint', async (t) => {
@@ -202,7 +207,7 @@ test('AG-1: a Patterns over HTTPS on another machine gets its token only once a 
   assert.equal((await answer(ctl, 'nodes:acceptCertificate', { id: 'patlan', fingerprint: wrongStart })).ok, false);
   assert.deepEqual(await answer(ctl, 'nodes:acceptCertificate', { id: 'patlan', fingerprint: fp.slice(7, 23).toUpperCase() }), { ok: true });
   await until(async () => (await view('patlan')).status === 'live', 8000, 'live');
-  await until(() => (onDisk().tlsPins || {})[peerlinks.pinKey('patlan')] === fp, 3000, 'pinned on disk');
+  await until(() => (onDisk().tlsPins || {})[peerlinks.pinKey('patlan')] === fp, SAVE_MS, 'pinned on disk');
   assert.ok(seen.length > 0 && seen.every((r) => r.token), 'its token, over TLS to the certificate a person confirmed');
   const audit = await api(srv.base, 'GET', '/api/audit?limit=50', undefined, { cookie: admin });
   assert.ok(audit.body.entries.some((e) => e.action === 'node.certificate' && e.target === 'patlan' && e.words === 'confirmed the patterns certificate of “Patterns LAN” (the start of its fingerprint typed)'));
@@ -210,10 +215,10 @@ test('AG-1: a Patterns over HTTPS on another machine gets its token only once a 
   // Typed when it is linked: live at once; the typed start is kept as hex, and kept when it is linked again for a hall.
   assert.ok((await emit(ctl, 'nodes:link', { id: 'patlan2', t: 'patterns', url, name: 'Patterns LAN 2', token: PATTERNS_TOKEN, fingerprint: fp.slice(7, 23).toUpperCase().match(/../g).join(':') })).ok);
   await until(async () => ((await view('patlan2')) || {}).status === 'live', 8000, 'live on the typed start');
-  await until(() => ((onDisk().peerLinks || {}).patlan2 || {}).fpTyped === fp.slice(7, 23), 3000, 'the typed start on disk, as hex');
+  await until(() => ((onDisk().peerLinks || {}).patlan2 || {}).fpTyped === fp.slice(7, 23), SAVE_MS, 'the typed start on disk, as hex');
   assert.ok((await emit(ctl, 'nodes:link', { id: 'patlan2', hall })).ok);
   await until(async () => ((await view('patlan2')) || {}).hall === hall, 3000, 'moved to the hall');
-  await until(() => ((onDisk().peerLinks || {}).patlan2 || {}).hall === hall, 3000, 'saved');
+  await until(() => ((onDisk().peerLinks || {}).patlan2 || {}).hall === hall, SAVE_MS, 'saved');
   assert.equal(onDisk().peerLinks.patlan2.fpTyped, fp.slice(7, 23), 'kept across a link again');
   // Unlinked, a link starts nothing more: what reaches the node after is a request already under way as it went, and the
   // pins the unlinks forgot stay forgotten. Typed wrong: refused, and nothing sent to it.
@@ -221,7 +226,10 @@ test('AG-1: a Patterns over HTTPS on another machine gets its token only once a 
   for (const id of ['patlan', 'patlan2']) assert.ok((await emit(ctl, 'nodes:unlink', { id })).ok);
   const unlinkedAt = Date.now();
   const forgotten = () => ['patlan', 'patlan2'].map((id) => (onDisk().tlsPins || {})[peerlinks.pinKey(id)]);
-  await until(() => forgotten().every((p) => p === undefined), 3000, 'unlinking forgets their pins');
+  await until(() => forgotten().every((p) => p === undefined), SAVE_MS, 'unlinking forgets their pins').catch((e) => {
+    // Which case: both still pinned, no save landed; one alone, a pin put back after the unlinks.
+    throw new Error(e.message + ' (on disk now: ' + JSON.stringify(forgotten().map((p) => (p ? 'pinned' : 'none'))) + ')');
+  });
   assert.ok((await emit(ctl, 'nodes:link', { id: 'patlan3', t: 'patterns', url, name: 'Patterns LAN 3', token: TOKEN3, fingerprint: wrongStart })).ok);
   await until(async () => ((await view('patlan3')) || {}).status === 'refused', 8000, 'refused on the wrong start');
   assert.match((await view('patlan3')).problem, /does not start with the characters typed for it/);

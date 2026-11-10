@@ -7441,6 +7441,18 @@ laptop and no Board device walked)
   saves and sends its token), and with its request still connecting (the old link writes the token once its handshake
   is done). Each is held by its own test: the fix without its abort fails the last alone, without its check after the
   certificate the second alone. A review of this change found the second and third missing from its first tests.
+- Two tests CI run 122 failed now wait as the server works; nothing that ships changed. Each was found by an investigation
+  in a scratch copy and checked by two more. `test/server.test.js`'s show desk (Windows): its fake Stagewatch sent one
+  frame and never answered the link's ping, so 6 s after that frame the link read stale (Show Bus §4) and the desk
+  loop, rightly, left it alone; on a runner that held the server for seconds (the file took 71 s against 11), the one
+  tick that could read the proposal's `done` fell outside that window. Its fake and the send-to-stage subtest's now
+  answer pings, as the shared fake does; with the server held for 3.5 s after the frame the old test fails as run 122
+  did and the new one passes. `test/shownet.test.js`'s AG-1 (Linux, with coverage): the one save after the unlinks
+  (a synchronous write and fsync on the server's loop, 100 ms after) was held past the 3 s the test gave it, its pins
+  still the ones from before; nothing put a pin back (no path does, and the time it took fits a stall, not a write).
+  Every save it waits for now has 8 s, and the wait for the unlinks says what is on disk when it ends: both pins, no
+  save landed; one alone, a pin put back. With the save held 4.5 s the old test fails as run 122 did and the new one
+  passes; a pin put back 20 ms or 150 ms after the unlinks still fails it.
 - The admin page draws Accounts held aside with its first fill, never before it, and an adoption's one-time passwords
   with the panel's new state, from one answer. CI's browser smoke on Windows (run 106) missed twice on the held list: the
   first left click on ana's ⋯ opened no menu (the click meant to close it then opened one, left open with the focus in
