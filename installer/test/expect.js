@@ -129,6 +129,8 @@ const WORDS = Object.freeze({
   /** The way back's lines in the log of the build that did not start (GoBack). */
   wayBack: () => 'the way back: ',
   keptEnded: (b) => 'the kept installer of build ' + b.build + ' ended with 0',
+  /** The way back's restore (machine.js restore): the earlier build's first start says it restarted in each room. */
+  restartsEachHall: 'The earlier build\'s first start says AGMessage restarted in each hall.',
   /**
    * The upgrade's stop (machine.js upgrade-stop), saved and backed up: `backup` as the stop's record names it, inside the
    * data folder (lib/upgradebackup.js make: backups/<folder>).
@@ -266,10 +268,18 @@ function eventsOf(text) {
   return out;
 }
 
-/** The facts an upgrade, an uninstall that keeps the data and an install again must keep (lib/importfacts.js), compared (pure): the differences in words. */
-function factsKept(before, after) {
+/**
+ * The facts an upgrade, an uninstall that keeps the data and an install again must keep (lib/importfacts.js), compared
+ * (pure): the differences in words. `restarted` is how many rooms were told "AGMessage restarted" at the start after:
+ * a way back's restore lays the data back as the upgrade's stop left it but for that stop's record, written after the
+ * backup was made, so the earlier build's first start says it restarted in every room, one message each (restartsEachHall).
+ */
+function factsKept(before, after, { restarted = 0 } = {}) {
   const out = [];
-  for (const k of ['halls', 'rooms', 'messages', 'accounts', 'screens']) if (before[k] !== after[k]) out.push(k + ' ' + before[k] + ' became ' + after[k]);
+  for (const k of ['halls', 'rooms', 'messages', 'accounts', 'screens']) {
+    const want = k === 'messages' ? before[k] + restarted : before[k];
+    if (want !== after[k]) out.push(k + ' ' + before[k] + (k === 'messages' && restarted ? ' and ' + restarted + ' restart line' + (restarted === 1 ? '' : 's') : '') + ' became ' + after[k]);
+  }
   if (before.sealed.total !== after.sealed.total || after.sealed.open !== after.sealed.total) out.push('sealed values ' + before.sealed.total + ' (' + before.sealed.open + ' open) became ' + after.sealed.total + ' (' + after.sealed.open + ' open)');
   if (before.cert.fp !== after.cert.fp) out.push('the certificate\'s fingerprint changed');
   if (before.key.kid !== after.key.kid) out.push('the machine key changed');

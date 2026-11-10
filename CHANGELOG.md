@@ -7477,14 +7477,16 @@ laptop and no Board device walked)
   import folder of the account that started Setup, where that account may add a file and write it; its first answer
   (that it did not finish) was a file made there, and every later one opened that file again to replace it. CI run 123's
   R6, the export run as a standard account the lane made, ended with 2 and left its first answer in place, so the
-  elevated import read "The export did not finish" whatever the export had done: writing its answer again failed. Why
-  is not yet known (the lane kept only the answer, not the export's own words, which name the error); the export no
-  longer depends on it (`launch.js`: its answer file opened once, each answer put in place of the one before through
-  that handle, then closed). `test/import.test.js`
-  exports with any second open of that file refused, as that account met it: the old export fails as R6 did (2, its
-  first answer kept), the new one answers its export and a refusal alike. R6's record now keeps the export's own words,
-  a file the account writes twice in its inbox (whose grants are the import folder's) with each write's outcome, and
-  both files' access lists read elevated; its words say what the second write met, beside the reading, never judged.
+  elevated import read "The export did not finish" whatever the export had done: writing its answer again failed. The
+  export no longer depends on it (`launch.js`: its answer file opened once, each answer put in place of the one before
+  through that handle, then closed). `test/import.test.js` exports with any second open of that file refused, as that
+  account met it: the old export fails as R6 did (2, its first answer kept), the new one answers its export and a
+  refusal alike. R6's record now keeps the export's own words, a file the account writes twice in its inbox (whose
+  grants are the import folder's) with each write's outcome, and both files' access lists read elevated; its words say
+  what the second write met, beside the reading, never judged. CI run 125 measured it: the export wrote its bundle and
+  its answer, and the second write of a file the account made was refused (EPERM). Its grant on that file is `0x100116`
+  (icacls' `W`: write, append, attributes and synchronize), without READ_CONTROL, which an open to write asks for with
+  the rest of FILE_GENERIC_WRITE; the first write was granted as the file was made.
 - A room's transcript draws a take after every message posted before it. The transcript draws each entry before the
   first message at or after its time, so a take made in the same millisecond as the message just before it was drawn
   before that message: CI's CR LF run of 964c573 drew the operator's web page above "After the quote", sent first. A
@@ -7494,6 +7496,15 @@ laptop and no Board device walked)
   (a message posted after a take that was moved past the one before it). Forced into the message's millisecond, the old
   take fails `test/stagerecord.test.js`'s end-to-end check as that run did, and the new one passes; a test of its own
   holds the rule and that each take is made at it.
+- The installer's life cycle expects what the way back's restore says it leaves: the data as the upgrade's stop left
+  it, and one "— AGMessage restarted · N messages kept —" line in each room at the earlier build's first start. The
+  stop's record (`last-stop.json`, that it saved) is written after its backup, so the restore removes it as a file the
+  newer build's run made, and the restore's words have said so since it was built ("The earlier build's first start
+  says AGMessage restarted in each hall."): a way back from a newer build that ran rolls its messages back, and each room
+  is told. CI run 125, the first to reach this test, counted 5 messages where the test, counting none of those lines,
+  expected 4. `installer/test/expect.js` `factsKept` counts the rooms told (`restarted`), the life cycle passes it the
+  halls and rooms the node held and asserts the restore's words; `test/machine.test.js` holds those words and the one
+  line in the hall to a real restore and start, and `test/lifecycle.test.js` the count. Nothing that ships changed.
 - The admin page draws Accounts held aside with its first fill, never before it, and an adoption's one-time passwords
   with the panel's new state, from one answer. CI's browser smoke on Windows (run 106) missed twice on the held list: the
   first left click on ana's ⋯ opened no menu (the click meant to close it then opened one, left open with the focus in

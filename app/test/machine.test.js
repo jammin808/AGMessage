@@ -656,6 +656,11 @@ test('restore after an upgrade that ran: the earlier hall comes back, the newer 
   t.after(() => h.stopServer(earlier.child));
   const fresh = read(path.join(root, 'data', 'audit.jsonl')).slice(auditBefore.length).trim().split('\n').filter(Boolean).map((l) => JSON.parse(l).action);
   assert.ok(!fresh.some((a) => a === 'audit.cut' || a === 'audit.head'), 'no disagreement: ' + fresh.join(', '));
+  // As the restore says (the installer's life cycle reads these words): the stop's record was written after its backup,
+  // so it is not laid back, and the earlier build's first start says AGMessage restarted in the hall, once.
+  assert.ok(back.text.endsWith(' ' + lifecycleWords.restartsEachHall), back.text);
+  await h.stopServer(earlier.child);
+  assert.equal(read(snapshot).split('AGMessage restarted').length - 1, 1, 'one restart line in the hall');
 });
 
 // ---------------------------------------------------------------- preinstall-check

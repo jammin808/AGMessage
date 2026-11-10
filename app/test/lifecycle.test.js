@@ -509,6 +509,10 @@ test('what the life cycle must keep across an upgrade, an uninstall that keeps t
   assert.deepEqual(expect.factsKept(f, { ...f, messages: 2, sealed: { total: 2, open: 1 }, cert: { fp: 'cc' }, key: { kid: 'k2' }, chain: { done: false, entries: 9, words: 'broken at 9' } }), [
     'messages 3 became 2', 'sealed values 2 (2 open) became 2 (1 open)', 'the certificate\'s fingerprint changed', 'the machine key changed', 'the audit chain does not check to its end, or holds fewer entries (12 became 9: broken at 9)',
   ]);
+  // After a way back each room says AGMessage restarted, one message each: counted, never more nor fewer.
+  assert.deepEqual(expect.factsKept(f, { ...f, messages: 4 }, { restarted: 1 }), []);
+  assert.deepEqual(expect.factsKept(f, f, { restarted: 1 }), ['messages 3 and 1 restart line became 3']);
+  assert.deepEqual(expect.factsKept(f, { ...f, messages: 6 }, { restarted: 2 }), ['messages 3 and 2 restart lines became 6']);
 });
 
 test('the seed\'s first admin account: every passphrase the life cycle makes for it is one the server takes, the username and the name aside', () => {

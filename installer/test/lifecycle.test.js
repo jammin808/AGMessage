@@ -568,10 +568,12 @@ test('a new build that will not start is replaced by the build before it, which 
   const r = await H.install(B.broken.exe, ['/FORCE=the installer\'s life cycle installs a build that does not start'], 'upgrade-broken');
   assert.equal(r.code, 3, 'the installer says it did not install its build: ' + said(r));
   assert.ok(r.said.says(WORDS.wayBack()) && r.said.says(WORDS.keptEnded(B.current)), said(r));
+  assert.ok(r.said.says(WORDS.restartsEachHall), 'the restore says each room is told AGMessage restarted: ' + said(r));
   const rec = H.record();
   assert.deepEqual([rec.Version, rec.SemVer, rec.Previous, rec.Admin], [B.current.installVersion, B.current.semver, '', before.record.Admin], 'the record names the build gone back to, and no build before it');
   await serving(B.current, 'the build gone back to');
-  assert.deepEqual(expect.factsKept(before.facts, await H.facts()), [], 'its data laid back as it was');
+  // As the restore says: its data as the upgrade's stop left it, and one "AGMessage restarted" line in each room.
+  assert.deepEqual(expect.factsKept(before.facts, await H.facts(), { restarted: before.facts.halls + before.facts.rooms }), [], 'its data laid back as it was');
   payloadIs(B.current);
   note('A build that does not start (' + B.broken.full + '): gone back to ' + B.current.full + ' by itself in ' + Math.round(r.ms / 1000) + ' s.');
 });
