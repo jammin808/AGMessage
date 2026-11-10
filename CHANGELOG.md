@@ -7502,9 +7502,10 @@ laptop and no Board device walked)
   bound and says it had no answer. An install or upgrade gives each account with a right its inbox and outbox with this
   build's grants again, as it did the laptop's admin's alone, so an upgraded node holds the new grant too.
   `test/machine.test.js` holds the grant to every right an open to write asks for but the owner's, and to no read of
-  what a file holds, and an upgrade to each account's folders, once, before its control task. That Windows now lets
-  the second write through rests on its rules and runs 125 to 127, not on a run of this grant: R6 reads both writes at
-  each run, and whether they are let through is the next run's to say.
+  what a file holds, and an upgrade to each account's folders, once, before its control task. CI run 128 measured it:
+  the account's grant on the file it made `0x100196`, the account its owner, and both the write that replaces it and the
+  open to write it in place let through, which runs 125 to 127 refused with `0x100116`. Read attributes alone was added,
+  so it was the right missing; R6 reads both writes at each run.
 - The smoke's doors checks say, for a right-click that opened no menu, what the page heard of it: each `contextmenu`
   (where it met, and whether a door took it), each menu drawn and taken away, a dialog open, a selection, the focus and
   the width (`rightMenu` in `test/browser-smoke.js`, at each of its three right-clicks; the watch only listens). One
