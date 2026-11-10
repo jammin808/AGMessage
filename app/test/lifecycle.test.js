@@ -351,8 +351,9 @@ test('the words the life cycle expects are machine.js\'s own, as its commands sa
   assert.equal(expect.ANSWER_S * 1000, wire.ANSWER_MS);
   const line = { active: 1, takes: 0, help: 0, countdowns: 0, seats: 0, screens: 0, sockets: 1 };
   await assert.rejects(machine.preinstallCheck(opts, { net: { portAnswers: async () => true, hello: async () => ({ ok: true, build: portable.build }), busy: async () => ({ answered: true, running: true, busy: true, words: '1 page active', line }) } }), (e) => e.busy === true && expect.WORDS.busy.test(e.words) && e.words.match(expect.WORDS.busy).groups.counts === '1 page active');
-  // The upgrade's stop, saved and backed up, as its record says it.
-  const backup = 'upgrade-0.6.0-dev.41+abcdef1-20261107T203100Z-a1b2c3';
+  // The upgrade's stop, saved and backed up, as its record says it (the server's record names the backup inside the data
+  // folder, as test/machine.test.js holds against a real server's stop).
+  const backup = 'backups/upgrade-0.6.0-dev.41+abcdef1-20261107T203100Z-a1b2c3';
   fs.mkdirSync(path.join(root, 'data'));
   fs.writeFileSync(path.join(root, 'data', 'last-stop.json'), JSON.stringify({ at: Date.now() + 60000, build: portable.build, saved: true, backup, backupMs: 120 }));
   const stopped = await machine.upgradeStop({ ...opts, '--by': 'the installer' }, { net: { estimate: () => ({ copyBytes: 0, free: null }), stop: async () => ({ ok: true, status: 200, json: { stopping: true } }), portAnswers: async () => false } });

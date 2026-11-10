@@ -129,8 +129,11 @@ const WORDS = Object.freeze({
   /** The way back's lines in the log of the build that did not start (GoBack). */
   wayBack: () => 'the way back: ',
   keptEnded: (b) => 'the kept installer of build ' + b.build + ' ended with 0',
-  /** The upgrade's stop (machine.js upgrade-stop), saved and backed up. */
-  upgradeStopped: /^AGMessage stopped for the upgrade and saved at \d\d:\d\d; backup (?<backup>upgrade-[0-9A-Za-z.+-]+-\d{8}T\d{6}Z-[0-9A-Za-z]{6})\.$/,
+  /**
+   * The upgrade's stop (machine.js upgrade-stop), saved and backed up: `backup` as the stop's record names it, inside the
+   * data folder (lib/upgradebackup.js make: backups/<folder>).
+   */
+  upgradeStopped: /^AGMessage stopped for the upgrade and saved at \d\d:\d\d; backup (?<backup>backups\/upgrade-[0-9A-Za-z.+-]+-\d{8}T\d{6}Z-[0-9A-Za-z]{6})\.$/,
   /** The import on a node that has served (machine.js servedWords). */
   served: /^This PC's AGMessage has served already: it holds .+\. An import goes only into an AGMessage that has never started, since two machine keys, server secrets, certificates and audit chains cannot be merged: nothing is ever merged\./,
   /** The import's take, verified (machine.js import --step take). */

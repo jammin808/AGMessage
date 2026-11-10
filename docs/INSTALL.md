@@ -1021,8 +1021,8 @@ https://support.microsoft.com/kb/950934): the admin archives the event on the ad
   be written ends the start the same way for a new folder and another build of the format: a node never serves a folder
   that does not say which build last wrote it. A newer build of the same format before this one is served and said
   (health's `format`, "This laptop"'s Data folder row, the log's "Data folder:" line), and a marker whose build changed
-  is one `server.upgraded` audit row. The upgrade's own backup at its stop (`data\backups\upgrade-<build>-<time>\`) is
-  the installer's units', beside these.
+  is one `server.upgraded` audit row. The upgrade's own backup at its stop
+  (`data\backups\upgrade-<build>-<time>-<suffix>\`) is the installer's units', beside these.
 - **The pages after an upgrade** (both channels). The pages, their scripts and styles are served `no-cache` with their
   ETag, so a browser checks each with the server at every load (a 304 while unchanged) and a reload brings the build
   that serves. An open page on another build reloads itself at a quiet moment of its own: a hall page and the halls

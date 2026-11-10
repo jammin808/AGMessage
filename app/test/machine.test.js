@@ -20,6 +20,8 @@ const wire = require('../lib/machinewire');
 const busy = require('../lib/busy');
 const version = require('../lib/version');
 const upgradebackup = require('../lib/upgradebackup');
+/** The words the installer's life cycle reads on Windows (installer/test/expect.js), held here to a real server's. */
+const lifecycleWords = require('../../installer/test/expect.js').WORDS;
 
 const W = 'C:\\ProgramData\\AGMessage';
 const SYS = 'C:\\Windows\\System32';
@@ -473,6 +475,7 @@ test('upgrade-stop on an idle server: it waits for the server to end, reads the 
   assert.ok(rec.at >= asked, 'the record of this stop');
   assert.match(rec.backup, /^backups\/upgrade-/);
   assert.match(r.text, /^AGMessage stopped for the upgrade and saved at \d\d:\d\d; backup backups\/upgrade-/);
+  assert.equal((r.text.match(lifecycleWords.upgradeStopped) || { groups: {} }).groups.backup, rec.backup, 'the installer\'s life cycle reads these words and their backup as the server writes them');
   const res = JSON.parse(read(out));
   assert.deepEqual([res.code, res.saved, res.backup, res.at], [0, true, rec.backup, rec.at]);
   assert.ok(fs.existsSync(path.join(root, 'data', ...rec.backup.split('/'), 'data', 'rooms', code + '.json')), 'the hall is in the backup');

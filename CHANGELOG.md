@@ -7467,6 +7467,12 @@ laptop and no Board device walked)
   console starts it; with the old rule all three fail. With a terminal for its input, as a task's console is to Node,
   both commands waited for Enter on the old ending and end at once on the new; a person's `machine.js status` still
   waits.
+- The installer's life cycle reads the upgrade stop's backup as the stop's record names it, `backups/upgrade-…` inside the
+  data folder (`lib/upgradebackup.js`; the server's own test of a real stop already said so). Its pattern for the stop's
+  words took the folder's bare name, so CI run 123's upgrade, which stopped, saved and backed up as it should, failed
+  that check, and the next test looked for the backup one `backups` too deep. `installer/test/expect.js` and the place
+  it looks follow the record; `test/machine.test.js` holds that pattern to a real server's stop (the old one fails it),
+  and `test/lifecycle.test.js`'s stand-in record names the backup as the server does. Nothing that ships changed.
 - The admin page draws Accounts held aside with its first fill, never before it, and an adoption's one-time passwords
   with the panel's new state, from one answer. CI's browser smoke on Windows (run 106) missed twice on the held list: the
   first left click on ana's ⋯ opened no menu (the click meant to close it then opened one, left open with the focus in

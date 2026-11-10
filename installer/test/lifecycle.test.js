@@ -312,7 +312,7 @@ test('the upgrade\'s stop wrote last-stop.json: it saved, it names the build it 
   const rec = JSON.parse(fs.readFileSync(file, 'utf8'));
   assert.deepEqual([rec.saved, rec.build, rec.backup], [true, B.previous.full, S.upgradeStop]);
   assert.ok(rec.at >= S.upgradeAt && rec.at <= S.stopToHealth.healthAt, 'written by this upgrade\'s stop');
-  assert.ok(fs.statSync(path.win32.join(dir, 'backups', rec.backup)).isDirectory(), 'its backup is there: ' + rec.backup);
+  assert.ok(fs.statSync(path.win32.join(dir, ...rec.backup.split('/'))).isDirectory(), 'its backup is there: ' + rec.backup);
   const ms = S.stopToHealth.healthAt - rec.at;
   note('The upgrade from ' + B.previous.full + ': stopped and saved at ' + new Date(rec.at).toISOString() + ' (backup made in ' + (rec.backupMs ?? '?') + ' ms), this build answering ' + (ms / 1000).toFixed(1) + ' s later; the installer ran ' + Math.round(S.stopToHealth.installMs / 1000) + ' s.');
 });
