@@ -7505,6 +7505,11 @@ laptop and no Board device walked)
   what a file holds, and an upgrade to each account's folders, once, before its control task. That Windows now lets
   the second write through rests on its rules and runs 125 to 127, not on a run of this grant: R6 reads both writes at
   each run, and whether they are let through is the next run's to say.
+- The smoke's doors checks say, for a right-click that opened no menu, what the page heard of it: each `contextmenu`
+  (where it met, and whether a door took it), each menu drawn and taken away, a dialog open, a selection, the focus and
+  the width (`rightMenu` in `test/browser-smoke.js`, at each of its three right-clicks; the watch only listens). One
+  local run of this build missed a right-click on a message's time on the account's hall page, while that message's ⋯
+  and Shift+F10 opened its menu; its rerun did not, and nothing here explains it yet. Nothing that ships changed.
 - A room's transcript draws a take after every message posted before it. The transcript draws each entry before the
   first message at or after its time, so a take made in the same millisecond as the message just before it was drawn
   before that message: CI's CR LF run of 964c573 drew the operator's web page above "After the quote", sent first. A

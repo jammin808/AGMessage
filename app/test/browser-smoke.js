@@ -650,6 +650,36 @@ const OPEN_SCREENS = `(() => { document.getElementById('headerMore').click(); co
  */
 const DOORS_SAW = (held) => `JSON.stringify({ menu: !!document.querySelector('.agm-menu'), focus: document.activeElement.tagName + '.' + document.activeElement.className, replaced: !window.${held}.isConnected })`;
 /**
+ * What a page hears of one right-click, watched from before it is given (RIGHT_WATCH) until it is read (RIGHT_SAW) and
+ * the watch taken away (RIGHT_UNWATCH): each contextmenu event (where it met, and whether a door took it, read after every
+ * listener), each menu drawn and each taken away. The watch only listens: it neither prevents nor stops anything.
+ */
+const RIGHT_WATCH = `(() => { const s = window.__rightSaw = { heard: [], drawn: 0, gone: 0 };
+  s.capture = (e) => { s.heard.push({ at: e.target && e.target.tagName ? e.target.tagName + '.' + e.target.className : String(e.target), shift: e.shiftKey, button: e.button, x: e.clientX, y: e.clientY }); };
+  s.bubble = (e) => { const h = s.heard[s.heard.length - 1]; if (h) h.taken = e.defaultPrevented; };
+  addEventListener('contextmenu', s.capture, true);
+  addEventListener('contextmenu', s.bubble);
+  const isMenu = (n) => n.nodeType === 1 && n.matches('.agm-menu');
+  s.watch = new MutationObserver((list) => { for (const m of list) { s.drawn += [...m.addedNodes].filter(isMenu).length; s.gone += [...m.removedNodes].filter(isMenu).length; } });
+  s.watch.observe(document.body, { childList: true, subtree: true });
+  return true; })()`;
+const RIGHT_SAW = `(() => { const s = window.__rightSaw || {}; return JSON.stringify({ heard: s.heard, drawn: s.drawn, gone: s.gone, menu: !!document.querySelector('.agm-menu'),
+  dialogs: [...document.querySelectorAll('dialog[open]')].map((d) => d.id || d.className), selection: String(getSelection()).slice(0, 40),
+  focus: document.activeElement.tagName + '.' + document.activeElement.className, width: innerWidth }); })()`;
+const RIGHT_UNWATCH = `(() => { const s = window.__rightSaw; if (s) { removeEventListener('contextmenu', s.capture, true); removeEventListener('contextmenu', s.bubble); s.watch.disconnect(); } window.__rightSaw = null; return true; })()`;
+/**
+ * A right-click at a point of a tab, and the menu it opened (`out.right`, its ids, as MENU_IDS reads them, within 3 s). One
+ * that opened none is said where every doors report prints it (`out.rightSaw`): what the page heard of it and what it
+ * held, never the catalogue's set, so the check still fails.
+ */
+async function rightMenu(tab, at, out) {
+  await tab.eval(RIGHT_WATCH);
+  await rightClick(tab, at);
+  out.right = await tab.until(MENU_IDS, 3000);
+  if (!out.right) out.rightSaw = await tab.eval(RIGHT_SAW);
+  await tab.eval(RIGHT_UNWATCH);
+}
+/**
  * An object's doors on a page, each opened and read: right-click (at its name), its ⋯, and Shift+F10 on the focused
  * object each open the ids of the catalogue's shown set for it; the ⋯ clicked again closes its menu, the focus on it;
  * the key's menu has the focus on its first enabled item, and Escape gives the focus back; each inline act is in the
@@ -659,8 +689,7 @@ async function doorsOf(tab, kind, sel, obj, { facts = 'F', bar = '.msg-acts > .m
   const out = { want: await tab.eval(`JSON.stringify(AGM.catalog.ids(${codeLiteral(kind)}, ${facts}, ${obj}))`) };
   const at = await tab.eval(`(() => { const n = ${sel}; n.scrollIntoView({ block: 'center' }); const h = n.querySelector(${codeLiteral(hit)}) || n; const q = h.getBoundingClientRect(); return { x: Math.round(q.left + Math.min(6, q.width / 2)), y: Math.round(q.top + q.height / 2) }; })()`);
   out.hit = await tab.eval(`(() => { const h = document.elementFromPoint(${at.x}, ${at.y}); return h ? h.tagName + '.' + h.className + ' in ' + (${sel}).contains(h) : 'nothing'; })()`);
-  await rightClick(tab, at);
-  out.right = await tab.until(MENU_IDS, 3000);
+  await rightMenu(tab, at, out);
   await press(tab, 'Escape');
   out.rightClosed = !!(await tab.until(NO_MENU, 3000));
   // The ⋯ clicked as a mouse clicks it opens the menu, and clicked again closes it, the focus on it.
@@ -758,8 +787,7 @@ async function barsUnderAFinger(edge, url, ready) {
 async function selfDoors(tab, kind, sel, obj) {
   const out = { want: await tab.eval(`JSON.stringify(AGM.catalog.ids(${codeLiteral(kind)}, F, ${obj}))`) };
   out.size = await tab.eval(`(() => { const q = (${sel}).getBoundingClientRect(); return Math.round(Math.min(q.width, q.height) * 10) / 10; })()`);
-  await rightClick(tab, await middleOf(tab, sel));
-  out.right = await tab.until(MENU_IDS, 3000);
+  await rightMenu(tab, await middleOf(tab, sel), out);
   await press(tab, 'Escape');
   out.rightClosed = !!(await tab.until(NO_MENU, 3000));
   await leftClick(tab, await middleOf(tab, sel));
@@ -783,8 +811,7 @@ const selfInStep = (d) => !!d.want && d.want !== '[]' && d.size >= 24 && d.right
 async function ownLinkDoors(tab, kind, sel, obj, { facts = 'F' } = {}) {
   const out = { want: await tab.eval(`JSON.stringify(AGM.catalog.ids(${codeLiteral(kind)}, ${facts}, ${obj}))`) };
   out.size = await tab.eval(`(() => { const q = (${sel}).getBoundingClientRect(); return Math.round(Math.min(q.width, q.height) * 10) / 10; })()`);
-  await rightClick(tab, await middleOf(tab, sel));
-  out.right = await tab.until(MENU_IDS, 3000);
+  await rightMenu(tab, await middleOf(tab, sel), out);
   await press(tab, 'Escape');
   out.rightClosed = !!(await tab.until(NO_MENU, 3000));
   await tab.eval(`(${sel}).focus()`);
