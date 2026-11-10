@@ -263,7 +263,7 @@ test('grant: from the laptop\'s admin\'s own task, the account resolved to its S
   assert.deepEqual(win.grants, { [BEN]: 'token,start,stop' });
   for (const box of ['inbox', 'outbox']) assert.ok(fs.statSync(path.join(root, 'machine', box, BEN)).isDirectory(), box);
   assert.ok(win.icacls.includes(path.join(root, 'machine', 'inbox', BEN) + ' /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F *' + BEN + ':(WD)'), 'it may add a file to its inbox\\, never a folder');
-  assert.ok(win.icacls.includes(path.join(root, 'machine', 'inbox', BEN) + ' /grant *' + BEN + ':(OI)(IO)W'), 'and write the files in it');
+  assert.ok(win.icacls.includes(path.join(root, 'machine', 'inbox', BEN) + ' /grant *' + BEN + ':' + machine.INBOX_FILES), 'and write the files in it');
   assert.ok(win.icacls.includes(path.join(root, 'machine', 'outbox', BEN) + ' /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F *' + BEN + ':(OI)(CI)RX'), 'it may read its outbox\\');
   assert.ok(win.icacls.includes(path.join(root, 'token') + ' /grant:r *' + BEN + ':(OI)(CI)R'), 'given token: read on token\\');
   const xml = win.xml[machine.controlTask(BEN)];

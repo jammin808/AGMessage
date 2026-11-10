@@ -7488,10 +7488,23 @@ laptop and no Board device walked)
   `0x100116` on that file (icacls' `W`: write data, append, extended attributes, attributes and synchronize). An open
   to write asks for two rights more: READ_CONTROL, which FILE_GENERIC_WRITE holds and which Windows also gives a file's
   owner (where no OWNER RIGHTS entry says otherwise, and these lists hold none), and FILE_READ_ATTRIBUTES, which
-  CreateFileW adds to every open and which no owner is given. By those rules the list alone refuses that open, whoever
-  owns the file; that is read from the rules, not measured. R6 now also reads each file's owner, elevated, and opens
+  CreateFileW adds to every open and which no owner is given. R6 now also reads each file's owner, elevated, and opens
   the file to write it in place (the same rights, never replacing it) beside the write that replaces it; its words say
-  both outcomes and whose the file is.
+  both outcomes and whose the file is. CI run 127 read them: the file's owner was the account itself, which so holds
+  READ_CONTROL, and the open in place was refused too (EPERM). So the replacing was not the cause, and by Windows'
+  rules READ_CONTROL was not either: FILE_READ_ATTRIBUTES is the one right an open asks for that is not held, read by
+  elimination, not measured.
+- A person's request to AGMessage's control task, or an installer they name for an upgrade, sent while one of that name
+  still waits in their inbox, replaces it. Their inbox's files are granted read attributes beside write (`machine.js`
+  `INBOX_FILES`: icacls' `W` and `RA`, `0x100196`), so with the READ_CONTROL Windows gives a file's owner, every right an
+  open to write asks for is held on a file the account made. Before, that write was refused, and `launch.js` told the
+  person "You have no AGMessage rights on this PC", rights they had. The console of a request replaced waits out its
+  bound and says it had no answer. An install or upgrade gives each account with a right its inbox and outbox with this
+  build's grants again, as it did the laptop's admin's alone, so an upgraded node holds the new grant too.
+  `test/machine.test.js` holds the grant to every right an open to write asks for but the owner's, and to no read of
+  what a file holds, and an upgrade to each account's folders, once, before its control task. That Windows now lets
+  the second write through rests on its rules and runs 125 to 127, not on a run of this grant: R6 reads both writes at
+  each run, and whether they are let through is the next run's to say.
 - A room's transcript draws a take after every message posted before it. The transcript draws each entry before the
   first message at or after its time, so a take made in the same millisecond as the message just before it was drawn
   before that message: CI's CR LF run of 964c573 drew the operator's web page above "After the quote", sent first. A

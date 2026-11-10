@@ -401,8 +401,8 @@ event into its audit row (The machine's events, below).
   `token`, since the watchdog replaces the token by a rename, which needs delete; read on `machine\events.jsonl`, that file
   alone, never a list of `machine\`. The laptop's admin is given read on `token` and `logs` (Show the admin token,
   AGMessage status) and its own `machine\inbox\<sid>\` (it may create and write files) and `machine\outbox\<sid>\` (it may
-  read), and its own control task. On an upgrade each account given a right has its control task registered again from
-  this build's definition. Every grant is checked: a SID not read or a grant that fails is not done (2), with no record
+  read), and its own control task. On an upgrade each account given a right has its `inbox\` and `outbox\` given this
+  build's grants again and its control task registered again from this build's definition. Every grant is checked: a SID not read or a grant that fails is not done (2), with no record
   written.
 - **The firewall rules** (answer 37). One for TCP on the port, one for UDP on 9928 (discovery), each naming the program
   (`node.exe`), the protocol and the local port, the remote address `LocalSubnet`, on Private and Domain, and Public only
@@ -521,7 +521,9 @@ the pages "the laptop's admin" is that Windows account; "admin account" stays an
   runner's `upgrade --step run`), so no request waits behind one that has finished.
 - **A request.** `launch.js` (run as the person, never elevated by itself) reads their SID (`whoami.exe`), writes
   `request.json` (`{id, verb, …}`) into `machine\inbox\<SID>\`, where only that account may add a file and write it (no
-  folder and no junction: the folder's own grant is `WD`, the files' an inherited `W`), and runs their control
+  folder and no junction: the folder's own grant is `WD`, the files' an inherited `W` and `RA`, read attributes, which
+  every open asks for; with the READ_CONTROL Windows gives a file's owner, a request or an installer the person sends while
+  one of that name still waits replaces it), and runs their control
   task (`schtasks.exe /Run`). The control task, as SYSTEM, refuses a request file that `lstat` shows as a link, a hard
   link, a folder or over 4 KB (whatever was there is removed, so nothing is read twice), copies its bytes into
   `machine\work\` and reads that copy: whole JSON, an `id`, a known verb (`start`, `stop`, `upgrade`, `back`, `grant`,

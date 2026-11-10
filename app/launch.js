@@ -974,8 +974,8 @@ async function exportPortable({ source, machine, sys, port = 0, run = childProce
   if (!me) return { code: NOT_DONE, text: 'Your Windows account could not be read (whoami.exe), so nothing was exported.' };
   const dir = importDirOf(machine, me.sid);
   const id = crypto.randomBytes(12).toString('hex');
-  // The account may add files to its import folder and write them, and nothing more (it may not even read the folder's
-  // attributes): its first answer, that the export did not finish, is what tells whether the folder was made ready for it,
+  // The account may add files to its import folder, write them and read their attributes, and nothing more (it may not
+  // even read the folder's own attributes): its first answer, that the export did not finish, is what tells whether the folder was made ready for it,
   // and stays as its answer should the export stop part way. Every later answer is written through the handle that wrote
   // the first, never by opening its file again: that handle is granted as the file is made, by the folder's right to add
   // a file, so the answer the installer reads never rests on what a second open of the file is granted.

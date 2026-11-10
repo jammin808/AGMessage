@@ -457,11 +457,19 @@ const MACHINE_SUBS = Object.freeze(['inbox', 'outbox', 'work', 'staged']);
 /** What any signed-in account may do in setup\<random>\: create a file, never list or read one. */
 const SETUP_GRANT = '*' + SID.authed + ':(WD,AD,WA)';
 /**
- * An account's own inbox\<sid>\: it may add a file to the folder (WD on the folder alone) and write the files in it (W,
- * inherited by files alone), never make a folder or a junction there; and its outbox\<sid>\, which it may read (RX,
- * inherited inside). Each list's first grant is set with the folder's access list, each other one added after it.
+ * What an account may do to the files of its own inbox\<sid>\, inherited by files alone: icacls' W (write data, append,
+ * extended attributes, attributes, synchronize) and RA, read attributes, which CreateFileW asks for with every open. With
+ * the READ_CONTROL Windows gives a file's owner, every right an open to write asks for (FILE_GENERIC_WRITE) is held on a
+ * file the account made, so a request or an installer it sends while one of that name waits replaces it. Never a read of
+ * a file's contents.
  */
-const inboxGrants = (sid) => ['*' + sid + ':(WD)', '*' + sid + ':(OI)(IO)W'];
+const INBOX_FILES = '(OI)(IO)(WD,AD,WEA,WA,RA,S)';
+/**
+ * An account's own inbox\<sid>\: it may add a file to the folder (WD on the folder alone) and write the files in it
+ * (INBOX_FILES), never make a folder or a junction there; and its outbox\<sid>\, which it may read (RX, inherited inside).
+ * Each list's first grant is set with the folder's access list, each other one added after it.
+ */
+const inboxGrants = (sid) => ['*' + sid + ':(WD)', '*' + sid + ':' + INBOX_FILES];
 const outboxGrants = (sid) => [grant(sid, 'RX')];
 
 /** One command-line argument as Windows reads it (CommandLineToArgvW), for a task's <Arguments>. */
@@ -1195,11 +1203,13 @@ function install(opts, { run = childProcess.execFileSync, fsImpl = fs } = {}) {
   try { fsImpl.appendFileSync(events, ''); } catch (e) { throw notDone('machine\\events.jsonl could not be made (' + (e.code || e.message) + ').'); }
   mustGrant(H, [events, '/grant:r', '*' + taskSid + ':(R)'], 'machine\\events.jsonl');
   // The laptop's admin's own inbox\ and outbox\ and control task; on an upgrade, each account given a right has its
-  // control task registered again from this build's definition (its folders and grants are kept).
-  accountFolder(H, fsImpl, root, 'inbox', admin, inboxGrants(admin));
-  accountFolder(H, fsImpl, root, 'outbox', admin, outboxGrants(admin));
+  // inbox\ and outbox\ given this build's grants again and its control task registered again from this build's definition.
   const grantees = Object.keys(readGrants(H)).filter((sid) => personSid(sid) && sid !== admin);
-  for (const sid of [admin, ...grantees]) registerControl(H, fsImpl, { root, sys: opts['--sys'], node, script, sid });
+  for (const sid of [admin, ...grantees]) {
+    accountFolder(H, fsImpl, root, 'inbox', sid, inboxGrants(sid));
+    accountFolder(H, fsImpl, root, 'outbox', sid, outboxGrants(sid));
+    registerControl(H, fsImpl, { root, sys: opts['--sys'], node, script, sid });
+  }
   // The firewall rules, by program, protocol and port.
   const rules = firewallRules({ node, port, public: !!opts['--public'] });
   const fw = H.powershell(PS_FIREWALL_ADD, { AGM_RULE_TCP: RULE_TCP, AGM_RULE_UDP: RULE_UDP, AGM_NODE: node, AGM_PORT: String(port), AGM_UDP: String(DISCOVERY_PORT), AGM_PROFILES: rules[0].profiles.join(',') });
@@ -3927,7 +3937,7 @@ module.exports = {
   main, run, parse, waitsForEnter, prepare, install, uninstall, preinstallCheck, upgradeStop, status, restore, whose, start, firstAccount, control,
   controlTaskXml, controlTask, controlSddl, requestOf, takeRequest, clearBox, grantRightsOf, elevatedOf, appendEvent, lastSeqOf, RIGHTS, CONTROL_VERBS, REQUEST_MAX,
   personSid, accountOf, whoseOf, adminOf, serverProgram, programWords, outsideOwnChain, accountFile, startedFrom, proven, PS_WHOSE, PS_PROGRAMS, START_WAIT_MS, PROGRAMS_WAIT_MS,
-  CHILDREN, MACHINE_SUBS, BASE_GRANTS, SETUP_GRANT, inboxGrants, outboxGrants, serverTaskXml, winArg, firewallRules, recordValues, ownerSidOf, grant,
+  CHILDREN, MACHINE_SUBS, BASE_GRANTS, SETUP_GRANT, INBOX_FILES, inboxGrants, outboxGrants, serverTaskXml, winArg, firewallRules, recordValues, ownerSidOf, grant,
   csvRows, taskStateOf, installOf, kindOf, NEVER_ROLLED_BACK, backupEstimate, readLastStop, fullPath,
   hello, ask, serverProof, askProof, sameProof, tokenOf, busyLineOf, busyIsBusy, BUSY_KEYS, hands, portAnswers, portCloses, healthOf, HELLO_SAYS, ASK_SAYS,
   PS_OWNER, PS_FIREWALL_ADD, PS_FIREWALL_REMOVE, PS_STATUS,

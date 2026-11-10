@@ -146,9 +146,27 @@ test('the machine folder\'s children: SYSTEM and Administrators first; the task 
   assert.deepEqual([by.logs.admin, by.token.admin, by.data.admin, by.keys.admin], ['R', 'R', undefined, undefined]);
   assert.equal(by.machine.task, undefined, 'machine\\ is SYSTEM and Administrators only');
   assert.deepEqual(machine.MACHINE_SUBS, ['inbox', 'outbox', 'work', 'staged']);
-  assert.deepEqual(machine.inboxGrants(ANA), ['*' + ANA + ':(WD)', '*' + ANA + ':(OI)(IO)W'], 'its inbox\\: add a file to the folder (never a folder or a junction), write the files in it');
+  assert.deepEqual(machine.inboxGrants(ANA), ['*' + ANA + ':(WD)', '*' + ANA + ':(OI)(IO)(WD,AD,WEA,WA,RA,S)'], 'its inbox\\: add a file to the folder (never a folder or a junction), write the files in it and read their attributes');
   assert.deepEqual(machine.outboxGrants(ANA), ['*' + ANA + ':(OI)(CI)RX']);
   assert.equal(machine.SETUP_GRANT, '*S-1-5-11:(WD,AD,WA)', 'any signed-in account may create a file there, none may list or read');
+});
+
+test('the inbox\'s files: every right an open to write asks for of a file the account made, but the READ_CONTROL Windows gives its owner, and never a read of what it holds', () => {
+  // icacls' specific rights by winnt.h's masks. An open to write asks for FILE_GENERIC_WRITE (libuv's, for 'w' and O_WRONLY),
+  // to which CreateFileW adds SYNCHRONIZE and FILE_READ_ATTRIBUTES. Runs 125 to 127 read icacls' W on these files as 0x100116,
+  // and refused a second write of a file the account made and owned: READ_ATTRIBUTES was the one right asked and not held.
+  const SPECIFIC = { RD: 0x1, WD: 0x2, AD: 0x4, REA: 0x8, WEA: 0x10, X: 0x20, DC: 0x40, RA: 0x80, WA: 0x100, DE: 0x10000, RC: 0x20000, WDAC: 0x40000, WO: 0x80000, S: 0x100000 };
+  const m = /^\(OI\)\(IO\)\(([A-Z,]+)\)$/.exec(machine.INBOX_FILES);
+  assert.ok(m, 'inherited by files alone, as a list of specific rights');
+  const rights = m[1].split(',');
+  assert.ok(rights.every((r) => Object.hasOwn(SPECIFIC, r)), rights.join(','));
+  const mask = rights.reduce((a, r) => a | SPECIFIC[r], 0);
+  assert.equal(mask, 0x100116 | 0x80, 'icacls\' W, and read attributes');
+  const FILE_GENERIC_WRITE = 0x120116;
+  const READ_CONTROL = 0x20000;
+  const asked = FILE_GENERIC_WRITE | 0x100000 | 0x80;
+  assert.equal(asked & ~READ_CONTROL & ~mask, 0, 'all an open to write asks for, but what the owner is given');
+  assert.equal(mask & (SPECIFIC.RD | SPECIFIC.REA | SPECIFIC.X | SPECIFIC.DE | SPECIFIC.RC | SPECIFIC.WDAC | SPECIFIC.WO), 0, 'no read of its contents, no delete, no change of who may');
 });
 
 test('the server task\'s definition: node.exe on launch.js serve by their absolute paths from launch.js\'s folder, LocalService under its own SID, SeChangeNotifyPrivilege alone, a boot trigger, its descriptor SYSTEM and Administrators only', () => {
@@ -321,6 +339,31 @@ test('prepare refuses a new root another account filled before the grant ran, a 
 
 // ---------------------------------------------------------------- install
 
+test('install on an upgrade: the laptop\'s admin and each account given a right have their inbox\\ and outbox\\ given this build\'s grants again, each once, then their control task', async () => {
+  const { root } = prepared();
+  const app = appFolder();
+  // The record an earlier build left, with a grant given since (and the admin named among the grants too, as it never is,
+  // so its folders are still made once).
+  const win = fakeWindows({ record: { InstallDir: app, Version: '0.6.41', SemVer: '0.6.0', Admin: ANA, AdminName: 'LAPTOP\\ana', Port: '3023' }, grants: { [BEN]: 'start,stop', [ANA]: 'token' } });
+  const r = await machine.run(['install', '--machine', root, '--app', app, '--sys', SYS, '--build', '0.6.1+44.def5678', '--port', '3023'], { run: win.run });
+  assert.equal(r.code, 0, r.text);
+  const values = Object.fromEntries(win.calls.filter((c) => c.name === 'reg.exe' && c.args[0] === 'add').map((c) => [c.args[3], c.args[7]]));
+  assert.deepEqual([values.Admin, values.Previous], [ANA, '0.6.41'], 'an upgrade: the admin kept from the record, the build it replaced Previous');
+  const line = (c) => c.args.join(' ');
+  const where = (want) => win.calls.flatMap((c, i) => (line(c) === want ? [i] : []));
+  for (const sid of [ANA, BEN]) {
+    const inbox = path.join(root, 'machine', 'inbox', sid);
+    const outbox = path.join(root, 'machine', 'outbox', sid);
+    const set = where(inbox + ' /inheritance:r /grant:r ' + machine.BASE_GRANTS.join(' ') + ' *' + sid + ':(WD)');
+    const files = where(inbox + ' /grant *' + sid + ':' + machine.INBOX_FILES);
+    const out = where(outbox + ' /inheritance:r /grant:r ' + machine.BASE_GRANTS.join(' ') + ' *' + sid + ':(OI)(CI)RX');
+    const task = win.calls.flatMap((c, i) => (c.name === 'schtasks.exe' && c.args[0] === '/Create' && c.args.includes(machine.controlTask(sid)) ? [i] : []));
+    assert.deepEqual([set.length, files.length, out.length, task.length], [1, 1, 1, 1], sid + ': each once');
+    assert.ok(files[0] > set[0] && out[0] > files[0] && task[0] > out[0], sid + ': ' + [set, files, out, task].join(' < '));
+    assert.ok(fs.statSync(inbox).isDirectory() && fs.statSync(outbox).isDirectory(), sid);
+  }
+});
+
 test('install: the task registered from its definition (then removed), its SID given what it uses, the admin its reads and its inbox\\ and outbox\\, events.jsonl alone readable by the task, the rules, the record last; machine.admin appended once; setup\\ removed', async () => {
   const { root } = prepared();
   const app = appFolder();
@@ -339,7 +382,7 @@ test('install: the task registered from its definition (then removed), its SID g
   assert.ok(icacls.includes(path.join(root, 'machine', 'events.jsonl') + ' /grant:r *' + TASK_SID + ':(R)'), 'events.jsonl alone, no list of machine\\');
   assert.ok(!icacls.some((a) => a.startsWith(path.join(root, 'machine') + ' ')), 'nothing granted on machine\\ itself');
   assert.ok(icacls.includes(path.join(root, 'machine', 'inbox', ANA) + ' /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F *' + ANA + ':(WD)'));
-  assert.ok(icacls.indexOf(path.join(root, 'machine', 'inbox', ANA) + ' /grant *' + ANA + ':(OI)(IO)W') > icacls.indexOf(path.join(root, 'machine', 'inbox', ANA) + ' /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F *' + ANA + ':(WD)'), 'the files\' grant added by a call of its own, after the access list');
+  assert.ok(icacls.indexOf(path.join(root, 'machine', 'inbox', ANA) + ' /grant *' + ANA + ':' + machine.INBOX_FILES) > icacls.indexOf(path.join(root, 'machine', 'inbox', ANA) + ' /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F *' + ANA + ':(WD)'), 'the files\' grant added by a call of its own, after the access list');
   assert.ok(icacls.includes(path.join(root, 'machine', 'outbox', ANA) + ' /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F *' + ANA + ':(OI)(CI)RX'));
   const fw = win.calls.find((c) => c.name === 'powershell.exe');
   assert.deepEqual([fw.env.AGM_NODE, fw.env.AGM_PORT, fw.env.AGM_UDP, fw.env.AGM_PROFILES, fw.env.SystemRoot], [path.join(app, 'node', 'node.exe'), '3023', '9928', 'Domain,Private,Public', 'C:\\Windows']);

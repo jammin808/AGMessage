@@ -412,7 +412,11 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   makes the new admin's folders and task, takes the old admin's reads (handing nothing over while one stays), rewrites
   the record, then gives the new admin its reads, the old admin's control task last; a read Windows refuses to give or
   take back is said and answered not done, and the record stays where it was. An account's inbox takes files, never a
-  folder or a junction, and its folders are removed entry by entry, never recursively, so a link is never followed. A
+  folder or a junction. Its grant on them is to write them and read their attributes (so a request it sends again
+  replaces the one waiting), never to read what they hold, remove them or change who may; as the owner of each file it
+  made (no OWNER RIGHTS entry), it also holds READ_CONTROL and WRITE_DAC there and so may change that file's access list,
+  which reaches only bytes it wrote: a request is read from a copy, an installer only through its staged copy's digest.
+  Its folders are removed entry by entry, never recursively, so a link is never followed. A
   start never ends the server task (Task Scheduler's End is TerminateProcess, never the stop). An administrator's elevated console may do every act (a
   laptop whose admin account is gone), refused when its token is not elevated (read by SID). What SYSTEM does is bounded
   by the record and the request's verb: start runs the server task, stop is the server's own stop at loopback with the

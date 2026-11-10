@@ -131,7 +131,7 @@ test('end to end: a stopped portable copy is exported as its account, taken and 
   const dir = machine.importDir(root, ANA);
   assert.ok(fs.statSync(dir).isDirectory());
   const grants = win.calls.filter((c) => c.name === 'icacls.exe' && c.args[0] === dir).map((c) => c.args.slice(1));
-  assert.deepEqual(grants, [['/inheritance:r', '/grant:r', ...machine.BASE_GRANTS, '*' + ANA + ':(WD)'], ['/grant', '*' + ANA + ':(OI)(IO)W']], 'the inbox\'s own grants: add a file, write it, never a folder');
+  assert.deepEqual(grants, [['/inheritance:r', '/grant:r', ...machine.BASE_GRANTS, '*' + ANA + ':(WD)'], ['/grant', '*' + ANA + ':' + machine.INBOX_FILES]], 'the inbox\'s own grants: add a file, write it, never a folder');
   // export: the bundle, as the account, its answer for the installer.
   const ex = await launch.exportPortable({ source: src, machine: root, sys: SYS, run: win.run, profile: keys });
   assert.equal(ex.code, launch.DONE, ex.text);
