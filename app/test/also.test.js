@@ -388,8 +388,13 @@ test('a Board account\'s switch is read at each send: turned off by the admin wh
   assert.equal(first.ok, true, JSON.stringify(first));
   assert.equal((await api(srv.base, 'PATCH', '/api/users/' + tech.id, { onStage: { screens: false } }, { cookie: admin })).status, 200);
   await until(() => events(tess, 'onStage').length === 1, 4000, 'told live');
-  const seq = (await emit(tess, 'join', { roomCode: hall, as: 'account', docs: true })).seq;
+  // The room's messages, as a first open reads them: the first send's line is followed after it (its `also` updated as the
+  // screen confirms it, an op of its own), so the room's last change is no measure of what was posted.
+  const posted = async () => (await emit(tess, 'join', { roomCode: hall, as: 'account', docs: true })).history.map((m) => m.id + ':' + (m.text || ''));
+  const before = await posted();
   assert.deepEqual(await act(tess, 'message', { type: 'text', text: 'One minute', also: { screens: true } }), { ok: false, error: NO_SCREENS });
-  assert.equal((await emit(tess, 'join', { roomCode: hall, as: 'account', docs: true })).seq, seq, 'nothing posted');
+  const after = await posted();
+  assert.deepEqual(after, before, 'nothing posted');
+  assert.ok(before.some((m) => m.endsWith(':Two minutes')) && !after.some((m) => m.endsWith(':One minute')), JSON.stringify(after));
   assert.deepEqual((await emit(ctl, 'display:list', { code: hall })).displays[0].content, { kind: 'countdown', text: 'Two minutes', tone: 'info' }, 'the screen keeps the line it had');
 });

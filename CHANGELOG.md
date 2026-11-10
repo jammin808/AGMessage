@@ -7401,8 +7401,8 @@ laptop and no Board device walked)
   plant found no walk; it now runs ws as the bundle's Node 24 does, without that pair (Node 26.13.0 fails the old test
   and passes the new; the static reading of what ws can ask is unchanged). `test/keyedstore.test.js` (Windows, runs 117
   and 118): the save numbers it expected counted one save per account made, but two saves asked within the lane's wait
-  are one (the creates' hashing ends when it ends); it reads them from the files, and fails the old way when both
-  creates run at once. `test/server.test.js` (Windows, run 116): a line's push is read against its window (8 s in the
+  are one (the creates' hashing ends when it ends); it reads them from the files, and the old test fails as CI did
+  when both creates run at once. `test/server.test.js` (Windows, run 116): a line's push is read against its window (8 s in the
   test) before its words, and on a loaded runner the take made at the test's start was past it by the check of a text
   that is no line; that check and the other pusher's line are asked of takes made just before them. `test/shownet.test.js`
   (Windows, run 116): a request of a link removed just before still landed (each poll is a connection and a handshake
@@ -7420,7 +7420,13 @@ laptop and no Board device walked)
   page's `socket.io.js` failed to load (`net::ERR_NO_BUFFER_SPACE`, which Windows gives when it has no socket to give,
   most often no ephemeral port free), so the page never joined and the checks after it waited it out; run 120 did not
   meet it, and nothing here explains it yet. The smoke's doors check now says, on a ⋯ that opened no menu, what the click
-  met there and where the ⋯ is (one local run missed so once and its rerun did not).
+  met there, where the ⋯ drawn now is and what the page held, in every doors report's line (one local run missed so once
+  and its rerun did not).
+- `test/also.test.js`'s switch read at each send (Windows, run 121) took "nothing posted" from the room's last change,
+  but the message sent just before with `also` is followed after it is posted: its `also` is updated by an op of its own
+  as the screen confirms its line, at most once a second (the `also` frame). On a loaded runner that op came between the
+  two reads. The check now compares the room's messages as a first open reads them; with 1.5 s between the two reads the
+  old check fails as run 121 did (3 !== 2) and the new one passes. Nothing that ships changed.
 - The admin page draws Accounts held aside with its first fill, never before it, and an adoption's one-time passwords
   with the panel's new state, from one answer. CI's browser smoke on Windows (run 106) missed twice on the held list: the
   first left click on ana's ⋯ opened no menu (the click meant to close it then opened one, left open with the focus in

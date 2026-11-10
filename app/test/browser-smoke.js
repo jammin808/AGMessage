@@ -668,10 +668,11 @@ async function doorsOf(tab, kind, sel, obj, { facts = 'F', bar = '.msg-acts > .m
   await tab.eval(`(window.__doorsFirst = ${sel}.querySelector('.obj-more'), true)`);
   await leftClick(tab, dotsAt);
   out.dots = await tab.until(MENU_IDS, 3000);
-  // A miss says what the click met where it was given, where the ⋯ is now and what the page holds.
+  // A miss is said where every doors report prints the ⋯'s set: what the click met where it was given, where the ⋯ drawn
+  // now is, and what the page holds (never the catalogue's set, so the check still fails).
   if (!out.dots) {
-    out.dotsSaw = await tab.eval(`(() => { const h = document.elementFromPoint(${dotsAt.x}, ${dotsAt.y}); const q = window.__doorsFirst.getBoundingClientRect();
-      return JSON.stringify({ at: ${JSON.stringify(dotsAt)}, met: h ? h.tagName + '.' + h.className : 'nothing', now: { x: Math.round(q.left + q.width / 2), y: Math.round(q.top + q.height / 2) }, saw: ${DOORS_SAW('__doorsFirst')} }); })()`);
+    out.dots = 'no menu: ' + await tab.eval(`(() => { const h = document.elementFromPoint(${dotsAt.x}, ${dotsAt.y}); const m = (${sel}).querySelector('.obj-more'); const q = m ? m.getBoundingClientRect() : null;
+      return JSON.stringify({ at: ${JSON.stringify(dotsAt)}, met: h ? h.tagName + '.' + h.className : 'nothing', now: q ? { x: Math.round(q.left + q.width / 2), y: Math.round(q.top + q.height / 2) } : null, saw: ${DOORS_SAW('__doorsFirst')} }); })()`);
   }
   out.inline = await tab.eval(`(async () => {
     const n = ${sel}; const menu = document.querySelector('.agm-menu:not(.agm-sub)'); const rows = [];
@@ -1802,7 +1803,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const roomHelpSeen = (await signin.until(`(() => { const li = ${ROOM_HELP}; const c = document.querySelector('.hall-row[data-code="${helpHall}"] .help-count'); return li && c && JSON.stringify({ where: li.querySelector('.help-where').textContent, count: c.textContent, open: li.querySelector('.help-open').textContent, hidden: li.querySelector('.help-open').hidden, code: new URL(li.querySelector('.help-open').href).searchParams.get('code') }); })()`)) || 'not drawn';
     const roomHelpDoors = roomHelpSeen === 'not drawn' ? { want: 'not drawn' } : await doorsOf(signin, 'help', ROOM_HELP, `AGM.page.object('help', (${ROOM_HELP}).dataset.key)`, { ...PAGE_DOORS_HALLS, hit: '.help-what' });
     report(!!(helpInRoom && helpInRoom.ok) && roomHelpSeen === JSON.stringify({ where: 'Side asks › Legal', count: '■ 1 needs help', open: 'Open its room', hidden: false, code: helpRoom.key }) && doorsInStep(roomHelpDoors) && roomHelpDoors.want === JSON.stringify(['help.respond', 'help.resolve', 'help.open']),
-      `a side room's help request reads "Side asks › Legal" on the board, counted on its hall's row, opened by Open its room, its doors in step (${roomHelpSeen}; ${roomHelpDoors.want}; made ${JSON.stringify(helpRoom)}, joined ${JSON.stringify(helpRoomIn && { ok: helpRoomIn.ok, error: helpRoomIn.error })}, asked ${JSON.stringify(helpInRoom)})`);
+      `a side room's help request reads "Side asks › Legal" on the board, counted on its hall's row, opened by Open its room, its doors in step (${roomHelpSeen}; ${roomHelpDoors.want}; made ${JSON.stringify(helpRoom)}, joined ${JSON.stringify(helpRoomIn && { ok: helpRoomIn.ok, error: helpRoomIn.error })}, asked ${JSON.stringify(helpInRoom)})${doorsInStep(roomHelpDoors) ? '' : ' — ' + doorsMissed(roomHelpDoors)}`);
     helpAsker.close();
     const helpCloser = await connect(base, cookie);
     const helpHallGone = await emit(helpCloser, 'admin:deleteRoom', { roomCode: helpHall, purgeFiles: false });
@@ -1924,7 +1925,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       `Set up lists the hall's rooms, the Main room first with its code; its doors are New room in this hall…, Board members…, May send in… and its code (${setupMain}; ${mainSetupDoors.want}; ${mainSetupDoors.right} / ${mainSetupDoors.dots} / ${mainSetupDoors.key})`);
     report(addAsk === 'New room in Smoke AGM' && /^[A-Z2-9]{8}$/.test(pressKey || '') && pressMade === JSON.stringify({ toast: 'Made Press in Smoke AGM: its guest code is off.', code: true, order: [code, pressKey] })
       && doorsInStep(pressDoors) && pressDoors.want === JSON.stringify(['adminRoom.members', 'adminRoom.sendFrom', 'adminRoom.codeToggle', 'adminRoom.newCode', 'adminRoom.rename', 'adminRoom.remove']) && pressOn === 'The guest code of Smoke AGM › Press is on.',
-      `+ Add room makes a room in Set up, listed after the Main room with its code off; its doors are Members…, May send in…, its code, Rename… and Remove room…, and Turn the code on switches it (${addAsk}; ${pressMade}; ${pressDoors.want}; "${pressOn}")`);
+      `+ Add room makes a room in Set up, listed after the Main room with its code off; its doors are Members…, May send in…, its code, Rename… and Remove room…, and Turn the code on switches it (${addAsk}; ${pressMade}; ${pressDoors.want}; "${pressOn}")${doorsInStep(pressDoors) ? '' : ' — ' + doorsMissed(pressDoors)}`);
     // A room button is the room's own link, inside its hall's row: right-click and Shift+F10 on it open the room's menu
     // (kind room), never its row's; for the admin, who sets halls up and is told every code: Open, Open in a new tab, Copy
     // link, Copy guest code and Set up….
@@ -2247,7 +2248,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const floorDialogStays = await floorDesk.until(`${NO_MENU} && document.getElementById('screensDialog').hasAttribute('open') && 'kept'`, 3000);
     await floorDesk.eval(`document.getElementById('screensClose').click()`);
     report(doorsInStep(floorDoors) && floorMenu === JSON.stringify({ fixed: true, popover: false, layer: true }) && !!floorMenuShut && !!floorScreen && floorScreens === 'fallback' && floorInDialog === 'in the dialog' && floorDialogStays === 'kept' && floorDesk.problems.length === 0,
-      `the hall page at the floor, with no popover API: a message's right-click, ⋯ and Shift+F10 open the catalogue's set (${floorDoors.key}), fixed at the menus' layer and no popover (${floorMenu}), Escape giving the focus back; in Screens & pages, opened through AGM.openDialog's own (${floorScreens}), a screen's menu opens in the dialog (${floorInDialog}) and Escape closes it, the dialog kept open (${floorDialogStays})${floorDesk.problems.length ? ' — ' + floorDesk.problems.slice(0, 3).join(' | ') : ''}`);
+      `the hall page at the floor, with no popover API: a message's right-click, ⋯ and Shift+F10 open the catalogue's set (${floorDoors.key}), fixed at the menus' layer and no popover (${floorMenu}), Escape giving the focus back; in Screens & pages, opened through AGM.openDialog's own (${floorScreens}), a screen's menu opens in the dialog (${floorInDialog}) and Escape closes it, the dialog kept open (${floorDialogStays})${doorsInStep(floorDoors) ? '' : ' — ' + doorsMissed(floorDoors)}${floorDesk.problems.length ? ' — ' + floorDesk.problems.slice(0, 3).join(' | ') : ''}`);
     floorDesk.close();
     // A first open is bounded (unit 32): a hall of a long day opens with its newest 200 messages, the newest 60 drawn at
     // once and the rest above them through AGM.idle; Show earlier draws the ones before above, the reader's place kept; a
@@ -3411,7 +3412,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const dialogStillOpen = await hallView.eval(`document.getElementById('screensDialog').open`);
     await hallView.eval(`document.getElementById('screensClose').click()`);
     report(doorsInStep(screenDoors) && !!inDialog && !!menuGoneDialogStays && renameField === 'Doors spare' && !!askGoneDialogStays && !!renamed && removeAsk === JSON.stringify({ title: 'Remove Doors renamed?', focused: 'no', yes: 'Remove' }) && !!removedScreen && dialogStillOpen,
-      `a screen's doors are in step inside the Screens dialog; its menu and asks open in the dialog and Escape closes them, not it; Rename… is a field, Remove… asks in place with the safe answer focused (${JSON.stringify({ want: screenDoors.want, renameField, removeAsk })})`);
+      `a screen's doors are in step inside the Screens dialog; its menu and asks open in the dialog and Escape closes them, not it; Rename… is a field, Remove… asks in place with the safe answer focused (${JSON.stringify({ want: screenDoors.want, renameField, removeAsk })})${doorsInStep(screenDoors) ? '' : ' — ' + doorsMissed(screenDoors)}`);
 
     // The admin's support view draws the person's menus, every item disabled with whose view it is, and sends nothing.
     const supportView = await edge.tab(`${base}/app.html?code=${code}&name=Chair&role=board&adminView=1`);
