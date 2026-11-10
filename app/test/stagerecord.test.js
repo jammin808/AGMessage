@@ -13,11 +13,11 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { StageRecord, entryOf, storedEntry, confidentialOf, whoSaid, didSaid, seenSaid, MAX, SEEN_MS } = require('../lib/stagerecord');
+const { StageRecord, takeAt, entryOf, storedEntry, confidentialOf, whoSaid, didSaid, seenSaid, MAX, SEEN_MS } = require('../lib/stagerecord');
 const { WriteLane } = require('../lib/resilience');
 const { uploadRef } = require('../lib/pages');
 const ai = require('../lib/ai');
-const { startServer, restartServer, stopServer, api, connect, emit, wait, until, pngOf, inviteOf, fakeStagewatch, setupAdmin } = require('./helpers');
+const { startServer, restartServer, stopServer, api, connect, emit, wait, until, pngOf, inviteOf, fakeStagewatch, setupAdmin, readSource, ROOT } = require('./helpers');
 
 const HALL = 'HALLA1';
 const LEGAL = 'LEGALKEY';
@@ -87,6 +87,25 @@ test('an entry keeps the uploads it shows or was made from by their references, 
   assert.deepEqual(read.map((e) => e.confidential === true), [true, true, false]);
   assert.ok(read.every((e) => !Object.hasOwn(e, 'uploads')), 'no reader is given them');
   assert.deepEqual(confidentialOf([quoted], () => false)[0].confidential, undefined);
+});
+
+test('a take is made at a time after every message its hall\'s rooms hold, so the transcript draws it after them: within the same millisecond, or on a clock that stepped back', () => {
+  const room = (...ats) => ({ messages: ats.map((at, i) => ({ id: 'm' + i, at })) });
+  assert.equal(takeAt([], 1000), 1000, 'no room: now');
+  assert.equal(takeAt([room(), room()], 1000), 1000, 'no message: now');
+  assert.equal(takeAt([room(900, 999)], 1000), 1000, 'every message before it: now');
+  assert.equal(takeAt([room(900, 1000)], 1000), 1001, 'a message in the same millisecond, posted first: just after it');
+  assert.equal(takeAt([room(1003)], 1000), 1004, 'a message newer than the clock reads (a clock that stepped back): just after it');
+  assert.equal(takeAt([room(990), room(1000), room(995)], 1000), 1001, 'the newest of every room it is drawn in');
+  assert.equal(takeAt([null, { messages: 'x' }, room(1000, NaN)], 1000), 1000, 'a room or a message of no shape is none');
+  assert.equal(new StageRecord(path.join(os.tmpdir(), 'agm-unused')).timeFor([room(1000)], 1000), 1001, 'the record\'s own reader');
+  // Every take the record keeps is made at that time: each pages.take of the server and the takes module names it.
+  for (const [file, rooms] of [['server.js', 'store.roomsOf(hall)'], ['lib/handlers/takes.js', 'store.roomsOf(hall.code)']]) {
+    const src = readSource(path.join(ROOT, file));
+    const takes = src.split('pages.take(').length - 1;
+    assert.ok(takes >= 1, file + ' makes a take');
+    assert.equal(src.split('at: stageRecord.timeFor(' + rooms + ') });').length - 1, takes, file + ': each pages.take made at stageRecord.timeFor(' + rooms + ')');
+  }
 });
 
 test('the transcript\'s words for an entry: who and from which seat, what they did for whom, and what the pages reported', () => {

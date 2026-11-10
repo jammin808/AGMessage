@@ -3684,7 +3684,7 @@ io.on('connection', (socket) => {
     if (card) {
       const before = hallPages(hall);
       const board = before.filter((p) => p.board && !p.support);
-      const take = pages.take(hall, 'board', card, { name: me.name, onStage: true }, { onStage: [...new Set(board.map((p) => p.key))], arrive: 'side', line: true });
+      const take = pages.take(hall, 'board', card, { name: me.name, onStage: true }, { onStage: [...new Set(board.map((p) => p.key))], arrive: 'side', line: true, at: stageRecord.timeFor(store.roomsOf(hall)) });
       if (take) {
         for (const t of takeSends(hall, before)) { const s = io.sockets.sockets.get(t.sid); if (s) s.emit('page:take', t.take); }
         const holders = hallPages(hall).filter((p) => !p.support && p.line.take && p.line.take.seq === take.seq);

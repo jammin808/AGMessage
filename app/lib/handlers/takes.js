@@ -344,7 +344,7 @@ function register(socket, conn, ctx) {
     // An information take keeps who put it up (`who`): its pusher may withdraw it, and a later push's answer gives a web
     // page's address back to them alone, and the admin. It keeps whether its pusher held canPush (`op`).
     const by = { name: byName(), guest: conn.actor().t === 'code', ...(layer !== 'show' && op ? { op: true } : {}), ...(layer !== 'show' && whoKey ? { who: whoKey } : {}) };
-    const take = pages.take(hall.code, to, content, by, { onStage, arrive, aside, slot: named, sent, made: from });
+    const take = pages.take(hall.code, to, content, by, { onStage, arrive, aside, slot: named, sent, made: from, at: stageRecord.timeFor(store.roomsOf(hall.code)) });
     if (!take) return { ok: false, error: content.kind === 'web' ? WEB_NOT_KEPT : NOT_KEPT };
     for (const f of files) {
       const file = f.url.slice(9);

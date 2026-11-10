@@ -212,6 +212,22 @@ async function readRecord(file) {
 /** A hall's record as it is kept: its entries, the count gone past the bound, its lane, why its file could not be read, and whether that file is whole. */
 const blankBook = (whole = true, unread = '') => ({ entries: [], dropped: 0, lane: null, unread, whole });
 
+/**
+ * When a take is made, for its record beside the messages (pure): `now`, or just after the newest message of `rooms` (the
+ * rooms whose transcripts draw it) when that is not before `now`. A transcript draws each entry before the first message
+ * at or after its time, so a take made after a message, within the same millisecond or on a clock that stepped back, is
+ * drawn after it, and a message posted at the take's time or later is drawn after the take. Only a message posted after
+ * a take moved past it, within the millisecond it was moved from (three acts in one), is still drawn before the take.
+ */
+function takeAt(rooms, now = Date.now()) {
+  let at = Number.isFinite(now) ? now : Date.now();
+  for (const r of Array.isArray(rooms) ? rooms : []) {
+    const m = isRecord(r) && Array.isArray(r.messages) ? r.messages[r.messages.length - 1] : null;
+    if (isRecord(m) && Number.isFinite(m.at) && m.at >= at) at = m.at + 1;
+  }
+  return at;
+}
+
 class StageRecord {
   /**
    * The record kept in `dir` (one file a hall), read by `load()`: until it is, everything asked of it waits, in order.
@@ -334,6 +350,9 @@ class StageRecord {
     const book = this.books.get(hall);
     return book ? book.entries.find((e) => e.seq === seq) || null : null;
   }
+
+  /** The time a take is made at, so its record is drawn after every message `rooms` hold already (takeAt). */
+  timeFor(rooms, now = Date.now()) { return takeAt(rooms, now); }
 
   /**
    * A take a hall accepted, recorded (entryOf's options, and `pages`: each page that holds it now, {sid, docs}, whose
@@ -493,4 +512,4 @@ class StageRecord {
   }
 }
 
-module.exports = { StageRecord, entryOf, storedEntry, confidentialOf, whoSaid, didSaid, seenSaid, ROLE_SAID, MAX, SEEN_MS };
+module.exports = { StageRecord, takeAt, entryOf, storedEntry, confidentialOf, whoSaid, didSaid, seenSaid, ROLE_SAID, MAX, SEEN_MS };

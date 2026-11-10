@@ -1595,6 +1595,7 @@ const ANY_ROOM = {
     'an event archived keeps every code its rooms held, Main or side: none is made again',
     'and each room\'s log is closed, Main or side, before its files move, at the act and at its Finish',
     'a room a page leaves is said, kept and told only while it is the store\'s own for its key, Main or side: never an archived event\'s',
+    'an On stage line beside the Board\'s chat is made after every message of its hall\'s rooms, Main or side, so a transcript draws it after them',
   ],
   'lib/importfacts.js': [
     'an import counts every room, Main or side, and the messages each holds, alike in the portable folder and the installed node',
@@ -1613,6 +1614,7 @@ const ANY_ROOM = {
     'the room the admin names what a person may do On stage in, by its key, Main or side: the person seated there',
     'a confidential file shown where it is not in use names each room, Main or side, it will be in use in',
     'and its pusher confirms it from a room, Main or side, where it is in use',
+    'a take is made after every message of its hall\'s rooms, Main or side, so a transcript draws it after them',
   ],
 };
 /** A call to one of the store's any-room readers, however it is spaced. */

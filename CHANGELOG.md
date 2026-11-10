@@ -7485,6 +7485,15 @@ laptop and no Board device walked)
   first answer kept), the new one answers its export and a refusal alike. R6's record now keeps the export's own words,
   a file the account writes twice in its inbox (whose grants are the import folder's) with each write's outcome, and
   both files' access lists read elevated; its words say what the second write met, beside the reading, never judged.
+- A room's transcript draws a take after every message posted before it. The transcript draws each entry before the
+  first message at or after its time, so a take made in the same millisecond as the message just before it was drawn
+  before that message: CI's CR LF run of 964c573 drew the operator's web page above "After the quote", sent first. A
+  take is now made at a time after the newest message of its hall's rooms (`lib/stagerecord.js` takeAt, used by the
+  takes module and by an On stage line beside the Board's chat). It is drawn after every message before it, and a
+  message posted at its time or later after it; only three acts within one millisecond can still be drawn out of order
+  (a message posted after a take that was moved past the one before it). Forced into the message's millisecond, the old
+  take fails `test/stagerecord.test.js`'s end-to-end check as that run did, and the new one passes; a test of its own
+  holds the rule and that each take is made at it.
 - The admin page draws Accounts held aside with its first fill, never before it, and an adoption's one-time passwords
   with the panel's new state, from one answer. CI's browser smoke on Windows (run 106) missed twice on the held list: the
   first left click on ana's ⋯ opened no menu (the click meant to close it then opened one, left open with the focus in
