@@ -163,6 +163,9 @@ test('AG-1: a Patterns over HTTPS on another machine gets its token only once a 
   assert.ok(lan, 'this test needs a network address that is not loopback (every CI runner and show laptop has one)');
   const cert = tlsmod.makeCertificate({ name: 'Patterns', hosts: ['localhost'], ips: [lan] });
   const fp = tlsmod.fingerprint(cert.certDer);
+  // The link typed wrong (below) is given a token of its own, so a request is told by what it carries: each poll is a
+  // connection and a handshake of its own, and one sent as the links before it were removed may reach the node after.
+  const TOKEN3 = 'R4TN-8VYC-M2HE';   // secret-scan: fixture — a second fake pairing token
   const seen = [];   // every request that reached it, with whether it carried the token
   const node = https.createServer({ cert: tlsmod.toPem(cert.certDer), key: cert.keyPem }, (req, res) => {
     seen.push({ url: req.url, token: req.headers['x-patterns-token'] === PATTERNS_TOKEN });
@@ -216,11 +219,11 @@ test('AG-1: a Patterns over HTTPS on another machine gets its token only once a 
   await until(() => (onDisk().tlsPins || {})[peerlinks.pinKey('patlan')] === undefined, 3000, 'unlinking forgets its pin');
   await new Promise((resolve) => { setTimeout(resolve, 300); });
   seen.length = 0;
-  assert.ok((await emit(ctl, 'nodes:link', { id: 'patlan3', t: 'patterns', url, name: 'Patterns LAN 3', token: PATTERNS_TOKEN, fingerprint: wrongStart })).ok);
+  assert.ok((await emit(ctl, 'nodes:link', { id: 'patlan3', t: 'patterns', url, name: 'Patterns LAN 3', token: TOKEN3, fingerprint: wrongStart })).ok);
   await until(async () => ((await view('patlan3')) || {}).status === 'refused', 8000, 'refused on the wrong start');
   assert.match((await view('patlan3')).problem, /does not start with the characters typed for it/);
   await new Promise((resolve) => { setTimeout(resolve, 300); });
-  assert.deepEqual(seen, [], 'nothing sent to a certificate whose start was typed wrong');
+  assert.deepEqual(seen.filter((r) => !r.token), [], 'nothing sent to a certificate whose start was typed wrong (a request of the links removed before it may still land)');
   assert.ok((await emit(ctl, 'nodes:unlink', { id: 'patlan3' })).ok);
 });
 

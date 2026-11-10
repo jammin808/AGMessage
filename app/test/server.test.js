@@ -1200,6 +1200,10 @@ test('a push can carry one line to the speaker\'s screen, through the operator o
   const hers = await push(sue, { kind: 'snippet', unit: 'text', text: 'Capex rose 8%' }, 'side');   // beside the operator's
   const NOT_YOURS = { ok: false, error: 'The line goes with a push of yours from the last minute — send it as a line of its own instead.' };
   assert.deepEqual(await act(tom, 'stage:send', { withTake: hers }), NOT_YOURS, 'another person\'s take');
+  // Asked by its pusher within its window (read first): a line read as the screen shows it is the same line.
+  const hersAsked = await act(sue, 'stage:propose', { withTake: hers, text: 'Capex  rose 8%' });
+  assert.equal(hersAsked.ok, true, 'a line read as the screen shows it is the same line: ' + JSON.stringify(hersAsked));
+  assert.equal(sw.proposals.get(hersAsked.proposal.id).line, 'message "Capex rose 8%" info off ack');
   assert.deepEqual(await act(sue, 'stage:propose', { withTake: cell }), NOT_YOURS, 'another person\'s take, asked of the desk');
   assert.deepEqual(await act(tom, 'stage:send', { withTake: 9999 }), NOT_YOURS, 'no such take');
   const clock = await push(tom, { kind: 'clock' });
@@ -1207,10 +1211,9 @@ test('a push can carry one line to the speaker\'s screen, through the operator o
   const web = await push(tom, { kind: 'web', url: 'https://vote.example.com/results' });
   assert.deepEqual(await act(tom, 'stage:send', { withTake: web }), { ok: false, error: 'That push has no words for the speaker\'s screen — a document or a picture needs a line above it.' }, 'an address is never a line');
   for (const withTake of ['1', 1.5, 0, true, { seq: cell }]) assert.deepEqual(await act(tom, 'stage:send', { withTake }), { ok: false, error: 'That line\'s push could not be read.' }, JSON.stringify(withTake));
-  assert.deepEqual(await act(tom, 'stage:send', { withTake: cell, text: 5 }), { ok: false, error: 'The line must be the push\'s own words.' }, 'a text that is no line');
-  const hersAsked = await act(sue, 'stage:propose', { withTake: hers, text: 'Capex  rose 8%' });
-  assert.equal(hersAsked.ok, true, 'a line read as the screen shows it is the same line: ' + JSON.stringify(hersAsked));
-  assert.equal(sw.proposals.get(hersAsked.proposal.id).line, 'message "Capex rose 8%" info off ack');
+  // A take of this moment: `cell`'s window may be over by now on a loaded machine, and the window is read first.
+  const fresh = await push(tom, CELL);
+  assert.deepEqual(await act(tom, 'stage:send', { withTake: fresh, text: 5 }), { ok: false, error: 'The line must be the push\'s own words.' }, 'a text that is no line');
   // A take older than its minute: refused, and nothing more reaches Stagewatch.
   await helpers.wait(Math.max(0, oldAt + WINDOW + 300 - Date.now()));
   const late = sent().length;

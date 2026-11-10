@@ -498,7 +498,10 @@ test('a continue resumed at a start opens the archive\'s own accounts, or the co
   const sam = (await st.accounts.create({ username: 'sam', name: 'Sam', role: 'admin', password: PW })).account;
   st.flush();
   const file = path.join(dir, 'accounts.json');
+  // The saves the two creates made depend on when their hashing ended against the lane's wait (two of them, or one where
+  // the second came inside the first's), so the save numbers below are read from the files, never counted here.
   const older = read(file);   // sam an admin
+  const olderGen = JSON.parse(older).gen;
   st.accounts.update(sam.id, { role: 'staff' });   // the demotion, saved twice
   st.flush();
   // Archive A takes the accounts (sam Staff), pinned; archive B, next: continue A, claimed.
@@ -508,6 +511,8 @@ test('a continue resumed at a start opens the archive\'s own accounts, or the co
   fs.mkdirSync(path.join(dir, 'archive', A), { recursive: true });
   fs.copyFileSync(file, path.join(dir, 'archive', A, 'accounts.json'));
   const asArchived = read(file);
+  const archivedGen = JSON.parse(asArchived).gen;
+  assert.equal(archivedGen, olderGen + 2, 'the demotion is two saves after the older one');
   st.ks.clearClaim();
   assert.equal(st.ks.claim({ time: B, kind: 'continue', next: A }), '');
   st.flush();
@@ -518,7 +523,8 @@ test('a continue resumed at a start opens the archive\'s own accounts, or the co
   const b = atStart();
   assert.deepEqual([b.ks.report().accounts.state, b.ks.underWay().time], ['archiving', B]);
   const held = b.ks.openArchived(file, A);
-  assert.match(held.held || '', /^accounts\.json is an older save \(4; this laptop recorded 6\), put back from a copy \(kept aside as accounts\.held-.*\.json\)$/);
+  const heldWords = held.held || '';
+  assert.ok(heldWords.startsWith('accounts.json is an older save (' + olderGen + '; this laptop recorded ' + archivedGen + '), put back from a copy (kept aside as accounts.held-') && heldWords.endsWith('.json)'), heldWords);
   assert.deepEqual([b.ks.report().accounts.state, b.accounts.size], ['older', 0]);
   // A's own file in place: it opens, against its pin.
   fs.writeFileSync(file, asArchived);
@@ -531,7 +537,7 @@ test('a continue resumed at a start opens the archive\'s own accounts, or the co
   c.accounts.save({ twice: true });
   c.flush();
   const saved = JSON.parse(read(file));
-  assert.ok(saved.gen > 6, 'a save made after the claim');
+  assert.ok(saved.gen > archivedGen, 'a save made after the claim');
   const d = atStart();
   assert.deepEqual((d.ks.openArchived(file, A).users || []).map((u) => u.username + ':' + u.role), ['ana:admin', 'sam:staff'], 'the continue\'s own save, made after its claim');
   // The older save put back over it: held as older again.

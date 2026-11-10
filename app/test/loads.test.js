@@ -172,8 +172,10 @@ test('only what it ships: the hook and the plant see the walk, and each kind of 
   const planted = plant(base);
   const app = fs.realpathSync(ROOT);
   // ws asked for without its switch: its buffer-util asks for bufferutil, app has none, and Node's walk ends at the plant.
+  // It asks so on the Node the bundle ships (24); a Node that masks WebSocket frames itself (http.websocketMask, 26) keeps
+  // ws from asking at all, so the walk is run as 24 runs it, without that pair.
   const asks = path.join(base, 'asks.js');
-  fs.writeFileSync(asks, 'require(process.argv[2]);\n');
+  fs.writeFileSync(asks, "const http = require('node:http');\ndelete http.websocketMask;\ndelete http.websocketUnmask;\nrequire(process.argv[2]);\n");
   /** A run's rows but its own start (the script outside app the test runs, which is not what the fence judges). */
   const rowsOfWs = (file) => rowsOf(file).filter((r) => r.asked !== asks);
   const run = (file, env) => new Promise((resolve) => {
@@ -223,7 +225,7 @@ test('only what it ships: the hook and the plant see the walk, and each kind of 
  * runs above hold the switches: ws never asks for either.
  */
 const NEVER_ASKED = [
-  { asked: 'bufferutil', from: /(^|\/)node_modules\/ws\/lib\/buffer-util\.js$/, why: 'ws\'s native helper, asked for only without WS_NO_BUFFER_UTIL, which server.js sets before its first require and the watchdog gives its child' },
+  { asked: 'bufferutil', from: /(^|\/)node_modules\/ws\/lib\/buffer-util\.js$/, why: 'ws\'s native helper, asked for only on a Node without http.websocketMask (24, the one the bundle ships) and without WS_NO_BUFFER_UTIL, which server.js sets before its first require and the watchdog gives its child' },
   { asked: 'utf-8-validate', from: /(^|\/)node_modules\/ws\/lib\/validation\.js$/, why: 'ws\'s native helper, asked for only without WS_NO_UTF_8_VALIDATE, set as WS_NO_BUFFER_UTIL is' },
 ];
 /** Requires whose name is made at run time, which no reading of the source can judge, each with why it is never reached. */

@@ -7394,6 +7394,20 @@ laptop and no Board device walked)
   say what was measured and no longer that RestartOnFailure restarts it; the plan's U.5 cost 2 carries an as-built note.
   The task's definition is unchanged, and a launch Task Scheduler could not make (which its setting may still retry) was
   not measured.
+- Four tests that CI runs 116 to 119 failed, each on what the test assumed rather than what AGMessage does, each proved
+  with a probe that fails the old test with CI's own answer and passes the new one. Nothing that ships changed.
+  `test/loads.test.js` (Node 26, since ws 8.22.1): ws masks its frames with Node's own `http.websocketMask` where Node
+  has it (26 does, 24 does not), and then never asks for `bufferutil`, so the run that shows the module walk reaching the
+  plant found no walk; it now runs ws as the bundle's Node 24 does, without that pair (Node 26.13.0 fails the old test
+  and passes the new; the static reading of what ws can ask is unchanged). `test/keyedstore.test.js` (Windows, runs 117
+  and 118): the save numbers it expected counted one save per account made, but two saves asked within the lane's wait
+  are one (the creates' hashing ends when it ends); it reads them from the files, and fails the old way when both
+  creates run at once. `test/server.test.js` (Windows, run 116): a line's push is read against its window (8 s in the
+  test) before its words, and on a loaded runner the take made at the test's start was past it by the check of a text
+  that is no line; that check and the other pusher's line are asked of takes made just before them. `test/shownet.test.js`
+  (Windows, run 116): a request of a link removed just before still landed (each poll is a connection and a handshake
+  of its own), and the link typed wrong is now given a token of its own, so what it would send is told from what the
+  links before it sent.
 - The admin page draws Accounts held aside with its first fill, never before it, and an adoption's one-time passwords
   with the panel's new state, from one answer. CI's browser smoke on Windows (run 106) missed twice on the held list: the
   first left click on ana's ⋯ opened no menu (the click meant to close it then opened one, left open with the focus in
