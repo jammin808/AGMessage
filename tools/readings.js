@@ -671,7 +671,8 @@ function judgeR12(r) {
  * R6 (U14 landed): what a runner takes of it. The export as a standard account into its own import folder (its exit code
  * and the words it left there), and the elevated import's take of that bundle (verified or not); an elevated read of that
  * account's %LOCALAPPDATA%\AGMessage; and whether Windows let that account write again a file it made in its inbox (whose
- * grants are the import folder's), which is said beside them and never judged. The two readings of the account that
+ * grants are the import folder's), replacing it and opened to write in place, with that file's owner, which are said beside
+ * them and never judged. The two readings of the account that
  * started Setup need a desktop where an administrator approves another account's elevation, which no runner has, so the
  * mark is never judged here: open when the export and the take both did their part, missed when either did not.
  */
@@ -686,17 +687,39 @@ function judgeR6(r) {
   const words = 'the export, run as a standard account, ' + (exported ? 'wrote its bundle into its own import folder' : 'did not: ' + String(ex.words || 'no words').slice(0, 200))
     + '; the elevated import ' + (taken ? 'read and verified it' : 'did not take it' + (r.take ? ': ' + String(r.take.words || '').slice(0, 200) : ''))
     + '; an elevated read of that account\'s %LOCALAPPDATA%\\AGMessage ' + read
-    + reopenWords(ex.reopen)
+    + reopenWords(ex.reopen, ex.owner && typeof ex.owner === 'object' ? String(ex.owner.reopen || '') : '', String(r.sid || ''))
     + '. The two readings of the account that started Setup need an administrator approving another account\'s elevation at a desktop, which no runner has: the show laptop\'s';
   return verdict(exported && taken ? 'open' : 'missed', words, facts);
 }
 
-/** What a standard account met writing a file it made a second time (R6's `reopen`), as words after R6's own; '' with none. */
-function reopenWords(re) {
+/**
+ * What a standard account met writing a file it made a second time (R6's `reopen`): the write that replaces it, the open
+ * to write it in place, and whose file it is (`owner`, SDDL's owner part as read elevated, or why it was not), as words
+ * after R6's own; '' with none. Windows gives an owner READ_CONTROL on its own file beyond the access list (where no
+ * OWNER RIGHTS entry says otherwise), never the FILE_READ_ATTRIBUTES every open asks for, so the owner is said beside
+ * the outcomes, never read into them.
+ */
+function reopenWords(re, owner = '', sid = '') {
   if (!re || typeof re !== 'object') return '';
-  const said = (v) => (v === 'written' ? 'let through' : 'refused (' + String(v || 'no answer').slice(0, 60) + ')');
+  const said = (v) => (v === 'written' || v === 'opened' ? 'let through' : 'refused (' + String(v || 'no answer').slice(0, 60) + ')');
   if (re.first !== 'written') return '; a file of its own in its inbox was not made (' + String(re.first || 'no answer').slice(0, 60) + ')';
-  return '; a file it made in its inbox, written again: ' + said(re.again);
+  const o = ownerOf(owner);
+  const why = /^not read \(([\s\S]*)\)$/.exec(String(owner));
+  const whose = !owner ? '' : !o ? '; its owner was not read' + (why ? ' (' + why[1].slice(0, 160) + ')' : '')
+    : '; its owner: ' + (o.sid === sid ? 'that account' : o.name === o.sid || o.name.startsWith(o.sid + ', ') ? o.name : o.name + ' (' + o.sid + ')');
+  return '; a file it made in its inbox, written again: ' + said(re.again) + (re.open ? ', opened to write in place: ' + said(re.open) : '') + whose;
+}
+/**
+ * SDDL's owner part (`O:…`, as Get-Acl's owner form or a whole descriptor begins) as {sid, name}, an alias read as daclOf
+ * reads one; null when there is none.
+ */
+function ownerOf(sddl) {
+  const m = /^O:(S-1-[0-9-]+|[A-Za-z]{2})(?=[GDS]:|$)/.exec(String(sddl || ''));
+  if (!m) return null;
+  const who = m[1].toUpperCase();
+  const machine = Object.hasOwn(MACHINE_ALIASES, who) ? MACHINE_ALIASES[who] : null;
+  const sid = machine ? who : SID_ALIASES[who] || m[1];
+  return { sid, name: machine ? machine.name : SID_NAMES[sid] || sid };
 }
 
 /**
@@ -1064,7 +1087,7 @@ if (require.main === module) process.exitCode = main(process.argv.slice(2));
 
 module.exports = {
   READINGS, LABS, STATES, MARKS, SID_NAMES, STANDARD_ACCOUNT,
-  rightsMask, daclOf, holds, csvRows, privilegesOf, sidsOf, taskSidOf, ruleFields,
+  rightsMask, daclOf, ownerOf, holds, csvRows, privilegesOf, sidsOf, taskSidOf, ruleFields,
   defenderOf, defenderGaps, defenderFor, takenWithout, stampFull, judge, summary, notes, labRecord, isJudged, recordInstall, main,
   LAPTOP_IDS, LAPTOP_RECORD, laptopReadings, laptopNotes,
 };

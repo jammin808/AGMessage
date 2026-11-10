@@ -408,6 +408,62 @@ test('R6: open when a standard account\'s export wrote its bundle and the elevat
   assert.deepEqual([x.state, x.words.includes('read the file it made; a file it made in its inbox, written again: refused (EPERM). The two readings')], ['open', true]);
   assert.ok(reopened({ first: 'written', again: 'written' }).words.includes('; a file it made in its inbox, written again: let through. '));
   assert.ok(reopened({ first: 'EACCES', again: 'EACCES' }).words.includes('; a file of its own in its inbox was not made (EACCES). '));
+  // The open to write it in place, and whose file it is as read elevated: said beside the outcomes, never judged.
+  const owned = (reopen, owner) => byId(R.judge(raw({ R6: { ...good, export: { ...good.export, reopen, ...(owner === undefined ? {} : { owner: { answer: 'O:BA', reopen: owner } }) } } })), 'R6');
+  x = owned({ first: 'written', again: 'EPERM', open: 'EPERM' }, 'O:' + good.sid);
+  assert.deepEqual([x.state, x.words.includes('; a file it made in its inbox, written again: refused (EPERM), opened to write in place: refused (EPERM); its owner: that account. The two readings')], ['open', true], x.words);
+  x = owned({ first: 'written', again: 'EPERM', open: 'opened' }, 'O:BA');
+  assert.ok(x.words.includes('written again: refused (EPERM), opened to write in place: let through; its owner: Administrators (S-1-5-32-544). The two'), x.words);
+  assert.ok(owned({ first: 'written', again: 'EPERM', open: 'EPERM' }, 'O:S-1-5-21-9-9-9-1002').words.includes('; its owner: S-1-5-21-9-9-9-1002. The two'), 'another account by its SID');
+  assert.ok(owned({ first: 'written', again: 'EPERM', open: 'EPERM' }, 'O:LA').words.includes('; its owner: LA, this machine\'s Administrator. The two'), 'the machine\'s alias said once');
+  assert.ok(owned({ first: 'written', again: 'EPERM', open: 'EPERM' }, 'not read (powershell.exe ended with 1: Get-Acl refused)').words.includes('; its owner was not read (powershell.exe ended with 1: Get-Acl refused). The two'));
+  assert.ok(owned({ first: 'written', again: 'EPERM', open: 'EPERM' }, 'O:').words.includes('; its owner was not read. The two'), 'an owner part with no SID is not read as one');
+  assert.ok(owned({ first: 'written', again: 'EPERM' }).words.includes('written again: refused (EPERM). The two'), 'a record from before the open and the owner were read says neither');
+  assert.ok(owned({ first: 'EACCES', again: 'EACCES', open: 'ENOENT' }, 'not read (no answer for it)').words.includes('; a file of its own in its inbox was not made (EACCES). The two'), 'nothing more when there was no file');
+});
+
+test('ownerOf reads SDDL\'s owner part: a whole SID, a well-known alias and the machine\'s own; null with none', () => {
+  assert.deepEqual(R.ownerOf('O:S-1-5-21-1-2-3-1005'), { sid: 'S-1-5-21-1-2-3-1005', name: 'S-1-5-21-1-2-3-1005' });
+  assert.deepEqual(R.ownerOf('O:BAG:SYD:AI(A;ID;FA;;;SY)'), { sid: 'S-1-5-32-544', name: 'Administrators' });
+  assert.deepEqual(R.ownerOf('O:S-1-5-18G:S-1-5-18D:(A;;FA;;;SY)'), { sid: 'S-1-5-18', name: 'SYSTEM' });
+  assert.deepEqual(R.ownerOf('O:sy'), { sid: 'S-1-5-18', name: 'SYSTEM' });
+  assert.deepEqual(R.ownerOf('O:LA'), { sid: 'LA', name: 'LA, this machine\'s Administrator' });
+  for (const none of ['', 'O:', 'D:(A;;FA;;;SY)', 'G:SYO:BA', 'O:BAX', 'not read (EACCES)', null, undefined, 42]) assert.equal(R.ownerOf(none), null, String(none));
+});
+
+test('ownersOf: each file\'s owner in the order asked, one answer read as a list of one, and why each was not read', () => {
+  const asked = [];
+  const lane = (answer) => ({ ps: (script, env) => { asked.push([script === T.SCRIPTS.owners, env.AGM_READ_PATHS]); if (answer instanceof Error) throw answer; return answer; } });
+  assert.deepEqual(T.ownersOf(lane([{ path: 'C:\\b', owner: 'O:BA' }, { path: 'C:\\a', owner: 'O:S-1-5-21-1-2-3-1005' }]), ['C:\\a', 'C:\\b']), ['O:S-1-5-21-1-2-3-1005', 'O:BA']);
+  assert.deepEqual(asked.pop(), [true, 'C:\\a|C:\\b']);
+  assert.deepEqual(T.ownersOf(lane({ path: 'C:\\a', owner: 'O:SY' }), ['C:\\a']), ['O:SY']);
+  assert.deepEqual(T.ownersOf(lane([{ path: 'C:\\a', error: 'Cannot find path' }, { path: 'C:\\b', owner: 'BA' }]), ['C:\\a', 'C:\\b', 'C:\\c']),
+    ['not read (Cannot find path)', 'not read (no answer for it)', 'not read (no answer for it)']);
+  assert.deepEqual(T.ownersOf(lane(new Error('powershell.exe ended with 1: no')), ['C:\\a', 'C:\\b']), ['not read (powershell.exe ended with 1: no)', 'not read (powershell.exe ended with 1: no)']);
+  assert.match(T.SCRIPTS.owners, /Get-Acl -LiteralPath \$p\)\.GetSecurityDescriptorSddlForm\('Owner'\)/);
+});
+
+test('probe-export records the write that replaces its file, the open to write it in place, and leaves the second write\'s words in it', (t) => {
+  const dir = tmp('agm-r6probe-');
+  // The probe writes into %LOCALAPPDATA%\AGMessage, the portable copy's own key folder: here, a folder of the test's.
+  const was = { SystemRoot: process.env.SystemRoot, LOCALAPPDATA: process.env.LOCALAPPDATA };
+  t.after(() => {
+    for (const [k, v] of Object.entries(was)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  process.env.SystemRoot = 'C:\\Windows';
+  if (process.platform === 'win32') process.env.LOCALAPPDATA = path.join(dir, 'local'); else delete process.env.LOCALAPPDATA;
+  const reopen = path.join(dir, 'r6-reopen.txt');
+  fs.writeFileSync(path.join(dir, 'plan.json'), JSON.stringify({ launch: path.join(dir, 'no-launch.js'), source: dir, machine: dir, reopen }));
+  assert.equal(T.probeExport(dir), 0);
+  const ran = JSON.parse(fs.readFileSync(path.join(dir, 'ran.json'), 'utf8'));
+  assert.deepEqual(ran.reopen, { first: 'written', again: 'written', open: 'opened' });
+  assert.equal(fs.readFileSync(reopen, 'utf8'), 'R6 2\n', 'the open in place changed nothing');
+  assert.notEqual(ran.code, 0, 'no launch.js there: the export\'s own code is kept as it ended');
+  if (process.platform === 'win32') {
+    assert.equal(ran.made, 'made');
+    assert.ok(fs.existsSync(path.join(dir, 'local', 'AGMessage', 'r6-probe.txt')), 'its profile file in the test\'s own folder');
+  } else assert.match(ran.made, /no LOCALAPPDATA/);
 });
 
 test('R11: met at 10 of 10, the account the control task is for running it (answered as SYSTEM for its SID) and a second account refused; anything less is missed with the first round that did not', () => {
@@ -1544,6 +1600,12 @@ test('on Windows: the PowerShell the lane asks answers in its shape (signatures,
     const one = Array.isArray(sig) ? sig[0] : sig;
     assert.equal(one.path, process.execPath);
     assert.ok(['Valid', 'NotSigned', 'HashMismatch', 'NotTrusted', 'UnknownError', 'Incompatible', 'NotSupportedFileFormat'].includes(one.status), one.status);
+    // A file's owner as SDDL's owner part, and a path with no file answered with why, each in the order asked.
+    const made = path.join(dir, 'owned.txt');
+    fs.writeFileSync(made, 'R6\n');
+    const owners = T.ownersOf(L, [made, path.join(dir, 'none.txt')]);
+    assert.ok(R.ownerOf(owners[0]), 'an owner read: ' + owners[0]);
+    assert.match(owners[1], /^not read \(.+\)$/);
     await new Promise((resolve, reject) => {
       let said = '';
       pipe.stdout.on('data', (d) => { said += d; if (said.includes('ready')) resolve(); });

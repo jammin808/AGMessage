@@ -45,8 +45,10 @@
  *       R6   U14's export as a standard account made for the reading (a task with its logon, as Inno's ExecAsOriginalUser
  *            runs it) of a stand-in portable folder into its own import folder, which the bundle's machine.js import
  *            --step stage made with its grants; the bundle's machine.js import --step take reading and verifying it
- *            elevated; and an elevated read of that account's %LOCALAPPDATA%\AGMessage. The plan's two readings under
- *            over-the-shoulder elevation need a desktop no runner has: they are the show laptop's, and the record says so
+ *            elevated; and an elevated read of that account's %LOCALAPPDATA%\AGMessage. Beside them, a file the account
+ *            makes in its inbox, written again and opened to write in place, and that file's access list and owner read
+ *            elevated. The plan's two readings under over-the-shoulder elevation need a desktop no runner has: they are
+ *            the show laptop's, and the record says so
  *       R13  a task with a control task's principal and settings (SYSTEM) reading GitHub's release answer for the newest
  *            published tag; then, with no network, a copy of the bundle's node.exe that an outbound rule of the
  *            firewall blocks, run by the same kind of task, asking the bundle's own machine.js for that release as a
@@ -547,6 +549,19 @@ function aclOf(L, target, work) {
   try { fs.rmSync(file, { force: true }); } catch { /* the lane's own work folder, removed with it */ }
   return sddl || 'not read (icacls /save ended with ' + saved.code + ': ' + String(saved.err || saved.out).trim().slice(0, 200) + ')';
 }
+/**
+ * Each file's owner, read elevated (SCRIPTS.owners): SDDL's owner part (O:…) in the order of `targets`, or why it was not
+ * read. An answer that is one object rather than a list is read as a list of one.
+ */
+function ownersOf(L, targets) {
+  let got;
+  try { got = L.ps(SCRIPTS.owners, { AGM_READ_PATHS: targets.join('|') }); } catch (e) { return targets.map(() => 'not read (' + String((e && e.message) || e).slice(0, 200) + ')'); }
+  const list = Array.isArray(got) ? got : [got];
+  return targets.map((t) => {
+    const o = list.find((x) => x && x.path === t);
+    return o && typeof o.owner === 'string' && /^O:/.test(o.owner) ? o.owner.slice(0, 200) : 'not read (' + String((o && o.error) || 'no answer for it').slice(0, 200) + ')';
+  });
+}
 
 /** A client's connection to a pipe, made by a child Node of its own so a slow SMB answer never holds the lane. */
 const PIPE_REACH = String.raw`const s = require('node:net').connect(process.argv[1]); const say = (o) => { process.stdout.write(JSON.stringify(o)); s.destroy(); process.exit(0); }; s.on('connect', () => say({ connected: true, error: '' })); s.on('error', (e) => say({ connected: false, error: String(e.code || e.message) }));`;
@@ -690,8 +705,10 @@ function probeRun(dir) {
  * the account that started Setup: a file made in that account's own %LOCALAPPDATA%\AGMessage (which the lane, elevated,
  * then reads), and the bundle's launch.js export of the plan's portable folder into that account's import folder, by
  * their absolute paths; then a file of its own written twice in its inbox (the plan's `reopen`), whose folder it may add a
- * file to and whose files it may write, as the import folder's: whether the second write, an open of a file it made,
- * is let through. Its exit code, its words' tail, each write's outcome and where its profile is written to ran.json (no
+ * file to and whose files it may write, as the import folder's: whether the second write, an open of a file it made that
+ * replaces it, is let through, and whether an open to write it in place is (FILE_GENERIC_WRITE both, as libuv asks
+ * them, to which CreateFileW adds FILE_READ_ATTRIBUTES and SYNCHRONIZE; the first with CREATE_ALWAYS and the other with
+ * OPEN_EXISTING). Its exit code, its words' tail, each write's outcome and where its profile is written to ran.json (no
  * secret: the export writes none).
  */
 function probeExport(dir) {
@@ -706,7 +723,11 @@ function probeExport(dir) {
   } catch (e) { made = String((e && (e.code || e.message)) || 'not made').slice(0, 120); }
   const r = run(process.execPath, [String(plan.launch), 'export', '--source', String(plan.source), '--machine', String(plan.machine), '--sys', system32()], { ms: 120000 });
   const wrote = (n) => { try { fs.writeFileSync(String(plan.reopen), 'R6 ' + n + '\n'); return 'written'; } catch (e) { return String((e && (e.code || e.message)) || 'not written').slice(0, 120); } };
-  const reopen = plan.reopen ? { first: wrote(1), again: wrote(2) } : null;
+  const opened = () => {
+    let fd = null;
+    try { fd = fs.openSync(String(plan.reopen), fs.constants.O_WRONLY); return 'opened'; } catch (e) { return String((e && (e.code || e.message)) || 'not opened').slice(0, 120); } finally { if (fd !== null) fs.closeSync(fd); }
+  };
+  const reopen = plan.reopen ? { first: wrote(1), again: wrote(2), open: opened() } : null;
   writeJson(path.join(dir, 'ran.json'), { code: r.code, out: (r.out + r.err).trim().slice(-600), local, made, reopen, user: os.userInfo().username, at: Date.now() });
   return 0;
 }
@@ -858,6 +879,9 @@ const LSA_SOURCE = [
  *   taskEvents  that log's events for one task (AGM_TASK_NAME) since a time (AGM_SINCE, ISO 8601), and the events that
  *               name a task only by its GUID (104, 311) in that time: each {id, at, values}, at most 50 (startWhy reads them)
  *   defender    Defender's real-time monitoring, its scanning on access, its mode, and the paths it excludes
+ *   owners      each file's owner (AGM_READ_PATHS, separated by |) as SDDL's owner part (O:…), read elevated by Get-Acl,
+ *               or the reason it gave: icacls /save keeps the access list alone, and Windows gives an owner READ_CONTROL
+ *               and WRITE_DAC on its own object beyond that list (where no OWNER RIGHTS entry says otherwise)
  */
 const SCRIPTS = {
   signatures: String.raw`$ErrorActionPreference = 'Stop'; $out = @(); foreach ($p in ($env:AGM_READ_PATHS -split '\|')) { $s = Get-AuthenticodeSignature -LiteralPath $p; $out += @{ path = $p; status = [string]$s.Status; message = [string]$s.StatusMessage; signer = $(if ($s.SignerCertificate) { [string]$s.SignerCertificate.Subject } else { '' }); timestamped = [bool]$s.TimeStamperCertificate } }; ConvertTo-Json -InputObject $out -Depth 4 -Compress`,
@@ -867,6 +891,7 @@ const SCRIPTS = {
   usersGone: String.raw`$ErrorActionPreference = 'Continue'; $lsa = $true; try { Add-Type -TypeDefinition $env:AGM_LSA -ErrorAction Stop } catch { $lsa = $false }; $sids = @(); $revoked = 0; foreach ($n in ($env:AGM_R11_USERS -split ',')) { $u = Get-LocalUser -Name $n -ErrorAction SilentlyContinue; if ($u) { $sids += [string]$u.SID.Value; if ($lsa) { try { if ([AgmLsa]::Revoke([string]$u.SID.Value, 'SeBatchLogonRight')) { $revoked++ } } catch { } }; Remove-LocalUser -Name $n } }; foreach ($p in @(Get-CimInstance -ClassName Win32_UserProfile)) { if ($sids -contains [string]$p.SID) { Remove-CimInstance -InputObject $p -ErrorAction SilentlyContinue } }; ConvertTo-Json -InputObject @{ removed = $sids.Count; revoked = $revoked } -Compress`,
   taskHistory: String.raw`$ErrorActionPreference = 'Stop'; $l = Get-WinEvent -ListLog 'Microsoft-Windows-TaskScheduler/Operational'; $was = [bool]$l.IsEnabled; if (-not $was) { $l.IsEnabled = $true; $l.SaveChanges() }; ConvertTo-Json -InputObject @{ was = $was; on = [bool](Get-WinEvent -ListLog 'Microsoft-Windows-TaskScheduler/Operational').IsEnabled } -Compress`,
   taskEvents: String.raw`$ErrorActionPreference = 'Stop'; $since = [datetime]::Parse($env:AGM_SINCE, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind); $name = [string]$env:AGM_TASK_NAME; $out = @(); foreach ($e in @(Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-TaskScheduler/Operational'; Id = 100,101,102,103,104,110,111,129,200,201,203,311,322,332; StartTime = $since } -ErrorAction SilentlyContinue)) { $values = @($e.Properties | ForEach-Object { [string]$_.Value }); if (($values -contains $name) -or $e.Id -eq 104 -or $e.Id -eq 311) { $out += @{ id = [int]$e.Id; at = $e.TimeCreated.ToUniversalTime().ToString('o'); values = $values } }; if ($out.Count -ge 50) { break } }; ConvertTo-Json -InputObject @($out) -Depth 4 -Compress`,
+  owners: String.raw`$ErrorActionPreference = 'Stop'; $out = @(); foreach ($p in ($env:AGM_READ_PATHS -split '\|')) { try { $out += @{ path = $p; owner = [string](Get-Acl -LiteralPath $p).GetSecurityDescriptorSddlForm('Owner') } } catch { $out += @{ path = $p; error = [string]$_.Exception.Message } } }; ConvertTo-Json -InputObject $out -Depth 4 -Compress`,
   defender: String.raw`$ErrorActionPreference = 'Stop'; $s = Get-MpComputerStatus; $p = Get-MpPreference; ConvertTo-Json -InputObject @{ realtime = [bool]$s.RealTimeProtectionEnabled; onAccess = [bool]$s.OnAccessProtectionEnabled; antivirus = [bool]$s.AntivirusEnabled; service = [bool]$s.AMServiceEnabled; mode = [string]$s.AMRunningMode; exclusions = @($p.ExclusionPath | Where-Object { $_ }); processes = @($p.ExclusionProcess | Where-Object { $_ }); extensions = @($p.ExclusionExtension | Where-Object { $_ }) } -Compress`,
 };
 
@@ -1478,11 +1503,14 @@ async function takeR6(L, { node, root, self, work, sys }, { exportMs = 150000, p
       let said = {};
       try { said = readJson(path.join(machineRoot, 'machine', 'inbox', u.sid, 'import', 'export.json')); } catch (e) { said = { words: 'its answer was not read elevated (' + (e.code || e.message) + ')' }; }
       // What the export said itself, beside the answer it left, and what Windows let the account do with a file it made
-      // (each write's outcome, both files' access lists as read elevated).
+      // (each write's and the open's outcome, both files' access lists and owners as read elevated).
+      const answerFile = path.join(machineRoot, 'machine', 'inbox', u.sid, 'import', 'export.json');
+      const [answerOwner, reopenOwner] = ownersOf(L, [answerFile, reopen]);
       out.export = {
         code: ran.code, words: String(said.words || ran.out || '').slice(0, 400), said: String(ran.out || '').slice(-400), user: String(ran.user || ''), made: String(ran.made || ''),
-        ...(ran.reopen && typeof ran.reopen === 'object' ? { reopen: { first: String(ran.reopen.first || ''), again: String(ran.reopen.again || '') } } : {}),
-        acl: { answer: aclOf(L, path.join(machineRoot, 'machine', 'inbox', u.sid, 'import', 'export.json'), work), reopen: aclOf(L, reopen, work) },
+        ...(ran.reopen && typeof ran.reopen === 'object' ? { reopen: { first: String(ran.reopen.first || ''), again: String(ran.reopen.again || ''), open: String(ran.reopen.open || '') } } : {}),
+        acl: { answer: aclOf(L, answerFile, work), reopen: aclOf(L, reopen, work) },
+        owner: { answer: answerOwner, reopen: reopenOwner },
       };
       try { fs.rmSync(reopen, { force: true }); } catch { /* left in the reading's own machine folder, removed with it */ }
       progress(out);
@@ -2012,7 +2040,7 @@ module.exports = {
   zipEntries, memberParts, topFolder, releaseOf, layOut, extractOne, taskXml, winArg, utf16, SERVER_PRINCIPAL, CONTROL_PRINCIPAL, SCRIPTS, LSA_SOURCE, lane, system32, takeR11, probeRun, takeR6, probeExport, R6_USER, R6_TASK,
   batchWarning, START_REFUSED, hresultOf, startWhy, logonOf, proveToken,
   snapshot, snapshotDiff, udpHeard, waitHealth, quickTunnel, readRelease, probeOffline, probeExit, parseArgs, main, TRYCF, installerSignature,
-  sddlOfSave, pipeReach, keepTail, tokenIn, withoutSecrets, placeRefusal, takeR12, take,
+  sddlOfSave, ownersOf, pipeReach, keepTail, tokenIn, withoutSecrets, placeRefusal, takeR12, take,
   seedHalls, pageSocket, paceMs, takeR1, takeR9, takeR3prime, serveFolders, R1_SIZES, R1_QUIET_MS, PAGE_PACE,
   SERVER_TASK, STAND_IN, DEFINITION_TASK, CONTROL_DEFINITION_TASK, RESTART_TASKS, R11_TASKS, R11_USERS, R11_ROUNDS, WORK_MARK,
   ORDER, BOUNDS, DEADLINE_MIN, STOP_MIN, SETTLE_MS, takeAll, release, stopOn, recordAt, beginRecord, endRecord, readingsOf, finish, held, within, left, until, run, endWatchdog,

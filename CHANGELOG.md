@@ -7484,9 +7484,14 @@ laptop and no Board device walked)
   refusal alike. R6's record now keeps the export's own words, a file the account writes twice in its inbox (whose
   grants are the import folder's) with each write's outcome, and both files' access lists read elevated; its words say
   what the second write met, beside the reading, never judged. CI run 125 measured it: the export wrote its bundle and
-  its answer, and the second write of a file the account made was refused (EPERM). Its grant on that file is `0x100116`
-  (icacls' `W`: write, append, attributes and synchronize), without READ_CONTROL, which an open to write asks for with
-  the rest of FILE_GENERIC_WRITE; the first write was granted as the file was made.
+  its answer, and the second write of a file the account made was refused (EPERM). The access list grants the account
+  `0x100116` on that file (icacls' `W`: write data, append, extended attributes, attributes and synchronize). An open
+  to write asks for two rights more: READ_CONTROL, which FILE_GENERIC_WRITE holds and which Windows also gives a file's
+  owner (where no OWNER RIGHTS entry says otherwise, and these lists hold none), and FILE_READ_ATTRIBUTES, which
+  CreateFileW adds to every open and which no owner is given. By those rules the list alone refuses that open, whoever
+  owns the file; that is read from the rules, not measured. R6 now also reads each file's owner, elevated, and opens
+  the file to write it in place (the same rights, never replacing it) beside the write that replaces it; its words say
+  both outcomes and whose the file is.
 - A room's transcript draws a take after every message posted before it. The transcript draws each entry before the
   first message at or after its time, so a take made in the same millisecond as the message just before it was drawn
   before that message: CI's CR LF run of 964c573 drew the operator's web page above "After the quote", sent first. A
