@@ -3900,17 +3900,31 @@ async function main(argv, { out = (t) => process.stdout.write(t + '\n'), ...stan
   return r.code;
 }
 
+/**
+ * Whether a run waits for Enter before it ends (pure): only a person's, in a console (`tty`), so a window that closes
+ * with it is read first. Never a run that names --out (the installer's, hidden), nor a task's own command, which Task
+ * Scheduler starts in a console nobody sees: a control task's (`control --for`) and a runner's (`upgrade --step run`).
+ * There a wait holds the task until its limit ends it (a control task's ten minutes, every request queued behind it
+ * unanswered until then; a runner's never).
+ */
+function waitsForEnter(argv, tty) {
+  if (!tty || argv.includes('--out')) return false;
+  const step = argv.indexOf('--step');
+  if (argv[0] === 'control' && argv.includes('--for')) return false;
+  if (argv[0] === 'upgrade' && step > 0 && argv[step + 1] === 'run') return false;
+  return true;
+}
+
 if (require.main === module) {
   const argv = process.argv.slice(2);
   main(argv).then((code) => {
     process.exitCode = code;
-    // A person reading it in a console waits for Enter; the installer's runs (--out, in a hidden console) never wait.
-    if (process.stdin.isTTY && !argv.includes('--out')) { process.stdout.write('\nPress Enter to close this window.\n'); process.stdin.once('data', () => process.stdin.pause()); }
+    if (waitsForEnter(argv, process.stdin.isTTY === true)) { process.stdout.write('\nPress Enter to close this window.\n'); process.stdin.once('data', () => process.stdin.pause()); }
   });
 }
 
 module.exports = {
-  main, run, parse, prepare, install, uninstall, preinstallCheck, upgradeStop, status, restore, whose, start, firstAccount, control,
+  main, run, parse, waitsForEnter, prepare, install, uninstall, preinstallCheck, upgradeStop, status, restore, whose, start, firstAccount, control,
   controlTaskXml, controlTask, controlSddl, requestOf, takeRequest, clearBox, grantRightsOf, elevatedOf, appendEvent, lastSeqOf, RIGHTS, CONTROL_VERBS, REQUEST_MAX,
   personSid, accountOf, whoseOf, adminOf, serverProgram, programWords, outsideOwnChain, accountFile, startedFrom, proven, PS_WHOSE, PS_PROGRAMS, START_WAIT_MS, PROGRAMS_WAIT_MS,
   CHILDREN, MACHINE_SUBS, BASE_GRANTS, SETUP_GRANT, inboxGrants, outboxGrants, serverTaskXml, winArg, firewallRules, recordValues, ownerSidOf, grant,

@@ -301,6 +301,7 @@ test('a named installer: staged by its bytes in machine\\staged\\, its release i
   assert.equal(s.args[0], path.join(dir, 'machine.js'));
   assert.ok(fs.readFileSync(s.args[0]).equals(fs.readFileSync(path.join(h.ROOT, 'machine.js'))), 'machine.js\'s own copy, byte for byte');
   assert.equal(s.xml, machine.runnerTaskXml({ node: s.cmd, args: s.args, cwd: dir, uri: s.tn }), 'registered from its definition');
+  assert.equal(machine.waitsForEnter(s.args.slice(1), true), false, 'the runner never waits for Enter in the console its task gives it');
   for (const part of ['<UserId>S-1-5-18</UserId>', '<Triggers />', '<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>', '<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>', '<SecurityDescriptor>' + machine.SERVER_TASK_SDDL + '</SecurityDescriptor>']) assert.ok(s.xml.includes(part), part);
   assert.ok(!/token|password/i.test(s.xml), 'no token or password in its definition');
   assert.ok(!fs.existsSync(path.join(dir, 'task.xml')), 'the definition\'s file removed once registered');
@@ -501,6 +502,7 @@ test('who may: the laptop\'s admin and an account given upgrade; one without it 
   assert.deepEqual([e.spawned.length, it.tasks.size, r.out.runner], [1, 0, 4242]);
   const sp = e.spawned[0];
   assert.deepEqual([sp.opts.detached, sp.opts.stdio, sp.opts.cwd, path.dirname(sp.cmd)], [true, 'ignore', path.dirname(sp.cmd), path.dirname(planFileOf(sp))]);
+  assert.equal(machine.waitsForEnter(sp.args.slice(1), true), false, 'nor the runner an administrator\'s console starts');
   assert.deepEqual([planOf(sp).elevated, planOf(sp).by.sid], [true, 'S-1-5-21-1-2-3-500']);
   // Its start failing (its node.exe could not be copied) is said, its folder marked ended, nothing left staged.
   const bad = hands({ download: e.net.download });

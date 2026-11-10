@@ -515,7 +515,10 @@ the pages "the laptop's admin" is that Windows account; "admin account" stays an
   `app\machine.js control --for <SID> --machine C:\ProgramData\AGMessage --sys C:\Windows\System32`, both by their absolute
   paths, fixed at registration; its descriptor `D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;<SID>)`, read and execute for that
   account alone beside SYSTEM and Administrators. So which task ran says whose request it is, and nothing the request
-  says can change that. Which rights let a standard account run it on demand is reading R11.
+  says can change that. Which rights let a standard account run it on demand is reading R11. Its run ends once it has
+  answered: Task Scheduler gives its program a console nobody sees, and `machine.js` waits for Enter only on a person's
+  own run in a console (`waitsForEnter`: never with `--out`, never a control task's `control --for` or the upgrade
+  runner's `upgrade --step run`), so no request waits behind one that has finished.
 - **A request.** `launch.js` (run as the person, never elevated by itself) reads their SID (`whoami.exe`), writes
   `request.json` (`{id, verb, …}`) into `machine\inbox\<SID>\`, where only that account may add a file and write it (no
   folder and no junction: the folder's own grant is `WD`, the files' an inherited `W`), and runs their control
@@ -613,7 +616,8 @@ each run, against its release's digest and its publisher's signature; it is buil
   `machine.js prepare`'s, in its race-free order, and `HKLM\SOFTWARE\AGMessage` is `machine.js install`'s one record.
 - **Every machine-level act is `machine.js`'s**, run with this build's `node.exe` and `machine.js`, extracted to the
   installer's temporary folder before anything is laid down (R10 read that extraction inside 5 s), hidden and waited for,
-  its record read from `--out`; a command run with `--out` never waits for Enter. In order:
+  its record read from `--out`; a command run with `--out` never waits for Enter, nor a task's own (the control tasks,
+  above). In order:
   1. **`InitializeSetup`, the refusals.** Only a newer build installs, by the install version: "AGMessage 0.6.0 (build
      41) is newer than this installer's 0.6.0 (build 37): uninstall it first to go back."; the same build "is installed
      already: an installer upgrades only an older build."; a quiet first install without `/ADMIN=` "AGMessage needs to

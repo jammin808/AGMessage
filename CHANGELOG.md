@@ -7453,6 +7453,20 @@ laptop and no Board device walked)
   Every save it waits for now has 8 s, and the wait for the unlinks says what is on disk when it ends: both pins, no
   save landed; one alone, a pin put back. With the save held 4.5 s the old test fails as run 122 did and the new one
   passes; a pin put back 20 ms or 150 ms after the unlinks still fails it.
+- A control task and an upgrade's runner end once they have answered. `machine.js` waited for Enter at the end of every
+  run with a console for its input and no `--out`, and Task Scheduler gives a task's program a console nobody sees: a
+  control task's run sat there until Task Scheduler ended it at its ten minutes, and the runs queued behind it (its
+  definition queues them) went unanswered until then. CI run 123 met it twice. In the installer's life cycle, a standard
+  account given start and stop had its Stop answered and its Start never (no answer in 180 s), the control task's
+  `node.exe` still running six minutes on, so each install and uninstall after it was refused as "AGMessage's own console
+  is open (node.exe (pid 9092) runs from C:\Program Files\AGMessage)". In the Windows readings, R11's account had 1 of
+  its 10 runs answered. An upgrade's runner, a task with no time limit, would have waited for ever. `waitsForEnter`
+  (`machine.js`) says which run waits: a person's in a console, never one that names `--out`, a control task's
+  `control --for` or a runner's `upgrade --step run`. `test/installer.test.js` holds it to the command a control task's
+  definition gives Task Scheduler, and `test/upgrade.test.js` to the runner's, as its task and as an administrator's
+  console starts it; with the old rule all three fail. With a terminal for its input, as a task's console is to Node,
+  both commands waited for Enter on the old ending and end at once on the new; a person's `machine.js status` still
+  waits.
 - The admin page draws Accounts held aside with its first fill, never before it, and an adoption's one-time passwords
   with the panel's new state, from one answer. CI's browser smoke on Windows (run 106) missed twice on the held list: the
   first left click on ana's ⋯ opened no menu (the click meant to close it then opened one, left open with the focus in

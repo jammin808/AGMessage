@@ -538,9 +538,24 @@ test('the installer\'s own chain is left out of the programs of {app}: the kept 
   assert.equal(machine.parse(['preinstall-check', '--rollback', 'x']).problem, '"x" is not an argument machine.js preinstall-check knows.', '--rollback takes no value');
 });
 
-test('machine.js waits for Enter only for a person reading it in a console: never on the installer\'s hidden runs, which name --out', () => {
+test('machine.js waits for Enter only for a person reading it in a console: never on the installer\'s hidden runs, which name --out, nor on a task\'s own command, which Task Scheduler gives a console nobody sees', () => {
   const src = h.readSource(path.join(h.ROOT, 'machine.js'));
-  assert.match(src, /if \(process\.stdin\.isTTY && !argv\.includes\('--out'\)\) \{ process\.stdout\.write\('\\nPress Enter to close this window\.\\n'\)/);
+  assert.match(src, /if \(waitsForEnter\(argv, process\.stdin\.isTTY === true\)\) \{ process\.stdout\.write\('\\nPress Enter to close this window\.\\n'\)/);
+  assert.equal(src.split('Press Enter to close this window').length, 2, 'the one wait, behind its rule');
+  const person = ['status', '--machine', 'C:\\ProgramData\\AGMessage', '--sys', SYS];
+  assert.equal(machine.waitsForEnter(person, true), true, 'a person\'s run in a console waits, so its window is read before it closes');
+  assert.equal(machine.waitsForEnter(person, false), false, 'with no console, nothing to wait in');
+  assert.equal(machine.waitsForEnter([...person, '--out', 'C:\\ProgramData\\AGMessage\\machine\\work\\said.json'], true), false, 'the installer\'s runs name --out');
+  // A control task's command, as its definition gives it to Task Scheduler: run in a console, it never waits (run 123: a
+  // wait held it its ten minutes, and every request queued behind it went unanswered). The runner's is held in
+  // test/upgrade.test.js, where it is handed its task.
+  const xml = machine.controlTaskXml({ sid: 'S-1-5-21-1-2-3-1001', node: 'C:\\Program Files\\AGMessage\\node\\node.exe', script: 'C:\\Program Files\\AGMessage\\app\\machine.js', machine: 'C:\\ProgramData\\AGMessage', sys: SYS });
+  const line = /<Arguments>([^<]*)<\/Arguments>/.exec(xml)[1].replace(/&quot;/g, '"');
+  const words = line.match(/"[^"]*"|\S+/g).map((w) => w.replace(/^"|"$/g, ''));
+  assert.deepEqual(words.slice(0, 3), ['C:\\Program Files\\AGMessage\\app\\machine.js', 'control', '--for']);
+  assert.equal(machine.waitsForEnter(words.slice(1), true), false, 'a control task never waits for Enter');
+  assert.equal(machine.waitsForEnter(['control', '--elevated', '--request', 'x', '--machine', 'C:\\ProgramData\\AGMessage', '--sys', SYS], true), true, 'an administrator\'s own control run is a person\'s');
+  assert.equal(machine.waitsForEnter(['upgrade', '--step', 'take'], true), true, 'only the runner\'s step is a task\'s');
   // Every call the installer makes of machine.js names --out.
   assert.ok(/Exec\(NodeExe, Arg\(MachineJs\) \+ ' ' \+ Verb \+ ' ' \+ Params \+ ' --out ' \+ Arg\(OutFile\)/.test(CODE));
   assert.ok(/' uninstall --machine ' \+ Arg\(MachineDir\) \+ ' --sys ' \+ Arg\(ExpandConstant\('\{sys\}'\)\) \+ ' --app ' \+ Arg\(ExpandConstant\('\{app\}'\)\) \+ ' --out ' \+ Arg\(Said\)/.test(CODE), 'the uninstall waits for the programs of {app}, and refuses an open console');
