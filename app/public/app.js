@@ -1857,10 +1857,11 @@ function openObjectMenu(kind, get, { node, more, at, opener, label, header }) {
   if (!list.length) return false;
   const anchor = more || node;
   const from = opener || anchor;
+  const placed = AGM.menu.placer(node, anchor, from);
   const handle = AGM.menu(list, at || { anchor }, {
     label, header: header(o), opener: from,
     goneWords: AGM.catalog.WORDS.gone,
-    onPick: (id, value, item) => { const now = get(); if (now) act(kind, id, now, { anchor, node, value, item, opener: from }); else AGM.toast(goneWords(kind), true); },
+    onPick: (id, value, item) => { const now = get(); if (now) act(kind, id, now, { ...placed(), value, item }); else AGM.toast(goneWords(kind), true); },
     onDisabled: (words) => AGM.toast(words, true),
     submenu: (item) => submenuFor(kind, item, get() || o),
     // An open submenu's values as they are now (a reaction's check, an answer chosen); the rooms are asked once.

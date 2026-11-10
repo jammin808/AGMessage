@@ -491,6 +491,23 @@
   menu.isOpen = () => !!open;
   /** The open menu's handle, or null. */
   menu.current = () => (open ? open.handle : null);
+  /**
+   * Where an act picked from an object's menu is placed, read at the pick: by the menu's `anchor` while it is in the page,
+   * else by the row drawn in `node`'s place since (the same list, the same data-key) and that row's ⋯. A list drawn again
+   * while its menu is open replaces its rows, and an ask placed by a row no longer in the page would be mounted outside
+   * the dialog that holds the list (where a modal dialog leaves it out of reach) and drawn at the page's corner. Answers a
+   * function that gives {anchor, node, opener}.
+   */
+  menu.placer = (node, anchor, opener) => {
+    const list = node ? node.parentElement : null;
+    const key = node && node.dataset ? node.dataset.key : undefined;
+    return () => {
+      if (!anchor || anchor.isConnected) return { anchor, node, opener };
+      const now = list && list.isConnected && key ? Array.prototype.find.call(list.children, (n) => !!n.dataset && n.dataset.key === key) : null;
+      const more = now ? now.querySelector('.obj-more') : null;
+      return now ? { anchor: more || now, node: now, opener: more || now } : { anchor, node, opener };
+    };
+  };
 
   // A press outside the menu closes it; a press on the button that opened it (its ⋯) leaves it to that button's click,
   // which closes it, so the ⋯ toggles.
@@ -870,9 +887,10 @@
       const from = opener || anchor;
       const words = gone || C.WORDS.gone;
       const head = header || (() => undefined);
+      const placed = menu.placer(node, anchor, from);
       const handle = menu(list, at || { anchor }, {
         label: typeof label === 'function' ? label(o) : label, header: head(o), opener: from, goneWords: C.WORDS.gone,
-        onPick: (id, value, item) => { const now = get(); if (now) act(kind, id, now, { anchor, node, value, item, opener: from, get, gone: words, refocus }); else say(words, true); },
+        onPick: (id, value, item) => { const now = get(); if (now) act(kind, id, now, { ...placed(), value, item, get, gone: words, refocus }); else say(words, true); },
         onDisabled: (w) => say(w, true),
         submenu: (item) => C.submenu(kind, item.id, facts(), get() || o) || (submenu ? submenu(item, get() || o) : []),
         values: (item) => (item.id ? C.submenu(kind, item.id, facts(), get() || o) : null),

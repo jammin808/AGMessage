@@ -631,3 +631,39 @@ test('a menu opened from a button is drawn under it or above it and never over i
   assert.deepEqual(plain(spot({ beside: row }, { w: 200, h: 120 }, { w: 1400, h: 757 })), { x: 858, y: 300, h: null });
   assert.deepEqual(plain(spot({ beside: row }, { w: 200, h: 120 }, { w: 1000, h: 757 })), { x: 426, y: 300, h: null });
 });
+
+test('an act picked from an object\'s menu is placed by its anchor while it is in the page, else by the row drawn in its place since (the same list, the same key) and that row\'s ⋯, never by a row of another key or list', () => {
+  const { placer } = loadMenus();
+  /** A row of a list as the page draws it: its key, its ⋯, in the page or not. */
+  const row = (key, list) => {
+    const more = { name: 'more of ' + key, isConnected: true };
+    const r = { name: 'row ' + key, dataset: { key }, parentElement: list, isConnected: true, querySelector: (sel) => (sel === '.obj-more' ? more : null), more };
+    list.children.push(r);
+    return r;
+  };
+  const list = { children: [], isConnected: true };
+  const was = row('s1', list);
+  row('s2', list);
+  const opener = { name: 'pressed' };
+  const at = placer(was, was.more, opener);
+  /** What it answers, field by field (its object is made in menus.js's own context). */
+  const placedIs = (got, want) => { for (const k of ['anchor', 'node', 'opener']) assert.equal(got[k], want[k], k); };
+  // Still in the page: the anchor, the node and the opener the menu opened with.
+  placedIs(at(), { anchor: was.more, node: was, opener });
+  // The list drawn again: s1's row is a new one, and the act goes by it and its ⋯.
+  was.isConnected = false; was.more.isConnected = false;
+  list.children.length = 0;
+  row('s2', list);
+  const now = row('s1', list);
+  placedIs(at(), { anchor: now.more, node: now, opener: now.more });
+  // The object no longer drawn there, or its list gone: the act keeps what the menu opened with.
+  list.children.length = 0;
+  row('s2', list);
+  placedIs(at(), { anchor: was.more, node: was, opener });
+  list.children.push(now); list.isConnected = false;
+  placedIs(at(), { anchor: was.more, node: was, opener });
+  // A menu opened at a point, or by a node with no key: nothing to find again.
+  placedIs(placer(null, null, null)(), { anchor: null, node: null, opener: null });
+  const keyless = { dataset: {}, parentElement: list, isConnected: false };
+  placedIs(placer(keyless, keyless, keyless)(), { anchor: keyless, node: keyless, opener: keyless });
+});

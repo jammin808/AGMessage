@@ -665,8 +665,14 @@ async function doorsOf(tab, kind, sel, obj, { facts = 'F', bar = '.msg-acts > .m
   out.rightClosed = !!(await tab.until(NO_MENU, 3000));
   // The ⋯ clicked as a mouse clicks it opens the menu, and clicked again closes it, the focus on it.
   const dotsAt = await middleOf(tab, `${sel}.querySelector('.obj-more')`);
+  await tab.eval(`(window.__doorsFirst = ${sel}.querySelector('.obj-more'), true)`);
   await leftClick(tab, dotsAt);
   out.dots = await tab.until(MENU_IDS, 3000);
+  // A miss says what the click met where it was given, where the ⋯ is now and what the page holds.
+  if (!out.dots) {
+    out.dotsSaw = await tab.eval(`(() => { const h = document.elementFromPoint(${dotsAt.x}, ${dotsAt.y}); const q = window.__doorsFirst.getBoundingClientRect();
+      return JSON.stringify({ at: ${JSON.stringify(dotsAt)}, met: h ? h.tagName + '.' + h.className : 'nothing', now: { x: Math.round(q.left + q.width / 2), y: Math.round(q.top + q.height / 2) }, saw: ${DOORS_SAW('__doorsFirst')} }); })()`);
+  }
   out.inline = await tab.eval(`(async () => {
     const n = ${sel}; const menu = document.querySelector('.agm-menu:not(.agm-sub)'); const rows = [];
     for (const b of n.querySelectorAll(${codeLiteral(bar)})) {
@@ -3285,6 +3291,17 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const inDialog = await hallView.until(`(() => { const m = document.querySelector('.agm-menu'); return m && m.closest('dialog') === document.getElementById('screensDialog'); })()`);
     await press(hallView, 'Escape');
     const menuGoneDialogStays = await hallView.until(`${NO_MENU} && document.getElementById('screensDialog').open`);
+    // The list drawn again while a screen's menu is open (displays:changed reads it again whenever a screen changes): the
+    // act picked from that menu is placed by the row drawn now, its ask inside the dialog, never by the row it replaced.
+    await hallView.eval(`${screenRow}.querySelector('.obj-more').click()`);
+    await hallView.until(`!!document.querySelector('.agm-menu .agm-mi[data-action="screen.rename"]')`);
+    const redrawnUnder = await hallView.eval(`(() => { const old = ${screenRow}; Screens.redraw(); return !old.isConnected && !!${screenRow} && !!document.querySelector('.agm-menu'); })()`);
+    await hallView.eval(`document.querySelector('.agm-menu .agm-mi[data-action="screen.rename"]').click()`);
+    const askAfterRedraw = await hallView.until(`(() => { const a = document.querySelector('.agm-ask'); return a && JSON.stringify({ inDialog: a.closest('dialog') === document.getElementById('screensDialog'), focused: document.activeElement === a.querySelector('input'), value: a.querySelector('input').value }); })()`, 5000);
+    await press(hallView, 'Escape');
+    const goneAfterRedraw = await hallView.until(`!document.querySelector('.agm-ask') && document.getElementById('screensDialog').open`, 3000);
+    report(redrawnUnder === true && askAfterRedraw === JSON.stringify({ inDialog: true, focused: true, value: 'Doors spare' }) && !!goneAfterRedraw,
+      `a screen's menu open while the list is drawn again: Rename… asks inside the dialog by the row drawn now, its field focused, and Escape leaves the dialog open (${JSON.stringify({ redrawnUnder, askAfterRedraw, goneAfterRedraw: !!goneAfterRedraw })})`);
     const openRename = async () => {
       await hallView.eval(`${screenRow}.querySelector('.obj-more').click()`);
       await hallView.until(`!!document.querySelector('.agm-menu .agm-mi[data-action="screen.rename"]')`);

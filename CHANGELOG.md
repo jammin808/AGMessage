@@ -7408,6 +7408,19 @@ laptop and no Board device walked)
   (Windows, run 116): a request of a link removed just before still landed (each poll is a connection and a handshake
   of its own), and the link typed wrong is now given a token of its own, so what it would send is told from what the
   links before it sent.
+- An act picked from an object's menu while its list is drawn again asks by the row drawn now. The Screens dialog draws
+  its rows again whenever a screen changes (`displays:changed`), and a menu kept the row it opened from as its anchor:
+  an act picked after a redraw put its ask by a row no longer in the page, so it was mounted outside the modal dialog,
+  where a person cannot reach it, and stayed open. CI's Windows smoke (run 120) missed four checks so: New link…'s ask
+  was not found in the dialog, and the asks after it met that one still open. `AGM.menu.placer` (menus.js) reads at the
+  pick where the act goes: the menu's anchor while it is in the page, else the row of the same list with the same key and
+  its ⋯; the hall page's menus (`openObjectMenu`) and every page's catalogue doors (`AGM.acts`) use it. A new smoke step
+  opens a screen's menu, draws the list again and picks Rename…: on the old pick it fails, and the four checks after it
+  fail as run 120's did; `test/menus.test.js` holds the rule. Run 119's Windows smoke lost its phone leg instead: its
+  page's `socket.io.js` failed to load (`net::ERR_NO_BUFFER_SPACE`, which Windows gives when it has no socket to give,
+  most often no ephemeral port free), so the page never joined and the checks after it waited it out; run 120 did not
+  meet it, and nothing here explains it yet. The smoke's doors check now says, on a ⋯ that opened no menu, what the click
+  met there and where the ⋯ is (one local run missed so once and its rerun did not).
 - The admin page draws Accounts held aside with its first fill, never before it, and an adoption's one-time passwords
   with the panel's new state, from one answer. CI's browser smoke on Windows (run 106) missed twice on the held list: the
   first left click on ana's ⋯ opened no menu (the click meant to close it then opened one, left open with the focus in
