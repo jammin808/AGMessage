@@ -301,9 +301,10 @@ function pinnedTlsOptions(certPem, fp) {
  * fetch-like request over http or (pinned) https. Resolves {status, body, text, headers, retryAfter} (body parsed as JSON
  * when it is JSON; retryAfter the whole seconds of a Retry-After header, else null).
  * @param {string} url
- * @param {{method?:string, headers?:object, body?:string, timeoutMs?:number, tls?:object}} o
+ * `signal` (an AbortSignal) cuts it: one cut before its connection is made, or its TLS handshake done, writes nothing.
+ * @param {{method?:string, headers?:object, body?:string, timeoutMs?:number, tls?:object, signal?:AbortSignal}} o
  */
-function request(url, { method = 'GET', headers = {}, body, timeoutMs = 4000, tls: tlsOpts } = {}) {
+function request(url, { method = 'GET', headers = {}, body, timeoutMs = 4000, tls: tlsOpts, signal } = {}) {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
     const mod = u.protocol === 'https:' ? https : http;
@@ -311,6 +312,7 @@ function request(url, { method = 'GET', headers = {}, body, timeoutMs = 4000, tl
       method, hostname: u.hostname, port: u.port, path: u.pathname + u.search,
       headers: { ...headers, ...(body !== undefined ? { 'Content-Length': Buffer.byteLength(body) } : {}) },
       ...(u.protocol === 'https:' ? { ...(tlsOpts || {}), agent: false } : {}),
+      ...(signal ? { signal } : {}),
     }, (res) => {
       const chunks = [];
       let size = 0;

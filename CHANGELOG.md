@@ -7394,8 +7394,9 @@ laptop and no Board device walked)
   say what was measured and no longer that RestartOnFailure restarts it; the plan's U.5 cost 2 carries an as-built note.
   The task's definition is unchanged, and a launch Task Scheduler could not make (which its setting may still retry) was
   not measured.
-- Four tests that CI runs 116 to 119 failed, each on what the test assumed rather than what AGMessage does, each proved
-  with a probe that fails the old test with CI's own answer and passes the new one. Nothing that ships changed.
+- Four tests that CI runs 116 to 119 failed, each proved with a probe that fails the old test with CI's own answer and
+  passes the new one. Three failed on what the test assumed, and nothing that ships changed for them; what the fourth
+  saw is a fault of AGMessage's, fixed in the entry on a link stopped while its poll was under way, below.
   `test/loads.test.js` (Node 26, since ws 8.22.1): ws masks its frames with Node's own `http.websocketMask` where Node
   has it (26 does, 24 does not), and then never asks for `bufferutil`, so the run that shows the module walk reaching the
   plant found no walk; it now runs ws as the bundle's Node 24 does, without that pair (Node 26.13.0 fails the old test
@@ -7406,8 +7407,9 @@ laptop and no Board device walked)
   test) before its words, and on a loaded runner the take made at the test's start was past it by the check of a text
   that is no line; that check and the other pusher's line are asked of takes made just before them. `test/shownet.test.js`
   (Windows, run 116): a request of a link removed just before still landed (each poll is a connection and a handshake
-  of its own), and the link typed wrong is now given a token of its own, so what it would send is told from what the
-  links before it sent.
+  of its own). The link typed wrong is given a token of its own, and each request is told by when its connection was
+  made: after the unlinks only one already under way as they went may land, nothing at all to the certificate typed
+  wrong, and the pins the unlinks forgot stay forgotten.
 - An act picked from an object's menu while its list is drawn again asks by the row drawn now. The Screens dialog draws
   its rows again whenever a screen changes (`displays:changed`), and a menu kept the row it opened from as its anchor:
   an act picked after a redraw put its ask by a row no longer in the page, so it was mounted outside the modal dialog,
@@ -7427,6 +7429,18 @@ laptop and no Board device walked)
   as the screen confirms its line, at most once a second (the `also` frame). On a loaded runner that op came between the
   two reads. The check now compares the room's messages as a first open reads them; with 1.5 s between the two reads the
   old check fails as run 121 did (3 !== 2) and the new one passes. Nothing that ships changed.
+- A link to a Patterns or a PlayMap stopped while its poll was under way (unlinked, linked again, AGMessage stopping)
+  goes no further. A poll checked that its link was running only as it began: one under way at Unlink still sent the
+  node its pairing token where it was reading the certificate, and an answer that came after put back the certificate's
+  pin the unlink had just forgotten, saved it, and set the link live again; the unlink's audit row says its token and pin
+  are forgotten. Found by a review of the AG-1 test's change above, which had stopped looking at this. `lib/peerlinks.js`
+  stops at each wait once its link is stopped, before it sends, pins, saves or says anything, and stop() cuts the request
+  it waits on (`lib/tls.js` request takes a `signal`: one cut before its TLS handshake is done writes nothing).
+  `test/tls.test.js` stops a link at each place: waiting for the answer (on the old link the pin comes back, a save is
+  made and the link reads live), reading a certificate of another machine's with its start typed (the old link pins it,
+  saves and sends its token), and with its request still connecting (the old link writes the token once its handshake
+  is done). Each is held by its own test: the fix without its abort fails the last alone, without its check after the
+  certificate the second alone. A review of this change found the second and third missing from its first tests.
 - The admin page draws Accounts held aside with its first fill, never before it, and an adoption's one-time passwords
   with the panel's new state, from one answer. CI's browser smoke on Windows (run 106) missed twice on the held list: the
   first left click on ana's ⋯ opened no menu (the click meant to close it then opened one, left open with the focus in

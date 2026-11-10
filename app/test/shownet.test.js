@@ -163,16 +163,17 @@ test('AG-1: a Patterns over HTTPS on another machine gets its token only once a 
   assert.ok(lan, 'this test needs a network address that is not loopback (every CI runner and show laptop has one)');
   const cert = tlsmod.makeCertificate({ name: 'Patterns', hosts: ['localhost'], ips: [lan] });
   const fp = tlsmod.fingerprint(cert.certDer);
-  // The link typed wrong (below) is given a token of its own, so a request is told by what it carries: each poll is a
-  // connection and a handshake of its own, and one sent as the links before it were removed may reach the node after.
+  // The link typed wrong (below) is given a token of its own, so a request is told by what it carries; and each by when
+  // its connection was made, since one under way as the links before it were removed may still land after.
   const TOKEN3 = 'R4TN-8VYC-M2HE';   // secret-scan: fixture — a second fake pairing token
-  const seen = [];   // every request that reached it, with whether it carried the token
+  const seen = [];   // every request that reached it: whether it carried the token, and when its connection was made
   const node = https.createServer({ cert: tlsmod.toPem(cert.certDer), key: cert.keyPem }, (req, res) => {
-    seen.push({ url: req.url, token: req.headers['x-patterns-token'] === PATTERNS_TOKEN });
+    seen.push({ url: req.url, token: req.headers['x-patterns-token'] === PATTERNS_TOKEN, at: req.socket.madeAt || 0 });
     if (req.headers['x-patterns-token'] !== PATTERNS_TOKEN) { res.writeHead(403); return res.end(); }
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ v: 1, node: { t: 'patterns', id: 'patlan', name: 'Patterns LAN' }, light: 'green', headline: 'Programme', commands: [] }));
   });
+  node.on('secureConnection', (s) => { s.madeAt = Date.now(); });
   await new Promise((resolve) => { node.listen(0, '0.0.0.0', resolve); });
   const url = 'https://' + lan + ':' + node.address().port;
   assert.equal((await tlsmod.probeCertificate(lan, node.address().port)).fp, fp, 'that address reaches it');
@@ -214,16 +215,21 @@ test('AG-1: a Patterns over HTTPS on another machine gets its token only once a 
   await until(async () => ((await view('patlan2')) || {}).hall === hall, 3000, 'moved to the hall');
   await until(() => ((onDisk().peerLinks || {}).patlan2 || {}).hall === hall, 3000, 'saved');
   assert.equal(onDisk().peerLinks.patlan2.fpTyped, fp.slice(7, 23), 'kept across a link again');
-  // Typed wrong: refused, and nothing sent to it (the links that are live go first, so whatever arrives now is its).
+  // Unlinked, a link starts nothing more: what reaches the node after is a request already under way as it went, and the
+  // pins the unlinks forgot stay forgotten. Typed wrong: refused, and nothing sent to it.
+  const fromUnlink = seen.length;
   for (const id of ['patlan', 'patlan2']) assert.ok((await emit(ctl, 'nodes:unlink', { id })).ok);
-  await until(() => (onDisk().tlsPins || {})[peerlinks.pinKey('patlan')] === undefined, 3000, 'unlinking forgets its pin');
-  await new Promise((resolve) => { setTimeout(resolve, 300); });
-  seen.length = 0;
+  const unlinkedAt = Date.now();
+  const forgotten = () => ['patlan', 'patlan2'].map((id) => (onDisk().tlsPins || {})[peerlinks.pinKey(id)]);
+  await until(() => forgotten().every((p) => p === undefined), 3000, 'unlinking forgets their pins');
   assert.ok((await emit(ctl, 'nodes:link', { id: 'patlan3', t: 'patterns', url, name: 'Patterns LAN 3', token: TOKEN3, fingerprint: wrongStart })).ok);
   await until(async () => ((await view('patlan3')) || {}).status === 'refused', 8000, 'refused on the wrong start');
   assert.match((await view('patlan3')).problem, /does not start with the characters typed for it/);
-  await new Promise((resolve) => { setTimeout(resolve, 300); });
-  assert.deepEqual(seen.filter((r) => !r.token), [], 'nothing sent to a certificate whose start was typed wrong (a request of the links removed before it may still land)');
+  // Every connection to the node closed (a request under way answered or cut), then a save's time.
+  await until(async () => (await new Promise((resolve) => { node.getConnections((e, n) => resolve(e ? -1 : n)); })) === 0, 8000, 'no connection to the node open');
+  await new Promise((resolve) => { setTimeout(resolve, 500); });
+  assert.deepEqual(seen.slice(fromUnlink).filter((r) => !r.token || r.at > unlinkedAt), [], 'after the unlinks only a request under way as they went, and nothing to a certificate whose start was typed wrong');
+  assert.deepEqual(forgotten(), [undefined, undefined], 'the pins the unlinks forgot stay forgotten');
   assert.ok((await emit(ctl, 'nodes:unlink', { id: 'patlan3' })).ok);
 });
 

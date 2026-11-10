@@ -275,6 +275,8 @@ class PeerLink {
     const port = (u.protocol === 'https:' && Number(u.port)) || (peer && peer.ports && peer.ports.https) || Number(u.port) || 443;
     const nodeKey = pinKey(this.node.id);
     const cert = await tlsmod.probeCertificate(u.hostname, port);
+    // Stopped while the certificate was read: nothing is pinned, refused or sent.
+    if (this.stopped) return null;
     const verdict = this.pins.check(nodeKey, cert.fp, (peer && peer.tls) || '');
     // A certificate nothing vouches for yet (the hello is unauthenticated): on this machine pinned after its first answer;
     // on another only once a person typed the start of its fingerprint, read from the node's own screen.
@@ -318,25 +320,35 @@ class PeerLink {
 
   _headers(extra = {}) { return { [HEADER[this.node.t]]: this.token, ...extra }; }
 
+  /**
+   * Read the node's context once. A link stopped (unlinked, linked again, AGMessage stopping) goes no further than where it
+   * is: a request not yet written is cut (stop()), and what any wait brings back after the stop sends nothing, pins
+   * nothing and says nothing — the unlink forgot its token and its certificate's pin, and they stay forgotten.
+   */
   async poll() {
     if (this.busy || this.stopped) return;
     this.busy = true;
+    const cut = new AbortController();
+    this.cut = cut;
     try {
       // A link that resolved plain moves to TLS as soon as TLS is wanted, without waiting for an error.
       if (!this.endpoint || (!this.endpoint.tls && this._wantsTls())) this.endpoint = await this._resolve();
-      if (!this.endpoint) return;
-      const res = await tlsmod.request(this.endpoint.base + '/api/context', { headers: this._headers(), timeoutMs: 3000, tls: this.endpoint.tls });
+      if (!this.endpoint || this.stopped) return;
+      const res = await tlsmod.request(this.endpoint.base + '/api/context', { headers: this._headers(), timeoutMs: 3000, tls: this.endpoint.tls, signal: cut.signal });
+      if (this.stopped) return;
       if (res.status === 401 || res.status === 403) { this._set('refused', 'the node refused the token — link it again with its current one'); return; }
       const ctx = readContext(res.body);
       if (!ctx) { this._set('error', 'no context in its answer (' + res.status + ')'); return; }
       if (this.endpoint.tls && this.pins.confirm(this.endpoint.nodeKey, this.endpoint.fp)) this.onPins();
-      if (this.node.t === 'playmap' && this.endpoint.rules === undefined) this.endpoint.rules = await this._readRules();
+      if (this.node.t === 'playmap' && this.endpoint.rules === undefined) this.endpoint.rules = await this._readRules(cut.signal);
+      if (this.stopped) return;
       const changed = !this.context || this.context.light !== ctx.light || this.context.headline !== ctx.headline;
       this.context = ctx; this.okAt = Date.now();
       if (this.endpoint.rules !== undefined) { this.rules = this.endpoint.rules; this.rulesKnown = true; }   // else: asked again at the next poll
       if (changed) this.onChange();
       this._set('live');
     } catch (e) {
+      if (this.stopped) return;
       const certRefused = !!(this.endpoint && this.endpoint.tls) && /CERT|SIGNATURE/.test(String((e && e.code) || '') + ' ' + String((e && e.message) || ''));
       this.endpoint = null;
       if (Date.now() - this.okAt > STALE_MS) this._set(this.okAt ? 'stale' : 'unreachable', e && e.message ? String(e.message).slice(0, 80) : '');
@@ -345,16 +357,19 @@ class PeerLink {
       if (certRefused) {
         try { this.endpoint = await this._resolve(); } catch { /* unreachable: the next poll says so */ }
       }
-    } finally { this.busy = false; }
+    } finally {
+      this.busy = false;
+      if (this.cut === cut) this.cut = null;
+    }
   }
 
   /**
    * PlayMap's own risk rules per verb (its vocabulary); null when it serves none (404: an older build — the listed risks
    * stand); undefined when it could not be read now (unreachable, busy, an odd answer), so the next poll asks again.
    */
-  async _readRules() {
+  async _readRules(signal) {
     try {
-      const res = await tlsmod.request(this.endpoint.base + '/api/verbs', { headers: this._headers(), timeoutMs: 3000, tls: this.endpoint.tls });
+      const res = await tlsmod.request(this.endpoint.base + '/api/verbs', { headers: this._headers(), timeoutMs: 3000, tls: this.endpoint.tls, signal });
       if (res.status === 200 && Array.isArray(res.body)) return readVerbRules(res.body);
       return res.status === 404 ? null : undefined;
     } catch { return undefined; }
@@ -393,7 +408,11 @@ class PeerLink {
     };
   }
 
-  stop() { this.stopped = true; clearInterval(this.timer); }
+  stop() {
+    this.stopped = true;
+    clearInterval(this.timer);
+    if (this.cut) this.cut.abort();
+  }
 }
 
 module.exports = { PeerLink, pinKey, baseFor, isLoopback, verbWords, matchCommand, readContext, readVerbRules, withRules, secretFrom, redactLine, KINDS };

@@ -369,3 +369,96 @@ test('C17: a Stagewatch pinned once opens no plain WebSocket with its key while 
     assert.deepEqual(Object.keys(pins.pins), []);
   } finally { again.stop(); sw.close(); }
 });
+
+/**
+ * A Patterns that answers its context only when told to, over TLS, behind a door that holds new connections: every one
+ * from the `from`th (0, the first) while it holds. `host` is the address it is reached at (127.0.0.1, this machine; a
+ * network address, another machine).
+ */
+async function heldPatterns(host = '127.0.0.1') {
+  const net = require('net');
+  const cert = tlsmod.makeCertificate({ name: 'Patterns', hosts: ['localhost'], ips: [host] });
+  const seen = [];
+  const waiting = [];
+  const node = https.createServer({ cert: tlsmod.toPem(cert.certDer), key: cert.keyPem }, (req, res) => { seen.push({ url: req.url, token: req.headers['x-patterns-token'] || '' }); waiting.push(res); });
+  await new Promise((r) => node.listen(0, '127.0.0.1', r));
+  const answer = () => {
+    for (const res of waiting.splice(0)) {
+      if (res.writableEnded || res.destroyed) continue;
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ v: 1, node: { t: 'patterns', id: 'pat1', name: 'Patterns' }, light: 'green', headline: 'Programme', commands: [] }));
+    }
+  };
+  // The door: a connection made while it holds waits there, its TLS handshake not begun, until it is let through.
+  let holdFrom = Infinity;
+  let made = 0;
+  const held = [];
+  const through = (sock) => {
+    const up = net.connect(node.address().port, '127.0.0.1');
+    up.on('error', () => sock.destroy());
+    sock.on('error', () => up.destroy());
+    sock.pipe(up); up.pipe(sock);
+  };
+  const door = net.createServer((sock) => { if (made++ >= holdFrom) held.push(sock); else through(sock); });
+  await new Promise((r) => door.listen(0, host, r));
+  return {
+    base: 'https://' + host + ':' + door.address().port, fp: tlsmod.fingerprint(cert.certDer), seen, waiting, answer, held,
+    hold: (from = 0) => { holdFrom = from; },
+    letThrough: () => { holdFrom = Infinity; for (const s of held.splice(0)) through(s); },
+    close: () => { answer(); node.closeAllConnections(); node.close(); door.close(); for (const s of held.splice(0)) s.destroy(); },
+  };
+}
+
+test('a link stopped (unlinked) while its poll waits for the answer: the answer, should it come, pins nothing, saves nothing and says nothing', async () => {
+  const peerlinks = require('../lib/peerlinks');
+  const node = await heldPatterns();
+  const pins = new tlsmod.PinStore();
+  let saves = 0;
+  const link = new peerlinks.PeerLink({ node: { t: 'patterns', id: 'pat1', name: 'Patterns' }, base: node.base, token: 'K7QM-3XWD-P9RA' /* secret-scan: fixture */, pins, onPins: () => { saves++; } });
+  try {
+    assert.ok(await until(() => node.waiting.length === 1, 4000), 'the first poll waits on its answer');
+    // As nodes:unlink does: its pin forgotten, then the link stopped.
+    pins.forget(peerlinks.pinKey('pat1'));
+    link.stop();
+    const at = { saves, status: link.status, seen: node.seen.length };
+    node.answer();
+    await new Promise((r) => { setTimeout(r, 300); });
+    assert.deepEqual([pins.pins[peerlinks.pinKey('pat1')], saves, link.status, link.context, node.seen.length], [undefined, at.saves, at.status, null, at.seen], 'nothing pinned, saved, said or sent after the stop');
+  } finally { link.stop(); node.close(); }
+});
+
+test('a link to another machine stopped while its certificate is read sends no request and pins nothing: its token never leaves after the stop, and the pin its unlink forgot is not put back', async () => {
+  const peerlinks = require('../lib/peerlinks');
+  const lan = tlsmod.lanAddresses()[0];
+  assert.ok(lan, 'this test needs a network address that is not loopback (every CI runner and show laptop has one)');
+  const node = await heldPatterns(lan);
+  node.hold();
+  const pins = new tlsmod.PinStore();
+  let saves = 0;
+  // Its fingerprint's start typed, as a link to another machine is confirmed: read without a stop, it would be pinned here.
+  const link = new peerlinks.PeerLink({ node: { t: 'patterns', id: 'pat1', name: 'Patterns' }, base: node.base, token: 'K7QM-3XWD-P9RA' /* secret-scan: fixture */, confirmFp: node.fp.slice(7, 23), pins, onPins: () => { saves++; } });
+  try {
+    assert.ok(await until(() => node.held.length === 1, 4000), 'the first poll reads the certificate');
+    link.stop();
+    node.letThrough();
+    // The probe ends (its handshake read) and the link would go on to the request: none comes.
+    await new Promise((r) => { setTimeout(r, 600); });
+    assert.deepEqual([node.seen.length, Object.keys(pins.pins).length, saves, link.status], [0, 0, 0, 'connecting'], 'no request after the stop: ' + JSON.stringify(node.seen));
+  } finally { link.stop(); node.close(); }
+});
+
+test('a link stopped while its request is still connecting cuts it: its TLS handshake done after the stop, the token is never written', async () => {
+  const peerlinks = require('../lib/peerlinks');
+  const node = await heldPatterns();
+  node.hold(1);   // the certificate's probe goes through; the request's own connection waits at the door
+  const pins = new tlsmod.PinStore();
+  let saves = 0;
+  const link = new peerlinks.PeerLink({ node: { t: 'patterns', id: 'pat1', name: 'Patterns' }, base: node.base, token: 'K7QM-3XWD-P9RA' /* secret-scan: fixture */, pins, onPins: () => { saves++; } });
+  try {
+    assert.ok(await until(() => node.held.length === 1, 4000), 'the request is connecting');
+    link.stop();
+    node.letThrough();
+    await new Promise((r) => { setTimeout(r, 600); });
+    assert.deepEqual([node.seen.length, Object.keys(pins.pins).length, saves, link.status], [0, 0, 0, 'connecting'], 'no request reached the node after the stop: ' + JSON.stringify(node.seen));
+  } finally { link.stop(); node.close(); }
+});
