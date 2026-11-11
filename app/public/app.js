@@ -1750,8 +1750,8 @@ function drawBar(bar, kind, o, { words = false, more = 'More actions', keysOn = 
 }
 function drawActs(node, msg) {
   senderName(node, msg);
-  // The full view's acts sit in the message's header with its ⋯; the simple view's (Got it, Reply) after its words, as
-  // text actions, so a response follows what it answers in the page's order, and it has no ⋯ (no menu).
+  // The full view's acts sit in the message's header with its ⋯; the simple view's (👁 Look on a file, Got it, Reply) after
+  // its words, as buttons, so a response follows what it answers in the page's order, and it has no ⋯ (no menu).
   const head = node.querySelector(':scope > header .msg-acts');
   let resp = node.querySelector(':scope > .msg-response');
   const simple = F.view === 'simple';
@@ -1766,7 +1766,7 @@ function drawActs(node, msg) {
   // In the pinned strip a message's door unpins each kind it is pinned by (`where: 'strip'`), beside its own two; in the
   // simple view a tapped message's row holds Got it, Reply and 📌 Pin for me.
   const o = node.classList.contains('pinned-copy') ? Object.assign({}, msg, { where: 'strip' }) : msg;
-  if (bar) drawBar(bar, 'msg', o, { keysOn: node, words: simple, max: simple || o !== msg ? 3 : 2 });
+  if (bar) drawBar(bar, 'msg', o, { keysOn: node, words: simple, max: simple ? 4 : o !== msg ? 3 : 2 });
   // The body's own doors (a prompt's answers, a help request's answers) are the same entries, and say why when they
   // cannot run now.
   const shown = new Set(AGM.catalog.shown('msg', F, msg).map((e) => e.id));
@@ -2208,7 +2208,8 @@ Object.assign(RUN, {
   'msg.pin': (m) => pinForRoom(m),
   'msg.pinMine': (m) => { pinForMe(m); Simple.tap(''); },
   'msg.confidential': (m) => markFile(m),
-  'msg.look': (m) => openDocInPanel(m),
+  // In the simple view the file is brought into view too: below 900 px wide, its Shown to you tab is chosen.
+  'msg.look': (m) => { openDocInPanel(m); Simple.reveal(); },
   'msg.download': (m) => download(m),
   'msg.stage': (m, c) => Show.fromMenu(m, c),
   'msg.copy': (m, { anchor }) => copyText(m.text || '', 'Copied.', anchor),
@@ -3328,6 +3329,8 @@ function setStageCollapsed(collapsed) {
     delete docPanel.dataset.savedFlex;
   }
   docPanel.classList.toggle('collapsed', !!collapsed);
+  // The grip before the panel reads it from the page: hidden while the panel is its rail.
+  document.body.dataset.stageCollapsed = collapsed ? '1' : '0';
   if (docExpandRail) docExpandRail.hidden = !collapsed;
   // A card that arrived in the side bar is in view now, or no longer: said again.
   if (stageMoved) stageMoved();
@@ -3381,11 +3384,14 @@ let dragStartLeft = 0;
 let dragTotal = 0;
 
 let dragVertical = false;
+// The simple view's grip sets the share of its Shown to you column (Simple.setColumn), kept on this device alone; the full
+// view's splitter, the split it keeps and tells the person's other pages.
+const simpleGrip = () => pageFacts.view === 'simple';
 splitResizer?.addEventListener('pointerdown', (e) => {
   if (!HAS_STAGE) return;
   if (docPanel.classList.contains('collapsed')) return;
   isDragging = true;
-  dragVertical = window.innerWidth <= 800;
+  dragVertical = !simpleGrip() && window.innerWidth <= 800;
   dragStartX = dragVertical ? e.clientY : e.clientX;
   const rect = leftCol.getBoundingClientRect();
   const parentRect = leftCol.parentElement.getBoundingClientRect();
@@ -3400,6 +3406,7 @@ splitResizer?.addEventListener('pointermove', (e) => {
   const cur = dragVertical ? e.clientY : e.clientX;
   const delta = cur - dragStartX;
   let newSize = dragStartLeft + delta;
+  if (simpleGrip()) { Simple.setColumn(100 - (newSize / dragTotal) * 100, false); return; }
   const min = dragVertical ? 160 : 240;
   const max = dragTotal - (dragVertical ? 160 : 280);
   newSize = Math.max(min, Math.min(max, newSize));
@@ -3411,6 +3418,7 @@ splitResizer?.addEventListener('pointerup', (e) => {
   document.body.style.cursor = '';
   document.body.style.userSelect = '';
   splitResizer.releasePointerCapture(e.pointerId);
+  if (simpleGrip()) { Simple.setColumn(Simple.column(), true); return; }
   const lc = leftCol.getBoundingClientRect();
   const pr = leftCol.parentElement.getBoundingClientRect();
   const pct = ((dragVertical ? lc.height : lc.width) /
@@ -3421,6 +3429,7 @@ splitResizer?.addEventListener('pointerup', (e) => {
 });
 splitResizer?.addEventListener('dblclick', () => {
   if (!HAS_STAGE) return;
+  if (simpleGrip()) { Simple.setColumn(Simple.columnDefault, true); return; }
   applySplit(50);
   localStorage.setItem('agm.splitPct', '50');
 });
@@ -5338,11 +5347,31 @@ const Takes = (function () {
   }
   /** How many cards the side bar holds now: a take minimised, information arrived there (beside the operator's too). */
   const carded = () => LAYERS.filter((l) => !!cardOf[l]).length;
-  /** The collapsed panel's rail says what waits in it: "📺 On stage • 2". */
+  /** How many cards draw what they hold in the side bar (information that arrived there): each is something to read. */
+  const reading = () => LAYERS.filter((l) => !!cardOf[l] && cardOf[l].side).length;
+  /** Each document drawn in a card laid out again for the card's width now (the column opened wide, or dragged). */
+  function refitCards() {
+    if (!renderer) return;
+    for (const l of LAYERS) {
+      const inner = cardOf[l] && cardOf[l].li.querySelector('.take-card-box');
+      if (inner) renderer.refit(inner);
+    }
+  }
+  /**
+   * The collapsed panel's rail, a button that opens it again, says what waits in it: the full view's "📺 On stage • 2" (its
+   * cards); the simple view's "📺 Shown to you • 3 ⇤", all its column holds (the cards, Earlier, a file open there), so
+   * nothing shown is out of reach until it is cleared.
+   */
   function drawRail() {
     const rail = document.getElementById('docExpandRail');
+    if (!rail) return;
+    if (document.body.dataset.view === 'simple') {
+      const n = carded() + pastNow().length + (previewing ? 1 : 0);
+      rail.textContent = '📺 Shown to you' + (n ? ' • ' + n : '') + ' ⇤';
+      return;
+    }
     const n = carded();
-    if (rail) rail.textContent = n ? '📺 On stage • ' + n : '📺 On stage ⇤';
+    rail.textContent = n ? '📺 On stage • ' + n : '📺 On stage ⇤';
   }
 
   // ---- Earlier: the information taken off this page lately, each opened with a Look (no report, no take)
@@ -5569,7 +5598,7 @@ const Takes = (function () {
     apply();
     setStageCollapsed(false);
     const seq = t.seq;
-    AGM.toast('Minimised to 📺 On stage.', { undo: () => { const now = told[l]; if (now && now.seq === seq && now.answer === 'minimised') showAgain(l); } });
+    AGM.toast('Minimised to ' + panelHeading() + '.', { undo: () => { const now = told[l]; if (now && now.seq === seq && now.answer === 'minimised') showAgain(l); } });
   }
   /**
    * Show again (a card's, or Minimise's Undo): the take drawn over the chat again, and said with `again`; information that
@@ -5682,13 +5711,13 @@ const Takes = (function () {
   /** Stagewatch's frame moved: a countdown drawn shows it at once. */
   function stageFrame(v) { stage = v; tickNow(); }
   /** The page's facts changed (connected, the support view): the bars drawn again. */
-  function redraw() { drawBarNow(); for (const l of LAYERS) drawCardBar(l); drawPastBars(); if (!layer.hidden) drawNews(); }
+  function redraw() { drawBarNow(); for (const l of LAYERS) drawCardBar(l); drawPastBars(); drawRail(); if (!layer.hidden) drawNews(); }
   /** The side bar opened or closed, or its tab was chosen: a card that arrived there is in view now, or no longer. */
   function seen() { sayAll(); }
   stageMoved = seen;
 
   return {
-    joined, stage: stageFrame, heard, redraw, seen, object, cardObject, pastObject, carded, earlier: () => pastNow().length, load,
+    joined, stage: stageFrame, heard, redraw, seen, object, cardObject, pastObject, carded, reading, refitCards, drawRail, earlier: () => pastNow().length, load,
     current: () => told.show, over: () => told.info,
   };
 })();
@@ -7542,7 +7571,8 @@ const Clock = (function () {
 // one reading column, one response place per screen after the words it answers (Got it and Reply on the newest message
 // from backstage that waits for this person, and on each 🔥 one; a tap brings any other's own row back), questions with
 // their answers, a 🔥 strip only while its message is out of view, the composer with 🔥 Priority first, and a ⋯ sheet in
-// place of the header's menu. It has no menu door and acts on Tab, Enter and Escape alone. Everything it shows is drawn
+// place of the header's menu. It has no menu door and acts on Tab, Enter and Escape alone (and ← → on the grip of its
+// Shown to you column, which opens wide while it holds something to read). Everything it shows is drawn
 // from facts the server already sends: what waits is this page's reading of the room's messages, never a field of its
 // own. Its layout follows the screen's size and each feature a probe, never the device's name (styles.css).
 const Simple = (function () {
@@ -7759,9 +7789,74 @@ const Simple = (function () {
   // ---- what is shown to this person: a column at 900 px wide or more, a tab below, drawn only while it holds something
   /** How many things are shown to this person now: the takes in the side bar's cards, its Earlier, a file open there. */
   const shownCount = () => Takes.carded() + Takes.earlier() + (previewing ? 1 : 0);
+  // The column at 900 px wide or more: 360 px while it holds cards and Earlier alone, and wide while it holds something to
+  // read (a file opened with Look, or a document or a picture that arrived in a card), its share of the row (`--bv-col`)
+  // set by its grip, dragged or moved by ← and →, and kept on this device; the chat and the column each keep 360 px.
+  const COL = { def: 55, min: 25, max: 80, step: 5, keep: 'agm.bvCol', least: 360 };
+  let col = COL.def;
+  try { const kept = parseFloat(localStorage.getItem(COL.keep)); if (kept >= COL.min && kept <= COL.max) col = kept; } catch { /* storage blocked: the default share */ }
+  /** The column's share now, held between its bounds and the 360 px each side keeps on this row's width. */
+  function colBounds() {
+    const row = document.querySelector('.main-row');
+    const w = row ? row.getBoundingClientRect().width : 0;
+    if (!w) return { lo: COL.min, hi: COL.max };
+    const lo = Math.max(COL.min, Math.ceil((COL.least / w) * 100));
+    return { lo: Math.min(lo, COL.max), hi: Math.max(lo, Math.min(COL.max, Math.floor(((w - COL.least - 12) / w) * 100))) };
+  }
+  /** Whether the column holds something to read: a file open there, or a card that draws what arrived in the side bar. */
+  const readingNow = () => isSimple() && (!!previewing || Takes.reading() > 0);
+  /** What the column draws laid out again for its width, once the layout has moved (the reader's own place kept). */
+  function refitShown() { setTimeout(() => { rerenderCurrentDoc(); Takes.refitCards(); }, 60); }
+  /** The column's share set (by the grip), drawn now, and kept on this device when `keep`. */
+  function setColumn(pct, keep) {
+    const b = colBounds();
+    col = Math.round(Math.max(b.lo, Math.min(b.hi, pct)));
+    body.style.setProperty('--bv-col', col + '%');
+    drawGrip();
+    if (keep) {
+      try { localStorage.setItem(COL.keep, String(col)); } catch { /* storage blocked: kept for this page only */ }
+      refitShown();
+    }
+  }
+  /** The grip between the chat and the wide column: a separator with its value while it is there, else the full view's. */
+  function drawGrip() {
+    const g = splitResizer;
+    if (!g) return;
+    if (isSimple() && body.dataset.reading === '1') {
+      const b = colBounds();
+      g.tabIndex = 0;
+      g.setAttribute('aria-label', 'Width of Shown to you');
+      g.setAttribute('aria-valuemin', String(b.lo));
+      g.setAttribute('aria-valuemax', String(b.hi));
+      g.setAttribute('aria-valuenow', String(col));
+      g.setAttribute('aria-valuetext', col + '% of the screen');
+      g.title = 'Drag to make Shown to you wider or narrower (or Tab here and use ← →)';
+      return;
+    }
+    g.removeAttribute('tabindex');
+    for (const a of ['aria-valuemin', 'aria-valuemax', 'aria-valuenow', 'aria-valuetext', 'title']) g.removeAttribute(a);
+    g.setAttribute('aria-label', 'Resize panels');
+  }
+  splitResizer?.addEventListener('keydown', (e) => {
+    if (!isSimple() || body.dataset.reading !== '1') return;
+    const by = e.key === 'ArrowLeft' ? COL.step : e.key === 'ArrowRight' ? -COL.step : 0;
+    if (!by) return;
+    e.preventDefault();
+    setColumn(col + by, true);
+  });
+  body.style.setProperty('--bv-col', col + '%');
+  /** Below 900 px wide, where the column is the Shown to you tab (styles.css). */
+  const narrow = () => !!window.matchMedia && window.matchMedia('(max-width: 899.98px)').matches;
   function layout() {
     const n = isSimple() ? shownCount() : 0;
     body.dataset.shown = String(n);
+    const wide = readingNow();
+    if ((body.dataset.reading === '1') !== wide) { body.dataset.reading = wide ? '1' : '0'; refitShown(); }
+    // Below 900 px the Shown to you tab is the column's whole way in: a column collapsed on a wider screen (or before the
+    // device turned) is never drawn there as its rail.
+    if (isSimple() && body.dataset.tab === 'shown' && docPanel.classList.contains('collapsed') && narrow()) setStageCollapsed(false);
+    drawGrip();
+    Takes.drawRail();
     const tabs = $('bvTabs');
     tabs.hidden = !isSimple() || n === 0;
     $('shownCount').textContent = String(n);
@@ -7779,12 +7874,16 @@ const Simple = (function () {
   }
   function pickTab(which) {
     body.dataset.tab = which === 'shown' ? 'shown' : 'chat';
+    // The tab is the column's whole way in below 900 px: a column collapsed on a wider screen opens with it.
+    if (body.dataset.tab === 'shown' && docPanel.classList.contains('collapsed')) setStageCollapsed(false);
     $('tabChat').setAttribute('aria-pressed', String(body.dataset.tab === 'chat'));
     $('tabShown').setAttribute('aria-pressed', String(body.dataset.tab === 'shown'));
     if (body.dataset.tab === 'shown') rerenderCurrentDoc();
     drawStrip();
     Takes.seen();
   }
+  /** A file the person opened with Look, in view: below 900 px wide its tab is chosen (the column is in view above it). */
+  function reveal() { if (isSimple() && narrow()) pickTab('shown'); }
   $('tabChat').addEventListener('click', () => pickTab('chat'));
   $('tabShown').addEventListener('click', () => pickTab('shown'));
   const shownWatch = new MutationObserver(() => layout());
@@ -7819,6 +7918,16 @@ const Simple = (function () {
     const words = ruler.measureText(LONG).width <= room ? LONG : SHORT;
     if (field.placeholder !== words) field.placeholder = words;
   }
+  // The field's own width moves without the window's too (Shown to you opening wide beside the chat, its grip dragged):
+  // the words are measured again as it does. Setting the placeholder never changes the field's size.
+  if (typeof ResizeObserver === 'function') new ResizeObserver(() => fitPlaceholder()).observe($('directorInput'));
+  // The chat 600 px wide or less, whatever the window's width (Shown to you opened wide beside it): the phone's composer,
+  // 🔥 alone and Send's mark (styles.css). The composer's form never changes the column's width, so this settles.
+  if (typeof ResizeObserver === 'function') new ResizeObserver(() => {
+    const w = leftCol.clientWidth;
+    const n = w > 0 && w <= 600;
+    if ((body.dataset.narrowChat === '1') !== n) body.dataset.narrowChat = n ? '1' : '0';
+  }).observe(leftCol);
   let fitting = false;
   window.addEventListener('resize', () => {
     if (fitting) return;
@@ -8004,7 +8113,7 @@ const Simple = (function () {
     if (field && document.activeElement !== field) { e.preventDefault(); field.focus(); }
   });
 
-  return { setView, waits, said, tap, change, people: drawAlone, sheet, layout, isSimple, awakeState: () => awake,
+  return { setView, waits, said, tap, change, people: drawAlone, sheet, layout, isSimple, awakeState: () => awake, setColumn, column: () => col, columnDefault: COL.def, reveal,
     // What the sheet draws changed from elsewhere (the admin's clock or countdown): its rows drawn again in place, if open.
     sheetChanged: () => { if (sheetOpen()) drawSheet(); },
     // The sheet as an ask from it reads it: its object while it is open, null once it is closed (its ask goes with it).

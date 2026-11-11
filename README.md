@@ -311,7 +311,11 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   the device may sleep, and Leave the hall, asked in place. It **starts in Dark** until the person chooses Light, and paints dark before its first frame
   on a device last used there; the admin's support view never turns it light. It works on iPads old and new, Android
   tablets and phones, upright or sideways: the Shown to you column at 900 px wide or more and two tabs, Chat and 📺 Shown
-  to you, below; 22 px text on a tablet and 20 px on a phone. Only Tab, Enter and Escape act on it, and it opens no menu.
+  to you, below; 22 px text on a tablet and 20 px on a phone. A file has **👁 Look** in its own row, and opens wide enough
+  to read: the column takes 55 % of the screen while it holds a file or a document sent there, its grip dragged (or
+  tabbed to and moved with ← →) to make it wider or narrower, kept on the device; below 900 px Look opens the Shown to
+  you tab. Closed with ⇥, the column is a rail, "📺 Shown to you • 2 ⇤", that opens it again. Look, Got it, Reply and
+  Pin for me are buttons of 44 px. Tab, Enter and Escape act on it (and ← → on the column's grip), and it opens no menu.
 - **Remote phones.** Through the built-in Cloudflare tunnel, up to 150 at once — a Quick Tunnel's 200 in-flight
   requests, less room for page loads and files — and half of them at most from one network (an IPv6 phone counted by
   its /64, so a phone that changes its address is still one network). A page that has not joined a room within 20 s

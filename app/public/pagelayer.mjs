@@ -633,6 +633,16 @@ function drawQuote(box, content, ctx) {
   });
 }
 
+/**
+ * A document drawn into `box` laid out again for the box's size now, at the place it was (docview.mjs refit): the box was
+ * made wider or narrower by the page (the simple view's Shown to you column, dragged or opened wide). A picture or a quote
+ * fits itself as its box changes, and nothing drawn is a no-op.
+ */
+export function refit(box) {
+  const view = box ? views.get(box) : null;
+  if (view && typeof view.refit === 'function') view.refit();
+}
+
 /** What `box` holds let go: a document's or a picture's reader destroyed (its object URLs revoked), the box emptied. */
 export function clear(box) {
   if (!box) return;

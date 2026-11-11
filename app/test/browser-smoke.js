@@ -4282,9 +4282,9 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       report(!!sharedMsg.id && sharedMsg.size > 0 && !!planId && /^📎 board pack\.pdf · PDF · /.test(sharedMsg.line) && zipMsg.line === '📦 stage pack.zip · ZIP · 10 bytes · download only'
         && sharedSaid === 'Shared in Main — the backstage team can download it; the Board can open it.'
         && ['msg.stage', 'msg.look', 'msg.screens'].every((x) => !zipMenu.includes(x)) && zipMenu.includes('msg.download')
-        && cyCards === JSON.stringify({ pdf: ['msg.look'], zip: [] }) && cyPanel1 === JSON.stringify({ state: JSON.parse(cyPanel0).state, layer: false })
+        && cyCards === JSON.stringify({ pdf: ['msg.look', 'msg.look'], zip: [] }) && cyPanel1 === JSON.stringify({ state: JSON.parse(cyPanel0).state, layer: false })
         && oxCard === JSON.stringify({ url: false, img: 0, links: 0, acts: 0 }),
-        `Share puts a file card in the feed ("📎 … · PDF · size"; a zip "📦 … · download only" with no Look, no Show and no screen), says "Shared in Main — the backstage team can download it; the Board can open it." and changes nothing on the Board's page; On stage a Look and no Download; an observer's card holds no link, no picture and no act (${JSON.stringify({ sharedSaid, sharedMsg, zipMsg, zipMenu, cyCards, cyPanel0, cyPanel1, oxCard })})`);
+        `Share puts a file card in the feed ("📎 … · PDF · size"; a zip "📦 … · download only" with no Look, no Show and no screen), says "Shared in Main — the backstage team can download it; the Board can open it." and changes nothing on the Board's page; On stage a Look (its line, and its 👁 Look button in the simple view) and no Download; an observer's card holds no link, no picture and no act (${JSON.stringify({ sharedSaid, sharedMsg, zipMsg, zipMenu, cyCards, cyPanel0, cyPanel1, oxCard })})`);
 
       // A Board seat's Look: the file opens in her own panel, read no-store, its object URLs revoked as the panel closes.
       await cy.eval(`(() => { window.__lookFrom = window.__urls.made.length; window.__fetchFrom = window.__fetched.length; act('msg', 'msg.look', findMessage(${codeLiteral(planId || '')}), {}); return true; })()`);
@@ -7267,6 +7267,22 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
         await tab.until(`typeof joined !== 'undefined' && joined && allMessages.some((m) => m.type === 'file')`, 10000);
         await tab.eval(`(() => { const m = allMessages.find((x) => x.type === 'file'); act('msg', 'msg.look', m, {}); return true; })()`);
         await tab.until(`document.body.dataset.shown === '1'`, 5000);
+        // Look brings the file into view: below 900 px its Shown to you tab is chosen; at 900 px or more the column opens wide
+        // (its share of the row, 55 % until its grip moves it), the grip beside it. Read, then back to the chat for the rest.
+        const looked = JSON.parse(await tab.until(`(() => { const p = document.getElementById('docPanel').getBoundingClientRect(); const row = document.querySelector('.main-row').getBoundingClientRect(); const g = document.getElementById('splitResizer');
+          return JSON.stringify({ tab: document.body.dataset.tab, reading: document.body.dataset.reading, share: row.width ? Math.round(p.width / row.width * 100) : 0, grip: g.getClientRects().length > 0, now: g.getAttribute('aria-valuenow') }); })()`, 3000) || 'null');
+        const railed = w >= 900 ? await (async () => {
+          await tab.eval(`document.getElementById('splitResizer').focus(); true`);
+          await press(tab, 'ArrowLeft');
+          const wider = await tab.until(`document.getElementById('splitResizer').getAttribute('aria-valuenow') !== ${JSON.stringify(looked && looked.now)} && document.getElementById('splitResizer').getAttribute('aria-valuenow')`, 3000);
+          await tab.eval(`document.getElementById('docCollapseBtn').click(); true`);
+          const rail = await tab.until(`(() => { const r = document.getElementById('docExpandRail'); return r.getClientRects().length > 0 && document.getElementById('docPanel').classList.contains('collapsed') && r.textContent; })()`, 3000);
+          await tab.eval(`document.getElementById('docExpandRail').click(); true`);
+          const back = await tab.until(`!document.getElementById('docPanel').classList.contains('collapsed') && document.body.dataset.reading === '1' && 'back'`, 3000);
+          await tab.eval(`(() => { try { localStorage.removeItem('agm.bvCol'); } catch { /* none */ } return true; })()`);
+          return { wider, rail, back };
+        })() : null;
+        await tab.eval(`(() => { const t = document.getElementById('tabChat'); if (t.getClientRects().length) t.click(); return true; })()`);
         // The read waits until what it measures is drawn: a first open draws its newest 60 at once and the rest as the page
         // is idle, and the joins and leaves of the devices before this one add to the hall's lines.
         await tab.until(`[...feed.querySelectorAll(':scope > .msg[data-id]')].some((n) => (findMessage(n.dataset.id) || {}).text === 'Wrap up resolution 3 now, please.')`, 5000);
@@ -7280,15 +7296,18 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
         // from is still open, so its object is not gone.
         const kept = asks ? await tab.eval(`(() => { refreshOpenMenu(); return !!document.querySelector('.agm-ask'); })()`) : null;
         await press(tab, 'Escape');
-        layout[w + 'x' + h] = { ...r, sheetEnd: JSON.parse(sheetEnd || 'null'), asks, kept, problems: tab.problems.length };
+        layout[w + 'x' + h] = { ...r, sheetEnd: JSON.parse(sheetEnd || 'null'), asks, kept, looked, railed, problems: tab.problems.length };
         console.log(`the Board's chat view at ${w}×${h}: the feed is ${r && r.feedHeight} px tall (a record, not a pass mark)`);
         tab.close();
       }
       const layoutOk = (k, r) => { const [w, h] = k.split('x').map(Number);
         return !!r && r.view === 'simple' && r.column === (w >= 900) && r.tabs === (w < 900) && r.body === (Math.min(w, h) >= 600 ? 22 : 20) && r.scroll && r.missed.length === 0 && r.fits
-          && r.placeholder === (r.longFits ? 'Message everyone here…' : 'Message everyone…') && r.label === 'Message everyone here…' && !!r.sheetEnd && r.sheetEnd.inView && r.sheetEnd.tall && r.asks === 'asks' && r.kept === true && r.problems === 0; };
+          && r.placeholder === (r.longFits ? 'Message everyone here…' : 'Message everyone…') && r.label === 'Message everyone here…' && !!r.sheetEnd && r.sheetEnd.inView && r.sheetEnd.tall && r.asks === 'asks' && r.kept === true && r.problems === 0
+          && !!r.looked && r.looked.reading === '1' && (w >= 900
+            ? r.looked.tab === 'chat' && r.looked.share >= 50 && r.looked.grip && r.looked.now === '55' && !!r.railed && r.railed.wider === '60' && /^📺 Shown to you • 1 ⇤$/.test(r.railed.rail || '') && r.railed.back === 'back'
+            : r.looked.tab === 'shown' && !r.looked.grip && r.railed === null); };
       report(Object.entries(layout).every(([k, r]) => layoutOk(k, r)),
-        `the layout leg at nine sizes: the Shown to you column at 900 px wide or more and the tabs below, 22 px where the smaller side is 600 px or more, no sideways scroll, a 44 px band through each control, the placeholder whole (the short words where the long do not fit the field, measured), the sheet within the screen with Leave reached and asked in place, the ask kept through a refresh of the page, no script error (${JSON.stringify(Object.fromEntries(Object.entries(layout).map(([k, r]) => [k, r && { column: r.column, tabs: r.tabs, body: r.body, scroll: r.scroll, missed: r.missed, placeholder: r.placeholder, fits: r.fits, sheetEnd: r.sheetEnd, asks: r.asks, kept: r.kept, problems: r.problems }])))})`);
+        `the layout leg at nine sizes: the Shown to you column at 900 px wide or more and the tabs below, 22 px where the smaller side is 600 px or more, no sideways scroll, a 44 px band through each control, the placeholder whole (the short words where the long do not fit the field, measured), the sheet within the screen with Leave reached and asked in place, the ask kept through a refresh of the page, no script error; 👁 Look brings the file into view (below 900 px its Shown to you tab; at 900 px or more the column opens wide, 55 % of the row, its grip moved by ← to 60 %, ⇥ leaving a rail "📺 Shown to you • 1 ⇤" that opens it again) (${JSON.stringify(Object.fromEntries(Object.entries(layout).map(([k, r]) => [k, r && { column: r.column, tabs: r.tabs, body: r.body, scroll: r.scroll, missed: r.missed, placeholder: r.placeholder, fits: r.fits, sheetEnd: r.sheetEnd, asks: r.asks, kept: r.kept, looked: r.looked, railed: r.railed, problems: r.problems }])))})`);
 
       // The floor leg's chat-view steps: no Fullscreen API (both its forms gone) and no Wake Lock: no Full screen row in the
       // sheet and none on a take, and the sheet says why the device may sleep; not a secure context: the HTTPS words; a

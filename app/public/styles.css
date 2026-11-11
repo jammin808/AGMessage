@@ -2201,7 +2201,7 @@ body[data-view="simple"] #peoplePanel, body[data-view="simple"] #roomSwitcher, b
 body[data-view="simple"] #researchCompose, body[data-view="simple"] .compose-to, body[data-view="simple"] .split-resizer,
 body[data-view="simple"] .msg .reactions, body[data-view="simple"] .msg .seen-line, body[data-view="simple"] .sys.presence,
 body[data-view="simple"] .msg > header .msg-acts, body[data-view="simple"] .action-responses,
-body[data-view="simple"] .docs-files, body[data-view="simple"] #docExpandRail { display: none; }
+body[data-view="simple"] .docs-files { display: none; }
 /* The clock or countdown (app.js Clock) is the simple view's: the countdown's chip is the full view's */
 body[data-view="simple"] .stage-chip { display: none; }
 /* The hall's name gives way first: the readout, Help and the ⋯ keep their room on the row */
@@ -2274,7 +2274,48 @@ body[data-view="simple"] .doc-panel .doc-display { background: var(--c-surface);
   body[data-view="simple"] .doc-panel { display: none; }
   body[data-view="simple"][data-tab="shown"] .doc-panel { display: flex; flex: 1 1 auto; max-width: none; max-height: none; border-left: 0; }
   body[data-view="simple"][data-tab="shown"] .left-col { display: none; }
+  /* The tab is the column's way in and out here: no ⇥, and no rail */
+  body[data-view="simple"] .doc-panel .doc-collapse-btn, body[data-view="simple"] .doc-panel .doc-expand-rail { display: none; }
 }
+/* At 900 px wide or more: while the column holds something to read (a file opened with Look, a document or a picture
+   that arrived in a card: app.js, data-reading) it opens wide, its share of the row --bv-col (55 % until its grip moves
+   it, kept on the device), and the chat and the column each keep 360 px; the grip between them is dragged, or tabbed to
+   and moved with ← and →. Collapsed (⇥), the column is its rail, a button that says what it holds and opens it again. */
+@media (min-width: 900px) {
+  body[data-view="simple"][data-reading="1"] .doc-panel { flex: 0 0 var(--bv-col, 55%); min-width: 360px; max-width: calc(100% - 372px); }
+  body[data-view="simple"][data-reading="1"]:not([data-stage-collapsed="1"]) .split-resizer {
+    display: block; flex: 0 0 12px; width: 12px; background: var(--c-surface-raised); border-left: 1px solid var(--c-border); cursor: col-resize; touch-action: none;
+  }
+  body[data-view="simple"] .split-resizer::before { left: -16px; right: -16px; }
+  body[data-view="simple"] .split-resizer::after {
+    content: ''; position: absolute; top: 50%; left: 3px; width: 4px; height: 48px; margin-top: -24px; border-radius: var(--radius-pill); background: var(--c-edge);
+  }
+  body[data-view="simple"] .split-resizer:hover::after { background: var(--c-action); }
+  body[data-view="simple"] .split-resizer:focus-visible::after { background: var(--c-action); }
+  body[data-view="simple"] .doc-panel.collapsed { flex: 0 0 var(--target-touch) !important; min-width: var(--target-touch); max-width: var(--target-touch); }
+  body[data-view="simple"] .doc-panel.collapsed .doc-expand-rail {
+    background: var(--c-surface-raised); color: var(--c-action); border-left: 2px solid var(--c-edge); letter-spacing: 0; font-size: var(--fs-md);
+  }
+  body[data-view="simple"] .doc-panel.collapsed .doc-expand-rail:hover { background: var(--c-surface); border-left-color: var(--c-action); }
+  body[data-view="simple"] .doc-panel.collapsed .doc-expand-rail:focus-visible { background: var(--c-surface); border-left-color: var(--c-action); }
+}
+/* With cards or Earlier in it, the column's empty words ("Nothing on stage.") are not drawn under them */
+body[data-view="simple"]:not([data-shown="0"]) .doc-display > .empty-state { display: none; }
+/* The column's ⇥, a button a finger finds; a card's drawing, and a file's, given the height of a wide column */
+body[data-view="simple"] .doc-collapse-btn { min-width: var(--target-touch); min-height: var(--target-touch); border: 2px solid var(--c-edge); color: var(--c-ink); font-size: var(--fs-lg); }
+body[data-view="simple"][data-reading="1"] .take-card-side .take-card-box { min-height: 16rem; max-height: 60vh; }
+/* What a card and Earlier offer: 👁 Look filled, every other act outlined, each at least 44 px */
+body[data-view="simple"] .take-card-acts { gap: var(--sp-2); }
+body[data-view="simple"] .take-card-acts .msg-act {
+  min-height: var(--target-touch); padding: 0 var(--sp-4); border: 2px solid var(--c-edge); border-radius: var(--radius-sm);
+  background: var(--c-surface-raised); color: var(--c-action); font: inherit; font-size: var(--fs-readout); font-weight: 600; cursor: pointer;
+}
+body[data-view="simple"] .take-card-acts .msg-act[data-action="card.show"], body[data-view="simple"] .take-card-acts .msg-act[data-action="past.look"] {
+  background: var(--c-action); border-color: var(--c-action); color: var(--c-on-action);
+}
+body[data-view="simple"] .take-card-acts .msg-act .act-words, body[data-view="simple"] .doc-actions .msg-act .act-words { font-size: inherit; }
+/* A file opened with Look: its Close as findable as the rest */
+body[data-view="simple"] .doc-actions .msg-act { min-height: var(--target-touch); padding: 0 var(--sp-4); border: 2px solid var(--c-edge); font-size: var(--fs-readout); font-weight: 600; }
 /* On stage content keeps no copy: a long press on iOS offers no save, and nothing is dragged out (in either view on an On
    stage seat: the side bar, its reader and the feed's pictures) */
 body[data-view="simple"] .take-cards, body[data-view="simple"] .doc-display, body[data-view="simple"] .page-layer,
@@ -2302,15 +2343,23 @@ body[data-view="simple"] .msg.mine .body { color: var(--c-ink-muted); }
 body[data-view="simple"] .msg .body p { line-height: 1.4; max-width: 36em; }
 body[data-view="simple"] .msg .reply-quote { font-size: calc(var(--fs-sm) * var(--zoom-msg, 1)); color: var(--c-ink-muted); background: none; padding: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* The response: Got it (or Got all N) and Reply after the words, text actions, 36 px drawn and 44 px to the finger */
-body[data-view="simple"] .msg-response, body[data-view="simple"] .bv-strip-acts { display: flex; flex-wrap: wrap; gap: var(--sp-4); margin-top: 6px; }
-body[data-view="simple"] .msg-response .msg-act, body[data-view="simple"] .bv-strip-acts .msg-act, .bv-text-act {
+/* The response: 👁 Look on a file, Got it (or Got all N), Reply and 📌 after the words, each a button with its edge, at
+   least 44 px, its words at the readout's size and the person's text size; Look filled, as Got it on a 🔥 message */
+body[data-view="simple"] .msg-response, body[data-view="simple"] .bv-strip-acts { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-2); }
+body[data-view="simple"] .msg-response .msg-act, body[data-view="simple"] .bv-strip-acts .msg-act {
+  position: relative; min-height: var(--target-touch); padding: 0 var(--sp-4); border: 2px solid var(--c-edge); border-radius: var(--radius-sm); background: var(--c-surface-raised);
+  color: var(--c-action); font: inherit; font-size: calc(var(--fs-readout) * var(--zoom-msg, 1)); font-weight: 600; cursor: pointer;
+}
+.bv-text-act {
   position: relative; min-height: 36px; padding: 0 var(--sp-2); border: 0; border-radius: var(--radius-sm); background: none;
   color: var(--c-action); font: inherit; font-size: calc(var(--fs-md) * var(--zoom-msg, 1)); font-weight: 600; cursor: pointer;
 }
-body[data-view="simple"] .msg-response .msg-act::before, body[data-view="simple"] .bv-strip-acts .msg-act::before, .bv-text-act::before { content: ''; position: absolute; top: -4px; right: 0; bottom: -4px; left: 0; }
+.bv-text-act::before { content: ''; position: absolute; top: -4px; right: 0; bottom: -4px; left: 0; }
 body[data-view="simple"] .msg-response .msg-act .act-words { font-size: inherit; }
-body[data-view="simple"] .msg.priority .msg-response .msg-act[data-action="msg.ack"], body[data-view="simple"] .bv-strip-acts .msg-act[data-action="msg.ack"] { background: var(--c-action); color: var(--c-on-action); }
+body[data-view="simple"] .msg-response .msg-act:hover { border-color: var(--c-action); }
+body[data-view="simple"] .msg-response .msg-act:focus-visible { border-color: var(--c-action); }
+body[data-view="simple"] .msg-response .msg-act[data-action="msg.look"],
+body[data-view="simple"] .msg.priority .msg-response .msg-act[data-action="msg.ack"], body[data-view="simple"] .bv-strip-acts .msg-act[data-action="msg.ack"] { background: var(--c-action); border-color: var(--c-action); color: var(--c-on-action); }
 
 /* A question: its words at the body size and weight 600, its answers 48 px, Answer in words… a text action */
 body[data-view="simple"] .action-text, body[data-view="simple"] .msg.is-action .action-text { font-size: inherit; font-weight: 600; line-height: 1.4; }
@@ -2373,7 +2422,7 @@ body[data-view="simple"] .director-compose { padding: var(--sp-2) max(16px, env(
 body[data-view="simple"] #directorForm { display: flex; gap: var(--sp-2); align-items: stretch; }
 body[data-view="simple"] #directorForm > * { min-height: var(--target-answer); }
 body[data-view="simple"] .director-compose input#directorInput { font-size: var(--bv-field); padding: 0 var(--sp-3); border: 2px solid var(--c-edge); background: var(--c-surface-raised); color: var(--c-ink); }
-body[data-view="simple"] .priority-btn { min-width: var(--target-touch); padding: 0 var(--sp-3); gap: var(--sp-1); border: 2px solid var(--c-edge); font-size: var(--fs-readout); }
+body[data-view="simple"] .priority-btn { flex: none; min-width: var(--target-touch); padding: 0 var(--sp-3); gap: var(--sp-1); border: 2px solid var(--c-edge); font-size: var(--fs-readout); }
 body[data-view="simple"] .priority-btn.on { border-color: var(--c-fault); box-shadow: none; }
 .priority-btn .pri-word { display: none; }
 body[data-view="simple"] .priority-btn .pri-word { display: inline; }
@@ -2405,6 +2454,16 @@ body[data-view="simple"] .bv-cleared { margin: 0 auto; padding: 0 max(16px, env(
   body[data-view="simple"] #directorForm { gap: 6px; }
   body[data-view="simple"] .director-compose input#directorInput { padding: 0 12px; }
 }
+/* The phone's composer wherever the chat itself is 600 px wide or less, its window wider: beside Shown to you opened wide
+   or dragged wider (app.js, data-narrow-chat), so the field keeps its words and Send its mark */
+body[data-view="simple"][data-narrow-chat="1"] .also-chip .also-long { display: none; }
+body[data-view="simple"][data-narrow-chat="1"] .priority-btn .pri-word { display: none; }
+body[data-view="simple"][data-narrow-chat="1"] .priority-btn { padding: 0; }
+body[data-view="simple"][data-narrow-chat="1"] #directorForm { gap: 6px; }
+body[data-view="simple"][data-narrow-chat="1"] .director-compose input#directorInput { padding: 0 12px; }
+body[data-view="simple"][data-narrow-chat="1"] .director-compose .send-btn.btn.primary { min-width: var(--target-touch); padding: 0 var(--sp-3); }
+body[data-view="simple"][data-narrow-chat="1"] .send-btn .send-icon { display: inline; font-size: var(--fs-lg); line-height: 1; }
+body[data-view="simple"][data-narrow-chat="1"] .send-btn .send-word { display: none; }
 
 /* The ⋯ sheet: 56 px rows, never taller than the screen and scrolled within it; a bottom sheet on a phone */
 .bv-sheet {

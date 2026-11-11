@@ -565,8 +565,9 @@
         inline: (f, o) => (!full(f) ? 3 : o.where === 'strip' && pinnedMine(f, o) ? 1.5 : false), verb: 'pin:mine', mode: 'hold',
         may: (f) => f.pinMine, fits: (f, o) => full(f) || (!!f.tapped && f.tapped === o.id) || (o.type === 'action' && pinnedMine(f, o)), undo: 'msg.pinMine', foldChecked: pinnedMine },
       // 👁 Look (On stage) or Preview (backstage): the file opened in the person's own panel, nothing reported or pushed;
-      // never a file for download only, which AGMessage does not open.
-      { id: 'msg.look', label: (f) => (f.role === 'research' ? 'Preview' : 'Look'), icon: '👁', key: 'Enter', group: '3_keep', verb: 'local', mode: 'local',
+      // never a file for download only, which AGMessage does not open. In the simple view it is a button of the file's
+      // own row, first, on every file it opens (a tap on the file's line is the same Look), not only the one that waits.
+      { id: 'msg.look', label: (f) => (f.role === 'research' ? 'Preview' : 'Look'), icon: '👁', key: 'Enter', group: '3_keep', inline: (f) => (!full(f) ? 0.5 : false), verb: 'local', mode: 'local',
         may: (f) => seesFiles(f), fits: (f, o) => o.type === 'file' && opens(o) },
       // ⬇ Download: the server's act, by a ticket for a seat that may download (the admin, the backstage team but a Viewer
       // account), in the full view; On stage a file is a Look, and only a take shown with Download ticked downloads there.

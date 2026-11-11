@@ -975,6 +975,12 @@ test('the simple view\'s second door: a tap brings a message\'s own row, Got it 
   // never Got it. One's own message tapped draws no button (its status words are its line); nor does a line of the room's.
   const tapped = (id) => seat({ role: 'board', uid: CHAIR, uploadToken: null, forwardable: false, view: 'simple', waiting: { plain: ['m9'], priority: [] }, tapped: id });
   assert.deepEqual(plain(C.inline('msg', tapped('m8'), OBJECTS.anaOld, 3)).map((i) => i.id), ['msg.reply', 'msg.pinMine'], 'answered by a reply, then tapped: Reply and 📌 alone');
+  // A file the page opens: 👁 Look first in its row in the simple view, waiting or not, tapped or not (a tap on its line is
+  // the same Look), and never an inline act of the full view's (its line and its ⋯ open it there).
+  assert.deepEqual(plain(C.inline('msg', SEATS.boardSimple, OBJECTS.anaFile, 4)).map((i) => [i.id, i.icon, i.label]), [['msg.look', '👁', 'Look']], 'a file not waiting: Look alone');
+  assert.deepEqual(plain(C.inline('msg', tapped('m3'), OBJECTS.anaFile, 4)).map((i) => i.id), ['msg.look', 'msg.reply', 'msg.pinMine'], 'a file tapped: Look first, then Reply and 📌');
+  assert.deepEqual(plain(C.inline('msg', SEATS.boardSimple, Object.assign({}, OBJECTS.anaFile, { transferOnly: true }), 4)), [], 'a file for download only opens nowhere: no Look');
+  assert.ok(!plain(C.inline('msg', SEATS.board, OBJECTS.anaFile, 4)).some((i) => i.id === 'msg.look'), 'the full view: no inline Look');
   assert.deepEqual(plain(C.inline('msg', tapped('m1'), OBJECTS.boardText, 3)).map((i) => i.id), ['msg.pinMine'], 'one\'s own message tapped: 📌 alone, its status words its line');
   assert.deepEqual(plain(C.inline('msg', tapped('m7'), OBJECTS.system, 3)).map((i) => i.id), [], 'a line of the room\'s tapped: no button');
   assert.deepEqual(plain(C.inline('msg', tapped('m4'), OBJECTS.anaQuestion, 3)).map((i) => i.id), ['msg.pinMine'], 'a question tapped: its answers its row, and 📌');

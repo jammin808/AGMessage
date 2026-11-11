@@ -7511,6 +7511,26 @@ laptop and no Board device walked)
   the width (`rightMenu` in `test/browser-smoke.js`, at each of its three right-clicks; the watch only listens). One
   local run of this build missed a right-click on a message's time on the account's hall page, while that message's ⋯
   and Shift+F10 opened its menu; its rerun did not, and nothing here explains it yet. Nothing that ships changed.
+- The Board's chat view: a file is readable, Shown to you comes back, and its acts are buttons. The owner's walk of
+  run 129's build found three things on a Board tablet, each reproduced here at 1180 × 820 before it changed. A file
+  opened with 👁 Look, or a document sent to the side bar, sat in a 360 px column nothing could widen, a PDF's page too
+  small to read. ⇥ closed the column for good: the simple view hid the rail that opens it again, and the closed state
+  was kept on the device, so a reload kept it shut. And Look, Got it and Reply were blue words with no edge. Now the
+  column opens wide while it holds something to read (a file opened with Look, or a card that draws what arrived in
+  the side bar): 55 % of the row, with each side keeping 360 px. A grip between the chat and the column sets its
+  share, dragged or tabbed to and moved with ← and →, and the device keeps it. A document drawn in a card is laid out
+  again for the card's new width (`pagelayer.mjs` `refit`). Closed with ⇥, the column is a rail, "📺 Shown to you • 2 ⇤",
+  that opens it again. Below 900 px, Look chooses the Shown to you tab, and the tab opens a column closed on a wider
+  screen. Every file the page opens has 👁 Look in its own row, first and filled. Got it, Reply, 📌 Pin for me, and
+  the cards' and Earlier's acts are outlined buttons of 44 px at the readout's size. With cards in it, the column no
+  longer says "Nothing on stage." The minimise toast names the column it went to ("Minimised to 📺 Shown to you.").
+  The composer follows the chat's own width, not only the window's. A chat 600 px wide or less beside the wide column
+  draws the phone's composer (🔥 alone, Send's ➤). Its placeholder is measured again whenever the field changes width.
+  The smoke's layout leg found it at 1024 px: with the column opened wide, "Message everyone here…" no longer fit, nor
+  did the short words once the grip had made the column 60 %.
+  `test/catalog.test.js` holds Look first in a file's row in the simple view, and none in the full view. The smoke's
+  layout leg reads Look at nine sizes: the tab below 900 px; at 900 px or more, the wide column, ← moving it to 60 %,
+  and ⇥ leaving the rail that opens it.
 - A room's transcript draws a take after every message posted before it. The transcript draws each entry before the
   first message at or after its time, so a take made in the same millisecond as the message just before it was drawn
   before that message: CI's CR LF run of 964c573 drew the operator's web page above "After the quote", sent first. A

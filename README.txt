@@ -257,6 +257,14 @@ Every day of the event
   three wait) and "Reply". Tap any other message for its own Got it,
   Reply and "Pin for me" (then "Unpin for me"). A question: tap an
   answer, or "Answer in words..."; "Change" picks another.
+  A file has "Look" under it: it opens in Shown to you, which takes
+  over half the screen on a tablet held sideways (drag the bar between
+  the chat and it to make it wider or narrower; the tablet keeps it),
+  and the Shown to you tab on a phone or a tablet held upright. The
+  arrow at its top right (->|) closes it to a strip on the right edge,
+  "Shown to you"; tap the strip to bring it back. A document the
+  backstage team sends to your side bar has its own "Look", which shows
+  it over the chat.
   The pinned bar under the header holds the room's pins first ("For
   everyone"), then your own ("For you"), "1 of 2" when there are more:
   tap it to go to the message, and again for the next. A pinned question
