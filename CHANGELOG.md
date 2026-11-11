@@ -11,6 +11,56 @@ Windows readings of run 101. Nothing in it is measured on the show laptop or wal
 (`docs/DESIGN.md`, `docs/DEVICES.md`). The tag `v0.6.0` and its release are the owner's, and wait for that walk and
 for a CI run that passes whole, the installer's life cycle among it.
 
+**The chat stays where a reader scrolls to when a message arrives in that moment, and the 🔥 strip follows its message**
+(CI's run 132, the first on the tag `v0.6.0`, whose Windows smoke failed one step)
+- The hall page kept the reader's place in the chat as its last scroll event read it. A scroll made by script that moves
+  the feed at once (Open chat from the 🔥 strip over a take, a message gone to where smooth scrolling is off, a control
+  focused away from the end) fires its event a frame later, and a message drawn in between read the place from before
+  the scroll and took the reader back to the end. The page now reads the place from the feed itself whenever the feed
+  has moved since its last event: a message arriving in that frame is drawn below and the reader stays where the scroll
+  put them. A reader at the end is still followed as messages are added below. A message's arrival, a page catching up
+  after a drop, the earlier history drawn while the page is idle and the simple view's own moves (its view changed, a
+  response drawn) read the place so. Two read the place as the last event left it, as before: the simple view's feed
+  resized (a frame fires its scroll events before its resize observers, so a scroll by the reader or by script has been
+  read by then), and a feed behind the Shown to you tab, which has no place of its own to read and records none when it
+  is put at its end, so a reader who was at the end comes back to Chat at the end with what arrived meanwhile in view.
+  Not changed here: a smooth go-to (a reply's quote followed, the pinned bar's Go to it, on Chrome and Edge) moves the
+  feed from its next frame on, and a message arriving in that first frame still takes the reader back to the end; and a
+  reader at the end who turns a phone is left a few lines above it, no longer followed, as on the tag's code.
+- What it broke in CI: the 🔥 strip goes once its message is in view, and the smoke scrolled the 🔥 message into view as
+  soon as the strip showed, before every note had reached Margaret's page (say() is answered once the server has a note;
+  the page draws it when its own socket brings it). Ana's sends wait for each answer in turn, and her bucket spaces the
+  last notes about a fifth of a second apart, so the last one or two can still be on their way to the page as it
+  scrolls; run 132's line does not say whether one was. A note drawn in that frame takes the feed back to its end, and
+  the strip stays: what run 132's Edge leg saw, on the code runs 130 and 131 passed. Reproduced on Linux by drawing a
+  note in the same task as the scroll: the feed went from 1442 to its end at 2748 and the strip stayed; the same note
+  two frames later left it at 1442 and the strip went. Two independent reads of the code and the failing line ranked
+  this cause first; the other they named, a page that drew no frame for 5 s, is not ruled out by run 132's line, and the
+  step's line now says, if it fails again, where the feed was, where the page read its end, how many frames the page
+  drew and how many notes it held.
+- The 🔥 strip follows the message's node as it is drawn now. It watched the node it first saw for that message, so a
+  feed drawn afresh with the message still the newest waiting (a rejoin answered with the history, as a tablet back from
+  a long sleep is) left it watching a node gone from the page, and the strip stayed over the chat until Got it, the
+  message in view or not; a message drawn after the strip first named it (the history drawn while the page is idle) was
+  never watched. The same message keeps what was last seen of it until its new node is seen, so the strip neither blinks
+  nor is said again. Found by the same reads; on the tag's code the strip stayed with the message's new node scrolled
+  into view, and with this change it goes.
+- An independent review of the change read every path that reads the reader's place, before it was pushed. It found one
+  the change had broken, now as before: the Shown to you tab, where the place read was the hidden feed's scrollTop of 0,
+  so a reader came back to Chat above what had arrived meanwhile, with nothing said below (on a tablet upright: at 1999
+  of 2130 with the change, at the end on the tag's code and with this one). A second it named, the feed resized as a
+  phone is turned, measures the same on the tag's code, the change before its review and this one (in landscape the
+  reader is 151 px above the end, and back upright at it), so the resize keeps the tag's reading. It also found the
+  strip blinking on a redraw, and three weaknesses in the new smoke steps (listeners that a throw could leave
+  unrestored, frame counts that ran on, a wait's line on the wrong check), all fixed before the push.
+- The smoke reads the strip only once every note is drawn on the page, and three new steps hold the page to all of it: a
+  note held at Margaret's socket and handed to the page's own listeners in the same task as the scroll (the reader stays
+  where the scroll put them, the 🔥 message in view, and the strip goes); her feed drawn afresh through the page's own
+  `renderHistory` with the 🔥 message's new node scrolled into view (the strip goes); and, on the upright tablet, a
+  message arriving while the chat is behind 📺 Shown to you (back on Chat, the reader is at the end with it in view and
+  nothing said below). The first fails in the smoke on the tag's page; the second fails on the tag's code and the third
+  on the change before its review, in the same steps run against them.
+
 **The admin's guide**
 - AGMessage serves an admin's guide at `/guide/`, five pages read in any browser that reaches it: setting up (the first
   start, the token and the first admin, the admin page, halls and rooms, codes and invite links, screens, the show

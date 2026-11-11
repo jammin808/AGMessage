@@ -1262,7 +1262,7 @@ const Earlier = (function () {
       if (mine !== era) return;
       const run = () => { do drawStep(steps.shift()); while (steps.length && deadline.timeRemaining() > 0); };
       // The reader at the end stays there; anyone else keeps what they read where it was on the screen.
-      if (place.atEnd) { run(); feed.scrollTop = feed.scrollHeight; } else holdView(run, gap);
+      if (atEndNow()) { run(); putAtEnd(); } else holdView(run, gap);
       refreshPinned();
       refreshDocPinnedList();
       HelpChip.draw();
@@ -4240,6 +4240,7 @@ function escapeHtml(s) {
 const newBelow = document.getElementById('newBelow');
 const place = {
   atEnd: true,      // the feed was within a line of the bottom when it was last moved, by the reader or the page
+  top: 0,           // the feed's scrollTop when atEnd was read (NaN: read while the feed was not drawn)
   unread: 0,        // messages from others drawn below a feed the reader had scrolled up
   asks: 0,          // the questions among them (the simple view names them)
   touched: false,   // the person touched the page since the divider was put where it is
@@ -4249,13 +4250,28 @@ function nearEnd() {
   const line = parseFloat(getComputedStyle(feed).fontSize) * 1.5;
   return feed.scrollHeight - feed.scrollTop - feed.clientHeight <= line;
 }
+/**
+ * Whether the reader is at the feed's end now. place.atEnd is what the feed's last scroll event read; a scroll since then
+ * whose event has not fired yet (one made by script that moves the feed at once: Open chat from the 🔥 strip over a take,
+ * a message gone to where smooth scrolling is off, a control focused away from the end) is read from the feed itself, so
+ * nothing drawn in that frame takes the reader back to the end they have just left. What is added below leaves scrollTop
+ * where it was, so a reader at the end is still followed. A feed that is not drawn (behind the Shown to you tab) has no
+ * place of its own to read, and one put at its end while not drawn recorded none: the last place read stands, as it does
+ * for the feed's own resize (the simple view's ResizeObserver).
+ */
+function atEndNow() { return Number.isNaN(place.top) || feed.scrollTop === place.top || !feed.clientHeight ? place.atEnd : nearEnd(); }
+/** The feed put at its end, and read so; while it is not drawn its scrollTop reads 0 and is no place of its own. */
+function putAtEnd() {
+  feed.scrollTop = feed.scrollHeight;
+  place.atEnd = true;
+  place.top = feed.clientHeight ? feed.scrollTop : NaN;
+}
 /** While a menu or an ask is open the feed never moves under it. */
-function readerAtEnd() { return (place.atEnd || nearEnd()) && !AGM.menu.isOpen() && !AGM.ask.isOpen(); }
+function readerAtEnd() { return (atEndNow() || nearEnd()) && !AGM.menu.isOpen() && !AGM.ask.isOpen(); }
 /** While a page draws what it missed (rejoin): the reader's place as read before the first, and whether to follow. */
 let catchUp = null;
 function scrollToBottom() {
-  feed.scrollTop = feed.scrollHeight;
-  place.atEnd = true;
+  putAtEnd();
   if (place.unread) drawNewBelow(0);
 }
 /** Follow the newest message: now, or once a page has drawn all it missed. */
@@ -4326,6 +4342,7 @@ const noteTouch = () => { if (document.visibilityState === 'visible') place.touc
 for (const ev of ['pointerdown', 'keydown', 'wheel']) document.addEventListener(ev, noteTouch, { capture: true, passive: true });
 feed.addEventListener('scroll', () => {
   place.atEnd = nearEnd();
+  place.top = feed.scrollTop;
   if (place.atEnd && place.unread) drawNewBelow(0);
 }, { passive: true });
 newBelow.addEventListener('click', scrollToBottom);
@@ -7597,7 +7614,9 @@ const Simple = (function () {
     : null;
   // The feed's height moves with what the simple view draws around it (the strip, the line over the composer, the tabs):
   // a reader at its end stays at its end.
-  if (typeof ResizeObserver === 'function') new ResizeObserver(() => { if (isSimple() && place.atEnd) feed.scrollTop = feed.scrollHeight; }).observe(feed);
+  // It reads the place as the last scroll event left it: a frame fires its pending scroll events before its resize
+  // observers, so a reader's or a script's scroll has been read by then.
+  if (typeof ResizeObserver === 'function') new ResizeObserver(() => { if (isSimple() && place.atEnd) putAtEnd(); }).observe(feed);
   let watched = null;
   const $ = (id) => document.getElementById(id);
   const isSimple = () => view === 'simple';
@@ -7606,7 +7625,7 @@ const Simple = (function () {
   function setView(v) {
     const next = v === 'simple' ? 'simple' : 'full';
     const was = view;
-    const atEnd = place.atEnd;
+    const atEnd = atEndNow();
     view = next;
     body.dataset.view = next;
     // The hall page's first paint reads the view it last drew (theme-init.js); the support view is the admin's browser.
@@ -7629,7 +7648,7 @@ const Simple = (function () {
       drawComposers();
       drawSkip();
       drawNewBelow(place.unread, place.asks);
-      if (atEnd) { feed.scrollTop = feed.scrollHeight; place.atEnd = true; }
+      if (atEnd) putAtEnd();
     }
     const head = document.getElementById('docPanelTitle');
     if (head) { head.textContent = panelHeading(); docPanel.setAttribute('aria-label', head.textContent); }
@@ -7677,9 +7696,9 @@ const Simple = (function () {
       waitsDue = false;
       if (!isSimple()) { drawCleared(); return; }
       // A response drawn or taken away moves what is below it: a reader at the end of the chat stays at its end.
-      const end = place.atEnd || nearEnd();
+      const end = atEndNow() || nearEnd();
       factsChanged({ waiting: waitingNow() });
-      if (end) { feed.scrollTop = feed.scrollHeight; place.atEnd = true; }
+      if (end) putAtEnd();
       for (const m of allMessages) { const n = messagesById.get(m.id); if (n && n.classList.contains('msg')) said(n, m); }
       drawCleared();
       drawStrip();
@@ -7749,11 +7768,16 @@ const Simple = (function () {
     const hot = isSimple() ? F.waiting.priority.map(findMessage).filter((m) => m && m.from && m.from.role === 'research') : [];
     const m = hot.length ? hot[hot.length - 1] : null;
     const id = m ? m.id : '';
-    if (id !== hotId) {
+    // The observer watches the node drawn now: a feed drawn afresh (a rejoin answered with the history) draws a new node
+    // for the same message and the old one is never in view again, and one drawn later (the history drawn while the page
+    // is idle) has no node until then. The same message keeps what was last seen of it until the new node's first record,
+    // so the strip neither blinks nor is said again.
+    const node = id ? messagesById.get(id) || null : null;
+    if (id !== hotId || node !== watched) {
+      if (id !== hotId) hotSeen = null;
       hotId = id;
-      hotSeen = null;
       if (seer && watched) seer.unobserve(watched);
-      watched = id ? messagesById.get(id) || null : null;
+      watched = node;
       if (seer && watched) seer.observe(watched);
     }
     // Without the observer the strip always shows: the safe failure. Behind the Shown to you tab it is out of view.

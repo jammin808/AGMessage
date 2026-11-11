@@ -7016,7 +7016,18 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
         pressed: [...document.querySelectorAll('#bvTabs button')].map((b) => b.textContent + ':' + b.getAttribute('aria-pressed')), side: document.getElementById('docPanel').getClientRects().length > 0 })`, 10000) || 'null');
       await upright.eval(`document.getElementById('tabShown').click()`);
       const uprightTab = JSON.parse(await upright.until(`document.body.dataset.tab === 'shown' && JSON.stringify({ chat: document.getElementById('leftCol').getClientRects().length > 0, panel: document.getElementById('docPanel').getClientRects().length > 0, head: document.querySelector('.doc-panel-header strong').textContent })`, 5000) || 'null');
+      // A message arriving while the chat is behind the tab (from another Board page, so nothing below waits on it): back on
+      // Chat, a reader who was at the end is at the end with it in view and nothing said below. Behind the tab the feed has no
+      // box, and what its place reads there is no place of its own.
+      const BEHIND = 'The water jug is by the lectern.';
+      const behindSent = await bvTabs[0].eval(`new Promise((r) => socket.emit('message', { type: 'text', text: '${BEHIND}' }, (x) => r(!!x && x.ok === true)))`);
+      const behindHeard = await upright.until(`allMessages.some((m) => m.text === '${BEHIND}') && document.body.dataset.tab === 'shown' && 'heard'`, 8000);
       await upright.eval(`document.getElementById('tabChat').click()`);
+      const behindBack = await upright.until(`(() => { const m = allMessages.find((x) => x.text === '${BEHIND}'); const n = m && messagesById.get(m.id); if (!n || document.body.dataset.tab !== 'chat') return null;
+        const f = feed.getBoundingClientRect(), r = n.getBoundingClientRect(); return nearEnd() && r.top >= f.top && r.bottom <= f.bottom + 1 && newBelow.hidden && 'kept'; })()`, 5000);
+      const behindWhy = behindBack ? null : await upright.eval(`JSON.stringify({ top: Math.round(feed.scrollTop), end: Math.round(feed.scrollHeight - feed.clientHeight), atEnd: place.atEnd, below: newBelow.hidden ? '' : newBelow.textContent })`);
+      report(behindSent === true && behindHeard === 'heard' && behindBack === 'kept',
+        `at 820×1180, a message arriving while the chat is behind 📺 Shown to you: back on Chat, a reader who was at the end is at the end with it in view and nothing said below (${JSON.stringify({ behindSent, behindHeard, behindBack, behindWhy })})`);
       // Withdrawn, it leaves every Board page: the steps below start from nothing shown.
       const sideGone = sideDoc && sideDoc.ok ? await emit(bvAdmin, 'page:withdraw', { code: bvHall, seq: sideDoc.seq }) : null;
       const uprightAfter = await upright.until(`document.body.dataset.shown === '0' && 'none'`, 5000);
@@ -7125,16 +7136,59 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       for (let i = 1; i <= 14; i++) await say({ type: 'text', text: 'Agenda note ' + i + ': the next speaker is on the second microphone, please keep the lectern clear.' });
       await say({ type: 'text', text: 'The livestream is running ten seconds late.', priority: true });
       for (let i = 15; i <= 26; i++) await say({ type: 'text', text: 'Agenda note ' + i + ': the speaker after next waits in the wings with the second microphone.' });
+      // say() is answered once the server has the note; Margaret's page draws it when her own socket brings it. The strip
+      // is read with every note drawn, so none arrives as the feed is scrolled below.
+      const notesDrawn = await meg.until(`allMessages.some((m) => m.text === 'Agenda note 26: the speaker after next waits in the wings with the second microphone.') && 'drawn'`, 10000);
       const stripAtEnd = await meg.until(`(() => { const s = document.getElementById('bvStrip'); return !s.hidden && getComputedStyle(s).display !== 'none' && JSON.stringify({ text: document.getElementById('bvStripText').textContent, more: document.getElementById('bvStripMore').hidden ? '' : document.getElementById('bvStripMore').textContent, got: [...s.querySelectorAll('button')].map((b) => b.textContent.trim()) }); })()`, 8000);
-      await meg.eval(`(() => { const n = messagesById.get(allMessages.find((m) => m.text === 'The livestream is running ten seconds late.').id); n.scrollIntoView({ block: 'center' }); return true; })()`);
+      // If the strip stays, the line says why: where the feed is and where its end is, whether the page reads it at its
+      // end, how many frames the page drew since the scroll, how many notes it holds, and whether the 🔥 node is drawn.
+      const HOT_NODE = `messagesById.get(allMessages.find((m) => m.text === 'The livestream is running ten seconds late.').id)`;
+      const FEED_PLACE = `JSON.stringify({ top: Math.round(feed.scrollTop), end: Math.round(feed.scrollHeight - feed.clientHeight), atEnd: place.atEnd, frames: window.__frames, notes: allMessages.filter((m) => /^Agenda note/.test(m.text || '')).length, drawn: ${HOT_NODE}.isConnected })`;
+      const COUNT_FRAMES = `window.__frames = 0; { const run = window.__frameRun = (window.__frameRun || 0) + 1; const stop = performance.now() + 6000; const frame = () => { if (window.__frameRun !== run) return; window.__frames++; if (performance.now() < stop) requestAnimationFrame(frame); }; requestAnimationFrame(frame); }`;
+      await meg.eval(`(() => { ${COUNT_FRAMES} ${HOT_NODE}.scrollIntoView({ block: 'center' }); return true; })()`);
       const stripInView = await meg.until(`document.getElementById('bvStrip').hidden && 'gone'`, 5000);
+      const stripWhy = stripInView ? null : await meg.eval(FEED_PLACE);
+      report(notesDrawn === 'drawn' && !!stripAtEnd && JSON.parse(stripAtEnd).text === 'The livestream is running ten seconds late.' && JSON.parse(stripAtEnd).more === '+1 more' && JSON.stringify(JSON.parse(stripAtEnd).got) === JSON.stringify(['👍Got it']) && stripInView === 'gone',
+        `the 🔥 strip holds the newest priority message only while it is out of view, with "+1 more" and its Got it alone; scrolled into view it goes (${JSON.stringify({ notesDrawn, stripAtEnd, stripInView, stripWhy })})`);
+      await meg.eval(`scrollToBottom(); true`);
+      await meg.until(`!document.getElementById('bvStrip').hidden`, 5000);
+      // A note that reaches the page in the frame the reader scrolls up in, before that scroll's event fires (a scroll made
+      // by script that moves the feed at once: Open chat from the 🔥 strip over a take, a control focused away from the
+      // end), is drawn below and leaves the reader where the scroll put them. The note is held at Margaret's socket and
+      // handed to the page's own listeners in the same task as the scroll, those listeners put back first.
+      const NOTE_27 = 'Agenda note 27: the lectern light is on the second switch.';
+      await meg.eval(`(() => { window.__noteListeners = socket.listeners('message'); window.__notesHeld = []; socket.off('message'); socket.on('message', (m) => window.__notesHeld.push(m)); return true; })()`);
+      await say({ type: 'text', text: NOTE_27 });
+      const noteHeld = await meg.until(`window.__notesHeld.some((m) => m.text === '${NOTE_27}') && 'held'`, 5000);
+      const sameFrame = await meg.eval(`(() => {
+        socket.off('message'); for (const heard of window.__noteListeners) socket.on('message', heard);
+        ${COUNT_FRAMES} ${HOT_NODE}.scrollIntoView({ block: 'center' });
+        for (const m of window.__notesHeld) for (const heard of window.__noteListeners) heard(m);
+        const box = feed.getBoundingClientRect(), r = ${HOT_NODE}.getBoundingClientRect();
+        return JSON.stringify({ drawn: allMessages.some((m) => m.text === '${NOTE_27}'), atEnd: nearEnd(), inView: r.top >= box.top && r.bottom <= box.bottom }); })()`);
+      const sameFrameGone = await meg.until(`(() => { const box = feed.getBoundingClientRect(), r = ${HOT_NODE}.getBoundingClientRect(); return document.getElementById('bvStrip').hidden && !nearEnd() && r.top >= box.top && r.bottom <= box.bottom && 'gone'; })()`, 5000);
+      const sameFrameWhy = sameFrameGone ? null : await meg.eval(FEED_PLACE);
+      report(noteHeld === 'held' && JSON.stringify(JSON.parse(sameFrame || 'null')) === JSON.stringify({ drawn: true, atEnd: false, inView: true }) && sameFrameGone === 'gone',
+        `a note drawn in the frame the reader scrolls up in, before that scroll's event, is drawn below and leaves the reader where the scroll put them; the 🔥 strip goes as its message stays in view (${JSON.stringify({ noteHeld, sameFrame, sameFrameGone, sameFrameWhy })})`);
+      await meg.eval(`scrollToBottom(); true`);
+      await meg.until(`!document.getElementById('bvStrip').hidden`, 5000);
+      // A feed drawn afresh (what a rejoin the server answers with the history draws: the page's own renderHistory, handed
+      // what the page holds) draws a new node for the 🔥 message, still the newest waiting. The strip follows the new node:
+      // it holds the message while it is out of view, and goes once the new node is scrolled into view.
+      await meg.eval(`(() => { renderHistory({ history: allMessages.slice(), older: [], files: [...roomFiles.values()], more: false }); return true; })()`);
+      const redrawnHeld = await meg.until(`(() => { const n = ${HOT_NODE}; return n && n.isConnected && !document.getElementById('bvStrip').hidden && document.getElementById('bvStripText').textContent === 'The livestream is running ten seconds late.' && 'held'; })()`, 8000);
+      await meg.eval(`(() => { ${COUNT_FRAMES} ${HOT_NODE}.scrollIntoView({ block: 'center' }); return true; })()`);
+      const redrawnGone = await meg.until(`document.getElementById('bvStrip').hidden && 'gone'`, 5000);
+      const redrawnWhy = redrawnGone ? null : await meg.eval(FEED_PLACE);
+      report(redrawnHeld === 'held' && redrawnGone === 'gone',
+        `a feed drawn afresh (a rejoin answered with the history) draws the 🔥 message anew: the strip holds it while it is out of view, and goes once the new node is scrolled into view (${JSON.stringify({ redrawnHeld, redrawnGone, redrawnWhy })})`);
       await meg.eval(`scrollToBottom(); true`);
       await meg.until(`!document.getElementById('bvStrip').hidden`, 5000);
       await meg.eval(`document.querySelector('#bvStrip button[data-action="msg.ack"]').click()`);
       const stripGot = await meg.until(`(() => { const m = allMessages.find((x) => x.text === 'The livestream is running ten seconds late.'); const next = document.getElementById('bvStrip').hidden ? '' : document.getElementById('bvStripText').textContent;
         return (m.reactions || []).some((r) => r.uid === MY_UID && r.emoji === '👍') && next === 'Wrap up resolution 3 now, please.' && JSON.stringify({ next }); })()`, 8000);
-      report(!!stripAtEnd && JSON.parse(stripAtEnd).text === 'The livestream is running ten seconds late.' && JSON.parse(stripAtEnd).more === '+1 more' && JSON.stringify(JSON.parse(stripAtEnd).got) === JSON.stringify(['👍Got it']) && stripInView === 'gone' && JSON.parse(stripGot || 'null') && JSON.parse(stripGot).next === 'Wrap up resolution 3 now, please.',
-        `the 🔥 strip holds the newest priority message only while it is out of view, with "+1 more" and its Got it alone; scrolled into view it goes; its Got it answers the one shown, and the strip moves to the next (${JSON.stringify({ stripAtEnd, stripInView, stripGot })})`);
+      report(!!JSON.parse(stripGot || 'null') && JSON.parse(stripGot).next === 'Wrap up resolution 3 now, please.',
+        `the 🔥 strip's Got it answers the one it shows, and the strip moves to the next (${stripGot})`);
       // ↓ n new, scrolled up: it names a question among them.
       await meg.eval(`(() => { feed.scrollTop = 0; feed.dispatchEvent(new Event('scroll')); return true; })()`);
       await meg.until('!place.atEnd', 3000);
