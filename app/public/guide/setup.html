@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>AGMessage — guide: setting up</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <script src="/theme-init.js"></script>
+</head>
+<body class="acct-page guide-page">
+  <a class="skip-link" href="#guideHead">Skip to the guide</a>
+  <header class="acct-bar">
+    <a class="acct-brand" href="/"><span class="brand-mark small">AG</span> AGMessage</a>
+    <nav class="acct-nav" aria-label="AGMessage">
+      <a class="btn ghost small" href="/halls.html">Halls</a>
+      <a class="btn ghost small" href="/admin.html">Admin</a>
+    </nav>
+  </header>
+
+  <main class="guide">
+    <nav class="guide-parts" aria-label="The guide's parts">
+      <a href="/guide/">Contents</a>
+      <a href="/guide/setup.html" aria-current="page">Setting up</a>
+      <a href="/guide/laptops.html">Laptops</a>
+      <a href="/guide/devices.html">Tablets and phones</a>
+      <a href="/guide/accounts.html">People and accounts</a>
+    </nav>
+
+    <h1 id="guideHead" tabindex="-1">Setting up AGMessage</h1>
+    <p class="guide-lede">From the first start to a show day: the admin token and the first account, the admin page, halls and
+      rooms, how people get in, screens, the show network, and what to do before doors and after the event.</p>
+
+    <nav class="guide-toc" aria-label="On this page">
+      <p class="guide-toc-head">On this page</p>
+      <ol>
+        <li><a href="#choose">Installed or portable</a></li>
+        <li><a href="#first-start">The first start</a></li>
+        <li><a href="#token">The admin token and Admin login</a></li>
+        <li><a href="#first-admin">The first admin account</a></li>
+        <li><a href="#admin-page">The admin page</a></li>
+        <li><a href="#halls">Halls and rooms</a></li>
+        <li><a href="#codes">Codes and invite links</a></li>
+        <li><a href="#people">People in a room</a></li>
+        <li><a href="#screens">Screens</a></li>
+        <li><a href="#show-network">Stagewatch, Patterns and PlayMap</a></li>
+        <li><a href="#ai">AI drafts</a></li>
+        <li><a href="#https">Encrypted connections</a></li>
+        <li><a href="#tunnel">The internet link</a></li>
+        <li><a href="#show-day">A show day</a></li>
+        <li><a href="#event">After the event</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="choose">Installed or portable</h2>
+    <p>AGMessage comes two ways, and both serve the same pages.</p>
+    <ul>
+      <li><strong>Installed</strong>, for your own show laptop: the installer
+        (<code>AGMessage-Setup-&lt;version&gt;-unsigned.exe</code>) puts it in <code>C:\Program Files\AGMessage</code> and its data
+        in <code>C:\ProgramData\AGMessage</code>. It starts with Windows, with nobody signed in, and has no window: you reach it
+        from <span class="guide-path"><span class="ui">Start</span> → <span class="ui">AGMessage</span></span>.</li>
+      <li><strong>Portable</strong>, for a venue's laptop or any laptop that is not yours: a zip with its own runtime. Nothing is
+        installed; it runs in a black window that stays open while the show runs.</li>
+    </ul>
+    <p>Both answer on port 3023. <a href="/guide/laptops.html#choose">Laptops</a> says more about each, and how to move a
+      portable folder into an installed AGMessage.</p>
+
+    <h2 id="first-start">The first start</h2>
+    <h3>Portable</h3>
+    <ol class="guide-steps">
+      <li>Right-click the zip and choose Extract All. A copy started from inside the zip stops and says
+        <q>AGMessage was started from inside the zip.</q></li>
+      <li>In the <code>AGMessage</code> folder, double-click <code>start-agmessage.bat</code>. A black window opens and says
+        <q>AGMessage is starting...</q> Leave it open while the show runs.</li>
+      <li>The first time a folder serves, Windows Firewall asks about <code>node.exe</code>: choose
+        <strong>Allow access</strong>. On a standard Windows account this needs an administrator's password.</li>
+      <li>The window shows the addresses: <code>Local:</code> for this laptop and <code>LAN:</code> for everyone else (for
+        example <code>http://192.168.1.42:3023</code>), then the Admin login block with its <code>Token:</code> line. Your
+        browser opens on this copy once it serves.</li>
+      <li>Share the <code>LAN:</code> address with the crew and the Board. They open it in any browser on the venue network.</li>
+    </ol>
+    <p>To stop, close the window or press <kbd>Ctrl</kbd>+<kbd>C</kbd> in it. Halls, messages and accounts are kept.</p>
+    <h3>Installed</h3>
+    <ol class="guide-steps">
+      <li>Run the installer from the Windows account you run shows from. Windows asks for an administrator's approval once. Its
+        pages are described in <a href="/guide/laptops.html#installer">Laptops: the installer</a>.</li>
+      <li>On its last page, <span class="ui">The first admin account</span>, you may make the first admin account now. Leave it
+        empty to make it later at the laptop, with the token.</li>
+      <li>Open <span class="guide-path"><span class="ui">Start</span> → <span class="ui">AGMessage</span> →
+        <span class="ui">Open AGMessage</span></span>. It opens <code>http://localhost:3023</code> in your browser.</li>
+    </ol>
+
+    <h2 id="token">The admin token and Admin login</h2>
+    <p>The admin token is 16 characters that AGMessage makes each time it starts, so a restart means a new one.</p>
+    <ul>
+      <li><strong>Portable</strong>: it is the <code>Token:</code> line in the black window, under <q>Admin login (only from this
+        host laptop):</q></li>
+      <li><strong>Installed</strong>: <span class="guide-path"><span class="ui">Start</span> → <span class="ui">AGMessage</span>
+        → <span class="ui">Show the admin token</span></span>. Only the laptop's admin, and an account given the token right,
+        can read it.</li>
+    </ul>
+    <ol class="guide-steps">
+      <li>On the AGMessage laptop itself, open <code>http://localhost:3023/admin</code>.</li>
+      <li>Type the token in <span class="ui">Admin token</span>, then press <span class="ui">Unlock admin</span>.</li>
+    </ol>
+    <aside class="guide-watch" aria-label="Watch for">
+      <p><strong>△ Watch for</strong> The token works only on the laptop, opened as <code>localhost</code>. From any other
+        device, and from the laptop's own LAN address, it is refused: <q>Admin login is only allowed on the host laptop.</q>
+        Use an admin account there instead. After five wrong tokens, each further wrong one is refused for a minute; the right
+        one still opens it.</p>
+    </aside>
+
+    <h2 id="first-admin">The first admin account</h2>
+    <p>While AGMessage has no accounts, its sign-in page shows <span class="ui">Create the first admin</span>. It works only on
+      the AGMessage laptop, with the token.</p>
+    <ol class="guide-steps">
+      <li>On the laptop, open <code>http://localhost:3023</code>.</li>
+      <li>Fill in <span class="ui">Admin token</span>, <span class="ui">Your name</span>, <span class="ui">Username</span> and
+        <span class="ui">Password</span>, then press <span class="ui">Create admin account</span>.</li>
+      <li>It signs you in and opens the halls board. Its <span class="ui">Accounts</span> link makes everyone else's account:
+        <a href="/guide/accounts.html#add">People: add a person</a>. Later, sign in with it on the
+        <span class="ui">Sign in</span> tab.</li>
+    </ol>
+    <p>A password is 10 to 128 characters; a few words together is easy to type and hard to guess. It may not be a common
+      password, one character repeated, or contain the username or the person's name.</p>
+
+    <h2 id="admin-page">The admin page</h2>
+    <p>The admin page (<code>/admin.html</code>) opens for the token at the laptop, or for an account allowed app settings,
+      from any device on the venue network. Its header has <span class="ui">New hall</span>, the theme button and
+      <span class="ui">Logout</span>. On the left, <span class="ui">Halls</span> lists each hall and its rooms; choose one to
+      watch it. Under the hall you watch come its code, <span class="ui">People in this room</span> and
+      <span class="ui">Live messages</span>. Then, in order:</p>
+    <div class="table-wrap">
+      <table class="acct-table guide-table">
+        <thead><tr><th scope="col">Section</th><th scope="col">What it is for</th></tr></thead>
+        <tbody>
+          <tr><td><span class="ui">✨ AI drafts</span></td><td>The Anthropic key that turns AI drafts and minutes on. <a href="#ai">AI drafts</a></td></tr>
+          <tr><td><span class="ui">📡 Show network</span></td><td>The default Stagewatch, and the Patterns and PlayMap AGMessage hears. <a href="#show-network">Show network</a></td></tr>
+          <tr><td><span class="ui">🔒 Encrypted connections</span></td><td>The certificate's fingerprint, a new certificate, and Require HTTPS. <a href="#https">Encrypted connections</a></td></tr>
+          <tr><td><span class="ui">Linked Patterns and PlayMap</span></td><td>The ones linked, each with its ⋯.</td></tr>
+          <tr><td><span class="ui">👥 Accounts and access</span></td><td>The count of accounts, links to the Accounts page and the audit log, accounts held aside, and whether admins may sign in through the internet link. <a href="/guide/accounts.html">People and accounts</a></td></tr>
+          <tr><td><span class="ui">🩺 Health</span></td><td>How AGMessage runs, the audit log's check, its signing key, Export and Split. <a href="/guide/accounts.html#audit">The audit log</a></td></tr>
+          <tr><td><span class="ui">💻 This laptop</span></td><td>What Windows says of the laptop: addresses, firewall, sleep, the lid, the server task, rights. <a href="/guide/laptops.html#this-laptop">This laptop</a></td></tr>
+          <tr><td><span class="ui">🗄 Event</span></td><td>The current event, the archived ones, and Archive this event. <a href="#event">After the event</a></td></tr>
+          <tr><td><span class="ui">🌐 Remote access (Cloudflare tunnel)</span></td><td>The internet link for phones off the venue network. <a href="#tunnel">The internet link</a></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>After an upgrade, a strip offers <span class="ui">Reload this page</span>: the admin page reloads only when you say so,
+      so nothing you are typing is lost.</p>
+
+    <h2 id="halls">Halls and rooms</h2>
+    <h3>Make a hall</h3>
+    <ol class="guide-steps">
+      <li>On the admin page press <span class="ui">New hall</span> (or the halls board's <span class="ui">New hall</span>, for
+        an account that sets halls up).</li>
+      <li>Type its name in <span class="ui">Hall name (for example Hall 2)</span>. Where an earlier hall's Stagewatch link is
+        kept, choose it in <span class="ui">Its Stagewatch</span>; otherwise it follows the default Stagewatch.</li>
+      <li>Press <span class="ui">Create hall</span>. It gets a 6-character guest code, which crew without an account join
+        with.</li>
+    </ol>
+    <h3>Add a room beside the Main room</h3>
+    <ol class="guide-steps">
+      <li>On the admin page, open the hall's ⋯ and choose <span class="ui">New room in this hall…</span>. (On the halls board:
+        the hall's ⋯ → <span class="ui">Set up…</span> → <span class="ui">+ Add room</span>.)</li>
+      <li>Type its name in <span class="ui">Room name (for example Legal)</span> and press <span class="ui">Make the room</span>.</li>
+      <li>A new room's guest code starts off: the admin, and the accounts given the room, go in. Turn it on from the room's ⋯
+        if guests should join with a code.</li>
+    </ol>
+    <h3>A hall's ⋯</h3>
+    <p>On the admin page, each hall's ⋯ (or a right-click on it) offers:</p>
+    <ul class="guide-cols">
+      <li><span class="ui">Watch</span>: its people and live messages, under the list.</li>
+      <li><span class="ui">Transcript</span> and <span class="ui">Minutes</span> (an AI draft, posted pinned when you choose).</li>
+      <li><span class="ui">Roles &amp; invites</span>: <a href="#codes">codes and invite links</a>.</li>
+      <li><span class="ui">New room in this hall…</span></li>
+      <li><span class="ui">Board members…</span> (<span class="ui">Members…</span> on a side room): tick accounts into the room
+        in one go. Offered to an account that creates accounts, not to the token.</li>
+      <li><span class="ui">May send in…</span>: which rooms may send messages and files into this one.</li>
+      <li><span class="ui">Turn the code off…</span> or <span class="ui">Turn the code on</span>, and <span class="ui">New code…</span></li>
+      <li><span class="ui">Rename…</span>, <span class="ui">Clear messages…</span>, and <span class="ui">Close hall…</span>
+        (<span class="ui">Remove room…</span> on a side room).</li>
+    </ul>
+    <aside class="guide-watch" aria-label="Watch for">
+      <p><strong>△ Watch for</strong> <span class="ui">Close hall…</span> sends everyone out and deletes its saved history, and
+        its <span class="ui">Also delete the files shared only in this hall</span> is ticked. To keep an event's halls, archive
+        the event instead: <a href="#event">After the event</a>.</p>
+    </aside>
+    <p>The halls board's <span class="ui">Set up…</span> on a hall holds its <span class="ui">Name</span>, its own Stagewatch
+      (<span class="ui">Address</span>, <span class="ui">Node key</span>, <span class="ui">Certificate fingerprint</span>; leave
+      them empty to follow the default) and its <span class="ui">Rooms</span>, each with its code and ⋯.</p>
+
+    <h2 id="codes">Codes and invite links</h2>
+    <p>Each room has a code. Anyone with it joins on the sign-in page's <span class="ui">Join with a code</span> tab: in a
+      hall's Main room as Backstage or as an Observer, and in a side room as a Member or an Observer.</p>
+    <aside class="guide-watch" aria-label="Watch for">
+      <p><strong>△ Watch for</strong> A code alone never seats anyone On stage, in an open hall or not. Presenters and board
+        members need the On stage invite link, an account seated On stage, or the admin moving their seat:
+        <a href="/guide/devices.html#seating">seating the Board</a>.</p>
+    </aside>
+    <h3>Roles &amp; invites</h3>
+    <ol class="guide-steps">
+      <li>On the admin page, open the hall's ⋯ and choose <span class="ui">Roles &amp; invites</span>. A panel opens under the
+        hall you watch.</li>
+      <li>To lock the hall's seats, tick <span class="ui">On stage and Backstage seats need an invite link (anyone else joins as
+        an observer)</span> (on a side room, <span class="ui">Member seats need an invite link (anyone else joins as an
+        observer)</span>).</li>
+      <li>Copy each link with its <span class="ui">📋 Copy</span> and send it only to that group: the
+        <span class="ui">On stage link</span> to presenters and board members, and, while the seats are locked, the
+        <span class="ui">Backstage link</span> to the crew. An open hall shows the On stage link alone.</li>
+      <li>To stop a link admitting anyone new, press its <strong>🔄 New On stage link</strong> (or the Backstage one). People
+        already seated with the old link keep their seats, and the code stays.</li>
+    </ol>
+    <aside class="guide-watch" aria-label="Watch for">
+      <p><strong>△ Watch for</strong> An invite link is made from the address the admin page is open at. Opened at the laptop
+        as <code>localhost</code> (as it is with the token), the copied link says <code>localhost</code> and will not open on a
+        tablet: put the LAN address (or the internet link's) in its place before sending it, or copy it from the admin page
+        opened at the LAN address with an admin account. Make a new On stage link after a shared device used it.</p>
+    </aside>
+    <h3>Turning a code off, and a new code</h3>
+    <ul>
+      <li><span class="ui">Turn the code off…</span> asks how: <span class="ui">Turn off</span> (guests already in stay; nobody
+        new joins) or <span class="ui">Turn off and send them out</span>. Accounts keep their way in either way. While the
+        code is off, invite links admit nobody new.</li>
+      <li><span class="ui">New code…</span> gives the room a new code. Guests in it stay; anyone joining later needs the new
+        one, and the invite links made with the old code stop working, so send the new links from
+        <span class="ui">Roles &amp; invites</span>.</li>
+    </ul>
+    <h3>Backstage guests and web pages</h3>
+    <p>In a locked hall, the tick <span class="ui">Backstage guests may show web pages on people's pages</span> lets guests who
+      joined Backstage with the invite link show web pages, as accounts with that right do. It is off by default, the admin's
+      alone, and needs the roles locked first; unlocking the hall turns it off.</p>
+
+    <h2 id="people">People in a room</h2>
+    <p>Watching a hall shows <span class="ui">People in this room</span>, one row a person:
+      <span class="ui">Name</span>, <span class="ui">Seat</span>, <span class="ui">Chat view</span>,
+      <span class="ui">Clock or countdown</span>, <span class="ui">On stage</span> and <span class="ui">May forward to</span>.</p>
+    <ul>
+      <li>A guest's <span class="ui">Seat</span> is changed here (an account's follows its rights, on the Accounts page).</li>
+      <li><span class="ui">Chat view</span>, the clock and the On stage switches are described in
+        <a href="/guide/devices.html#chat-view">Tablets and phones</a>.</li>
+      <li>A person's ⋯ also has <span class="ui">Open their view</span> (their page as they see it, to help them),
+        <span class="ui">Let them forward into</span> another room, and <span class="ui">Log out…</span>.</li>
+    </ul>
+
+    <h2 id="screens">Screens</h2>
+    <p>A screen is any browser that shows something for a hall: the projector PC, the lectern monitor, a foyer TV, a tablet
+      in the green room. Each has a link of its own (<code>/d/…</code>), opened once in that browser and left there.</p>
+    <p>Changing what screens show needs <span class="ui">Change what a hall's screens and people's pages show</span> (Tech and
+      up). Adding screens, their links, renaming and removing them need <span class="ui">Create, rename, move and revoke
+      screens</span>, which the Admin and Project manager roles start with.</p>
+    <ol class="guide-steps">
+      <li>On a hall page, open the header's ⋯ → <span class="ui">Screens &amp; pages…</span>,
+        <span class="ui">Screens</span> tab.</li>
+      <li>Type a name such as <q>Lectern monitor</q> and press <span class="ui">Add screen</span>. Its link is copied.</li>
+      <li>Open the link in that screen's browser. A double-click there makes it full screen.</li>
+      <li>Optionally choose a <span class="ui">Holding image:</span> from the pictures shared in the hall and press
+        <span class="ui">Use it</span> (<span class="ui">None (black)</span> keeps it black).</li>
+    </ol>
+    <p>Tick the screens to change, then choose <span class="ui">Holding</span>, <span class="ui">Countdown</span>,
+      <span class="ui">Clock</span> or <span class="ui">Black</span>, or type a message, choose <span class="ui">● Note</span>,
+      <span class="ui">▲ Soon</span> or <span class="ui">■ Urgent</span> (and <span class="ui">Under the countdown</span>) and
+      press <span class="ui">Show</span>. Each screen's ⋯ has <span class="ui">Identify</span>,
+      <span class="ui">Copy link</span>, <span class="ui">Rename…</span>, <span class="ui">New link…</span> and
+      <span class="ui">Remove…</span>.</p>
+    <aside class="guide-watch" aria-label="Watch for">
+      <p><strong>△ Watch for</strong> Anyone with a screen's link sees that screen. Give it only to the machine that shows it,
+        and choose <span class="ui">New link…</span> if it went further: the old link stops at once.
+        <a href="/guide/devices.html#screens">Tablets and phones: screens</a> covers the screen's own side.</p>
+    </aside>
+
+    <h2 id="show-network">Stagewatch, Patterns and PlayMap</h2>
+    <h3>The default Stagewatch</h3>
+    <ol class="guide-steps">
+      <li>In Stagewatch, make a node key: <span class="guide-path">Settings → Remote → API keys</span>.</li>
+      <li>On the admin page, under <span class="ui">📡 Show network</span>, type the Stagewatch address and its node key (and,
+        if you have it, its certificate fingerprint), then press <span class="ui">Link</span>. A Stagewatch AGMessage hears on
+        the network offers <span class="ui">Use this address</span>.</li>
+      <li>Accept the key in Stagewatch. Until it does, the link is refused.</li>
+    </ol>
+    <p>Halls without a Stagewatch of their own follow this one. A hall's own is set on the halls board's
+      <span class="ui">Set up…</span>. If a Stagewatch's certificate changes, Health says so and the link waits until you
+      choose <span class="ui">Accept certificate…</span> on its row.</p>
+    <h3>Patterns and PlayMap</h3>
+    <p>When AGMessage hears a Patterns or a PlayMap on the network, its row's ⋯ has <span class="ui">Link…</span>. It asks for
+      its pairing token (Patterns: its Remote page, TRUST; PlayMap: its node settings, Network), which halls it is for
+      (<span class="ui">Every hall</span> or one), and the first 16 characters or more of the fingerprint it shows on its own
+      screen. A linked one has <span class="ui">Set up…</span>, <span class="ui">Confirm fingerprint…</span> and
+      <span class="ui">Unlink…</span>.</p>
+
+    <h2 id="ai">AI drafts</h2>
+    <p>Under <span class="ui">✨ AI drafts</span>, paste an Anthropic key in <span class="ui">Anthropic API key (sk-ant-…)</span>
+      and press <span class="ui">Save key</span>. AI drafts are always a draft that a person edits and sends. Without a key,
+      every AI act is greyed with the reason; everything else works. AI drafts, the internet link and the installed laptop's
+      look-up of a new release are the only parts that need the internet.</p>
+
+    <h2 id="https">Encrypted connections</h2>
+    <p>AGMessage serves HTTPS on the same port as HTTP, with a certificate of its own. Each device trusts it once; after that,
+      people open AGMessage with <code>https://</code> instead of <code>http://</code>, same address and port. A tablet needs
+      HTTPS to keep its screen awake.</p>
+    <ol class="guide-steps">
+      <li>On each device, open <code>/tls</code> on AGMessage's address (for example <code>https://192.168.1.42:3023/tls</code>).</li>
+      <li>Check that its <span class="ui">SHA-256 fingerprint</span> matches the <span class="ui">Fingerprint:</span> under
+        <span class="ui">🔒 Encrypted connections</span> on the admin page.</li>
+      <li>Press <span class="ui">Download the certificate</span> and follow the steps <code>/tls</code> gives for that device
+        (Windows, macOS, iPhone and iPad, Android).</li>
+    </ol>
+    <p>The tick <span class="ui">Require HTTPS from other devices (plain HTTP keeps working on this laptop, and for the Cloudflare
+      tunnel)</span> sends every other device to HTTPS.</p>
+    <aside class="guide-watch" aria-label="Watch for">
+      <p><strong>△ Watch for</strong> With Require HTTPS on, a page or screen opened with an <code>http://</code> link from
+        another device is sent to the same address over <code>https://</code>; a device that has not trusted the certificate
+        then shows the browser's certificate warning instead, and a screen already open over <code>http://</code> says
+        <q>This AGMessage requires HTTPS — open it with https:// (see /tls).</q> Trust the certificate on each screen and tablet
+        first. <span class="ui">New certificate</span> means every device trusts it again.</p>
+    </aside>
+
+    <h2 id="tunnel">The internet link</h2>
+    <p>Phones off the venue network (on mobile data, in another building) join through a Cloudflare quick tunnel, from
+      <span class="ui">🌐 Remote access (Cloudflare tunnel)</span> on the admin page.</p>
+    <ol class="guide-steps">
+      <li>Turn it on with the card's switch (or <span class="ui">Turn on</span> in its ⋯). While it starts, it reads
+        <span class="ui">Starting…</span>.</li>
+      <li>Send the address under <span class="ui">Public URL — share with remote users:</span> to the people off-site
+        (<span class="ui">Copy address</span> in its ⋯). With it and a hall's guest code, they join.</li>
+      <li>Before doors, press <span class="ui">Check again</span> and walk one phone on mobile data through it.</li>
+    </ol>
+    <ul>
+      <li>It stays on until the end of the show day, 06:00 by the laptop's clock, or the time <span class="ui">Tunnel until…</span>
+        gives.</li>
+      <li>It has 150 places at once, half of them at most from one network. The card counts them and the day's refusals.</li>
+      <li><span class="ui">Turn off…</span> asks first: everyone who joined through it is cut off, and the address stops
+        working.</li>
+      <li>Accounts with admin rights sign in through it only when <span class="ui">Let accounts with admin rights sign in through
+        the Cloudflare tunnel (off: admins sign in on the venue network only)</span> is ticked under Accounts and access.</li>
+    </ul>
+    <aside class="guide-watch" aria-label="Watch for">
+      <p><strong>△ Watch for</strong> A quick tunnel's address is new each time AGMessage starts. If AGMessage restarts during
+        the day, it turns the link on again with a new address, said on the card: send the new address to the people
+        off-site, since the old one no longer works. Invite links copied for remote people need the public address in
+        place of <code>localhost</code>.</p>
+    </aside>
+
+    <h2 id="show-day">A show day</h2>
+    <h3>Before doors</h3>
+    <ol class="guide-steps">
+      <li>On <span class="ui">💻 This laptop</span>, read <span class="ui">Addresses</span>, <span class="ui">Network</span>,
+        <span class="ui">Firewall</span>, <span class="ui">Sleep on mains</span> and <span class="ui">Lid closed on mains</span>.
+        A firewall with no rule for the network's profile means phones there may not reach AGMessage:
+        <a href="/guide/laptops.html#firewall">the firewall and networks</a>. Set closing the lid to do nothing on mains.</li>
+      <li>Send each On stage link from <span class="ui">Roles &amp; invites</span> to its presenters and board members, and,
+        in a locked hall, its Backstage link to the crew.</li>
+      <li>Open each screen's link, and check each shows what it should.</li>
+      <li>On a Board tablet, open a hall On stage and check its clock, Help and a file's Look:
+        <a href="/guide/devices.html#check">what to check on a device</a>.</li>
+      <li>With the internet link on, read its check and walk one phone on mobile data.</li>
+      <li>After an upgrade, read <span class="ui">Pages</span> on This laptop:
+        <q>every open page and screen is on this build</q>, or which still reload.</li>
+      <li>Copy the audit log's signing key (<span class="ui">🩺 Health</span>, <span class="ui">📋 Copy</span>) into the show's
+        paperwork, and compare it at each start.</li>
+    </ol>
+    <h3>During</h3>
+    <ul>
+      <li>Help requests show on the halls board under <span class="ui">Needs help</span>, with
+        <span class="ui">On my way</span> and <span class="ui">Resolved</span>.</li>
+      <li>While a hall is live, AGMessage keeps the laptop from idle sleep (This laptop: <span class="ui">Kept awake</span>).
+        The lid and the power button still do what the power plan says.</li>
+      <li>A page that loses the connection comes back by itself; what someone wrote waits and is sent once.</li>
+    </ul>
+    <h3>After</h3>
+    <ul>
+      <li>Export the audit log at the end of each show day (<span class="ui">🩺 Health</span> → <span class="ui">Export…</span>)
+        and keep the export off the laptop.</li>
+      <li>Turn the internet link off.</li>
+      <li>After the last day, archive the event.</li>
+    </ul>
+
+    <h2 id="event">After the event</h2>
+    <p>Archiving keeps everything of an event (its halls, messages, files, help requests, screens, accounts and what was shown)
+      in the data folder's archive, never deleted silently, and begins the next one. Only the admin may archive.</p>
+    <ol class="guide-steps">
+      <li>Under <span class="ui">🗄 Event</span>, press <span class="ui">Archive this event…</span>.</li>
+      <li>Choose <span class="ui">What comes next</span>: <span class="ui">Start fresh: no halls, screens or accounts</span>,
+        <span class="ui">Copy this event's settings and structure</span>, a copy of an archived event's, or continuing one.</li>
+      <li>Name this event for its archive if it has no name, and type the new event's name to confirm. Choose whether to keep
+        the screens' links (for screens of your own kit) and whether to split the audit log there too.</li>
+      <li>Press <span class="ui">Archive</span>.</li>
+    </ol>
+    <aside class="guide-watch" aria-label="Watch for">
+      <p><strong>△ Watch for</strong> Archiving ends every sign-in, the token's too: everyone signs in again or joins with the
+        new codes, and the admin page reloads. A copy gives every room a new code and carries no invite link over. After
+        <span class="ui">Start fresh: no halls, screens or accounts</span>, the token makes the first admin account again.</p>
+    </aside>
+    <p>Each archived event's row offers <span class="ui">Continue this event…</span>, <span class="ui">Copy this event…</span>
+      and <span class="ui">Delete this archive's contents…</span>, which works only at the laptop, with the token typed.</p>
+
+    <p class="guide-foot"><a href="#guideHead">Back to the top</a> · <a href="/guide/laptops.html">Next: laptops</a></p>
+  </main>
+</body>
+</html>

@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>AGMessage — guide: tablets and phones</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <script src="/theme-init.js"></script>
+</head>
+<body class="acct-page guide-page">
+  <a class="skip-link" href="#guideHead">Skip to the guide</a>
+  <header class="acct-bar">
+    <a class="acct-brand" href="/"><span class="brand-mark small">AG</span> AGMessage</a>
+    <nav class="acct-nav" aria-label="AGMessage">
+      <a class="btn ghost small" href="/halls.html">Halls</a>
+      <a class="btn ghost small" href="/admin.html">Admin</a>
+    </nav>
+  </header>
+
+  <main class="guide">
+    <nav class="guide-parts" aria-label="The guide's parts">
+      <a href="/guide/">Contents</a>
+      <a href="/guide/setup.html">Setting up</a>
+      <a href="/guide/laptops.html">Laptops</a>
+      <a href="/guide/devices.html" aria-current="page">Tablets and phones</a>
+      <a href="/guide/accounts.html">People and accounts</a>
+    </nav>
+
+    <h1 id="guideHead" tabindex="-1">Tablets, phones and screens</h1>
+    <p class="guide-lede">The Board reads AGMessage on iPads, Android tablets and phones, at a glance and under lights. How to
+      seat them, what their page shows and what it lets them do, which devices work, and how to keep them awake.</p>
+
+    <nav class="guide-toc" aria-label="On this page">
+      <p class="guide-toc-head">On this page</p>
+      <ol>
+        <li><a href="#board">The Board and its devices</a></li>
+        <li><a href="#seating">Seating the Board</a></li>
+        <li><a href="#chat-view">The chat view</a></li>
+        <li><a href="#using">What a Board member does</a></li>
+        <li><a href="#files">Files on the Board's pages</a></li>
+        <li><a href="#clock">The clock or countdown</a></li>
+        <li><a href="#on-stage">What an On stage seat may do</a></li>
+        <li><a href="#shown">What the backstage team shows them</a></li>
+        <li><a href="#floors">The devices AGMessage needs</a></li>
+        <li><a href="#awake">Keeping a device awake</a></li>
+        <li><a href="#size">Full screen and text size</a></li>
+        <li><a href="#screens">Screens on TVs and tablets</a></li>
+        <li><a href="#phones">Phones backstage, and remote phones</a></li>
+        <li><a href="#check">What to check on a device</a></li>
+        <li><a href="#trouble">When something goes wrong</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="board">The Board and its devices</h2>
+    <p>The Board is everyone seated On stage in a hall's Main room: presenters and board members. An On stage seat reads and
+      writes messages and nothing else. It shares no file, drives no screen and sends nothing to the show network, and the
+      admin seated On stage is held to the same. Its device is never given the hall's code, and keeps no copy of a file: a
+      Board member reads a file with Look, and downloads one only when the backstage team shows it with Download ticked.</p>
+    <p>AGMessage reads no device's name: each page lays out by the screen's size and tests what the browser can do.</p>
+
+    <h2 id="seating">Seating the Board</h2>
+    <p>There are three ways to an On stage seat, and a code is not one of them. Without the On stage invite link, the sign-in
+      page does not offer the seat: it says <q>On stage seats come with an invite link from the backstage team.</q></p>
+    <h3>With the On stage invite link</h3>
+    <ol class="guide-steps">
+      <li>On the admin page, open the hall's ⋯ → <span class="ui">Roles &amp; invites</span>, and copy the
+        <span class="ui">On stage link</span> (<span class="ui">📋 Copy</span>). Copied at the laptop with the token, it says
+        <code>localhost</code>: put the LAN address in its place before sending it.</li>
+      <li>Send it to each presenter and board member, or open it on each Board tablet.</li>
+      <li>The link opens the sign-in page with the code filled in and On stage chosen: they type their name and tap
+        <span class="ui">Join</span>.</li>
+    </ol>
+    <p>Once joined, the hall page takes the code and the link out of its own address. The browser's history still holds the
+      sign-in page the link opened, so after a shared device was used, make a new link with
+      <strong>🔄 New On stage link</strong>. A reload, a dropped Wi-Fi or a restart of AGMessage keeps the seat.</p>
+    <h3>With a Board account</h3>
+    <ol class="guide-steps">
+      <li>On the Accounts page, <span class="ui">Add a person</span> (or <span class="ui">Edit…</span> an account).</li>
+      <li>Under <span class="ui">Halls and rooms</span>, tick <span class="ui">On stage (Board member)</span> beside the hall;
+        the hall is ticked with it.</li>
+      <li>They sign in on the <span class="ui">Sign in</span> tab, and the hall opens On stage.</li>
+    </ol>
+    <p>To seat many accounts at once, signed in with an account that creates accounts: the hall's ⋯ on the admin page →
+      <span class="ui">Board members…</span>, tick, Save. An
+      account that only reads cannot sit On stage: <q>Reads only: On stage needs Send messages.</q></p>
+    <h3>By moving a guest's seat</h3>
+    <p>Watching the hall on the admin page, change a guest's <span class="ui">Seat</span> to <span class="ui">On stage</span>.
+      Their page reloads into the seat.</p>
+    <aside class="guide-watch" aria-label="Watch for">
+      <p><strong>△ Watch for</strong> A browser signed in to an account cannot join with a code or an invite link. A tablet
+        shared between an account and an invite must <span class="ui">Sign out</span> first.</p>
+    </aside>
+
+    <h2 id="chat-view">The chat view</h2>
+    <p>Each person's <span class="ui">Chat view</span> is <span class="ui">By seat</span>, <span class="ui">Simple</span> or
+      <span class="ui">Full</span>. By seat, the default, is Simple where they sit On stage and Full everywhere else. It is
+      set in three places: the <span class="ui">Chat view</span> column of <span class="ui">People in this room</span> on the
+      admin page and the person's ⋯ in the admin's own hall page (by whoever the admin page lets in), and the Accounts page's
+      editor (by whoever creates accounts). Nobody sets their own.</p>
+    <p>The simple view puts the chat first: one reading column, the response after the words it answers, and a ⋯ sheet in
+      place of a menu. It starts dark until the person picks Light, with 22 px text on a tablet and 20 px on a phone. It acts on
+      Tab, Enter and Escape (and ← → on Shown to you's grip), and opens no menu of its own.</p>
+
+    <h2 id="using">What a Board member does</h2>
+    <ul>
+      <li><strong>Got it and Reply.</strong> Under the newest message from backstage that waits for them, and under each waiting
+        🔥 message: <span class="ui">Got it</span> (<span class="ui">Got all N</span> when several wait) and
+        <span class="ui">Reply</span>, each a button. Got it tells the backstage team, by name. A tap on any other message
+        brings its own row, with <span class="ui">Pin for me</span>.</li>
+      <li><strong>Questions.</strong> A tap on an answer, or <span class="ui">Answer in words…</span>; once answered,
+        <span class="ui">Change</span> brings the answers back.</li>
+      <li><strong>Priority.</strong> <span class="ui">🔥 Priority</span> before <span class="ui">Send</span>; it turns off after
+        each send. A 🔥 message from backstage that scrolled out of view waits in a strip above the chat.</li>
+      <li><strong>Help.</strong> <span class="ui">Help</span>, then what it is about (<span class="ui">Sound</span>,
+        <span class="ui">Vision</span>, <span class="ui">Lighting</span>, <span class="ui">Stage</span>,
+        <span class="ui">Presenter</span>, <span class="ui">IT / network</span> or <span class="ui">Something else</span>): the
+        tap sends it at once. The chip then reads that it was asked, then who is on the way.</li>
+      <li><strong>The ⋯ sheet.</strong> <span class="ui">Text size</span>, <span class="ui">Clock or countdown</span>,
+        <span class="ui">Theme</span>, <span class="ui">Full screen</span> where the device has it, and
+        <span class="ui">Leave the hall…</span>.</li>
+    </ul>
+
+    <h2 id="files">Files on the Board's pages</h2>
+    <p>A file the backstage team shares in the chat has <span class="ui">Look</span> under it, a filled button, and a tap on
+      the file's line does the same. It opens in the person's own <span class="ui">📺 Shown to you</span>, where they page,
+      zoom and find in it. Nobody else is told.</p>
+    <ul>
+      <li><strong>A tablet held sideways</strong> (900 px wide or more): Shown to you is a column beside the chat. It opens
+        wide while it holds a file, over half the screen. The bar between the chat and the column drags it wider or narrower
+        (or Tab to it and use ← →), and the tablet keeps the width. Its <code>⇥</code> closes it to a strip on the right edge,
+        "📺 Shown to you • 2 ⇤", and a tap on the strip brings it back. Nothing in it is lost until it is cleared.</li>
+      <li><strong>A phone, or a tablet held upright</strong>: Look opens the <span class="ui">📺 Shown to you</span> tab at the
+        full width, and <span class="ui">Chat</span> goes back.</li>
+      <li><strong>A document the backstage team sends to the side bar</strong> arrives as a card in Shown to you, with its own
+        <span class="ui">Look</span>, which shows it over the chat at the full screen.</li>
+    </ul>
+    <p>A file is closed with <span class="ui">Close</span> under it, and opened again with Look on its message.</p>
+
+    <h2 id="clock">The clock or countdown</h2>
+    <p>Beside the hall's name the simple view shows the time of day ("🕐 14:12"), the hall's Stagewatch countdown
+      ("⏱ 4:30 left", then "Wrap up", then "0:30 over"), or nothing. When the countdown is not live it reads
+      <code>--:--</code> with why.</p>
+    <ul>
+      <li>The person chooses on their device: ⋯ → <span class="ui">Clock or countdown</span> (<span class="ui">Time of
+        day</span>, <span class="ui">Countdown</span> or <span class="ui">Off</span>), kept on that device.</li>
+      <li>It can be chosen for them: <span class="ui">Their choice (the clock at first)</span>,
+        <span class="ui">Time of day</span>, <span class="ui">Stagewatch countdown</span> or <span class="ui">Off</span>,
+        on the admin page's people list, the hall page's People, or the Accounts page.</li>
+      <li><span class="ui">Lock it on their devices</span> keeps that choice on their devices; the sheet then says
+        <q>Set by the admin for you.</q> Anyone who sets the choice may pick it, but only the admin locks it. For a person whose chat view is Full it reads
+        <q>Applies in the simple view.</q></li>
+    </ul>
+
+    <h2 id="on-stage">What an On stage seat may do</h2>
+    <p>Three switches for each person, each off until the admin turns it on, on the admin page's <span class="ui">On stage</span>
+      column, the person's ⋯, or the Accounts page's <span class="ui">When On stage</span>:</p>
+    <ul>
+      <li><span class="ui">May send to a countdown screen</span>: their message can replace the line under the countdown on this
+        hall's screens (160 characters at most).</li>
+      <li><span class="ui">May send to people On stage</span>: their message can be shown beside the chat of everyone On
+        stage.</li>
+      <li><span class="ui">Got it clears the message</span>: a message they got folds to one line, with Show to bring it
+        back.</li>
+    </ul>
+    <p>With either of the first two on, an <span class="ui">Also on</span> row sits above their message box, a chip each, off
+      after every send; the message then says where it went as each screen and page confirms.</p>
+
+    <h2 id="shown">What the backstage team shows them</h2>
+    <p>Backstage, the Board chip in the hall page's header puts something on every Board page at once
+      (<span class="ui">Show Stagewatch</span>, <span class="ui">Show the clock</span>, <span class="ui">Show holding</span>,
+      <span class="ui">Show blank</span>, <span class="ui">Show a web page…</span>, <span class="ui">Take down</span>), and a
+      file's <span class="ui">Show the Board</span> shows a picture of a page, or the document. On a person's ⋯,
+      <span class="ui">Show them</span> does the same for one person.</p>
+    <ul>
+      <li>A take covers the page, its bar saying what it is and who sent it, with <span class="ui">Back to chat</span> and
+        <span class="ui">Minimise</span> (and Escape). Minimise puts it in Shown to you as a card, with Look.</li>
+      <li>A 🔥 message breaks through in a strip, with <span class="ui">Open chat</span>.</li>
+      <li>A take taken down goes under <span class="ui">Earlier</span> in Shown to you, where Look opens it again on that device
+        alone.</li>
+      <li>A document shown with Download ticked has <span class="ui">Download</span>; nothing else On stage can be
+        downloaded, and a long press on what is shown offers no save.</li>
+      <li><span class="ui">Screens &amp; pages…</span> → <span class="ui">People's pages</span> says what each page confirmed:
+        a tick only once the take is on the screen in front of them.</li>
+    </ul>
+
+    <h2 id="floors">The devices AGMessage needs</h2>
+    <div class="table-wrap">
+      <table class="acct-table guide-table">
+        <thead><tr><th scope="col">To</th><th scope="col">The device needs</th><th scope="col">Below it</th></tr></thead>
+        <tbody>
+          <tr><td>Use AGMessage at all</td><td>Safari 14.1 (iPadOS or iOS 14.5), or Chrome 84</td><td>One line, <q>This browser is too old for AGMessage.</q>, and nothing else: the hall never hears of it. Update it (Settings → General → Software Update on an iPad or iPhone; update Chrome on Android) or retire it.</td></tr>
+          <tr><td>Open a PDF, Word, Excel or PowerPoint file</td><td>Safari 16.4 (iPadOS or iOS 16.4), or Chrome 103</td><td><q>This device cannot open documents — ask the backstage team to show you a picture.</q> Pictures, quotes, web pages and plain files still work, and the sender's page sends such a device a picture of the page in the document's place.</td></tr>
+          <tr><td>Keep the screen awake by itself</td><td>HTTPS, and Safari 16.4 or Chrome 84</td><td>The ⋯ sheet says why the device may sleep: <a href="#awake">keeping a device awake</a>.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>For a device that joined after a document went, the Board chip and People's pages offer
+      <span class="ui">Show them a picture</span>, to that person alone.</p>
+
+    <h2 id="awake">Keeping a device awake</h2>
+    <p>The simple view asks the device to keep its screen on. Where it cannot, the ⋯ sheet says one of three things:</p>
+    <ul>
+      <li><q>This device may sleep: open AGMessage over HTTPS.</q> Trust AGMessage's certificate once on the device, then open
+        it with <code>https://</code>, same address and port.</li>
+      <li><q>This device may sleep: set its screen to stay on in its own settings (Auto-Lock or Screen timeout).</q> The browser
+        cannot keep it awake: set Auto-Lock (iPad) or Screen timeout (Android) to Never for the show.</li>
+      <li><q>This device would not stay awake (its battery may be low): plug it in.</q></li>
+    </ul>
+    <h3>Trusting the certificate on a tablet or phone</h3>
+    <ol class="guide-steps">
+      <li>Open <code>/tls</code> on AGMessage's address and check its fingerprint against the admin page's
+        <span class="ui">🔒 Encrypted connections</span>.</li>
+      <li>Press <span class="ui">Download the certificate</span>.</li>
+      <li>iPhone or iPad: open the download → Settings → Profile Downloaded → Install; then Settings → General → About →
+        Certificate Trust Settings, and turn it on. Android: Settings → Security → Encryption &amp; credentials → Install a
+        certificate → CA certificate, and choose the file (menus differ by maker).</li>
+      <li>Open AGMessage with <code>https://</code>.</li>
+    </ol>
+
+    <h2 id="size">Full screen and text size</h2>
+    <ul>
+      <li>⋯ → <span class="ui">Full screen</span> where the device has it; an iPhone has none, so hold it upright. A take
+        offers <span class="ui">Full screen</span> on its bar too, and never goes full screen by itself.</li>
+      <li>⋯ → <span class="ui">Text size</span>: <span class="ui">Aa−</span> and <span class="ui">Aa+</span>, from 70 % to
+        220 %. On an iPad mini, or with the tablet further away than an arm's length, press Aa+.</li>
+    </ul>
+
+    <h2 id="screens">Screens on TVs and tablets</h2>
+    <p>A screen is a browser holding a screen's link, made on the hall page's <span class="ui">Screens &amp; pages…</span>:
+      <a href="/guide/setup.html#screens">Setting up: screens</a>. On the screen itself:</p>
+    <ul>
+      <li>A double-click makes it full screen. Over HTTPS it keeps itself awake; otherwise set the device to stay on.</li>
+      <li>A small dot in the corner shows its link to AGMessage; <code>?status=hide</code> on the link hides it. With no
+        holding image it is black with its name, faint; <code>?idle=blank</code> hides the name.</li>
+      <li>It comes back by itself after a dropped connection, and never shows the audience a "busy".</li>
+      <li>A PDF on a screen needs Safari 16.4 or Chrome 103; on an older browser share the page as a picture instead.</li>
+      <li>A link that is wrong or no longer in use says so: <q>This screen link is not (or no longer) in use. Ask for the
+        current link.</q></li>
+    </ul>
+
+    <h2 id="phones">Phones backstage, and remote phones</h2>
+    <ul>
+      <li>The hall page fits a phone held upright, its header the same at every width; on a phone a menu opens as a sheet from
+        the bottom, with <span class="ui">‹ Back</span> for its submenus.</li>
+      <li>A message written while offline says it is sent when the connection is back, and is sent once.</li>
+      <li>Phones off the venue network join through the internet link: <a href="/guide/setup.html#tunnel">Setting up: the
+        internet link</a>. It has 150 places; a phone refused is told how long to wait, and comes back by itself.</li>
+      <li>Phones on the venue Wi-Fi reach the laptop only where Windows lets AGMessage in on that network:
+        <a href="/guide/laptops.html#firewall">the firewall and networks</a>.</li>
+    </ul>
+
+    <h2 id="check">What to check on a device</h2>
+    <p>Before a show, on each kind of device the Board will use, served over HTTPS with the certificate trusted, and with a
+      backstage page on a laptop beside it, upright and sideways:</p>
+    <ol class="guide-steps">
+      <li>The screen stays lit for 10 minutes untouched, or the ⋯ sheet says why not.</li>
+      <li>Help opens; a category sends it and closes; the chip says it was asked.</li>
+      <li>A file's Look opens it readable; sideways, the column drags wider, ⇥ closes it and the strip brings it back.</li>
+      <li>Got it, Reply and Answer in words… with the on-screen keyboard up: the reply line and Send stay in view.</li>
+      <li>🔥 Priority, and the strip for a 🔥 message out of view.</li>
+      <li>The clock reads the hall's time; the countdown its words; <code>--:--</code> when Stagewatch is offline.</li>
+      <li>A picture, a quote and a document shown to them; Back to chat; Earlier and its Look.</li>
+      <li>Lock the device for 2 minutes and wake it: the page is back with the new messages. Turn Wi-Fi off, send, turn it
+        on: the message lands once.</li>
+      <li>From their seat, the person reads what is new and what is urgent within 5 seconds, at the Text size they chose.</li>
+    </ol>
+
+    <h2 id="trouble">When something goes wrong</h2>
+    <ul>
+      <li><strong>"Reconnecting…"</strong> above the chat after 2 seconds, and "Offline · reconnecting" after 5: the page comes
+        back by itself, at once when the device wakes or is back online. What they wrote waits and is sent once.</li>
+      <li><strong>An act refused with "Not connected — AGMessage is reconnecting."</strong> Do it again once the page is back.</li>
+      <li><strong>"AGMessage now runs another build — reload this page when you can."</strong> The page could not reload by
+        itself onto the new build: reload it.</li>
+      <li><strong>To see what they see</strong>: on the admin page, the person's ⋯ → <span class="ui">Open their view</span>.
+        Every control there is theirs; act from your own page.</li>
+      <li><strong>The device may sleep</strong>: <a href="#awake">keeping a device awake</a>.</li>
+      <li><strong>A file too small</strong>: on a tablet held sideways, drag the column wider; on a phone or an upright tablet,
+        the Shown to you tab gives it the whole width. Fit width and + in the file's own bar zoom it.</li>
+    </ul>
+
+    <p class="guide-foot"><a href="#guideHead">Back to the top</a> · <a href="/guide/accounts.html">Next: people and accounts</a></p>
+  </main>
+</body>
+</html>

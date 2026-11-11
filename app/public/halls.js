@@ -58,6 +58,8 @@
     $('pwUser').value = me.username;
     $('usersLink').hidden = !(r.canManageUsers || r.canAudit);
     $('adminLink').hidden = !r.isAdmin;
+    // The admin's guide, for whoever the board offers Accounts or Admin.
+    $('guideLink').hidden = $('usersLink').hidden && $('adminLink').hidden;
     $('newHallBtn').hidden = !canManageHalls;
     earlierLinks = Array.isArray(r.earlierLinks) ? r.earlierLinks : [];
     $('boardTitle').textContent = me.rights.allHalls ? 'Every hall' : (halls.length === 1 ? 'Your hall' : 'Your halls');

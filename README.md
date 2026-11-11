@@ -353,6 +353,15 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
 - **AI drafts (optional, Claude).** Answers for the backstage team from the thread and the document on stage, buttons
   for action prompts, the minutes (from the thread and what was shown to the Board) — always a draft a person edits and
   sends. Everything else works offline.
+- **The admin's guide, in the app.** `/guide/`, five pages AGMessage serves itself, reachable wherever AGMessage is:
+  setting up (the first start, the token and the first admin, the admin page, halls and rooms, codes and invite links,
+  screens, the show network, HTTPS, the internet link, a show day, the event's archive), the show laptop and crew laptops
+  (installed or portable, the Start menu, Windows rights, sleep, the firewall, logs, upgrades), the Board's tablets and
+  phones (seating, the chat view, files, the clock, the devices AGMessage needs, keeping a device awake, screens), and
+  people and accounts (roles, rights, passwords, guests, who may change whom, accounts held aside, the audit log). The
+  admin page, the halls board (for whoever sees Accounts or Admin), the Accounts page and the first admin's panel link
+  to it. Every label it quotes is held to the code's own words by a test, so a renamed button fails the build until the
+  guide says the new one.
 - **Secure by default.** Encrypted connections (HTTPS on the same port, `/tls` to trust it), pinned links between show
   systems, sealed keys, a strict Content-Security-Policy, uploads checked by content (and a Word, Excel or PowerPoint
   file's archive and a picture's size checked before anyone opens them: one with macros, packed past AGMessage's bounds,

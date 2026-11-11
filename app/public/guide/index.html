@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>AGMessage — the admin's guide</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <script src="/theme-init.js"></script>
+</head>
+<body class="acct-page guide-page">
+  <a class="skip-link" href="#guideHead">Skip to the guide</a>
+  <header class="acct-bar">
+    <a class="acct-brand" href="/"><span class="brand-mark small">AG</span> AGMessage</a>
+    <nav class="acct-nav" aria-label="AGMessage">
+      <a class="btn ghost small" href="/halls.html">Halls</a>
+      <a class="btn ghost small" href="/admin.html">Admin</a>
+    </nav>
+  </header>
+
+  <main class="guide">
+    <nav class="guide-parts" aria-label="The guide's parts">
+      <a href="/guide/" aria-current="page">Contents</a>
+      <a href="/guide/setup.html">Setting up</a>
+      <a href="/guide/laptops.html">Laptops</a>
+      <a href="/guide/devices.html">Tablets and phones</a>
+      <a href="/guide/accounts.html">People and accounts</a>
+    </nav>
+
+    <h1 id="guideHead" tabindex="-1">The admin's guide</h1>
+    <p class="guide-lede">How to set AGMessage up for a show, run it on the show laptop, bring in the Board's tablets and phones,
+      and look after the people who sign in.</p>
+    <p>AGMessage serves these pages itself, so they are wherever AGMessage is: on the venue network, and through the internet
+      link while it is on. They name no code, link, token or password of this AGMessage. Words in a box, like
+      <span class="ui">Add a person</span>, are a button, a field or a heading as AGMessage draws it; words in quotes are what a
+      page says.</p>
+
+    <h2 id="parts">The four parts</h2>
+    <dl class="guide-index">
+      <dt><a href="/guide/setup.html">Setting up</a></dt>
+      <dd>The first start and the first admin account, the admin page, halls and rooms, codes and invite links, screens,
+        Stagewatch and the show network, encrypted connections, the internet link, a show day from before doors to the end,
+        and archiving an event.</dd>
+      <dt><a href="/guide/laptops.html">The show laptop and crew laptops</a></dt>
+      <dd>Installed or portable, the installer, the Start menu, who may run AGMessage on Windows, sleep and the lid, the
+        firewall, logs, upgrades and going back; and how crew laptops reach AGMessage, trust its certificate and sign in.</dd>
+      <dt><a href="/guide/devices.html">Tablets, phones and screens</a></dt>
+      <dd>The Board's devices: seating them On stage, the chat view, files they read, the clock or countdown, what their pages
+        are shown, the browsers AGMessage needs, keeping a tablet awake, screens on TVs and tablets, and what to check on a new
+        device.</dd>
+      <dt><a href="/guide/accounts.html">People, accounts and rights</a></dt>
+      <dd>Roles and rights, adding and changing people, Board accounts, passwords, guests who join with a code, who may
+        change whom, accounts held aside, and the audit log.</dd>
+    </dl>
+
+    <h2 id="quick">If you need to…</h2>
+    <div class="table-wrap">
+      <table class="acct-table guide-table">
+        <thead><tr><th scope="col">You need to</th><th scope="col">Read</th></tr></thead>
+        <tbody>
+          <tr><td>Start AGMessage for the first time</td><td><a href="/guide/setup.html#first-start">Setting up: the first start</a></td></tr>
+          <tr><td>Sign in to the admin page on the laptop</td><td><a href="/guide/setup.html#token">Setting up: the admin token</a></td></tr>
+          <tr><td>Make a hall, or a room beside it</td><td><a href="/guide/setup.html#halls">Setting up: halls and rooms</a></td></tr>
+          <tr><td>Seat a presenter or board member On stage</td><td><a href="/guide/devices.html#seating">Tablets and phones: seating the Board</a></td></tr>
+          <tr><td>Add a person who signs in</td><td><a href="/guide/accounts.html#add">People: add a person</a></td></tr>
+          <tr><td>Put a countdown or a message on the lectern screen</td><td><a href="/guide/setup.html#screens">Setting up: screens</a></td></tr>
+          <tr><td>Let phones off the venue network in</td><td><a href="/guide/setup.html#tunnel">Setting up: the internet link</a></td></tr>
+          <tr><td>Find out why phones cannot reach the laptop</td><td><a href="/guide/laptops.html#firewall">Laptops: the firewall and networks</a></td></tr>
+          <tr><td>Keep a tablet from going to sleep</td><td><a href="/guide/devices.html#awake">Tablets and phones: keeping a device awake</a></td></tr>
+          <tr><td>Help a Board member read a document</td><td><a href="/guide/devices.html#files">Tablets and phones: files on the Board's pages</a></td></tr>
+          <tr><td>Give someone a new password</td><td><a href="/guide/accounts.html#reset">People: new one-time password</a></td></tr>
+          <tr><td>Check the room before doors</td><td><a href="/guide/setup.html#show-day">Setting up: a show day</a></td></tr>
+          <tr><td>Upgrade the show laptop, or go back</td><td><a href="/guide/laptops.html#upgrades">Laptops: upgrades and going back</a></td></tr>
+          <tr><td>Close one event and start the next</td><td><a href="/guide/setup.html#event">Setting up: after the event</a></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 id="admins">Three kinds of admin</h2>
+    <p>Three things in AGMessage are called admin, and each opens different doors.</p>
+    <dl class="guide-terms">
+      <dt>The admin token</dt>
+      <dd>A code of 16 characters that AGMessage makes each time it starts. It is typed at Admin login on the laptop itself,
+        opened as <code>http://localhost:3023/admin</code>, and nowhere else: from any other device, the laptop's own network
+        address included, it is refused. It is not an account. It does what only the laptop may do: make the first admin
+        account, accept the audit log's findings, adopt accounts held aside, and delete an archive's contents.</dd>
+      <dt>An admin account</dt>
+      <dd>An account whose role is Admin, signed in with a username and password from any device on the venue network. It
+        makes everyone else's account, and does everything on the admin page but the few acts kept for the token at the
+        laptop.</dd>
+      <dt>The laptop's admin</dt>
+      <dd>On a laptop with AGMessage installed, the Windows account AGMessage belongs to. It reads the admin token from the
+        Start menu, starts, stops and upgrades AGMessage, and gives those rights to other Windows accounts. It is a Windows
+        account, and gives no right inside AGMessage.</dd>
+    </dl>
+    <p>Some acts are "the admin's" alone: the token at the laptop, or an account whose role is Admin. An account given
+      <span class="ui">App settings: AI key, HTTPS, the tunnel, the show network</span> opens the admin page, but it cannot
+      archive an event, split the audit log, lock someone's clock or countdown, choose what an On stage seat may do, or let
+      backstage guests show web pages.</p>
+
+    <h2 id="words">Words this guide uses</h2>
+    <p>AGMessage keeps one word for each thing, on every page.</p>
+    <dl class="guide-terms">
+      <dt>A hall</dt>
+      <dd>A venue space: its Main room, its code, its own Stagewatch link, its screens and its help requests.</dd>
+      <dt>A room</dt>
+      <dd>The Main room is the hall itself. A side room (Legal, Media) is one of its other rooms, named
+        "Hall 2 › Legal".</dd>
+      <dt>A code</dt>
+      <dd>The 6 characters a guest types to join a room. Each room has its own; the admin page calls it the guest code.</dd>
+      <dt>A seat</dt>
+      <dd>On stage, Backstage or Observer in a Main room; Member or Observer in a side room.</dd>
+      <dt>The Board</dt>
+      <dd>Everyone seated On stage in a hall's Main room: presenters and board members.</dd>
+      <dt>The backstage team</dt>
+      <dd>The crew and staff seated Backstage, who send messages, share files, show things to the Board and answer help
+        requests.</dd>
+      <dt>A screen</dt>
+      <dd>A browser holding a screen's link (<code>/d/…</code>): the projector PC, the lectern monitor, a foyer TV.</dd>
+      <dt>The speaker's screen</dt>
+      <dd>Stagewatch's confidence monitor, which AGMessage sends a line to through Stagewatch.</dd>
+      <dt>A take</dt>
+      <dd>What a screen, or a person's page, is told to show. It is on screen only once that screen or page confirms it.</dd>
+      <dt>The halls board</dt>
+      <dd>The page that lists every hall an account may see, with the help requests waiting.</dd>
+    </dl>
+
+    <p class="guide-foot"><a href="#guideHead">Back to the top</a></p>
+  </main>
+</body>
+</html>

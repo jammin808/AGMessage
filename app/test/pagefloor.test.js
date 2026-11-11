@@ -248,8 +248,10 @@ const DEFINE_ONLY = {
 /** The first place a page script asks the server anything or opens a socket. */
 const firstAsk = (src) => src.search(/\bfetch\(|\bAGM\.api\(|\bio\(|\bnew WebSocket\(|\bXMLHttpRequest\b|\bsendBeacon\(/);
 test('the floor\'s fences: every page with people loads theme-init.js first and a screen\'s page loads none; every page script stops below the floor before it asks the server anything or opens a socket', () => {
-  const pages = fs.readdirSync(path.join(ROOT, 'public')).filter((f) => f.endsWith('.html')).sort();
-  assert.deepEqual(pages, ['admin.html', 'app.html', 'display.html', 'halls.html', 'index.html', 'users.html'], 'the pages, each read below (a new page joins this list)');
+  const guide = fs.readdirSync(path.join(ROOT, 'public', 'guide')).filter((f) => f.endsWith('.html')).sort().map((f) => 'guide/' + f);
+  const pages = [...fs.readdirSync(path.join(ROOT, 'public')).filter((f) => f.endsWith('.html')).sort(), ...guide];
+  assert.deepEqual(pages, ['admin.html', 'app.html', 'display.html', 'halls.html', 'index.html', 'users.html',
+    'guide/accounts.html', 'guide/devices.html', 'guide/index.html', 'guide/laptops.html', 'guide/setup.html'], 'the pages, each read below (a new page joins this list); the guide\'s are pages with people');
   const own = new Set();
   for (const f of pages) {
     const scripts = [...read(f).matchAll(/<script\b[^>]*\bsrc="([^"]+)"/g)].map((m) => m[1]);

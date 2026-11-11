@@ -169,6 +169,12 @@ First time on a new laptop
    Share that URL with everyone on the venue's Wi-Fi or wired network.
    They open it in any browser — phone, tablet, laptop.
 
+7. The admin's guide is part of AGMessage: open /guide/ on the same
+   address (on this laptop, http://localhost:3023/guide/). It walks
+   through setting up, the show laptop and crew laptops, the Board's
+   tablets and phones, and people and accounts. The admin page, the
+   halls board and the Accounts page link to it as "Guide".
+
 Every day of the event
 ----------------------
 - Crew: open the LAN URL, sign in. The halls board shows every hall you

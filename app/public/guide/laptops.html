@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>AGMessage — guide: laptops</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <script src="/theme-init.js"></script>
+</head>
+<body class="acct-page guide-page">
+  <a class="skip-link" href="#guideHead">Skip to the guide</a>
+  <header class="acct-bar">
+    <a class="acct-brand" href="/"><span class="brand-mark small">AG</span> AGMessage</a>
+    <nav class="acct-nav" aria-label="AGMessage">
+      <a class="btn ghost small" href="/halls.html">Halls</a>
+      <a class="btn ghost small" href="/admin.html">Admin</a>
+    </nav>
+  </header>
+
+  <main class="guide">
+    <nav class="guide-parts" aria-label="The guide's parts">
+      <a href="/guide/">Contents</a>
+      <a href="/guide/setup.html">Setting up</a>
+      <a href="/guide/laptops.html" aria-current="page">Laptops</a>
+      <a href="/guide/devices.html">Tablets and phones</a>
+      <a href="/guide/accounts.html">People and accounts</a>
+    </nav>
+
+    <h1 id="guideHead" tabindex="-1">The show laptop and crew laptops</h1>
+    <p class="guide-lede">The laptop AGMessage runs on, installed or portable: how it starts, who may run it, how it stays
+      awake and reachable, and how it is upgraded. Then the crew's laptops, which only need a browser.</p>
+
+    <nav class="guide-toc" aria-label="On this page">
+      <p class="guide-toc-head">On this page</p>
+      <ol>
+        <li><a href="#choose">Installed or portable</a></li>
+        <li><a href="#installer">The installer</a></li>
+        <li><a href="#start-menu">The Start menu</a></li>
+        <li><a href="#rights">Who may run AGMessage on Windows</a></li>
+        <li><a href="#portable">Running the portable folder</a></li>
+        <li><a href="#import">Moving a portable folder in</a></li>
+        <li><a href="#this-laptop">This laptop, on the admin page</a></li>
+        <li><a href="#power">Sleep, the lid and the power button</a></li>
+        <li><a href="#firewall">The firewall and networks</a></li>
+        <li><a href="#logs">Logs</a></li>
+        <li><a href="#upgrades">Upgrades and going back</a></li>
+        <li><a href="#data">Data, backups and uninstalling</a></li>
+        <li><a href="#crew">Crew laptops</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="choose">Installed or portable</h2>
+    <div class="table-wrap">
+      <table class="acct-table guide-table">
+        <thead><tr><th scope="col"></th><th scope="col">Installed</th><th scope="col">Portable</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">For</th><td>Your own show laptop</td><td>A venue's laptop, or any laptop that is not yours</td></tr>
+          <tr><th scope="row">Where</th><td><code>C:\Program Files\AGMessage</code>; data in <code>C:\ProgramData\AGMessage</code></td><td>The folder you extracted; data in <code>app\data</code> and <code>app\uploads</code>, keys in the Windows account's <code>%LOCALAPPDATA%\AGMessage</code></td></tr>
+          <tr><th scope="row">Starts</th><td>With Windows, with nobody signed in; no window, no browser</td><td>From <code>start-agmessage.bat</code>, in a black window that stays open</td></tr>
+          <tr><th scope="row">The token</th><td><span class="ui">Show the admin token</span> in the Start menu</td><td>The window's <code>Token:</code> line</td></tr>
+          <tr><th scope="row">Upgrades</th><td><span class="ui">Upgrade AGMessage...</span>, checked against the release, with a way back</td><td>A new folder, with the data copied across</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Both use port 3023. A portable copy will not start while the installed AGMessage serves on that port, unless
+      <code>PORT</code> is set to another number before it starts.</p>
+
+    <h2 id="installer">The installer</h2>
+    <p>Run <code>AGMessage-Setup-&lt;version&gt;-unsigned.exe</code> from the Windows account you run shows from, standard or
+      administrator. Windows asks for an administrator's approval once. There is no folder page and no port page: AGMessage
+      always goes in <code>C:\Program Files\AGMessage</code>, which only administrators may change, and on port 3023. Its pages,
+      in order:</p>
+    <ol class="guide-steps">
+      <li><span class="ui">Smart App Control</span>, only while Windows is still evaluating the PC: the installer is unsigned.
+        Where Smart App Control is on, Windows blocks it before it runs; turn it off in Windows Security → App &amp; browser
+        control → Smart App Control.</li>
+      <li><span class="ui">AGMessage's admin on this PC</span> (a first install): the Windows account AGMessage will belong to,
+        the one that started the installer. When an administrator approved it, that administrator gets no AGMessage rights;
+        if two accounts could be meant, it asks you to choose.</li>
+      <li><span class="ui">Networks</span>: one tick, <span class="ui">Also on Public networks (hotels, airports, fresh venue
+        Wi-Fi)</span>, unticked by default. See <a href="#firewall">the firewall and networks</a>.</li>
+      <li><span class="ui">AGMessage is busy</span>, only when people are using it (an upgrade): type why you stop it now, or
+        cancel and install once it is quiet. The reason goes into the audit log.</li>
+      <li><span class="ui">A portable AGMessage</span> (a first install): <span class="ui">Start with no halls</span>, or
+        <span class="ui">Import a portable AGMessage folder</span>: <a href="#import">moving a portable folder in</a>.</li>
+      <li><span class="ui">The first admin account</span>: make AGMessage's first admin account now, or leave it empty and make
+        it later at the laptop, with the token.</li>
+    </ol>
+    <p>It refuses an installer older than the build installed (uninstall first to go back), the same build again, and a second
+      installer while one runs; each says <q>Nothing was changed.</q> For a quiet install from a command prompt it takes
+      <code>/VERYSILENT</code>, <code>/ADMIN=&lt;account&gt;</code> (one person's account) and
+      <code>/PUBLICFIREWALL=1</code> or <code>=0</code>.</p>
+
+    <h2 id="start-menu">The Start menu</h2>
+    <p><span class="guide-path"><span class="ui">Start</span> → <span class="ui">AGMessage</span></span> holds AGMessage's
+      commands. Each opens a console window as the person who clicked it, never as an administrator, and waits for Enter
+      before it closes; Open AGMessage closes by itself once it has opened the browser.</p>
+    <dl class="guide-terms">
+      <dt><span class="ui">Open AGMessage</span></dt>
+      <dd>Opens <code>http://localhost:3023</code> in your browser when AGMessage answers. Otherwise it says what it found: a
+        portable copy holding the port, another program, or <q>AGMessage is not serving on this PC.</q></dd>
+      <dt><span class="ui">Show the admin token</span></dt>
+      <dd>The token for Admin login on this PC. It changes at every start, so show it again after a restart or an upgrade.</dd>
+      <dt><span class="ui">Start AGMessage</span></dt>
+      <dd>Starts it and waits for it to answer, or says it is running already. If it does not answer within about half a
+        minute it is left running, still starting: try again in a minute.</dd>
+      <dt><span class="ui">Stop AGMessage...</span></dt>
+      <dd>Saves, then stops. When people are using it, it says how busy it is and asks why; Enter alone leaves it running.</dd>
+      <dt><span class="ui">Upgrade AGMessage...</span></dt>
+      <dd>See <a href="#upgrades">upgrades and going back</a>.</dd>
+      <dt><span class="ui">Go back to build N</span></dt>
+      <dd>Only after an upgrade, named for the build it replaced.</dd>
+      <dt><span class="ui">Who may run AGMessage...</span></dt>
+      <dd>Lists the laptop's admin and every right given, and takes one line to change them: <a href="#rights">next section</a>.</dd>
+      <dt><span class="ui">AGMessage status</span></dt>
+      <dd>How AGMessage runs: its server task, the laptop's admin, the port, the last stop and the log's last line.</dd>
+    </dl>
+    <aside class="guide-watch" aria-label="Watch for">
+      <p><strong>△ Watch for</strong> Close AGMessage's own consoles before an upgrade or an uninstall: an open one is named
+        and the step refused. And if the watchdog that runs AGMessage itself crashes, Windows does not start it again: use
+        <span class="ui">Start AGMessage</span>, or restart the PC. This laptop says so beside the build.</p>
+    </aside>
+
+    <h2 id="rights">Who may run AGMessage on Windows</h2>
+    <p>The laptop's admin is one Windows account, standard or administrator: by default, the account that ran the installer.
+      It reads the admin token, starts, stops and upgrades AGMessage, and gives these rights to other people's Windows accounts.
+      There are four rights: <code>token</code> (reads the admin token), <code>start</code>, <code>stop</code> and
+      <code>upgrade</code> (which covers going back too). These are Windows rights only: they give nothing inside AGMessage.</p>
+    <ol class="guide-steps">
+      <li>As the laptop's admin, open <span class="guide-path"><span class="ui">Start</span> → <span class="ui">AGMessage</span> →
+        <span class="ui">Who may run AGMessage...</span></span>. It lists who may do what.</li>
+      <li>Type one line and press Enter:
+        <ul>
+          <li><code>Give LAPTOP\ben: start, stop</code> gives rights.</li>
+          <li><code>Take back from LAPTOP\ben: stop</code> (or <code>all</code>) takes them back, at once.</li>
+          <li><code>Hand over to LAPTOP\ben</code> makes that account the laptop's admin; you type its name again to confirm,
+            and you keep no right unless it gives one back.</li>
+        </ul>
+      </li>
+      <li>Enter alone closes it with <q>Nothing was changed.</q></li>
+    </ol>
+    <p>Rights go to one person's account; a group or a service is refused. Only the laptop's admin gives them, and an account
+      given rights cannot pass them on. If the admin's Windows account is gone, an administrator runs
+      <span class="ui">Who may run AGMessage...</span> as administrator and hands it over. Every right given, taken back or
+      handed over, every start and stop, and every refusal is a row in the audit log.</p>
+
+    <h2 id="portable">Running the portable folder</h2>
+    <ol class="guide-steps">
+      <li>Extract the zip (right-click → Extract All), open the <code>AGMessage</code> folder and double-click
+        <code>start-agmessage.bat</code>.</li>
+      <li>Leave the black window open while the show runs. Its banner gives the <code>Local:</code> and <code>LAN:</code>
+        addresses and, under Admin login, the <code>Token:</code>.</li>
+      <li>To stop, press <kbd>Ctrl</kbd>+<kbd>C</kbd> in the window (it saves first), or close it.</li>
+    </ol>
+    <ul>
+      <li>If the server stops by itself, its watchdog starts it again: after half a second, then 4, 8, 15 and 30 seconds. After
+        more than 6 crashes in 10 minutes it gives up, and the window says <q>AGMessage did not start - the reason is above.</q></li>
+      <li>If a part of the copy is missing, the window names it: download the zip again and Extract All. An antivirus may be
+        removing it.</li>
+      <li>Each new folder is a new <code>node.exe</code> to Windows Firewall, which asks again.</li>
+      <li>The folder's keys are kept in the Windows account's <code>%LOCALAPPDATA%\AGMessage</code>, not in the folder: start
+        a copied folder from the same Windows account, or its accounts are held aside until the token adopts them.</li>
+      <li>Before handing the folder to anyone, run <code>make-shareable-copy.bat</code>. It makes a copy beside it with no halls,
+        files, keys or settings, and checks it before it says Done.</li>
+    </ul>
+
+    <h2 id="import">Moving a portable folder in</h2>
+    <p>On a first install, after its files and before AGMessage first starts, the installer offers
+      <span class="ui">Import a portable AGMessage folder</span>. It copies the folder's halls, messages, files, accounts,
+      screens and keys, checks what it copied, and only then retires the folder.</p>
+    <ol class="guide-steps">
+      <li>Upgrade the portable folder to the installer's build, start it once and stop it with <kbd>Ctrl</kbd>+<kbd>C</kbd>.</li>
+      <li>Run the installer from the Windows account that ran the folder: its keys are in that account's profile, and the import
+        is offered only when that account is AGMessage's admin here.</li>
+      <li>Choose <span class="ui">Import a portable AGMessage folder</span>, then the folder that holds
+        <code>start-agmessage.bat</code>, then Next.</li>
+    </ol>
+    <aside class="guide-watch" aria-label="Watch for">
+      <p><strong>△ Watch for</strong> Once the check passes, the folder no longer starts, and the keys are removed from
+        <code>%LOCALAPPDATA%\AGMessage</code>, which every portable folder of that Windows account shares. Once AGMessage has
+        started, no portable folder can be brought in.</p>
+    </aside>
+
+    <h2 id="this-laptop">This laptop, on the admin page</h2>
+    <p><span class="ui">💻 This laptop</span> lists what AGMessage and Windows say about the laptop, each fact with where it was
+      read; <span class="ui">Refresh</span> reads them again, and <span class="ui">Copy LAN address</span> copies an address for
+      devices. Only an admin sees its acts.</p>
+    <ul class="guide-cols">
+      <li><span class="ui">Addresses</span>: what devices open.</li>
+      <li><span class="ui">Network</span>: Private, Public or Domain.</li>
+      <li><span class="ui">Firewall</span>: whether a rule lets AGMessage in on that profile.</li>
+      <li><span class="ui">Sleep on mains</span> and <span class="ui">Lid closed on mains</span>.</li>
+      <li><span class="ui">Kept awake</span> and <span class="ui">Sleeps</span>.</li>
+      <li><span class="ui">Pages</span>: each page and screen still on another build.</li>
+      <li><span class="ui">The server task</span>, <span class="ui">The laptop's admin</span> and <span class="ui">Rights given</span>.</li>
+      <li><span class="ui">HTTPS</span>, <span class="ui">Screens</span>, <span class="ui">Stagewatch</span>,
+        <span class="ui">Internet link</span>, <span class="ui">Data folder</span> and <span class="ui">Last stop</span>.</li>
+    </ul>
+
+    <h2 id="power">Sleep, the lid and the power button</h2>
+    <p>While a hall is live (a page open in it, a screen showing something, or its countdown running), AGMessage asks Windows to
+      keep the laptop from idle sleep, and This laptop says <span class="ui">Kept awake</span>. The lid and the power button
+      still follow the power plan.</p>
+    <ul>
+      <li>Before doors, set "When I close the lid" to "Do nothing" on mains, in Windows' power settings.</li>
+      <li>On battery, a laptop with Modern Standby keeps the request 5 minutes at most: run the show on mains.</li>
+      <li>A sleep is told from a hang: the watchdog never counts the time asleep as a crash, and This laptop lists it under
+        <span class="ui">Sleeps</span>.</li>
+    </ul>
+
+    <h2 id="firewall">The firewall and networks</h2>
+    <p>The installer makes two Windows Firewall rules for AGMessage, each for the laptop's own subnet: the web port (TCP 3023)
+      and discovery (UDP 9928). They cover Private and Domain networks, and Public only when the installer's tick
+      <span class="ui">Also on Public networks (hotels, airports, fresh venue Wi-Fi)</span> was ticked.</p>
+    <aside class="guide-watch" aria-label="Watch for">
+      <p><strong>△ Watch for</strong> Windows makes every new network Public. On fresh venue Wi-Fi, phones and laptops cannot
+        reach an installed AGMessage until the network is made Private (Settings → Network &amp; internet → the network →
+        Private network) or the installer is run again with the Public tick. Devices on another subnet or VLAN of the venue
+        network are not let in either way.</p>
+    </aside>
+    <p>This laptop's <span class="ui">Firewall</span> row says, for each connected network, whether AGMessage is allowed there.
+      A portable folder asks on its first start instead: choose <strong>Allow access</strong>, and on a Public network
+      allow Public too, or make the network Private.</p>
+
+    <h2 id="logs">Logs</h2>
+    <ul>
+      <li>Installed: <code>C:\ProgramData\AGMessage\logs\server.log</code>, which the laptop's admin may read.</li>
+      <li>Portable: <code>app\data\logs\server.log</code>, beside what the black window shows.</li>
+      <li>Past 2 MB it becomes <code>server.1.log</code>, about 4 MB in all. It never holds the admin token.</li>
+    </ul>
+
+    <h2 id="upgrades">Upgrades and going back</h2>
+    <p>Upgrade between shows, never the night before one: upgrade, rehearse, then run the show on the build you rehearsed.</p>
+    <h3>Installed</h3>
+    <ol class="guide-steps">
+      <li>Open <span class="guide-path"><span class="ui">Start</span> → <span class="ui">AGMessage</span> →
+        <span class="ui">Upgrade AGMessage...</span></span> (the laptop's admin, or an account given the upgrade right). It
+        looks up AGMessage's newest release.</li>
+      <li>Press Enter to install it, or type the full path of an installer you downloaded. It must be newer than this build,
+        and its digest must match its release; a file that does not is refused: <q>This file is not the release's. Do not run
+        it.</q></li>
+      <li>Close the console. The upgrade runs once it has: AGMessage saves and backs its data up, the new build is laid down,
+        and AGMessage starts. If it does not answer, the earlier build and its data are laid back by themselves.</li>
+    </ol>
+    <p>With no internet, the installer cannot be checked against its release: run it yourself, and Windows asks for an
+      administrator. When people are using AGMessage, Upgrade asks why; Enter alone leaves it as it is.</p>
+    <p><span class="ui">Go back to build N</span> (after an upgrade) asks you to type that build's number. AGMessage stops, its
+      data is laid back as it was when the newer build was installed (what was written since is not kept, though the audit log
+      is), and the older build is laid down from the installer kept on this PC.</p>
+    <h3>Portable</h3>
+    <ol class="guide-steps">
+      <li>Stop the old copy with <kbd>Ctrl</kbd>+<kbd>C</kbd> in its window.</li>
+      <li>Extract the new zip into a new folder.</li>
+      <li>Copy <code>app\data</code> and <code>app\uploads</code> from the old folder into the new one, before its first start.</li>
+      <li>Start the new folder from the same Windows account.</li>
+    </ol>
+    <p>After an upgrade, open pages reload themselves onto the new build at a quiet moment; screens reload at their next take.
+      Screens left open from 0.5 need one reload by hand.</p>
+
+    <h2 id="data">Data, backups and uninstalling</h2>
+    <ul>
+      <li>An installed upgrade backs the data folder up first, into <code>data\backups</code>; the two newest are kept.</li>
+      <li>Uninstall from Windows' installed apps, where AGMessage is listed with its version and build. It asks
+        <q>Remove all AGMessage data from this PC?</q>: No, the default, keeps every hall, account, file and key for a later
+        install, which asks again whose AGMessage it is. Yes removes them, the keys last, and cannot be undone.</li>
+      <li>A busy AGMessage is uninstalled only with a reason typed at a command prompt
+        (<code>unins000.exe /FORCE="why"</code>).</li>
+      <li>A data folder copied to another laptop or Windows account keeps its accounts held aside until the token adopts them:
+        <a href="/guide/accounts.html#held">accounts held aside</a>.</li>
+    </ul>
+
+    <h2 id="crew">Crew laptops</h2>
+    <p>A crew laptop needs nothing installed: a browser on the venue network.</p>
+    <h3>Reaching AGMessage</h3>
+    <ul>
+      <li>Open AGMessage's address: the portable window's <code>LAN:</code> line, or This laptop's
+        <span class="ui">Addresses</span> (for example <code>http://192.168.1.42:3023</code>).</li>
+      <li>Off the venue network, the internet link's public address, while it is on.</li>
+      <li>Browsers from Chrome 84 and Safari 14.1 (iOS and iPadOS 14.5) up. An older one shows one line and opens nothing:
+        <q>This browser is too old for AGMessage. Update this device (iPadOS or iOS 14.5, or Chrome 84, or later), or use
+        another.</q></li>
+    </ul>
+    <h3>Trusting the certificate</h3>
+    <p>Open <code>/tls</code> on AGMessage's address, check the fingerprint against the admin page's
+      <span class="ui">🔒 Encrypted connections</span>, press <span class="ui">Download the certificate</span> and follow its
+      steps: on Windows, Install Certificate → Local Machine → Trusted Root Certification Authorities; on a Mac, Keychain Access
+      → Always Trust. Then open AGMessage with <code>https://</code>.</p>
+    <h3>Signing in, or joining with a code</h3>
+    <ul>
+      <li>Crew with an account use the <span class="ui">Sign in</span> tab. A first sign-in with a one-time password asks
+        them to choose their own: <span class="ui">Choose your password</span>.</li>
+      <li>Crew without one use <span class="ui">Join with a code</span>: the hall's code, their name, and the
+        <span class="ui">Backstage</span> seat.</li>
+      <li>A browser signed in to an account does not join with a code; it offers <span class="ui">Open your halls</span> or
+        <span class="ui">Sign out</span>.</li>
+    </ul>
+    <h3>The halls board and the hall page</h3>
+    <ul>
+      <li><span class="ui">Your halls</span> lists each hall the account may see, with <span class="ui">Needs help</span> above
+        it. Its header has <span class="ui">Accounts</span> and <span class="ui">Admin</span> where allowed,
+        <span class="ui">Password</span>, the theme and <span class="ui">Sign out</span>.</li>
+      <li>Everything has a ⋯. A right-click, <kbd>Shift</kbd>+<kbd>F10</kbd> and the menu key open the same list;
+        <kbd>Shift</kbd>+right-click opens the browser's own menu. An act that cannot run now is greyed, with why.</li>
+      <li>On a message with the focus: <kbd>R</kbd> reply, <kbd>E</kbd> react, <kbd>S</kbd> Show the Board, <kbd>F</kbd>
+        Send to, <kbd>P</kbd> pin, <kbd>D</kbd> download, <kbd>Enter</kbd> Preview.</li>
+    </ul>
+    <h3>When the connection drops</h3>
+    <p>Pages come back by themselves. After 2 seconds down, the hall page says <q>Reconnecting… what you write waits here until
+      we're back.</q>; what someone writes waits on the page, even through a reload, and is sent once when it is back, never
+      twice. After an upgrade, a page reloads onto the new build at a quiet moment.</p>
+
+    <p class="guide-foot"><a href="#guideHead">Back to the top</a> · <a href="/guide/devices.html">Next: tablets and phones</a></p>
+  </main>
+</body>
+</html>

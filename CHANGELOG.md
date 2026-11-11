@@ -11,6 +11,21 @@ Windows readings of run 101. Nothing in it is measured on the show laptop or wal
 (`docs/DESIGN.md`, `docs/DEVICES.md`). The tag `v0.6.0` and its release are the owner's, and wait for that walk and
 for a CI run that passes whole, the installer's life cycle among it.
 
+**The admin's guide**
+- AGMessage serves an admin's guide at `/guide/`, five pages read in any browser that reaches it: setting up (the first
+  start, the token and the first admin, the admin page, halls and rooms, codes and invite links, screens, the show
+  network, HTTPS, the internet link, a show day, the event's archive), the show laptop and crew laptops, the Board's
+  tablets and phones, and people, accounts and rights. Asked for by the owner as the walk began, built into 0.6.0 by
+  their choice. Each page is a page with people under the strict policy, with no script of its own (`theme-init.js` alone),
+  and names no code, token or key. The admin page's header, the halls board (for whoever sees Accounts or Admin), the
+  Accounts page and the first admin's panel link to it as Guide.
+- `test/guide.test.js` holds the guide to the code: each of its 447 labels and quoted lines is found as written in what
+  ships, so a button renamed in the code fails the build until the guide says the new one; its links land; its words
+  are the house's. Its claims were read against the code by an independent review before it shipped, and the 17 it found
+  wrong or missing were corrected (among them: a code alone never offers the On stage seat at all; the watchdog's
+  restart waits; who may change a person's chat view; the Backstage link only in a locked hall). The page floor's fence
+  reads its pages, and the smoke draws each and reads its words.
+
 **The audit log**
 - The admin's room controls are audited, one row for each change, written before the admin page is answered: a hall made
   from the admin page (`hall.create`, as one made over HTTP already was), a hall's session reset (`room.reset`, with how

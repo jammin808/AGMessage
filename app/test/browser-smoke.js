@@ -1721,6 +1721,15 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const signin = await edge.tab(`${base}/`, { init: HOLD_READS });
     report(!!(await signin.until(`!document.getElementById('setupPane').hidden`)), 'sign-in page offers the first admin when there are no accounts');
     await readOldWords('the sign-in and join page', signin);
+    // The admin's guide: five pages AGMessage serves to read, each drawn under the strict policy with no script of its own
+    // but theme-init.js, with no fault, its words the house's.
+    for (const [p, name] of [['/guide/', 'contents'], ['/guide/setup.html', 'setting up'], ['/guide/laptops.html', 'laptops'], ['/guide/devices.html', 'tablets and phones'], ['/guide/accounts.html', 'people and accounts']]) {
+      const g = await edge.tab(base + p);
+      const drawn = await g.until(`document.readyState === 'complete' && !!document.querySelector('main.guide h1') && document.querySelector('main.guide h1').textContent`, 5000);
+      await readOldWords('the guide: ' + name, g);
+      report(!!drawn && g.problems.length === 0, `the guide's ${name} page draws ("${drawn}") with no script error or CSP violation${g.problems.length ? ' — ' + g.problems.slice(0, 3).join(' | ') : ''}`);
+      g.close();
+    }
     // The join page asks for the code first: once six characters are still (half a second, or Enter, or leaving the field)
     // it names the room the code opens and offers that room's seats only — a hall's Main room Backstage and Observer (On
     // stage only from an On stage invite link), a side room Member and Observer — with none chosen on a first visit; a code
@@ -6061,7 +6070,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     report(await viewerHall.eval(`document.getElementById('movedLine').hidden`), 'a page opened in this browser after What moved\'s Got it does not say it again');
     await readOldWords('the hall page opened by a Viewer account, Observer', viewerHall);
     const pagesRead = Object.keys(oldWords);
-    report(pagesRead.length === 13 && pagesRead.every((p) => Array.isArray(oldWords[p]) && oldWords[p].length === 0),
+    report(pagesRead.length === 18 && pagesRead.every((p) => Array.isArray(oldWords[p]) && oldWords[p].length === 0),
       `no "session", "meeting", "director" or "research" in any page's chrome (${pagesRead.length} pages: ${pagesRead.map((p) => p + ': ' + (Array.isArray(oldWords[p]) ? (oldWords[p].length ? oldWords[p].join(' | ') : 'none') : 'not read')).join('; ')})`);
     await viewerHall.shot(path.join(OUT, 'hall-viewer.png'));
     // A stage send the server no longer follows (its Stagewatch restarted, or the hall moved) reads so, never "waiting".

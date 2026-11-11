@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>AGMessage — guide: people and accounts</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <script src="/theme-init.js"></script>
+</head>
+<body class="acct-page guide-page">
+  <a class="skip-link" href="#guideHead">Skip to the guide</a>
+  <header class="acct-bar">
+    <a class="acct-brand" href="/"><span class="brand-mark small">AG</span> AGMessage</a>
+    <nav class="acct-nav" aria-label="AGMessage">
+      <a class="btn ghost small" href="/halls.html">Halls</a>
+      <a class="btn ghost small" href="/admin.html">Admin</a>
+    </nav>
+  </header>
+
+  <main class="guide">
+    <nav class="guide-parts" aria-label="The guide's parts">
+      <a href="/guide/">Contents</a>
+      <a href="/guide/setup.html">Setting up</a>
+      <a href="/guide/laptops.html">Laptops</a>
+      <a href="/guide/devices.html">Tablets and phones</a>
+      <a href="/guide/accounts.html" aria-current="page">People and accounts</a>
+    </nav>
+
+    <h1 id="guideHead" tabindex="-1">People, accounts and rights</h1>
+    <p class="guide-lede">Who signs in, what each may do, and how to add, change and remove them. Crew and the Board may sign in
+      with accounts; presenters and guests may join a hall with its code instead.</p>
+
+    <nav class="guide-toc" aria-label="On this page">
+      <p class="guide-toc-head">On this page</p>
+      <ol>
+        <li><a href="#where">The Accounts page</a></li>
+        <li><a href="#roles">Roles</a></li>
+        <li><a href="#rights">Rights</a></li>
+        <li><a href="#add">Add a person</a></li>
+        <li><a href="#edit">Change a person</a></li>
+        <li><a href="#members">Many accounts into one room</a></li>
+        <li><a href="#seats">Seats, and Board accounts</a></li>
+        <li><a href="#passwords">Passwords and sign-ins</a></li>
+        <li><a href="#reset">New one-time password, sign out, turn off, remove</a></li>
+        <li><a href="#fence">Who may change whom</a></li>
+        <li><a href="#guests">Guests who join with a code</a></li>
+        <li><a href="#tunnel">Admin rights and the internet link</a></li>
+        <li><a href="#held">Accounts held aside</a></li>
+        <li><a href="#audit">The audit log</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="where">The Accounts page</h2>
+    <p>The Accounts page (<code>/users.html</code>) has two tabs, <span class="ui">People</span> and
+      <span class="ui">Audit log</span>. It is reached from the halls board's <span class="ui">Accounts</span> link, and from the
+      admin page's <span class="ui">👥 Accounts and access</span>: <span class="ui">Manage people, roles and halls</span>.</p>
+    <ul>
+      <li>The People tab is for an account allowed to create accounts. An account that may only read the audit log sees the
+        Audit log tab alone.</li>
+      <li>The admin token is not an account, so it cannot open the People tab. Make the first admin account with the token
+        (<a href="/guide/setup.html#first-admin">Setting up: the first admin account</a>), then sign in as that account.</li>
+    </ul>
+    <p>The People list shows each person's <span class="ui">Name</span> (with the username, and "turned off" or "one-time
+      password" where so), <span class="ui">Role</span> ("(adjusted)" when rights differ from the role's),
+      <span class="ui">Halls and rooms</span> (for example "Hall 2 (Main, Legal) · On stage") and
+      <span class="ui">Last signed in</span>. Each row has <span class="ui">Edit…</span> and a ⋯, also opened by a right-click.</p>
+
+    <h2 id="roles">Roles</h2>
+    <p>A role is where a person's rights start. The editor ticks the role's rights, and any of them can be changed for that one
+      person.</p>
+    <div class="table-wrap">
+      <table class="acct-table guide-table">
+        <thead><tr><th scope="col">Role</th><th scope="col">Which halls</th><th scope="col">What it starts with</th></tr></thead>
+        <tbody>
+          <tr><td><span class="ui">Admin</span></td><td>Every hall</td><td>Everything: accounts, rights and settings. Only an admin makes or changes an admin.</td></tr>
+          <tr><td><span class="ui">Project manager</span></td><td>Every hall</td><td>Messages, files, screens, the Board's pages, Stagewatch, the show network; sets halls up and hands out their codes; reads the audit log.</td></tr>
+          <tr><td><span class="ui">Senior tech</span></td><td>Every hall</td><td>Messages, files, screens, the Board's pages, Stagewatch, the show network.</td></tr>
+          <tr><td><span class="ui">Tech</span></td><td>Their halls</td><td>Messages, files, screens, the Board's pages, Stagewatch.</td></tr>
+          <tr><td><span class="ui">Staff</span></td><td>Their halls</td><td>Messages, files, and information for the Board's pages. A new person starts as Staff.</td></tr>
+          <tr><td><span class="ui">Viewer</span></td><td>Their halls</td><td>Read only.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <aside class="guide-watch" aria-label="Watch for">
+      <p><strong>△ Watch for</strong> Only the Admin role can create accounts, change settings and export the audit log. The
+        sign-in page tells people to ask their project manager for an account, so give your project managers
+        <span class="ui">Create accounts and set their roles, halls and rights</span> if they are to make them.</p>
+    </aside>
+
+    <h2 id="rights">Rights</h2>
+    <p>The editor's <span class="ui">Rights</span> come in three groups; a right that differs from the role's is marked
+      "(added)" or "(removed)".</p>
+    <h3><span class="ui">In the room</span></h3>
+    <ul>
+      <li><span class="ui">See a hall: its messages, files, countdown and screens</span></li>
+      <li><span class="ui">Send messages, replies, action prompts and help requests</span></li>
+      <li><span class="ui">Share files for download, or forward one into a hall</span></li>
+    </ul>
+    <h3><span class="ui">Show</span></h3>
+    <ul>
+      <li><span class="ui">Change what a hall's screens and people's pages show</span></li>
+      <li><span class="ui">Create, rename, move and revoke screens</span></li>
+      <li><span class="ui">Send to Stagewatch: the speaker's screen, or to the operator to pass on</span></li>
+      <li><span class="ui">Show files, pages and quotes to the people on stage</span></li>
+      <li><span class="ui">Show web pages on people's pages (the Board's or one person's)</span></li>
+      <li><span class="ui">Propose commands to Patterns and PlayMap (to the show desk)</span></li>
+    </ul>
+    <h3><span class="ui">Run AGMessage</span></h3>
+    <ul>
+      <li><span class="ui">Create halls and their rooms, set them up (names, Stagewatch link, holding image) and hand out their
+        guest codes</span></li>
+      <li><span class="ui">Create accounts and set their roles, halls and rights</span></li>
+      <li><span class="ui">App settings: AI key, HTTPS, the tunnel, the show network</span></li>
+      <li><span class="ui">Read the audit log</span></li>
+      <li><span class="ui">Export the whole audit log, signed, to check on another computer (an account with it signs in through
+        the tunnel only when admins may)</span></li>
+    </ul>
+    <p>The rights of the first two groups count only in the halls the account is given (or every hall, for the roles that
+      have them). A side room needs that room on the account, whatever its role, but an admin, who is in every room.</p>
+
+    <h2 id="add">Add a person</h2>
+    <ol class="guide-steps">
+      <li>Open the Accounts page (the halls board's <span class="ui">Accounts</span>) and press
+        <span class="ui">Add a person</span>.</li>
+      <li>Fill in <span class="ui">Name</span> and <span class="ui">Username</span>: 2 to 32 lowercase letters, digits, dots,
+        dashes or underscores, starting with a letter or digit. A username cannot be changed later.</li>
+      <li>Choose the <span class="ui">Role</span>, and optionally the <span class="ui">Chat view</span>.</li>
+      <li>Under <span class="ui">Halls and rooms</span>, tick each hall (its Main room and its rights there), any side rooms,
+        and <span class="ui">On stage (Board member)</span> where they sit on the Board. Or tick
+        <span class="ui">Every hall's Main room, including new ones (not their other rooms)</span>.</li>
+      <li>Change any of the <span class="ui">Rights</span> if this person differs from their role.</li>
+      <li>Press <span class="ui">Save</span>. The <span class="ui">One-time password</span> shows once: give it to the person in
+        person or by phone (<span class="ui">Copy</span> copies it), then press <span class="ui">Done</span>. It works once; they
+        choose their own at their first sign-in.</li>
+    </ol>
+    <p>A new account has no clock choice and no On stage switches. To set them, save the person, then
+      <span class="ui">Edit…</span>.</p>
+
+    <h2 id="edit">Change a person</h2>
+    <ol class="guide-steps">
+      <li>On the person's row press <span class="ui">Edit…</span> (or Enter on the row).</li>
+      <li>Change what you need, then press <span class="ui">Save</span>. Only what changed is sent.</li>
+    </ol>
+    <ul>
+      <li>A change to their role, rights, halls or rooms ends their open pages, which reconnect with the new rights:
+        Save says <q>their open pages reconnect with the new rights.</q></li>
+      <li>A change to their chat view, clock or On stage switches reaches their open pages at once:
+        Save says <q>their open pages draw it now.</q></li>
+      <li>A side room can be given without its hall. Ticking On stage ticks the hall; unticking the hall unticks On stage.</li>
+    </ul>
+
+    <h2 id="members">Many accounts into one room</h2>
+    <p>For an account that creates accounts (not the token), a hall's ⋯ on the admin page → <span class="ui">Board
+      members…</span> ticks who sits On stage in its Main room;
+      a side room's ⋯ → <span class="ui">Members…</span> ticks the accounts given that room. (Both are also on the halls board's
+      <span class="ui">Set up…</span> → <span class="ui">Rooms</span>.) Tick or untick, then <span class="ui">Save</span>: each
+      account is saved on its own, and their open pages reload. A row you may not change is greyed, with why.</p>
+
+    <h2 id="seats">Seats, and Board accounts</h2>
+    <p>Seats are On stage, Backstage and Observer in a hall's Main room, and Member and Observer in a side room. An account's
+      seat comes from its rights in that room:</p>
+    <ul>
+      <li>On stage in a hall's Main room, where the hall is one of its On stage halls and it may send messages there.</li>
+      <li>Backstage wherever else it may send messages; an Observer where it may only read.</li>
+    </ul>
+    <p>An account given <span class="ui">On stage (Board member)</span> always joins that Main room On stage, reads and writes
+      messages there and nothing else, and is never told the hall's code. That holds for an admin account too. In its other
+      rooms it keeps the seat its rights give it.</p>
+
+    <h2 id="passwords">Passwords and sign-ins</h2>
+    <ul>
+      <li>A password is 10 to 128 characters, not a common one, not one character repeated, and contains neither the username
+        nor the person's name.</li>
+      <li>At a first sign-in with a one-time password, the person chooses their own (<span class="ui">Choose your
+        password</span>); nothing else works until they do.</li>
+      <li>Anyone changes their own from the halls board's <span class="ui">Password</span>: <span class="ui">Current
+        password</span>, <span class="ui">New password</span>, <span class="ui">Save password</span>. Their other devices are
+        signed out.</li>
+      <li>A wrong username, a wrong password and a turned-off account all read the same:
+        <q>That username and password don't match.</q></li>
+      <li>Five wrong passwords for a username within 15 minutes hold that username where they came from (a device's address,
+        or the whole internet link as one place), and twenty from one address hold that address:
+        <q>Too many attempts — wait a few minutes and try again.</q> A username is never held on the AGMessage laptop itself,
+        though twenty wrong passwords from it hold it too.</li>
+      <li>A sign-in ends after 14 hours unused or 7 days old.</li>
+    </ul>
+
+    <h2 id="reset">New one-time password, sign out, turn off, remove</h2>
+    <p>Each is on the person's ⋯ on the Accounts page, and each asks first.</p>
+    <dl class="guide-terms">
+      <dt><span class="ui">New one-time password…</span></dt>
+      <dd>Signs them out everywhere, stops the old password, and shows a new one-time password once. It also lifts a hold
+        from wrong passwords. Only an admin resets an admin's password.</dd>
+      <dt><span class="ui">Sign out everywhere…</span></dt>
+      <dd>Closes every page they have open, on every device; they sign in again with their password.</dd>
+      <dt><span class="ui">Turn off…</span> and <span class="ui">Turn on</span></dt>
+      <dd>Signs them out everywhere and keeps them out until it is turned on again. Their messages stay.</dd>
+      <dt><span class="ui">Remove…</span></dt>
+      <dd>They can no longer sign in, and it cannot be undone. Their messages stay.</dd>
+    </dl>
+    <p>Nobody turns off or removes their own account, and the last active admin cannot be turned off, demoted or removed:
+      make another admin first.</p>
+
+    <h2 id="fence">Who may change whom</h2>
+    <ul>
+      <li>Nobody changes their own role, rights, halls, rooms, chat view, clock or On stage switches:
+        <q>Nobody changes their own role, rights or halls — ask another admin.</q></li>
+      <li>Only an admin makes or changes an admin, and only an admin gives the rights to create accounts, change app settings
+        or export the audit log.</li>
+      <li>An account holding any of those three is changed, reset, signed out, turned off or removed only by an admin.</li>
+      <li>Someone allowed to create accounts who is not an admin manages only accounts within their own rights, halls and
+        rooms, and gives only what they hold themselves. The editor offers only what the server allows, and greys the rest.</li>
+    </ul>
+
+    <h2 id="guests">Guests who join with a code</h2>
+    <p>A guest joins on the sign-in page's <span class="ui">Join with a code</span> tab with the room's code and a name. What
+      their seat allows:</p>
+    <ul>
+      <li>Backstage, in a hall's Main room: messages, files, and sends to Stagewatch. In a locked hall, Backstage guests may
+        also change what people's pages show.</li>
+      <li>On stage: messages only, and only with the On stage invite link
+        (<a href="/guide/devices.html#seating">seating the Board</a>).</li>
+      <li>Member, in a side room: messages and files. Observer: read only.</li>
+    </ul>
+    <p>A guest cannot take the name of an account. On the admin page, a guest's seat is changed in its
+      <span class="ui">Seat</span> column; an account's is changed on the Accounts page. <span class="ui">Log out…</span> on a
+      person sends them out: a guest can join again with the code, and an account can open the hall again until the hall is
+      taken off the account.</p>
+
+    <h2 id="tunnel">Admin rights and the internet link</h2>
+    <p>An account allowed to create accounts, change app settings or export the audit log cannot sign in, or use those rights,
+      through the internet link, unless <span class="ui">Let accounts with admin rights sign in through the Cloudflare tunnel
+      (off: admins sign in on the venue network only)</span> is ticked under <span class="ui">👥 Accounts and access</span>. Leave
+      it off unless an admin must work from off-site.</p>
+
+    <h2 id="held">Accounts held aside</h2>
+    <p>When a laptop cannot vouch for the accounts file (a data folder copied from another laptop or Windows account, a profile
+      rebuilt, an older copy put back), it holds the accounts aside. Account sign-ins are refused until they are opened; guests
+      still join with codes. The sign-in page says <span class="ui">Accounts are not open yet</span>.</p>
+    <ol class="guide-steps">
+      <li>At the AGMessage laptop, open the admin page and sign in with the token.</li>
+      <li>Under <span class="ui">👥 Accounts and access</span>, find <span class="ui">🔐 Accounts held aside</span>. Each account is
+        listed with its name, role and halls, and whether it is as this laptop last saved it, changed since, or new to it.</li>
+      <li>Tick those to keep, press <span class="ui">Adopt the ticked…</span> and type the token. An account's ⋯ also offers
+        <span class="ui">With a one-time password</span>, to adopt it with a new password.</li>
+      <li>Give each one-time password shown to its person. Leave out the rest with <span class="ui">Leave the rest
+        out…</span>, or begin with none with <span class="ui">Start with no accounts…</span>.</li>
+    </ol>
+    <p>An account that can manage AGMessage asks for a tick of its own: adopt it only if the folder has been in your hands since
+      it was given that.</p>
+
+    <h2 id="audit">The audit log</h2>
+    <p>Every sign-in, change of rights, hall, screen and send to another show system is a row in the audit log, each chained to
+      the one before with this laptop's key, so a row edited, removed or reordered shows. It never holds a password, a token or
+      a screen's link.</p>
+    <ul>
+      <li><strong>Read it</strong> on the Accounts page's <span class="ui">Audit log</span> tab, newest first, with
+        <span class="ui">Check the log</span>. Each row's mark: ✓ checked under this laptop's key, ◇ linked and accepted at the
+        laptop, △ not vouched for yet, ✕ did not check.</li>
+      <li><strong>Accept</strong> what the check found, at the laptop with the token: <span class="ui">🩺 Health</span> →
+        <span class="ui">Accept…</span>, tick the findings, type the token, <span class="ui">Accept the ticked</span>.</li>
+      <li><strong>Export</strong> it at the end of each show day: <span class="ui">Export…</span> on Health or the Audit log tab
+        downloads every row, signed, to check on another computer. It holds people's names and what they did: give it only to
+        whoever checks it. From another device it works only over HTTPS.</li>
+      <li><strong>Its signing key</strong> is on Health (<span class="ui">📋 Copy</span>): copy it into the show's paperwork, and
+        compare it at each start.</li>
+      <li><strong>Split</strong> it (the admin's alone): <span class="ui">Split the audit log…</span>, choose the point, type
+        the word split. The rows before it move into a signed archive; nothing is deleted. Archiving an event can split it too.</li>
+    </ul>
+
+    <p class="guide-foot"><a href="#guideHead">Back to the top</a> · <a href="/guide/">Contents</a></p>
+  </main>
+</body>
+</html>
