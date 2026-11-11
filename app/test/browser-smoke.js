@@ -4604,8 +4604,10 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       await cy.until(`document.getElementById('pageLayer').hidden && 'chat'`, 5000);
       await cy.eval(`(() => { window.__said = []; window.__emitWas = socket.emit; const e = socket.emit; socket.emit = function (ev, ...a) { window.__said.push(ev); return e.call(this, ev, ...a); }; return true; })()`);
       await cy.eval(`document.getElementById('tabShown') && !document.getElementById('bvTabs').hidden && document.getElementById('tabShown').click()`);
-      await cy.until(`!!document.querySelector('#takeEarlier [data-action="past.look"]')`, 5000);
-      await cy.eval(`document.querySelector('#takeEarlier [data-action="past.look"]').click()`);
+      // Back to chat goes through the server, and the quotes before it are under Earlier already: the slide's entry is the
+      // one looked at, first under Earlier once the server has taken it back.
+      await cy.until(`(() => { const li = document.querySelector('#takeEarlier .take-earlier-item'); return !!li && li.textContent.includes('Results') && !!li.querySelector('[data-action="past.look"]') && 'slide'; })()`, 5000);
+      await cy.eval(`document.querySelector('#takeEarlier .take-earlier-item [data-action="past.look"]').click()`);
       const quoteLook = await cy.until(`document.getElementById('webPreview').open && (() => { const q = document.querySelector('#webPreviewBox .take-quote'); return q && JSON.stringify({ what: document.getElementById('webPreviewWhat').textContent, show: !document.getElementById('webPreviewShow').hidden, unit: q.dataset.unit, line: q.querySelector('.take-quote-line').textContent }); })()`, 8000);
       await cy.eval(`document.getElementById('webPreview').close()`);
       await sleep(300);
@@ -6966,7 +6968,12 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
           order: msgs.every((n) => { const r = n.querySelector(':scope > .msg-response'); return !r || !r.childElementCount || !!(n.querySelector(':scope > .body').compareDocumentPosition(r) & 4); }),
           missed, placeholder: field.placeholder, label: field.getAttribute('aria-label'), fits, longFits, scroll: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
           column: vis(document.getElementById('docPanel')) && !vis(document.getElementById('bvTabs')), tabs: vis(document.getElementById('bvTabs')), ink, feedHeight: Math.round(feed.getBoundingClientRect().height) }); })()`;
-      const bvRead = async (tab) => JSON.parse(await tab.eval(BV_READ) || 'null');
+      // What it measures is partly drawn by the page's resize observers (the placeholder fitted to its field, the chat's
+      // narrow composer), which run with a frame: the read waits three frames, so a move made just before it has settled.
+      const bvRead = async (tab) => {
+        await tab.eval(`new Promise((done) => { let left = 3; const frame = () => (--left ? requestAnimationFrame(frame) : done(true)); requestAnimationFrame(frame); })`);
+        return JSON.parse(await tab.eval(BV_READ) || 'null');
+      };
       const LIGHT = `(() => { try { localStorage.setItem('agm.theme', 'light'); } catch { /* none */ } })();`;
       const bvLegs = {};
       const bvTabs = [];

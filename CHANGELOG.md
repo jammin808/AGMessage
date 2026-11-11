@@ -60,6 +60,14 @@ for a CI run that passes whole, the installer's life cycle among it.
   message arriving while the chat is behind 📺 Shown to you (back on Chat, the reader is at the end with it in view and
   nothing said below). The first fails in the smoke on the tag's page; the second fails on the tag's code and the third
   on the change before its review, in the same steps run against them.
+- CI's run 133, on this change, failed two other smoke steps, one in each browser, each read before what it measures was
+  there; neither touches the chat's place, and both passed on runs 130 to 132 with the same code. On Linux, a quote's
+  Look under Earlier opened the Markdown quote shown before the slide: Back to chat goes through the server, the step
+  waited only for some Look under Earlier, and the earlier quote was under it already. It now waits for the slide's own
+  entry, first under Earlier, and looks at that. On Windows, the layout leg read the placeholder at 1024×768 as not
+  fitting its field: the field is fitted by a resize observer, which runs with a frame, and the leg read the page
+  straight after moving the column's grip and opening it again. Each read of the Board's chat view now waits three
+  frames first.
 
 **The admin's guide**
 - AGMessage serves an admin's guide at `/guide/`, five pages read in any browser that reaches it: setting up (the first
